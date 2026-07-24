@@ -1,0 +1,136 @@
+# Digital Ocean App Platform spec — EXAMPLE "demo" environment.
+#
+# This is a self-host reference, not a live environment. Replace every
+# placeholder (repo, domain, database cluster/name, JWKS URL) with your own
+# values before applying. Backed by a DO Managed Postgres cluster with its own
+# logical database.
+#
+# Apply with: doctl apps create --spec .do/app-demo.yaml   (first time)
+#             doctl apps update <app-id> --spec .do/app-demo.yaml
+#
+# SECURITY: never deploy a reachable environment with AUTH_MODE=dev. The
+# backend is fail-closed — with AUTH_MODE unset (or != dev) it REQUIRES a valid
+# JWKS_URL and CORS_ORIGINS and refuses to start otherwise. AUTH_MODE=dev is for
+# a developer's local machine ONLY; it disables authentication entirely.
+name: gable-demo
+# Choose a region where DO Managed Postgres is available, and co-locate the app
+# and database cluster for low-latency cross-talk.
+region: nyc
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+domains:
+  - domain: demo.example.com
+    type: PRIMARY
+
+services:
+  - name: backend
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: your-org/gable
+      branch: master
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    health_check:
+      http_path: /healthz/live
+      initial_delay_seconds: 15
+      period_seconds: 30
+      failure_threshold: 3
+    routes:
+      # preserve_path_prefix keeps the original path when proxying to the
+      # container; without it App Platform strips the matched prefix and the Go
+      # router 404s (e.g. /healthz/live -> /live).
+      - path: /api
+        preserve_path_prefix: true
+      - path: /health
+        preserve_path_prefix: true
+      - path: /healthz
+        preserve_path_prefix: true
+      - path: /metrics
+        preserve_path_prefix: true
+    envs:
+      - key: PORT
+        value: "8080"
+      # Reachable/production auth. Point JWKS_URL at your identity provider's
+      # JWKS endpoint. Do NOT set AUTH_MODE=dev on a reachable host.
+      - key: AUTH_MODE
+        value: production
+      - key: JWKS_URL
+        value: https://auth.example.com/.well-known/jwks.json
+      - key: CORS_ORIGINS
+        value: https://demo.example.com
+      # PORTAL_JWT_SECRET is required in production. Set it as an encrypted
+      # secret out-of-band (doctl apps update / dashboard), never inline here:
+      #   - key: PORTAL_JWT_SECRET
+      #     scope: RUN_TIME
+      #     type: SECRET
+      - key: DATABASE_URL
+        value: ${gable-db.DATABASE_URL}
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+  - name: frontend
+    dockerfile_path: app/Dockerfile
+    source_dir: /
+    github:
+      repo: your-org/gable
+      branch: master
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    build_command: ""
+    envs:
+      # Empty = the SPA issues same-origin /api/* requests, which App Platform's
+      # path routing sends to the backend on the same hostname. Set a full URL
+      # only if the backend lives on a separate origin.
+      - key: VITE_API_URL
+        value: ""
+        scope: BUILD_TIME
+      # Optional: mounts the local "surface picker" landing page at / for a
+      # showcase build. Unrelated to authentication.
+      - key: VITE_DEMO_MODE
+        value: "true"
+        scope: BUILD_TIME
+      - key: BACKEND_URL
+        value: ${backend.PRIVATE_URL}
+        scope: RUN_TIME
+    routes:
+      - path: /
+
+jobs:
+  - name: migrate-and-seed
+    kind: POST_DEPLOY
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: your-org/gable
+      branch: master
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    # App Platform exec-splits run_command on whitespace and passes the tokens
+    # as argv to the first binary (no implicit /bin/sh). Wrapping with `sh -c`
+    # is required so the `&&` chain runs ./seed after ./migrate. Without it,
+    # only ./migrate executes and the seed binary is silently skipped.
+    run_command: sh -c "./migrate && ./seed"
+    envs:
+      - key: DATABASE_URL
+        value: ${gable-db.DATABASE_URL}
+        scope: RUN_TIME
+        type: SECRET
+
+databases:
+  - name: gable-db
+    engine: PG
+    version: "16"
+    # production: true references an externally-managed cluster you create ahead
+    # of `doctl apps create` (see .do/README.md). Multiple environments can
+    # share one cluster using distinct logical databases.
+    production: true
+    cluster_name: your-db-cluster
+    db_name: gable_demo_db
+    db_user: gable_user

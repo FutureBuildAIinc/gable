@@ -1,0 +1,478 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package pos
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/google/uuid"
+)
+
+// Handler handles POS HTTP endpoints.
+type Handler struct {
+	service *Service
+}
+
+// NewHandler creates a new POS handler.
+func NewHandler(service *Service) *Handler {
+	return &Handler{service: service}
+}
+
+// RegisterRoutes registers POS API routes.
+// NOTE: POS routes use /api/pos/* (legacy). Migrate to /api/v1/pos/* in API versioning sprint.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	// Transaction lifecycle
+	mux.HandleFunc("POST /api/v1/pos/transactions", guard(h.StartTransaction))
+	mux.HandleFunc("GET /api/v1/pos/transactions/{id}", guard(h.GetTransaction))
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/items", guard(h.AddItem))
+	mux.HandleFunc("DELETE /api/v1/pos/transactions/{id}/items/{itemId}", guard(h.RemoveItem))
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/complete", guard(h.CompleteTransaction))
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/void", guard(h.VoidTransaction))
+
+	// History and search
+	mux.HandleFunc("GET /api/v1/pos/transactions", guard(h.ListTransactions))
+	mux.HandleFunc("GET /api/v1/pos/products/search", guard(h.SearchProducts))
+
+	// Offline sync
+	mux.HandleFunc("POST /api/v1/pos/sync", guard(h.SyncOffline))
+	mux.HandleFunc("GET /api/v1/pos/catalog", guard(h.GetCatalog))
+
+	// Till sessions (drawer lifecycle)
+	mux.HandleFunc("POST /api/v1/pos/till/open", guard(h.OpenTill))
+	mux.HandleFunc("GET /api/v1/pos/till/current", guard(h.CurrentTill))
+	mux.HandleFunc("GET /api/v1/pos/till/{id}/report", guard(h.TillReportHandler))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/close", guard(h.CloseTill))
+	mux.HandleFunc("GET /api/v1/pos/till/{id}/zreport", guard(h.GetZReport))
+	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
+
+	// Returns / refunds
+	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
+	mux.HandleFunc("GET /api/v1/pos/returns/{id}", guard(h.GetReturn))
+	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))
+}
+
+// CreateReturn records a merchandise return and issues the refund.
+func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
+	var req ReturnRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	if req.RegisterID == "" {
+		req.RegisterID = "REG-01"
+	}
+	cashierID := uuid.New() // Dev-mode fallback; real deployments carry JWT identity
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
+		if parsed, err := uuid.Parse(claims.Subject); err == nil {
+			cashierID = parsed
+		}
+	}
+	ret, err := h.service.ReturnSale(r.Context(), cashierID, req)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(ret)
+}
+
+// GetReturn returns a single return with its lines.
+func (h *Handler) GetReturn(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid return ID", http.StatusBadRequest, err)
+		return
+	}
+	ret, err := h.service.GetReturn(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusNotFound, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ret)
+}
+
+// ListReturns lists returns (optional register_id + date query params).
+func (h *Handler) ListReturns(w http.ResponseWriter, r *http.Request) {
+	registerID := r.URL.Query().Get("register_id")
+	var date time.Time
+	if d := r.URL.Query().Get("date"); d != "" {
+		if parsed, err := time.Parse("2006-01-02", d); err == nil {
+			date = parsed
+		}
+	}
+	list, err := h.service.ListReturns(r.Context(), registerID, date)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to list returns", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"returns": list})
+}
+
+// GetZReport returns the immutable Z snapshot for a closed session.
+func (h *Handler) GetZReport(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid till session ID", http.StatusBadRequest, err)
+		return
+	}
+	z, err := h.service.GetZReport(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusNotFound, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(z)
+}
+
+// ListZReports lists Z snapshots (optional register_id + date query params).
+func (h *Handler) ListZReports(w http.ResponseWriter, r *http.Request) {
+	registerID := r.URL.Query().Get("register_id")
+	var date time.Time
+	if d := r.URL.Query().Get("date"); d != "" {
+		if parsed, err := time.Parse("2006-01-02", d); err == nil {
+			date = parsed
+		}
+	}
+	list, err := h.service.ListZReports(r.Context(), registerID, date)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to list Z-reports", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"z_reports": list})
+}
+
+// --- Till handlers ---
+
+func (h *Handler) OpenTill(w http.ResponseWriter, r *http.Request) {
+	var req OpenTillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	if req.RegisterID == "" {
+		req.RegisterID = "REG-01"
+	}
+	cashierID := uuid.New() // Dev-mode fallback; real deployments carry JWT identity
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
+		if parsed, err := uuid.Parse(claims.Subject); err == nil {
+			cashierID = parsed
+		}
+	}
+	session, err := h.service.OpenTill(r.Context(), req.RegisterID, cashierID, int64(req.OpeningFloat*100.0+0.5))
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(session)
+}
+
+func (h *Handler) CurrentTill(w http.ResponseWriter, r *http.Request) {
+	registerID := r.URL.Query().Get("register_id")
+	if registerID == "" {
+		registerID = "REG-01"
+	}
+	session, err := h.service.CurrentTill(r.Context(), registerID)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to look up till session", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"session": session})
+}
+
+func (h *Handler) TillReportHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid till session ID", http.StatusBadRequest, err)
+		return
+	}
+	report, err := h.service.TillReport(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to build till report", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid till session ID", http.StatusBadRequest, err)
+		return
+	}
+	var req CloseTillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	counted := make(map[string]int64, len(req.CountedByMethod))
+	for method, dollars := range req.CountedByMethod {
+		counted[method] = int64(dollars*100.0 + 0.5)
+	}
+	report, err := h.service.CloseTill(r.Context(), id, counted, req.Notes)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+// --- Request types ---
+
+type startTransactionRequest struct {
+	RegisterID string     `json:"register_id"`
+	CashierID  uuid.UUID  `json:"cashier_id"`
+	CustomerID *uuid.UUID `json:"customer_id,omitempty"`
+}
+
+type completeTransactionRequest struct {
+	Tenders []AddTenderRequest `json:"tenders"`
+}
+
+// --- Handlers ---
+
+func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
+	var req startTransactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if req.RegisterID == "" {
+		req.RegisterID = "REG-01"
+	}
+	if req.CashierID == uuid.Nil {
+		req.CashierID = uuid.New() // Demo fallback
+	}
+
+	tx, err := h.service.StartTransaction(r.Context(), req.RegisterID, req.CashierID, req.CustomerID)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to start transaction", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(tx)
+}
+
+func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
+		return
+	}
+
+	tx, err := h.service.GetTransaction(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "transaction not found", http.StatusNotFound, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tx)
+}
+
+func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
+	txID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
+		return
+	}
+
+	var req AddLineItemRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	tx, err := h.service.AddItem(r.Context(), txID, req)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to add item", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tx)
+}
+
+func (h *Handler) RemoveItem(w http.ResponseWriter, r *http.Request) {
+	txID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
+		return
+	}
+
+	itemID, err := uuid.Parse(r.PathValue("itemId"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid item ID", http.StatusBadRequest, err)
+		return
+	}
+
+	tx, err := h.service.RemoveItem(r.Context(), txID, itemID)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to remove item", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tx)
+}
+
+func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
+	txID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
+		return
+	}
+
+	var req completeTransactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if len(req.Tenders) == 0 {
+		httputil.RespondError(w, r, "At least one tender is required", http.StatusBadRequest, nil)
+		return
+	}
+
+	tx, err := h.service.CompleteTransaction(r.Context(), txID, req.Tenders)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to complete transaction", http.StatusUnprocessableEntity, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tx)
+}
+
+func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
+	txID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
+		return
+	}
+
+	tx, err := h.service.VoidTransaction(r.Context(), txID)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to void transaction", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tx)
+}
+
+func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
+	registerID := r.URL.Query().Get("register_id")
+	dateStr := r.URL.Query().Get("date")
+
+	date := time.Now()
+	if dateStr != "" {
+		parsed, err := time.Parse("2006-01-02", dateStr)
+		if err == nil {
+			date = parsed
+		}
+	}
+
+	summaries, err := h.service.ListTransactions(r.Context(), registerID, date)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to list transactions", http.StatusInternalServerError, err)
+		return
+	}
+
+	if summaries == nil {
+		summaries = []TransactionSummary{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summaries)
+}
+
+func (h *Handler) SearchProducts(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]QuickSearchResult{})
+		return
+	}
+
+	results, err := h.service.SearchProducts(r.Context(), query)
+	if err != nil {
+		httputil.RespondError(w, r, "product search failed", http.StatusInternalServerError, err)
+		return
+	}
+
+	if results == nil {
+		results = []QuickSearchResult{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+// SyncOffline handles POST /api/pos/sync — replays offline POS transactions.
+func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
+	var req OfflineSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if req.BatchID == "" {
+		httputil.RespondError(w, r, "batch_id is required", http.StatusBadRequest, nil)
+		return
+	}
+	if len(req.Items) == 0 {
+		httputil.RespondError(w, r, "items cannot be empty", http.StatusBadRequest, nil)
+		return
+	}
+
+	resp, err := h.service.SyncOfflineTransactions(r.Context(), req)
+	if err != nil {
+		httputil.RespondError(w, r, "offline sync failed", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// GetCatalog handles GET /api/pos/catalog — returns full product catalog for offline cache.
+func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
+	catalog, err := h.service.GetProductCatalog(r.Context())
+	if err != nil {
+		httputil.RespondError(w, r, "failed to get catalog", http.StatusInternalServerError, err)
+		return
+	}
+
+	if catalog == nil {
+		catalog = []CatalogProduct{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(catalog)
+}

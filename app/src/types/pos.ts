@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+// POS Types — Retail Counter Sales
+
+export type TransactionStatus = 'OPEN' | 'COMPLETED' | 'VOIDED' | 'RETURNED' | 'HELD';
+
+export interface POSTransaction {
+    id: string;
+    register_id: string;
+    cashier_id: string;
+    customer_id?: string;
+    subtotal: number;
+    tax_amount: number;
+    total: number;
+    change_due: number; // cents, set at completion
+    till_session_id?: string;
+    status: TransactionStatus;
+    completed_at?: string;
+    created_at: string;
+    line_items?: POSLineItem[];
+    tenders?: POSTender[];
+}
+
+// --- Till sessions (drawer lifecycle) ---
+
+export type TillSessionStatus = 'OPEN' | 'CLOSED';
+
+export interface TillSession {
+    id: string;
+    register_id: string;
+    cashier_id: string;
+    status: TillSessionStatus;
+    opening_float: number; // cents
+    opened_at: string;
+    closed_at?: string;
+    expected_by_method?: Record<string, number>; // cents
+    counted_by_method?: Record<string, number>;  // cents
+    over_short?: number; // cents; negative = short
+    notes: string;
+}
+
+export interface TillReport {
+    session: TillSession;
+    sale_count: number;
+    sales_total: number;   // cents
+    tax_total: number;     // cents
+    change_given: number;  // cents
+    tendered_by_method: Record<string, number>; // cents
+    expected_by_method: Record<string, number>; // cents
+}
+
+export interface POSLineItem {
+    id: string;
+    transaction_id: string;
+    product_id: string;
+    description: string;
+    quantity: number;
+    uom: string;
+    unit_price: number; // cents
+    line_total: number; // cents
+    created_at: string;
+}
+
+export interface POSTender {
+    id: string;
+    transaction_id: string;
+    method: string;
+    amount: number; // cents
+    reference?: string;
+    card_last4?: string;
+    card_brand?: string;
+    created_at: string;
+}
+
+export interface QuickSearchResult {
+    product_id: string;
+    sku: string;
+    description: string;
+    unit_price: number;
+    uom: string;
+    in_stock: number;
+}
+
+export interface AddLineItemRequest {
+    product_id: string;
+    quantity: number;
+    uom: string;
+}
+
+export interface AddTenderRequest {
+    method: string;
+    amount: number;
+    reference?: string;
+    token_id?: string;
+}
+
+export interface TransactionSummary {
+    id: string;
+    register_id: string;
+    total: number;
+    status: TransactionStatus;
+    item_count: number;
+    completed_at?: string;
+    created_at: string;
+}

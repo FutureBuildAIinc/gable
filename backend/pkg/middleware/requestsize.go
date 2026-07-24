@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package middleware
+
+import (
+	"net/http"
+)
+
+// MaxRequestSize limits the size of incoming request bodies.
+// Requests exceeding maxBytes will receive a 413 Request Entity Too Large
+// when the handler attempts to read the body.
+func MaxRequestSize(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

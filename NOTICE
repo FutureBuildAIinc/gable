@@ -1,0 +1,37 @@
+Gable — an open commons for lumber & building-materials (LBM) operations
+Copyright (c) 2026 FutureBuild, Inc. and OpenLBM contributors.
+
+This product is licensed PER COMPONENT under the OpenLBM Standard. Different
+directories are governed by different licenses. The authoritative mapping is
+LICENSE-MAP.md; the full license texts are in LICENSES/; every source file also
+carries an SPDX-License-Identifier header; REUSE.toml encodes the same mapping
+in machine-readable form. The canonical Standard is published at
+https://github.com/FutureBuildAIinc/openlbm.
+
+--------------------------------------------------------------------------------
+Third-party software
+--------------------------------------------------------------------------------
+
+This product bundles and/or depends on third-party open-source software. A
+summary of those dependencies and their licenses is in THIRD-PARTY-NOTICES.md.
+
+Some dependencies are licensed under the Apache License, Version 2.0. As
+required by Section 4(d) of that license, when you redistribute this software
+(including in binary form) you must retain the third-party attribution and
+NOTICE content reproduced in THIRD-PARTY-NOTICES.md.
+
+--------------------------------------------------------------------------------
+Map data attribution
+--------------------------------------------------------------------------------
+
+Gable's routing and geocoding features can call OpenRouteService (VROOM route
+optimization + the Pelias geocoder) and can render maps with Leaflet. Data
+served through those tools is derived from OpenStreetMap and related open
+datasets. Any deployment that displays this data MUST preserve the required
+attribution, including at minimum:
+
+  © OpenStreetMap contributors — Open Database License (ODbL) 1.0
+
+Pelias additionally blends sources published under Creative Commons Attribution
+(CC-BY) terms (e.g. GeoNames, Who's on First). See THIRD-PARTY-NOTICES.md for
+the full attribution requirements.

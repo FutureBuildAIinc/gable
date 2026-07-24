@@ -1,0 +1,27 @@
+OpenLBM Surface License 1.0
+=====================================================================
+SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+Applies to: surfaces & native client apps (ERP desktop, POS, driver, yard).
+
+  Draft pending counsel.
+
+  Incorporates the OpenLBM Definitions Core v1.0 by reference (You, Control,
+  Location, Community Member, Large Operator, Production Use, Modification,
+  Distribute, Network-Provide, Corresponding Source, Change Date, Open Target,
+  Steward).
+
+DEED — Use, run, and modify the app freely, including for your own business.
+Your private changes stay yours. If you hand the app to someone else, pass the
+source along too, under this same license.
+
+1. GRANT. A worldwide, royalty-free, non-exclusive license to use, modify,
+   distribute, and sublicense-within-this-License the Surface, for any purpose
+   including Production Use.
+2. RECIPROCITY (distribution only). If you Distribute a Modification, you must
+   provide its Corresponding Source to the recipients under this License. Using
+   or modifying it for your own operations — without Distributing it — triggers
+   nothing.
+3. NOTICES & ATTRIBUTION; TRADEMARK RESERVATION; PATENT PEACE — as in the
+   OpenLBM Commons License, Sections 3–5.
+4. DISCLAIMER — "AS IS", no warranty/liability to the extent permitted by law.
+   (Concept lineage: GPL-3.0, distribution-triggered. Text original.)

@@ -1,0 +1,156 @@
+OpenLBM Commons License, Version 1.0
+====================================
+
+  Draft pending counsel.
+
+  An original license authored for the OpenLBM Standard. It borrows *concepts*
+  (not text) from the GNU AGPL (network reciprocity), Apache-2.0 (patent
+  peace), and the PolyForm licenses (organization-size definitions). It is
+  NOT any of those licenses and is not endorsed by their stewards.
+
+  SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+
+
+DEED  (plain-language summary — normative; read the Terms for the binding detail)
+--------------------------------------------------------------------------------
+  You may use, study, modify, run, share, and build a business on this
+  software, at no charge, forever.
+
+  • If you are an INDEPENDENT OPERATOR (a building-materials business with fewer
+    than 50 locations, not owned by or owning a billion-dollar-plus company),
+    your private changes are YOURS. Run them, modify them, deploy them for your
+    own operations, and never publish a line. No strings.
+
+  • You must SHARE your changes (their source) only if you (a) give the software
+    to someone else, or (b) run a modified version as a service for other people.
+    And (c) if you are a LARGE OPERATOR (a consolidator) making real-world use of
+    a modified version, you must submit those changes to the project's maintainer
+    and community advisory panel — NOT necessarily the public — who then decide
+    whether to fold them into the public core.
+
+  • You may NOT use this to build or power a COMPETING product for the
+    building-materials software market — that's aimed at legacy ERP vendors and
+    would-be competitors, and it needs a separate license (see 1.1).
+
+  • Whatever you share stays under this same license, so the commons stays open.
+
+  • The brand names are not yours to use; there is a patent truce; and if this
+    project is ever abandoned, it opens even further automatically.
+
+
+TERMS
+--------------------------------------------------------------------------------
+
+0. DEFINITIONS.
+   This License incorporates the OpenLBM Definitions Core v1.0 by reference.
+   The capitalized terms below have the meanings given there, summarized:
+   "Licensor" (FutureBuild, Inc.); "Licensed Material"; "You / Your
+   Organization"; "Control"; "Location"; "Operator" (a building-materials
+   business); "Independent Operator" (< 50 Locations and not under common Control
+   with a >$1B-revenue entity); "Large Operator" (a consolidator — an Operator
+   that is not Independent); "Competing Vendor" (any org, any size, offering
+   competing vertical software); "Competing Use"; "Community Member" (an
+   Independent Operator or SME that participates in the community — a governance/
+   JV term, NOT the license grant); "Use"; "Modify / Modification"; "Distribute";
+   "Network-Provide"; "Third Party"; "Production Use"; "Corresponding Source";
+   "Steward" (FutureBuild as maintainer, with the Community Advisory Panel it
+   designates to curate the public Licensed Material).
+   Full definitions: OpenLBM Definitions & Eligibility (canonical).
+
+1. GRANT OF RIGHTS.
+   Subject to the Conditions below, Licensor grants You, and every recipient of
+   the Licensed Material, a worldwide, royalty-free, non-exclusive license to
+   Use, Modify, Distribute, Network-Provide, and sublicense-within-this-License
+   the Licensed Material, for any purpose, including Production Use and
+   commercial purposes.
+
+1.1 EXCLUDED — COMPETING USE. The grant in Section 1 does NOT extend to
+    Competing Use: using the Licensed Material to develop, train, enhance, or
+    offer any product or service that competes with the Gable/OpenLBM offerings
+    in the vertical (for example, a rival ERP, POS, or operational platform
+    marketed to building-materials businesses). This exclusion applies to
+    everyone regardless of size, and in particular to any Competing Vendor.
+    Competing Use requires a separate written license from the Licensor or
+    Steward, which may be declined. [COUNSEL: scope "competes" precisely to the
+    vertical software market so it does not over-reach.]
+
+2. RECIPROCITY (the size-conditioned copyleft).
+   2.1  A "Reciprocity Event" occurs when:
+          (a) You Distribute a Modification; OR
+          (b) You Network-Provide a Modification to Third Parties; OR
+          (c) You are a Large Operator and make any Production Use of a
+              Modification.
+   2.2  Upon a Reciprocity Event, You must make the Corresponding Source of that
+        Modification available as follows, no later than the date You first so
+        act and for as long as You continue:
+          - for (a): to the recipients of the Distribution, under this License;
+          - for (b): to the Third Parties to whom You Network-Provide it, under
+            this License, via a conspicuous offer in the running software;
+          - for (c): to the STEWARD, through the Steward's designated channel,
+            together with a perpetual, worldwide, royalty-free license
+            permitting the Steward to evaluate the Modification and, at the
+            Steward's sole discretion, incorporate it into the Licensed Material
+            under this License. Submission to the Steward satisfies (c); a Large
+            Operator is NOT thereby required to disclose the Modification to the
+            public or to its own users. The Steward, not the Large Operator,
+            decides what enters the public core.
+        [COUNSEL: submission channel, window, and the compelled grant-to-merge.]
+   2.3  An Independent Operator making Production Use of a Modification WITHOUT
+        Distributing it or Network-Providing it to Third Parties trips no
+        Reciprocity Event and owes nothing. Internal and first-party use is free
+        and private.
+   2.4  You need not share source for separate works that merely communicate
+        with the Licensed Material across a network or a documented interface
+        (for example, an OpenLBM-Connector-licensed client); reciprocity reaches
+        Modifications of the Licensed Material itself, not independent programs.
+
+3. NOTICES & ATTRIBUTION.
+   You must keep intact all copyright, license, and attribution notices, this
+   License, and the Deed; state prominently that You changed a file where You
+   did; and pass this License (and these obligations) to every recipient.
+
+4. TRADEMARK RESERVATION.
+   This License grants no rights in Licensor's names, logos, or trademarks,
+   including "Gable", "GableLBM", "AI_LM", and "OpenLBM". You may state factual
+   compatibility ("works with Gable"); You may not name Your fork or service in
+   a way likely to confuse it with Licensor's. See the OpenLBM Trademark Policy.
+
+5. PATENT PEACE.
+   Each contributor grants You a royalty-free license to their patent claims
+   necessarily infringed by their contribution. If You initiate patent
+   litigation alleging the Licensed Material infringes a patent, all rights
+   granted to You under this License terminate on the date You file.
+
+6. CONTINUITY (un-rug-pullable).
+   If the Licensed Material is Abandoned — no new release for twenty-four (24)
+   months, or Licensor dissolves without naming a successor steward — its rights
+   under this License automatically broaden: the Reciprocity condition in
+   Section 2 ceases to apply and the Licensed Material may thereafter be used
+   under the terms of the OpenLBM Connector License (maximally permissive).
+   [COUNSEL: confirm Abandonment triggers, notice, and contributor interaction.]
+
+7. TERMINATION & CURE.
+   Any use outside this License terminates Your rights automatically. Rights
+   reinstate if You cure within thirty (30) days of becoming aware, unless
+   Licensor has notified You of the violation, in which case reinstatement is at
+   Licensor's discretion. Section 5 (patent) termination is not subject to cure.
+
+8. DISCLAIMER OF WARRANTY & LIABILITY.
+   THE LICENSED MATERIAL IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR
+   PURPOSE, TITLE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW,
+   LICENSOR AND CONTRIBUTORS HAVE NO LIABILITY ARISING FROM THIS LICENSE OR THE
+   LICENSED MATERIAL. [COUNSEL: governing law, venue, limitation of liability.]
+
+9. NO OSI CLAIM.
+   Because Section 2.1(c) conditions an obligation on organization size, this
+   License is "fair source": source-available with strong community freedom, and
+   NOT an OSI-approved "open source" license. Do not represent it as such.
+
+--------------------------------------------------------------------------------
+NOTICE (apply to each licensed file or repository)
+--------------------------------------------------------------------------------
+  SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+  Copyright (c) <year> FutureBuild, Inc. and OpenLBM contributors
+  Licensed under the OpenLBM Commons License, Version 1.0. Free for all;
+  Community Members' private modifications stay private. See LICENSE-MAP.md.

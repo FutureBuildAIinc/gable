@@ -1,0 +1,23 @@
+GableLBM / OpenLBM Licensing
+============================
+
+Copyright (c) 2026 FutureBuild, Inc. and OpenLBM contributors.
+
+This repository is NOT under a single license. Licensing is PER COMPONENT:
+different directories are governed by different OpenLBM Standard licenses.
+
+  - LICENSE-MAP.md    the authoritative directory -> license mapping
+  - LICENSES/         the full text of every license referenced here
+  - REUSE.toml        machine-readable form of the same mapping (REUSE 3.x)
+
+Every source file also carries an `SPDX-License-Identifier` header naming the
+license that governs it. When in doubt, that header and LICENSE-MAP.md control.
+
+The full OpenLBM Standard and the canonical, counsel-reviewed license texts are
+published at:
+
+  https://github.com/FutureBuildAIinc/openlbm
+
+The OpenLBM license texts under LICENSES/ are drafts pending counsel review and
+are not yet effective as final legal instruments. Where these drafts and the
+published Standard disagree, the published Standard governs.

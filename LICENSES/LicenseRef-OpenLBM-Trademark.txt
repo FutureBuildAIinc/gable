@@ -1,0 +1,22 @@
+OpenLBM Trademark Policy 1.0
+=====================================================================
+SPDX-License-Identifier: LicenseRef-OpenLBM-Trademark
+Applies to: the marks "Gable", "GableLBM", "AI_LM", "OpenLBM" + logos.
+NOT a code license — a brand-use policy. Marks held by the Gable Steward.
+
+  Draft pending counsel.
+
+1. RESERVATION. The marks are owned by the Gable Steward and licensed to
+   FutureBuild for commercial use. No other rights are granted by any code
+   license in the Standard.
+2. PERMITTED (nominative) USE. You may state factual compatibility ("works
+   with Gable", "an OpenLBM implementation") without implying endorsement.
+3. NOT PERMITTED. Naming a fork, product, or service in a way likely to
+   confuse it with the marks; using the logos without written permission;
+   offering "Gable"-branded hosting, rails, or services without a trademark
+   license.
+4. FORKS. You may fork the code under its license; you may not distribute or
+   operate the fork *as* Gable/GableLBM. This is the community's ultimate
+   backstop against capture.
+5. ADMINISTRATION. The Steward publishes any allow-list (e.g., certified
+   partners) and handles enforcement in the community's interest.

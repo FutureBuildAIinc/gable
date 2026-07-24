@@ -1,0 +1,41 @@
+version = 1
+
+# GableLBM / OpenLBM per-component licensing.
+# This file mirrors LICENSE-MAP.md in the REUSE 3.x machine-readable form.
+#
+# ORDER MATTERS: when a path matches more than one [[annotations]] block, the
+# LAST matching block wins for that file. The backend/pkg/apps carve-out below
+# therefore MUST follow the broader backend/pkg entry so apps -> Connector while
+# the rest of backend/pkg -> Commons.
+
+[[annotations]]
+path = [
+  "backend/internal/**",
+  "backend/pkg/**",
+  "backend/cmd/**",
+  "backend/migrations/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Commons-1.0"
+
+# Connector seam: carved out of the backend/pkg Commons default above.
+[[annotations]]
+path = "backend/pkg/apps/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Connector-1.0"
+
+# Surfaces & native client apps.
+[[annotations]]
+path = "app/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
+
+# Documentation, specs, guides.
+[[annotations]]
+path = "docs/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"

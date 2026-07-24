@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gable_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gable_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gable_password}
+      POSTGRES_DB: ${POSTGRES_DB:-gable_db}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gable_user} -d ${POSTGRES_DB:-gable_db}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# NOTE: a NATS container used to live here, but no Go code imports a NATS
+# client — the event bus is a future consideration (see
+# docs/modularization-blueprint.md, Phase 2+). Re-add the container when the
+# first consumer lands.
+
+volumes:
+  postgres_data:
