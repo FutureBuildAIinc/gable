@@ -39,3 +39,73 @@ path = "docs/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"
+
+# ---------------------------------------------------------------------------
+# Coverage for the rest of the tree
+# ---------------------------------------------------------------------------
+# LICENSE-MAP.md scopes only the four source components above. Everything else
+# in the repo (build manifests, meta docs, CI config, brand assets) still has to
+# carry licensing information for `reuse lint` — and therefore for the license
+# job in .github/workflows/ci.yml — to pass. The choices below follow the map's
+# spirit: build/config that ships alongside Commons code is Commons; prose,
+# meta, and repo plumbing is Docs; brand assets are Trademark.
+
+# Backend build manifests and one-off developer scripts. These sit next to (and
+# describe) Commons-licensed code, so they take the Commons license. Note
+# backend/scripts/ is NOT under the backend/{internal,pkg,cmd,migrations}
+# prefixes enumerated in LICENSE-MAP.md, hence the explicit entry.
+[[annotations]]
+path = [
+  "backend/go.mod",
+  "backend/go.sum",
+  "backend/Dockerfile",
+  "backend/scripts/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Commons-1.0"
+
+# Root-level prose and project meta. Docs license — these are documents, not
+# code, and the Docs license is the most permissive fit in the map.
+# LICENSE, LICENSE-MAP.md and REUSE.toml itself are skipped by `reuse lint`
+# (REUSE spec: license files and the config file need no annotation), so they
+# are deliberately absent here.
+#
+# `*.md` matches root-level markdown ONLY — a single `*` does not cross a `/`,
+# so docs/, app/ and backend/ keep their own licenses. Using the glob rather
+# than a list of filenames means a new top-level document (a changelog, another
+# contributor guide) is covered the day it lands instead of the day someone
+# remembers to add it here.
+[[annotations]]
+path = [
+  "*.md",
+  "NOTICE",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"
+
+# Repo plumbing: CI/CD, issue & PR templates, CODEOWNERS, dependabot, ignore
+# files, container orchestration and DigitalOcean app specs. Same reasoning as
+# the meta docs above — configuration, not a licensed software component.
+[[annotations]]
+path = [
+  ".github/**",
+  ".do/**",
+  ".claude/**",
+  ".gitignore",
+  ".dockerignore",
+  "docker-compose.yml",
+  "Makefile",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"
+
+# Brand assets (logos, wordmarks). These are governed by the trademark/brand-use
+# policy, not by a code license — see LICENSE-MAP.md "Also in LICENSES/".
+[[annotations]]
+path = "brand/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Trademark"

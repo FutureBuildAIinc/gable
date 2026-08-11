@@ -8,9 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/configurator"
-	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/internal/testutil"
 )
 
 func TestConfiguratorService_Integration(t *testing.T) {
@@ -18,15 +17,9 @@ func TestConfiguratorService_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("Configuration error: %v", err)
-	}
-	db, err := database.Connect(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("Failed to connect to DB: %v", err)
-	}
-	defer db.Close()
+	// Skips (rather than fails) when Postgres is unreachable; runs unchanged
+	// when DATABASE_URL points at a live database.
+	db := testutil.RequireDB(t)
 
 	repo := configurator.NewRepository(db)
 	svc := configurator.NewService(repo)

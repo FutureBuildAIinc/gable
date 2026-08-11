@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
 name: CI
 
 on:
@@ -5,20 +8,37 @@ on:
     branches: [master, staging, community]
   pull_request:
     branches: [master, staging, community]
+  # The nightly trigger exists for the `vulnerabilities` job only: a new CVE
+  # can land in a dependency without anyone touching the repo, and we want to
+  # hear about it then rather than on the next unrelated PR. Every other job is
+  # gated on `github.event_name != 'schedule'` so the nightly run does not
+  # rebuild Docker images for nothing.
+  schedule:
+    - cron: "17 6 * * *" # 06:17 UTC daily
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
   AUTH_MODE: dev
+  # Pinned tool versions. Anything installed with `@latest` in CI makes the
+  # build non-deterministic — see the comment on the `vulnerabilities` job.
+  GO_VERSION: "1.25"
+  NODE_VERSION: "20"
+  GOVULNCHECK_VERSION: "v1.1.4"
+  REUSE_VERSION: "6.2.0"
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Merge gates. These must be green for a PR to land.
+  # ---------------------------------------------------------------------------
   backend:
     name: Backend
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     services:
@@ -44,7 +64,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
 
       - name: Vet
@@ -59,19 +79,59 @@ jobs:
         working-directory: backend
         run: go run ./cmd/migrate
 
-      - name: Test
+      # Coverage is collected here rather than in a separate run so the suite is
+      # only executed once. `-covermode=atomic` is required by `-race`.
+      - name: Test (with coverage)
         working-directory: backend
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
-      - name: Run govulncheck
-        run: govulncheck ./...
+      # REPORTING ONLY — there is deliberately NO coverage threshold, here or
+      # anywhere else in this workflow. Baseline coverage is low; a failing gate
+      # would block contributions rather than improve them. If a threshold is
+      # ever introduced it should ratchet upward from the measured baseline, not
+      # be imposed as a round number.
+      - name: Backend coverage summary
+        if: always()
         working-directory: backend
+        run: |
+          if [ ! -f coverage.out ]; then
+            echo "## Backend coverage" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No coverage profile was produced (the test step did not complete)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          go tool cover -func=coverage.out > coverage-func.txt
+          total="$(awk '/^total:/ {print $NF}' coverage-func.txt)"
+          {
+            echo "## Backend coverage"
+            echo ""
+            echo "**Total: ${total:-unknown}**"
+            echo ""
+            echo "Reporting only — no threshold is enforced."
+            echo ""
+            echo "<details><summary>40 least-covered functions</summary>"
+            echo ""
+            echo '```'
+            grep -v '^total:' coverage-func.txt | sort -k3 -n | head -40
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.out
+            backend/coverage-func.txt
+          if-no-files-found: warn
+          retention-days: 14
 
   frontend:
     name: Frontend
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     steps:
@@ -79,7 +139,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: app/package-lock.json
 
@@ -95,18 +155,86 @@ jobs:
         working-directory: app
         run: npm run lint
 
-      - name: Test
+      # Prefers the coverage-instrumented script. The fallback keeps this job
+      # green on branches where `test:coverage` has not been added to
+      # app/package.json yet.
+      - name: Test (with coverage)
         working-directory: app
-        run: npm run test -- --run
+        run: |
+          if node -e "const s=require('./package.json').scripts||{};process.exit(s['test:coverage']?0:1)"; then
+            npm run test:coverage
+          else
+            echo "::warning::app/package.json has no \"test:coverage\" script; running \"npm run test\" without coverage."
+            npm run test -- --run
+          fi
+
+      # REPORTING ONLY — see the note on the backend coverage step. No threshold.
+      - name: Frontend coverage summary
+        if: always()
+        working-directory: app
+        run: |
+          {
+            echo "## Frontend coverage"
+            echo ""
+            echo "Reporting only — no threshold is enforced."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "const t=require('./coverage/coverage-summary.json').total; console.log('| Metric | % | Covered / Total |'); console.log('|---|---|---|'); for (const [k,v] of Object.entries(t)) console.log('| '+k+' | '+v.pct+'% | '+v.covered+' / '+v.total+' |');" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -d coverage ]; then
+            echo "Coverage report generated — see the \`frontend-coverage\` artifact." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "_Tip: add the \`json-summary\` reporter to the vitest coverage config to get a table here._" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No coverage report was produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: app/coverage
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Build
         working-directory: app
         run: npm run build
 
+  license:
+    name: License (REUSE)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install reuse
+        run: |
+          pipx install "reuse==${REUSE_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Full human-readable report for the log. The pass/fail decision is made
+      # by the gate step below.
+      - name: reuse lint (report)
+        run: reuse lint || true
+
+      # `reuse lint` also fails on "unused licenses", i.e. texts in LICENSES/
+      # that no file is licensed under. That check is wrong for this repo:
+      # LICENSE-MAP.md deliberately catalogues licenses that are applied
+      # per-work rather than per-directory. The gate below enforces every other
+      # REUSE check — including "every file has copyright + licensing info" —
+      # and downgrades only the unused-license finding to a note. See
+      # .github/scripts/reuse_gate.py for the full reasoning.
+      - name: REUSE gate
+        run: python3 .github/scripts/reuse_gate.py
+
   docker:
     name: Docker Build
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, license]
 
     steps:
       - uses: actions/checkout@v4
@@ -116,3 +244,76 @@ jobs:
 
       - name: Build frontend image
         run: docker build -f app/Dockerfile .
+
+  # ---------------------------------------------------------------------------
+  # Advisory. NOT a merge gate.
+  # ---------------------------------------------------------------------------
+  # govulncheck used to run inside the `backend` job, installed with `@latest`.
+  # Two problems with that:
+  #
+  #   1. `@latest` is non-deterministic. The same commit could pass on Monday
+  #      and fail on Tuesday because a new tool release or a new entry in the Go
+  #      vulnerability database landed overnight.
+  #   2. Even pinned, the vulnerability database is a moving target. A freshly
+  #      disclosed CVE in a transitive dependency would turn every contributor's
+  #      PR red for a problem they did not introduce and cannot fix in their PR.
+  #
+  # So: the tool version is pinned (GOVULNCHECK_VERSION), the scan lives in its
+  # own job, and that job is `continue-on-error` — it reports loudly in the job
+  # summary and in the run's job list, but it does not fail the workflow.
+  #
+  # MAINTAINERS: do not add "Vulnerabilities" to the required status checks for
+  # branch protection; that would re-introduce exactly the blocking behaviour
+  # this split exists to avoid. Triage findings from the nightly run instead.
+  vulnerabilities:
+    name: Vulnerabilities (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Install govulncheck (pinned)
+        run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+
+      - name: Run govulncheck
+        id: govulncheck
+        working-directory: backend
+        run: |
+          set +e
+          govulncheck ./... > govulncheck.txt 2>&1
+          status=$?
+          set -e
+          cat govulncheck.txt
+          {
+            echo "## govulncheck (advisory)"
+            echo ""
+            echo "Tool: \`${GOVULNCHECK_VERSION}\` — exit code \`${status}\`."
+            echo ""
+            if [ "$status" -eq 0 ]; then
+              echo "No vulnerabilities called by this module's code."
+            else
+              echo "> [!WARNING]"
+              echo "> govulncheck reported findings. This does **not** block the merge gate,"
+              echo "> but a maintainer should triage it."
+            fi
+            echo ""
+            echo '```'
+            tail -n 200 govulncheck.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload govulncheck report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: govulncheck-report
+          path: backend/govulncheck.txt
+          if-no-files-found: warn
+          retention-days: 30

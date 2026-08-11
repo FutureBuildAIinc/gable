@@ -13,7 +13,7 @@ GableLBM is an open-source ERP platform purpose-built for lumber and building ma
 | `staging` | https://staging.gablelbm.com | Digital Ocean App Platform, db `gable_staging`. Internal demos. |
 | `community` | https://demo.gablelbm.com | Digital Ocean App Platform, db `gable_demo`. Community PRs target this branch. |
 
-Both deployed environments run with `AUTH_MODE=dev` — the seeded `demo@gable.com` user is treated as full admin/owner via the dev-mode pass-through in `backend/pkg/middleware/auth.go`. This is intentional and safe (demo data is non-confidential) but must **never** propagate to a future `master` production deploy. Manifests live in `.do/app-demo.yaml` and `.do/app-staging.yaml`; operational notes in `.do/README.md`.
+Both deployed environments run with `AUTH_MODE=dev` — requests are not authenticated at all. The auth middleware is never constructed, so claims are nil and `RequireRole` passes through (`backend/pkg/middleware/auth.go`), giving every anonymous caller full admin/owner reach. The seeded `demo@gable.com` user exists in the fixture but is not what grants that access, so removing it would change nothing. This is intentional and safe (demo data is non-confidential) but must **never** propagate to a future `master` production deploy. Manifests live in `.do/app-demo.yaml` and `.do/app-staging.yaml`; operational notes in `.do/README.md`.
 
 ## Repo Structure
 ```
@@ -92,17 +92,22 @@ docs/         → Architecture, design system, and database specs
 
 ### Backend (`cd backend`)
 ```bash
-go run ./cmd/server                # run API (port 8080, needs DB on :5434)
+AUTH_MODE=dev go run ./cmd/server  # run API (port 8080, needs DB on :5434)
 go run ./cmd/migrate               # apply SQL migrations in order
 go build ./...                     # full build check
-go test ./...                      # run all Go tests
+go test ./...                      # run all Go tests (DB-backed tests skip if
+                                   # Postgres is unreachable)
+go test -race ./...                # what CI runs
 go test ./internal/<module>/...    # tests for a single module
 go vet ./...                       # static analysis
 ```
 
+`AUTH_MODE=dev` is required to boot locally — it is not a default. Without it
+and without a `JWKS_URL`, the server fail-closes and exits (`cmd/server/main.go:146-148`).
+
 Override DB connection when Postgres is on the standard port:
 ```bash
-DATABASE_URL="postgres://gable_user:gable_password@localhost:5432/gable_db?sslmode=disable" go run ./cmd/server
+DATABASE_URL="postgres://gable_user:gable_password@localhost:5432/gable_db?sslmode=disable" AUTH_MODE=dev go run ./cmd/server
 ```
 
 ### Frontend (`cd app`)
@@ -148,7 +153,7 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 | Quotes, DailyTill, reporting | **float64 dollars** | Legacy float convention |
 | `account` module | **int64 cents** | Reads/writes `customers.balance_due` as cents — incompatible with portal's dollar interpretation of the same column |
 
-When rendering money on **ERP pages**, use `formatCents()` from `app/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.07. Portal/quotes pages already get dollars from the API and should format directly.
+When rendering money on **ERP pages**, use `formatCents()` from `app/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.00 — the cents value `7388` formatted as if it were dollars. Portal/quotes pages already get dollars from the API and should format directly.
 
 ### AR balance: read live from invoices; `customers.balance_due` is a secondary record
 For **reads / decisions**, compute the customer's AR balance live from open invoices —
@@ -238,3 +243,33 @@ read the referenced files before sizing.
 - ~~Wire NATS or remove the orphan container~~ **Done July 2026:** orphan NATS container removed from `docker-compose.yml`; the event bus remains future design (blueprint Phase 2+).
 - ~~`inventory.MockRepository` missing `DeallocateStock` breaks `go vet`~~ **Already fixed** — the mock implements it (`internal/inventory/service_test.go`); `go vet ./...` is clean.
 - Convert remaining leaf modules to installable apps per `docs/modularization-blueprint.md` §5 — the five dark pages (bankrecon, matching, rebates, purchasing recommendations) are the best next candidates.
+
+## Contributor Agent Kit (`.claude/`)
+
+This repo ships a Claude Code kit so contributors — including non-technical ones — get a
+repo-aware setup on clone. It is tracked in git (only `.claude/settings.local.json` and
+`.claude/**/*.local.json` are ignored).
+
+```
+.claude/skills/     report-an-issue · describe-a-workflow · improve-docs ·
+                    explain-this-code · check-my-contribution · add-a-test · licensing-check
+.claude/commands/   /file-issue · /describe-workflow · /fix-doc · /newcomer-tour ·
+                    /preflight · /write-a-test · /license-of
+.claude/settings.json   allows the pre-flight commands; denies reading .env and force-push
+```
+
+Human-facing onboarding is [`CONTRIBUTING-WITH-CLAUDE.md`](./CONTRIBUTING-WITH-CLAUDE.md).
+
+**Two skills matter most for people who don't write code:**
+`report-an-issue` (turns "the delivery screen showed the wrong total" into a filed, correctly
+routed report — and diverts security bugs to `SECURITY.md`) and `describe-a-workflow` (turns a
+dealer's operational knowledge into a spec with the Technical / PRR / User-driven acceptance
+triad, written to `docs/workflows/`).
+
+**Maintaining the kit:** the skills quote real commands and paths from this repo — `make`
+targets, CI job names, module layout, `LICENSE-MAP.md` rows. When you change the `Makefile`,
+`.github/workflows/ci.yml`, the branch model, or the license map, grep `.claude/` and update
+it in the same PR. Files under `.claude/` are `LicenseRef-OpenLBM-Docs-1.0`; the SPDX tags live
+inside the YAML frontmatter as `#` comments so the frontmatter still parses, and
+`settings.json` uses a `settings.json.license` sidecar. The REUSE job in CI is a merge gate,
+so a missing header there fails the build.

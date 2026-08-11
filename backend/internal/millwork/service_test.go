@@ -9,10 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/millwork"
-	"github.com/gablelbm/gable/pkg/database"
-	// Start with testify if available, otherwise switch to stdlib
+	"github.com/gablelbm/gable/internal/testutil"
 )
 
 func TestMillworkService_Integration(t *testing.T) {
@@ -21,16 +19,9 @@ func TestMillworkService_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Load Config & Connect DB
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("Configuration error: %v", err)
-	}
-	db, err := database.Connect(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("Failed to connect to DB: %v", err)
-	}
-	defer db.Close()
+	// Skips (rather than fails) when Postgres is unreachable; runs unchanged
+	// when DATABASE_URL points at a live database.
+	db := testutil.RequireDB(t)
 
 	// Setup Service
 	repo := millwork.NewRepository(db)

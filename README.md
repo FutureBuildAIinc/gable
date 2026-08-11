@@ -46,16 +46,23 @@ make migrate
 make seed
 
 # 4. Run backend and frontend in two terminals
-cd backend && go run ./cmd/server      # API on :8080
-cd app && npm install && npm run dev    # SPA on :5173
+cd backend && AUTH_MODE=dev go run ./cmd/server   # API on :8080
+cd app && npm install && npm run dev              # SPA on :5173
 ```
 
 Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 `make reset-db`.
 
-> **Local dev only:** the default `AUTH_MODE=dev` disables authentication for
-> convenience on your machine. It must **never** be used on a reachable or
-> production deployment — see [SECURITY.md](./SECURITY.md).
+> **Why `AUTH_MODE=dev` is on that command:** it is **not** a default. The
+> backend is fail-closed — with `AUTH_MODE` unset and no `JWKS_URL`, it logs
+> `JWKS_URL not set and AUTH_MODE != dev` and exits rather than starting
+> without authentication. You must opt in explicitly, which is the point.
+>
+> `AUTH_MODE=dev` disables authentication and authorization entirely: no JWT
+> is verified and every role check passes, so any request reaching the port has
+> full access to the ERP, general ledger, AP/AR and payments. It is safe **only**
+> on your own machine against throwaway data, and must **never** be set on a
+> reachable or production deployment — see [SECURITY.md](./SECURITY.md).
 
 ## Documentation
 
@@ -95,3 +102,30 @@ contributions are licensed via the CLA.
 Please also read our [Code of Conduct](./CODE_OF_CONDUCT.md). To report a
 security vulnerability, follow [SECURITY.md](./SECURITY.md) — do not open a
 public issue.
+
+### Contributing with Claude
+
+**You don't have to be a programmer to contribute.** This repo ships a Claude
+Code agent kit in [`.claude/`](./.claude/) that loads automatically when you
+open the project. It knows this codebase — the module layout, the money
+conventions, the pre-flight gates, the per-component licence map — so it gives
+you repo-specific help rather than generic advice.
+
+If you run a yard, work a counter, dispatch trucks, or write docs, it can turn
+what you know into a filed issue, a workflow spec, or a documentation fix
+without you writing any code.
+
+| Skill | Shortcut | For |
+|---|---|---|
+| `report-an-issue` | `/file-issue` | "The delivery screen showed the wrong total" → a properly scoped, correctly routed bug report |
+| `describe-a-workflow` | `/describe-workflow` | How will-call, dispatch, or quoting really works at your yard → a buildable spec |
+| `improve-docs` | `/fix-doc` | Docs that are wrong, stale, or missing |
+| `explain-this-code` | `/newcomer-tour` | Getting oriented in the codebase |
+| `check-my-contribution` | `/preflight` | The real pre-flight before you open a PR |
+| `add-a-test` | `/write-a-test` | Coverage for a module that has none |
+| `licensing-check` | `/license-of` | "Which licence governs this file?" |
+
+Start here: **[`CONTRIBUTING-WITH-CLAUDE.md`](./CONTRIBUTING-WITH-CLAUDE.md)** —
+installation, worked examples, and the ground rules. AI-assisted contributions
+are welcome; you remain responsible for understanding and testing what you
+submit.

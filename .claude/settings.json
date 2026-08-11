@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go vet:*)",
+      "Bash(go test:*)",
+      "Bash(go version)",
+      "Bash(go list:*)",
+      "Bash(gofmt:*)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm run lint)",
+      "Bash(npm run test:*)",
+      "Bash(npm run build)",
+      "Bash(npm ci)",
+      "Bash(npm install)",
+      "Bash(node -v)",
+      "Bash(make up)",
+      "Bash(make migrate)",
+      "Bash(make seed)",
+      "Bash(make ps)",
+      "Bash(make logs)",
+      "Bash(reuse lint)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git show:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./.do/.env*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  }
+}

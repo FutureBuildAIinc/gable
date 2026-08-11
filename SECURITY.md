@@ -81,8 +81,12 @@ write-up.
 Gable ships an authentication bypass for local development. When
 `AUTH_MODE=dev` is set:
 
-- The backend **skips JWT/JWKS verification entirely** and treats the request
-  as a fully privileged, seeded admin/owner user.
+- The backend **skips JWT/JWKS verification entirely**. The auth middleware is
+  never constructed (`backend/cmd/server/main.go:144-145`), so requests carry no
+  claims at all, and `RequireRole` passes through whenever claims are nil
+  (`backend/pkg/middleware/auth.go`). No user is impersonated — the request is
+  simply unauthenticated and every role gate opens for it. The effect is full
+  admin/owner reach for any anonymous caller.
 - The B2B portal auth is likewise bypassed and injects demo customer claims.
 - A dev-only default is used for the portal JWT secret.
 

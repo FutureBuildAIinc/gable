@@ -7,11 +7,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/purchase_order"
-	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -20,16 +19,10 @@ func TestSpecialOrder_POCreation(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Setup Code (similar to main.go wiring)
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("Configuration error: %v", err)
-	}
-	db, err := database.Connect(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("Failed to connect to DB: %v", err)
-	}
-	defer db.Close()
+	// Setup Code (similar to main.go wiring).
+	// Skips (rather than fails) when Postgres is unreachable; runs unchanged
+	// when DATABASE_URL points at a live database.
+	db := testutil.RequireDB(t)
 
 	// Initialize Services
 	orderRepo := order.NewRepository(db)
@@ -41,7 +34,7 @@ func TestSpecialOrder_POCreation(t *testing.T) {
 	accountNum := "TEST-" + custID.String()[:8]
 	// customers.primary_branch_id is NOT NULL post-migration 067; resolve
 	// the default branch from system_settings (seeded by migration 059).
-	_, err = db.Pool.Exec(context.Background(),
+	_, err := db.Pool.Exec(context.Background(),
 		`INSERT INTO customers (id, name, account_number, primary_branch_id)
 		 VALUES ($1, 'Test Customer', $2,
 		         (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`,

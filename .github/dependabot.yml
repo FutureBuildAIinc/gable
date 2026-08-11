@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Dependabot keeps the three dependency surfaces of this repo current:
+# the Go module in backend/, the npm workspace in app/, and the GitHub Actions
+# used by the workflows in .github/workflows/.
+#
+# Cadence is weekly rather than daily on purpose: the `vulnerabilities` job in
+# ci.yml already runs govulncheck nightly, so genuinely urgent problems surface
+# there. Weekly PRs keep the review queue manageable for a small maintainer
+# team, and open-PR limits stop a dependency storm from burying real work.
+#
+# NOTE: `reviewers`/`assignees` are intentionally omitted — .github/CODEOWNERS
+# still has placeholder team handles. Add them here once the real teams exist.
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # Go backend
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Roll the golang.org/x/* modules together; they release in lockstep and
+      # separate PRs for each just churn go.sum.
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+      go-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------
+  # Frontend (Vite + React SPA)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    commit-message:
+      prefix: "chore(deps)"
+    versioning-strategy: increase-if-necessary
+    groups:
+      # Dev tooling churns constantly and is low risk — one PR a week for the
+      # lot of it.
+      dev-tooling:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      prod-minor-and-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions used by .github/workflows/
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns:
+          - "*"

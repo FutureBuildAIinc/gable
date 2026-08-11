@@ -19,9 +19,14 @@ backend/seed
 # Stray binary that ended up committed at the repo root — do not re-add.
 /docker-compose
 
-# Agent/AI directories (.agent/ is tracked intentionally — see CLAUDE.md repo structure)
+# Agent/AI directories (.agent/ is tracked intentionally — see CLAUDE.md repo structure).
+#
+# `.claude/` IS tracked on purpose: it ships the shared contributor agent kit
+# (skills + slash commands) that every contributor gets on clone — see
+# CONTRIBUTING-WITH-CLAUDE.md. Only per-developer local overrides are ignored.
 .agents/
-.claude/
+.claude/settings.local.json
+.claude/**/*.local.json
 
 # IDE
 .idea/
@@ -35,6 +40,15 @@ node_modules/
 # Build output
 dist/
 
+# Coverage & CI reports. These are produced by `make cover` / `make fe-cover`
+# and by the backend/frontend jobs in .github/workflows/ci.yml, which upload
+# them as build artifacts. They are never committed.
+coverage.out
+coverage-func.txt
+govulncheck.txt
+coverage/
+*.lcov
+
 # Digital Ocean — keep .do/*.yaml tracked, but ignore any local-only manifests
 # (e.g. dev-scratch specs or secret env files dropped alongside).
 .do/*.local.*
@@ -43,3 +57,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python bytecode (reuse_gate.py in .github/scripts)
+__pycache__/
+*.pyc

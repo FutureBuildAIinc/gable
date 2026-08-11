@@ -24,9 +24,14 @@ make migrate
 make seed
 
 # 4. Run the backend and frontend in two terminals
-cd backend && go run ./cmd/server     # API on :8080
-cd app && npm install && npm run dev   # SPA on :5173
+cd backend && AUTH_MODE=dev go run ./cmd/server   # API on :8080
+cd app && npm install && npm run dev              # SPA on :5173
 ```
+
+`AUTH_MODE=dev` is required to start the backend locally and is **not** a
+default — without it (and without a `JWKS_URL`) the server fail-closes and
+exits. It disables authentication and authorization completely, so never set
+it anywhere reachable. See [SECURITY.md](./SECURITY.md).
 
 Open <http://localhost:5173>. To wipe and rebuild the dev database:
 
@@ -62,26 +67,87 @@ fast-forward `staging → master`. Do not target `master` directly.
 
 ### Pre-flight checklist
 
-Run these locally before pushing. CI runs them too, but failing fast locally
-saves a round trip.
+These are **exactly** the gates CI enforces — see
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml). Run them locally
+before pushing; failing fast locally saves a round trip.
+
+The short version:
 
 ```bash
-# Backend
-cd backend
-go build ./...
-go vet ./...
-go test ./...
+make preflight     # backend + frontend + licensing, everything the merge gate checks
+```
 
-# Frontend
+The long version, if you'd rather run the pieces yourself:
+
+```bash
+# ---- Backend (the `backend` job) -----------------------------------------
+cd backend
+go vet ./...
+go build ./...
+go run ./cmd/migrate                                  # needs Postgres
+go test -race ./...                                   # needs Postgres
+
+# ---- Frontend (the `frontend` job) ---------------------------------------
 cd app
+npm ci
 npx tsc --noEmit
 npm run lint
+npm run test:coverage                                 # or: npm run test -- --run
 npm run build
+
+# ---- Licensing (the `license` job) ---------------------------------------
+cd <repo root>
+pipx install reuse==6.2.0                             # once
+make license-check
+
+# ---- Container images (the `docker` job) ---------------------------------
+docker build -f backend/Dockerfile .
+docker build -f app/Dockerfile .
+```
+
+Equivalent make targets: `build`, `vet`, `test`, `test-short`, `cover`,
+`fe-install`, `fe-typecheck`, `fe-lint`, `fe-test`, `fe-cover`, `fe-build`,
+`license-check`, `vuln`. Run `make help` for the full list.
+
+**Not a gate:** `govulncheck` (`make vuln`) runs in its own advisory CI job on
+every push and nightly. It reports known vulnerabilities in Go dependencies but
+does **not** block your PR — a CVE disclosed overnight is not your bug to fix.
+Maintainers triage those findings.
+
+**Also not a gate:** code coverage. CI measures it, uploads it as a build
+artifact, and prints a summary — but there is no minimum threshold and no
+build failure for lowering it. Please do add tests; just don't expect a number
+to police it.
+
+#### Running tests without Postgres
+
+The backend suite talks to a real database for repository and integration
+tests. If you haven't booted Postgres, use the short flag — the DB-dependent
+tests skip themselves rather than failing:
+
+```bash
+cd backend && go test -short ./...    # or: make test-short
+```
+
+That is the fastest inner loop for changes that don't touch persistence. It is
+**not** a substitute for the full run: CI always runs `go test -race ./...`
+against a live Postgres 16, so a change that only passes under `-short` can
+still go red. Before pushing anything that touches SQL, migrations, or
+repository code, run the real thing:
+
+```bash
+make up && make migrate     # boots Postgres on localhost:5434 and migrates
+make test
 ```
 
 Database changes: new columns should follow the repo conventions — UUID primary
 keys, `DECIMAL(19,4)` for physical quantities, money-as-cents in application
 code, and every quantity paired with a UOM ID. See `CLAUDE.md` for details.
+
+Licensing: every source file carries an SPDX header, and `make license-check`
+enforces that the whole tree is accounted for. If you add a new file, copy the
+header from a neighbouring file in the same directory — the correct identifier
+for each path is in [`LICENSE-MAP.md`](./LICENSE-MAP.md).
 
 ## Licensing of contributions (inbound = OpenLBM, via CLA)
 
