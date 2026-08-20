@@ -247,14 +247,19 @@ func (r *PostgresRepository) GetCustomerStatement(ctx context.Context, customerI
 	return stmt, nil
 }
 
+// SavedReport carries its timestamps as strings, so every saved_reports query
+// casts them with ::text — selecting a bare TIMESTAMPTZ into a *string fails at
+// scan time in pgx with "cannot scan timestamptz (OID 1184) in binary format
+// into *string". The casts are load-bearing, not cosmetic; the same note
+// applies to the report_schedules queries further down.
 func (r *PostgresRepository) CreateSavedReport(ctx context.Context, report *SavedReport) error {
 	query := `
 INSERT INTO saved_reports (name, description, entity_type, definition_json, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, created_at, updated_at
+RETURNING id, created_at::text, updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		report.Name, report.Description, report.EntityType, report.DefinitionJSON, report.CreatedBy).
+		report.Name, report.Description, report.EntityType, report.DefinitionJSON, nullableUUID(report.CreatedBy)).
 		Scan(&report.ID, &report.CreatedAt, &report.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create saved report: %w", err)
@@ -262,9 +267,22 @@ RETURNING id, created_at, updated_at
 	return nil
 }
 
+// nullableUUID maps an absent author to SQL NULL.
+//
+// saved_reports.created_by is a nullable uuid; binding the empty string to it
+// fails with `invalid input syntax for type uuid: ""`. "No recorded author" is
+// a real state — a report saved by a deployment with authentication disabled
+// has one — and NULL is how the column expresses it.
+func nullableUUID(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (r *PostgresRepository) GetSavedReport(ctx context.Context, id string) (*SavedReport, error) {
 	query := `
-SELECT id, name, description, entity_type, definition_json, created_by, created_at, updated_at
+SELECT id, name, description, entity_type, definition_json, COALESCE(created_by::text, ''), created_at::text, updated_at::text
 FROM saved_reports
 WHERE id = $1
 `
@@ -280,7 +298,7 @@ WHERE id = $1
 
 func (r *PostgresRepository) ListSavedReports(ctx context.Context) ([]SavedReport, error) {
 	query := `
-SELECT id, name, description, entity_type, definition_json, created_by, created_at, updated_at
+SELECT id, name, description, entity_type, definition_json, COALESCE(created_by::text, ''), created_at::text, updated_at::text
 FROM saved_reports
 ORDER BY created_at DESC
 `
@@ -308,7 +326,7 @@ func (r *PostgresRepository) UpdateSavedReport(ctx context.Context, report *Save
 UPDATE saved_reports
 SET name = $1, description = $2, entity_type = $3, definition_json = $4, updated_at = NOW()
 WHERE id = $5
-RETURNING updated_at
+RETURNING updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		report.Name, report.Description, report.EntityType, report.DefinitionJSON, report.ID).

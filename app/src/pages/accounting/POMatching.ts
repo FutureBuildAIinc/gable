@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatCents } from '../../lib/utils.ts';
 import type { MatchResult, MatchException, MatchConfig } from '../../types/matching';
 import { runMatch, listExceptions, getMatchConfig, updateMatchConfig, getMatchResult } from '../../services/MatchingService';
 
@@ -71,8 +72,28 @@ export class POMatching extends LitElement {
         }
     }
 
-    private _formatCents(cents: number) {
-        return `$${(cents / 100).toFixed(2)}`;
+    /**
+     * The dollar-tolerance field is asymmetric about money units on purpose, and
+     * the asymmetry is the API's.
+     *
+     * READ — `GET /matching/config` returns `dollar_tolerance` as int64 **cents**
+     * (`matching/model.go`: `MatchConfig.DollarTolerance int64 // cents`), so the
+     * field divides by 100 to show dollars.
+     *
+     * WRITE — `PUT /matching/config` takes **dollars**
+     * (`UpdateMatchConfigRequest.DollarTolerance *float64 // dollars, converted
+     * to cents`) and the service converts with `money.DollarsToCents`. So the
+     * typed figure goes out unscaled. Multiplying by 100 here would scale twice
+     * and store a $73.88 tolerance as $7,388.00 — and `dollar_tolerance` is the
+     * absolute-dollar floor in the three-way match, so a value 100x too large
+     * waves through the vendor overbilling this control exists to catch.
+     */
+    private _dollarToleranceDollars(): string {
+        return ((this.config?.dollar_tolerance ?? 0) / 100).toFixed(2);
+    }
+
+    private _handleDollarToleranceChange(value: string) {
+        this._handleUpdateConfig('dollar_tolerance', parseFloat(value));
     }
 
     private _formatPct(pct: number) {
@@ -152,12 +173,13 @@ export class POMatching extends LitElement {
                                 />
                             </div>
                             <div>
+                                <!-- Units: see _dollarToleranceDollars / _handleDollarToleranceChange. -->
                                 <label class="text-xs text-slate-400 block mb-1">Dollar Tolerance</label>
                                 <input
                                     type="number"
                                     step="1"
-                                    .value=${(this.config.dollar_tolerance / 100).toFixed(2)}
-                                    @change=${(e: Event) => this._handleUpdateConfig('dollar_tolerance', Math.round(parseFloat((e.target as HTMLInputElement).value) * 100))}
+                                    .value=${this._dollarToleranceDollars()}
+                                    @change=${(e: Event) => this._handleDollarToleranceChange((e.target as HTMLInputElement).value)}
                                     class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none"
                                 />
                             </div>
@@ -259,8 +281,8 @@ export class POMatching extends LitElement {
                                             <td class="px-3 py-2.5 text-slate-300 font-mono">${line.po_qty}</td>
                                             <td class="px-3 py-2.5 text-slate-300 font-mono">${line.received_qty}</td>
                                             <td class="px-3 py-2.5 text-slate-300 font-mono">${line.invoiced_qty}</td>
-                                            <td class="px-3 py-2.5 text-slate-300 font-mono">${this._formatCents(line.po_unit_cost)}</td>
-                                            <td class="px-3 py-2.5 text-slate-300 font-mono">${this._formatCents(line.invoice_unit_price)}</td>
+                                            <td class="px-3 py-2.5 text-slate-300 font-mono">${formatCents(line.po_unit_cost)}</td>
+                                            <td class="px-3 py-2.5 text-slate-300 font-mono">${formatCents(line.invoice_unit_price)}</td>
                                             <td class="px-3 py-2.5 font-mono ${Math.abs(line.qty_variance_pct) > 0 ? 'text-yellow-400' : 'text-emerald-400'}">
                                                 ${this._formatPct(line.qty_variance_pct)}
                                             </td>

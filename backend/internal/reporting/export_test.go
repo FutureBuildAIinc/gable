@@ -7,8 +7,13 @@ import (
 	"bytes"
 	"encoding/csv"
 	"errors"
+	"math/big"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // --- formatValue ---------------------------------------------------------
@@ -62,6 +67,70 @@ func TestFormatValue_FloatsGetSixDecimalPlaces(t *testing.T) {
 		if got := formatValue(tc.in); got != tc.want {
 			t.Errorf("formatValue(%v) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// CORRECTNESS: BuildAndExecuteQuery reads rows with pgx.Rows.Values(), so the
+// values reaching formatValue are the driver's own Go types, and three of the
+// ones entitySchemas exposes are unreadable under %v. A money column arrived as
+// "{200000 -2 false finite true}", an id column as "[167 93 18 229 ...]" and a
+// date column as Go's "2026-08-20 16:16:40.520731 -0700 PDT" — in every CSV and
+// XLSX this package has ever produced.
+//
+// The exact driver representations are pinned against a live database in
+// TestExport_RendersRealDriverValues (scheduler_postgres_test.go); this test
+// pins the rendering itself, which needs no database.
+func TestFormatValue_RendersPgxDriverTypes(t *testing.T) {
+	// numeric(10,2) 2000.00 as pgx decodes it: unscaled 200000 with exponent -2.
+	money := pgtype.Numeric{Int: big.NewInt(200000), Exp: -2, Valid: true}
+	id := uuid.MustParse("a75d12e5-28c1-4375-8e62-2895d2c89d96")
+	ts := time.Date(2026, 8, 20, 16, 16, 40, 0, time.UTC)
+
+	tests := []struct {
+		name string
+		in   any
+		want string
+	}{
+		{"numeric keeps its stored scale", money, "2000.00"},
+		{"numeric pointer", &money, "2000.00"},
+		{"a NULL numeric is blank", pgtype.Numeric{}, ""},
+		{"negative numeric", pgtype.Numeric{Int: big.NewInt(-12345), Exp: -2, Valid: true}, "-123.45"},
+		{"integral numeric", pgtype.Numeric{Int: big.NewInt(7), Exp: 0, Valid: true}, "7"},
+		{"uuid renders canonically", [16]byte(id), "a75d12e5-28c1-4375-8e62-2895d2c89d96"},
+		{"timestamp renders as RFC 3339", ts, "2026-08-20T16:16:40Z"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatValue(tc.in); got != tc.want {
+				t.Errorf("formatValue(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// A spreadsheet cell must hold a number, not the text of one, or the recipient
+// cannot sum the column. excelValue therefore converts where formatValue
+// renders.
+func TestExcelValue_KeepsNumbersNumeric(t *testing.T) {
+	money := pgtype.Numeric{Int: big.NewInt(200000), Exp: -2, Valid: true}
+	if got := excelValue(money); got != 2000.00 {
+		t.Errorf("excelValue(numeric) = %#v, want the float64 2000.00", got)
+	}
+
+	id := uuid.MustParse("a75d12e5-28c1-4375-8e62-2895d2c89d96")
+	if got := excelValue([16]byte(id)); got != id.String() {
+		t.Errorf("excelValue(uuid) = %#v, want %q", got, id.String())
+	}
+
+	// Everything excelize already understands is passed through untouched, so
+	// a time stays a date cell rather than becoming a string.
+	ts := time.Date(2026, 8, 20, 16, 16, 40, 0, time.UTC)
+	if got := excelValue(ts); got != any(ts) {
+		t.Errorf("excelValue(time.Time) = %#v, want it passed through", got)
+	}
+	if got := excelValue("PAID"); got != any("PAID") {
+		t.Errorf("excelValue(string) = %#v, want it passed through", got)
 	}
 }
 
@@ -197,22 +266,13 @@ func TestExportCSV_DoesNotNeutraliseFormulaInjection(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. ExportCSV defers writer.Flush() and never checks writer.Error(),
-// so a write failure on the destination is swallowed: the function returns nil
-// while producing no output at all. The scheduled-report path uses this to
-// build an email attachment, and an HTTP handler uses it to stream a download —
-// in both cases a silent empty success is worse than an error.
-//
-// backend/internal/reporting/export.go:17-18 —
-//
-//	writer := csv.NewWriter(w)
-//	defer writer.Flush()
-//
-// The fix is `defer func() { writer.Flush(); err = writer.Error() }()` or an
-// explicit Flush + Error check before returning.
+// CORRECTNESS: ExportCSV must not swallow a write failure on the destination.
+// csv.Writer buffers, so a small report only fails at Flush time; if Flush is
+// deferred and writer.Error() never checked, the function returns nil while
+// producing no output at all. The scheduled-report path uses this to build an
+// email attachment, and an HTTP handler uses it to stream a download — in both
+// cases a silent empty success is worse than an error.
 func TestExportCSV_MustReportAFailingWriter(t *testing.T) {
-	t.Skip("KNOWN BUG: reporting/export.go:18 defers Flush and never checks writer.Error(), so a failing destination yields a nil error and an empty export")
-
 	cols := []ReportColumn{{Field: "id", Label: "ID"}}
 	rows := []map[string]any{{"id": "1"}}
 

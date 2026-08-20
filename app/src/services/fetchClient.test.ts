@@ -208,26 +208,14 @@ describe('fetchWithAuth — retry policy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  // --- Documented deviations from the module's stated contract ---------------
+  // --- Regressions on the module's stated contract ---------------------------
 
-  it('currently re-issues the request after a 401 (characterization)', async () => {
-    vi.useFakeTimers()
-    fetchMock.mockResolvedValue(new Response('', { status: 401 }))
-    const pending = fetchWithAuth('/api/v1/orders')
-    const assertion = expect(pending).rejects.toThrow('Session expired')
-    await vi.advanceTimersByTimeAsync(5_000)
-    await assertion
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
-
-  // BUG: the 401 interceptor throws from *inside* the try block, so the generic
-  // catch treats an expired session as a retryable network error. Result: every
-  // 401 costs a 2s stall, fires a second doomed request, and runs the
-  // localStorage-clear + `window.location.href = ...` redirect twice. The
-  // docblock says "Retries on network errors (not on HTTP error status codes)".
-  // Fix: hoist the 401 handling out of the try, or rethrow via a sentinel the
-  // catch re-raises.
-  it.fails('should not retry a 401 — an expired session is not a network error', async () => {
+  // The 401 interceptor used to throw from *inside* the try block, so the generic
+  // catch treated an expired session as a retryable network error. Every 401 cost
+  // a 2s stall, fired a second doomed request, and ran the localStorage-clear +
+  // `window.location.href = ...` redirect twice. The same wrapper carries
+  // POST /workflow/plans/{id}/push, so an expired session double-wrote.
+  it('does not retry a 401 — an expired session is not a network error', async () => {
     vi.useFakeTimers()
     fetchMock.mockResolvedValue(new Response('', { status: 401 }))
     const pending = fetchWithAuth('/api/v1/orders')
@@ -237,20 +225,27 @@ describe('fetchWithAuth — retry policy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('currently re-issues the request after a timeout abort (characterization)', async () => {
-    fetchMock.mockImplementation(hangUntilAborted())
-    await expect(fetchWithAuth('/api/v1/orders', { timeout: 20, retries: 1 }))
-      .rejects.toThrow(/abort/i)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+  it('does not re-issue a non-idempotent write after a 401', async () => {
+    // The concrete cost of the old behaviour: the second attempt was a second
+    // POST, so an expired session pushed the plan twice.
+    vi.useFakeTimers()
+    fetchMock.mockResolvedValue(new Response('', { status: 401 }))
+    const pending = fetchWithAuth('/api/v1/workflow/plans/plan-1/push', {
+      method: 'POST',
+      body: '{}',
+    })
+    const assertion = expect(pending).rejects.toThrow('Session expired')
+    await vi.advanceTimersByTimeAsync(5_000)
+    await assertion
+    expect(fetchMock.mock.calls.filter((c) => (c[1] as RequestInit).method === 'POST')).toHaveLength(1)
   })
 
-  // BUG: the retry guard is `attempt < retries && lastError.name !== 'AbortError'`,
-  // which only skips the *delay* on an abort — the loop still runs another
-  // attempt. The inline comment directly above it says "Retry on network errors,
-  // not on intentional aborts from timeout". A slow endpoint therefore gets hit
-  // twice and the caller waits 2x the configured timeout.
-  // Fix: `if (lastError.name === 'AbortError') throw lastError` before retrying.
-  it.fails('should not retry after its own timeout fired', async () => {
+  // The retry guard used to be `attempt < retries && lastError.name !== 'AbortError'`,
+  // which only skipped the *delay* on an abort — the loop still ran another
+  // attempt. The inline comment above it said "Retry on network errors, not on
+  // intentional aborts from timeout". A slow endpoint got hit twice and the
+  // caller waited 2x the configured timeout.
+  it('does not retry after its own timeout fired', async () => {
     fetchMock.mockImplementation(hangUntilAborted())
     await expect(fetchWithAuth('/api/v1/orders', { timeout: 20, retries: 1 }))
       .rejects.toThrow(/abort/i)

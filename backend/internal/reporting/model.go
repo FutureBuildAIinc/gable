@@ -72,18 +72,19 @@ type SavedReport struct {
 	UpdatedAt      string                 `json:"updated_at"`
 }
 
-// ScheduleStatusStored is the status every schedule created through the API
-// receives. It means "persisted, but nothing executes it".
+// ScheduleStatusStored means "persisted, but nothing executes it".
 //
-// It is deliberately NOT "ACTIVE": nothing in this repository runs scheduled
-// reports (see ScheduleExecution), and Scheduler.Start only registers rows
-// whose status is "ACTIVE". Writing "STORED" therefore both tells the truth to
-// anyone reading the table and guarantees these rows cannot start firing by
-// accident if the scheduler is wired up before it is fixed.
+// It is what the API writes when no executor is attached to the handler, and it
+// is what every row created before scheduled delivery was implemented carries.
+// Scheduler.Start registers ACTIVE rows only, so a STORED row does not begin
+// firing when the server is upgraded — an operator who was told a schedule
+// would never run does not get a surprise email run. Recreating the schedule
+// through the API writes it ACTIVE.
 const ScheduleStatusStored = "STORED"
 
-// ScheduleStatusActive is the status a schedule would carry once a working
-// executor is attached to the handler (Handler.WithScheduleExecutor).
+// ScheduleStatusActive is the status a schedule carries when a working executor
+// is attached to the handler (Handler.WithScheduleExecutor), which is the state
+// cmd/server/main.go wires. Scheduler.Start registers exactly these rows.
 const ScheduleStatusActive = "ACTIVE"
 
 type ReportSchedule struct {
@@ -99,13 +100,14 @@ type ReportSchedule struct {
 	UpdatedAt      string   `json:"updated_at"`
 }
 
-// ScheduleExecution tells a client whether stored schedules actually run.
+// ScheduleExecution tells a client whether stored schedules actually run, and
+// what "run" means in this deployment.
 //
-// This exists because the honest answer today is "no", and an API that
-// accepted a schedule, returned 201 and said nothing would let an operator
-// believe a financial report is being emailed to their controller every
-// Monday when in fact nothing will ever fire. Every schedule response carries
-// this block.
+// It exists because an API that accepts a schedule, returns 201 and says
+// nothing would let an operator believe a financial report is being emailed to
+// their controller every Monday. Every schedule response carries this block,
+// and every field in it is derived at request time from what is really wired —
+// nothing here is a constant someone has to remember to update.
 type ScheduleExecution struct {
 	// Enabled reports whether an executor is attached to the handler.
 	Enabled bool `json:"enabled"`
@@ -115,6 +117,17 @@ type ScheduleExecution struct {
 	// Blockers lists what must be fixed before Enabled can be true. Empty when
 	// execution is enabled.
 	Blockers []string `json:"blockers,omitempty"`
+	// Delivery describes what actually happens to a generated report, in the
+	// executor's own words (reporting.DeliveryDescriber). Present only when
+	// Enabled.
+	//
+	// "The schedule runs" and "the report is delivered" are two different
+	// claims, and this deployment can honestly make only the first: the server's
+	// email service is log-only, so a run produces a real CSV and records the
+	// send rather than transmitting it. Collapsing that into Enabled=true would
+	// reintroduce, one step later, exactly the false confidence this block
+	// exists to prevent.
+	Delivery string `json:"delivery,omitempty"`
 	// CronDialect states the expression grammar POST accepts.
 	//
 	// It is advertised here because the grammar is surprising and the shared
@@ -131,26 +144,37 @@ type ScheduleExecution struct {
 // rejected.
 const cronDialectDescription = `Six fields, seconds first: "second minute hour day-of-month month day-of-week" (e.g. "0 0 9 * * *" for 09:00 daily). Five-field crontab expressions are rejected. Descriptors such as @daily and @every 1h are accepted.`
 
-// scheduleExecutionDisabled is the truthful state of scheduled reporting in
-// this repository. The three blockers are the full list from the Scheduler doc
-// comment in scheduler.go; all three must be closed before schedules run.
+// scheduleExecutionDisabled describes a deployment with no executor attached to
+// the handler.
+//
+// cmd/server/main.go does attach one, so this is not the state of the shipped
+// server. It remains reachable — and remains the honest answer — for any
+// composition that registers the schedule routes without a running scheduler,
+// which is precisely why Handler.execution derives the choice from the executor
+// rather than from a build-time constant.
 func scheduleExecutionDisabled() ScheduleExecution {
 	return ScheduleExecution{
 		Enabled: false,
-		Summary: "Schedules are saved but never run: scheduled report delivery is not enabled in this deployment.",
+		Summary: "Schedules are saved but never run: no scheduled-report executor is attached in this deployment.",
 		Blockers: []string{
-			"reporting.Scheduler is not wired into the server; nothing loads or fires schedules.",
-			"Scheduler.ExecuteAndSendReport never decodes the saved report's definition_json, so it would execute an empty report definition.",
-			"No EmailSender implementation exists, so a generated report has nowhere to be delivered.",
+			"No reporting.Scheduler is attached to the schedule handler, so nothing loads or fires stored schedules.",
 		},
 		CronDialect: cronDialectDescription,
 	}
 }
 
-func scheduleExecutionEnabled() ScheduleExecution {
+// scheduleExecutionEnabled describes a deployment with an executor attached.
+//
+// The summary claims only what the executor can actually do — run the schedule
+// and produce the report. What happens to the finished file is the executor's
+// own statement, carried separately in Delivery, because a log-only email
+// service and a real SMTP one are both "enabled" and an operator needs to know
+// which one they have.
+func scheduleExecutionEnabled(delivery string) ScheduleExecution {
 	return ScheduleExecution{
 		Enabled:     true,
-		Summary:     "Schedules run on the server's cron engine and are emailed to their recipients.",
+		Summary:     "Schedules run on the server's cron engine: each run executes the saved report and renders it to CSV.",
+		Delivery:    delivery,
 		CronDialect: cronDialectDescription,
 	}
 }

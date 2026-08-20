@@ -202,25 +202,27 @@ describe('gable-order-detail — a below-cost sale', () => {
     expect(marginCard(el)).toContain('(-21.4%)')
   })
 
-  it('currently renders the minus inside the currency symbol (characterization)', async () => {
-    const el = await orderPage(belowCost)
-    expect(footerCells(el)[3]).toBe('$-150.00')
-  })
-
-  // BUG: `formatCents()` (app/src/lib/utils.ts:17-20) string-concatenates a "$"
-  // in front of `Number#toLocaleString()`, so every negative amount renders
-  // "$-150.00" instead of the en-US convention "-$150.00". This page is the
-  // live path: a below-cost sale renders it three times — the line margin cell,
-  // the grand-total footer and the Margin & Commission card — on the screen a
-  // sales manager uses to decide whether to approve the order.
-  // Fix: switch formatCents() to
-  // `Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' })`,
-  // then delete the characterization test above and the `.fails` here.
+  // Regression: `formatCents()` used to string-concatenate a "$" in front of
+  // `Number#toLocaleString()`, so every negative amount rendered "$-150.00"
+  // instead of the en-US convention "-$150.00". This page is the live path: a
+  // below-cost sale renders it three times — the line margin cell, the
+  // grand-total footer and the Margin & Commission card — on the screen a sales
+  // manager uses to decide whether to approve the order.
   // (Pinned once at the helper in lib/utils.test.ts; pinned here too because
   // this is where it reaches a user.)
-  it.fails('should render a loss as -$150.00, not $-150.00', async () => {
+  it('renders a loss as -$150.00, not $-150.00', async () => {
     const el = await orderPage(belowCost)
     expect(footerCells(el)[3]).toBe('-$150.00')
+  })
+
+  it('renders the loss the same way on the line and in the margin card', async () => {
+    // All three renders of the same negative amount agree, so nothing on the
+    // approval screen still shows the sign inside the symbol.
+    const el = await orderPage(belowCost)
+    const marginCell = Array.from(el.querySelectorAll('tbody tr td')).at(-1)!
+    expect(text(marginCell)).toBe('-$150.00 (-21.4%)')
+    expect(marginCard(el)).toContain('-$150.00 (-21.4%)')
+    expect(text(el)).not.toContain('$-150.00')
   })
 })
 

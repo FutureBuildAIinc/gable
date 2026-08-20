@@ -374,14 +374,17 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 			return fmt.Errorf("failed to check existing invoice: %w", err)
 		}
 		if !alreadyInvoiced {
-			// TotalAmount and PriceEach are already in cents. CreateInvoice
-			// recomputes subtotal/tax and sets the tax-inclusive TotalAmount.
+			// PriceEach is already in cents. TotalAmount is deliberately NOT
+			// carried over: the order total is PRE-TAX, and supplying it here
+			// used to make CreateInvoice treat the invoice as already priced
+			// and skip the tax calculation entirely. The lines are the input;
+			// CreateInvoice recomputes subtotal/tax and sets the tax-inclusive
+			// TotalAmount, exactly as the delivery-completion path does.
 			inv := &invoice.Invoice{
-				OrderID:     o.ID,
-				CustomerID:  o.CustomerID,
-				BranchID:    o.BranchID, // so the invoice + its tax rate come from the order's branch
-				TotalAmount: o.TotalAmount,
-				Status:      invoice.InvoiceStatusUnpaid,
+				OrderID:    o.ID,
+				CustomerID: o.CustomerID,
+				BranchID:   o.BranchID, // so the invoice + its tax rate come from the order's branch
+				Status:     invoice.InvoiceStatusUnpaid,
 			}
 			for _, ol := range o.Lines {
 				inv.Lines = append(inv.Lines, invoice.InvoiceLine{

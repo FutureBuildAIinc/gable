@@ -317,26 +317,16 @@ func TestCreateLocation_BranchPathDefaultsToTheName(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. The comment above the line says "Default active=true unless
-// explicitly false", but the code is an unconditional `if !loc.Active {
-// loc.Active = true }`. Because Go's zero value for a bool is false, "absent"
-// and "explicitly false" are indistinguishable after JSON decoding, so the
-// branch always fires: it is impossible to create an inactive location through
-// this service. An importer bringing in a decommissioned yard silently
-// reactivates it.
+// CORRECTNESS: the service must persist the Active flag it is handed. Forcing
+// it true — which is what `if !loc.Active { loc.Active = true }` does, because
+// Go's zero value for a bool is indistinguishable from an explicit false —
+// makes an inactive location impossible to create, so an importer bringing in
+// a decommissioned yard silently reactivates it.
 //
-// backend/internal/location/service.go:46-49 —
-//
-//	// Default active=true unless explicitly false.
-//	if !loc.Active {
-//	    loc.Active = true
-//	}
-//
-// The field needs to be a *bool on the request (or a separate create DTO) for
-// the documented behaviour to be expressible.
+// The "default to active unless explicitly false" rule lives at the HTTP
+// boundary instead, where the request DTO carries a *bool; see
+// TestCreateLocation_DefaultsToActive below.
 func TestCreateLocation_MustAllowCreatingAnInactiveLocation(t *testing.T) {
-	t.Skip("KNOWN BUG: location/service.go:47 forces Active=true on every create, so an explicitly inactive location cannot be created (the comment above it claims otherwise)")
-
 	repo := newFakeRepo()
 	loc := Location{Type: LocTypeBranch, Code: "OLD", Name: "Decommissioned Yard", Active: false}
 	if err := NewService(repo).CreateLocation(context.Background(), &loc); err != nil {
@@ -345,22 +335,74 @@ func TestCreateLocation_MustAllowCreatingAnInactiveLocation(t *testing.T) {
 	if loc.Active {
 		t.Error("Active = true; an explicitly inactive location was reactivated")
 	}
+	if repo.created[0].Active {
+		t.Error("the persisted row was reactivated")
+	}
 }
 
-// CHARACTERIZATION of the same line from the other direction: a location
-// created with no explicit active flag comes out active, which is the
-// behaviour every caller relies on today.
+// CORRECTNESS: a create request that does not mention "active" defaults to an
+// active location — the behaviour every caller relies on — while an explicit
+// `"active": false` is honoured. Both halves are asserted through the HTTP
+// layer because that is the only place the two cases are distinguishable: the
+// request DTO carries a *bool, the model a plain bool.
 func TestCreateLocation_DefaultsToActive(t *testing.T) {
 	repo := newFakeRepo()
-	loc := Location{Type: LocTypeBranch, Code: "VAN", Name: "Vancouver"}
-	if err := NewService(repo).CreateLocation(context.Background(), &loc); err != nil {
-		t.Fatalf("CreateLocation: %v", err)
+	mux := newTestMux(repo, nil)
+
+	rec := do(t, mux, http.MethodPost, "/api/v1/locations",
+		`{"type":"BRANCH","code":"VAN","name":"Vancouver"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
 	}
-	if !loc.Active {
-		t.Error("a new location must default to active")
+	if len(repo.created) != 1 {
+		t.Fatalf("persisted %d locations, want 1", len(repo.created))
 	}
 	if !repo.created[0].Active {
-		t.Error("the persisted row was not active")
+		t.Error("a location created with no explicit active flag was not active")
+	}
+	var echoed Location
+	if err := json.Unmarshal(rec.Body.Bytes(), &echoed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !echoed.Active {
+		t.Error("the response did not report the location as active")
+	}
+
+	rec = do(t, mux, http.MethodPost, "/api/v1/locations",
+		`{"type":"BRANCH","code":"OLD","name":"Decommissioned Yard","active":false}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
+	}
+	if len(repo.created) != 2 {
+		t.Fatalf("persisted %d locations, want 2", len(repo.created))
+	}
+	if repo.created[1].Active {
+		t.Error(`"active": false was overridden; an inactive location cannot be created`)
+	}
+}
+
+// CORRECTNESS: the same omitted-vs-explicit-false rule applies to the branch
+// endpoint, which is the route the admin UI actually posts to.
+func TestCreateBranch_ActiveDefaultAndExplicitFalse(t *testing.T) {
+	repo := newFakeRepo()
+	mux := newTestMux(repo, nil)
+
+	if rec := do(t, mux, http.MethodPost, "/api/v1/branches",
+		`{"code":"VAN","name":"Vancouver"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, mux, http.MethodPost, "/api/v1/branches",
+		`{"code":"OLD","name":"Closed Yard","active":false}`); rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
+	}
+	if len(repo.created) != 2 {
+		t.Fatalf("persisted %d branches, want 2", len(repo.created))
+	}
+	if !repo.created[0].Active {
+		t.Error("the branch created without an active flag was not active")
+	}
+	if repo.created[1].Active {
+		t.Error(`"active": false was overridden on the branch endpoint`)
 	}
 }
 

@@ -40,6 +40,9 @@ func (h *Handler) HandleList(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to list vendors", http.StatusInternalServerError, err)
 		return
 	}
+	if vendors == nil {
+		vendors = []Vendor{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(vendors)
 }

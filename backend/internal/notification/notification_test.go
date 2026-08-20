@@ -118,8 +118,13 @@ type recordingEmail struct {
 		to, invoiceID string
 		size          int
 	}
-	deliveries []struct{ to, subject, body string }
-	err        error
+	deliveries  []struct{ to, subject, body string }
+	attachments []struct {
+		to                []string
+		subject, filename string
+		size              int
+	}
+	err error
 }
 
 func (r *recordingEmail) SendInvoice(_ context.Context, to, invoiceID string, pdf []byte) error {
@@ -138,6 +143,18 @@ func (r *recordingEmail) SendDeliveryNotification(_ context.Context, to, subject
 		return r.err
 	}
 	r.deliveries = append(r.deliveries, struct{ to, subject, body string }{to, subject, body})
+	return nil
+}
+
+func (r *recordingEmail) SendEmailWithAttachment(_ context.Context, to []string, subject, _, filename string, content []byte) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.attachments = append(r.attachments, struct {
+		to                []string
+		subject, filename string
+		size              int
+	}{to, subject, filename, len(content)})
 	return nil
 }
 
@@ -344,10 +361,39 @@ func TestLogServices_NeverFail(t *testing.T) {
 	if err := email.SendDeliveryNotification(context.Background(), "a@b.c", "Subject", "Body"); err != nil {
 		t.Errorf("LogEmailService.SendDeliveryNotification: %v", err)
 	}
+	// The scheduled-report path: several recipients and a generated file.
+	if err := email.SendEmailWithAttachment(context.Background(),
+		[]string{"controller@example.com", "gm@example.com"},
+		"Scheduled Report: AR aging", "Attached.", "ar_aging_2026-08-20.csv",
+		[]byte("Customer,Total\nKelbrook Homes,1200\n")); err != nil {
+		t.Errorf("LogEmailService.SendEmailWithAttachment: %v", err)
+	}
+	// Zero recipients and an empty attachment are the caller's mistake to
+	// catch, not a reason for the log-only fallback to start returning errors.
+	if err := email.SendEmailWithAttachment(context.Background(), nil, "", "", "", nil); err != nil {
+		t.Errorf("LogEmailService.SendEmailWithAttachment with empty arguments: %v", err)
+	}
 
 	// They satisfy the interfaces the rest of the ERP wires them into.
 	var _ SMSService = sms
 	var _ EmailService = email
+}
+
+// CORRECTNESS: the report scheduler advertises to its API clients how a
+// generated report actually reaches its recipients, and derives that sentence
+// from the email service that is really wired. If LogEmailService stopped
+// describing itself honestly — or stopped describing itself at all — the
+// reporting API would go back to claiming reports "are emailed" when they are
+// only logged.
+func TestLogEmailService_DescribesItselfAsLogOnly(t *testing.T) {
+	desc := NewLogEmailService(testLogger()).DeliveryDescription()
+
+	if !strings.Contains(desc, "log-only") {
+		t.Errorf("DeliveryDescription() = %q, want it to say delivery is log-only", desc)
+	}
+	if !strings.Contains(desc, "main.go") {
+		t.Errorf("DeliveryDescription() = %q, want it to name where a real sender is swapped in", desc)
+	}
 }
 
 // --- delivery notifications ---------------------------------------------

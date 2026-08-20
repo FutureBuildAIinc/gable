@@ -17,19 +17,24 @@ import (
 	"github.com/google/uuid"
 )
 
-// ScheduleExecutor is the seam a working scheduled-report runner plugs into.
-// *Scheduler satisfies it, but nothing in this repository attaches one — see
-// Handler.WithScheduleExecutor and the Scheduler doc comment in scheduler.go.
+// ScheduleExecutor is the seam a scheduled-report runner plugs into.
+// *Scheduler is the production implementation, attached in cmd/server/main.go.
+//
+// RemoveSchedule is part of the seam because a registered cron entry outlives
+// the row it came from: deleting a schedule that is still registered would go
+// on emailing the report until the next restart.
 type ScheduleExecutor interface {
 	AddSchedule(ctx context.Context, schedule ReportSchedule) error
+	RemoveSchedule(id string)
 }
 
 type Handler struct {
 	service *Service
 
-	// scheduleExecutor is nil in every current deployment. Its nil-ness is the
-	// single source of truth for whether the schedule endpoints may claim that
-	// stored schedules actually run; see Handler.execution.
+	// scheduleExecutor is the single source of truth for whether the schedule
+	// endpoints may claim that stored schedules actually run; see
+	// Handler.execution. cmd/server/main.go attaches one; a composition that
+	// does not gets the honest "saved but never run" disclosure instead.
 	scheduleExecutor ScheduleExecutor
 }
 
@@ -40,22 +45,33 @@ func NewHandler(service *Service) *Handler {
 // WithScheduleExecutor attaches a runner for stored schedules.
 //
 // This is the ONLY switch that makes the schedule endpoints report
-// execution.enabled = true and create schedules with status ACTIVE. Do not
-// call it with a Scheduler until the two bugs in scheduler.go are fixed
-// (ExecuteAndSendReport drops the saved report definition, and no EmailSender
-// implementation exists) — attaching a broken executor would restore exactly
-// the silent failure this plumbing exists to prevent.
+// execution.enabled = true and create schedules with status ACTIVE. Nothing
+// else may set either: the API's claim about itself and the runtime reality are
+// the same fact read twice, so they cannot drift.
 func (h *Handler) WithScheduleExecutor(e ScheduleExecutor) *Handler {
 	h.scheduleExecutor = e
 	return h
 }
 
-// execution reports, truthfully, whether stored schedules run in this process.
+// ScheduleExecutionEnabled reports whether stored schedules run in this
+// process. It is exported so the wiring layer can assert what it wired rather
+// than restate it in a comment.
+func (h *Handler) ScheduleExecutionEnabled() bool {
+	return h.scheduleExecutor != nil
+}
+
+// execution reports, truthfully, whether stored schedules run in this process,
+// and — from the executor's own account of itself — what becomes of a report
+// once it has been generated.
 func (h *Handler) execution() ScheduleExecution {
 	if h.scheduleExecutor == nil {
 		return scheduleExecutionDisabled()
 	}
-	return scheduleExecutionEnabled()
+	delivery := ""
+	if d, ok := h.scheduleExecutor.(DeliveryDescriber); ok {
+		delivery = d.DeliveryDescription()
+	}
+	return scheduleExecutionEnabled(delivery)
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -223,11 +239,20 @@ func (h *Handler) HandleSaveReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract authenticated user identity from JWT claims
+	// Extract authenticated user identity from JWT claims.
+	//
+	// saved_reports.created_by is a nullable UUID column, so a non-UUID subject
+	// cannot be stored there. This used to write the literal "system" when
+	// there were no claims, which Postgres rejected with `invalid input syntax
+	// for type uuid: "system"` — every save through this endpoint failed with a
+	// 500 in any deployment that did not present a UUID-subject JWT, including
+	// AUTH_MODE=dev. An unknown author is now recorded as unknown (NULL) rather
+	// than as a fabricated one.
+	report.CreatedBy = ""
 	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
-		report.CreatedBy = claims.Subject
-	} else {
-		report.CreatedBy = "system"
+		if _, err := uuid.Parse(claims.Subject); err == nil {
+			report.CreatedBy = claims.Subject
+		}
 	}
 
 	if err := h.service.CreateSavedReport(r.Context(), &report); err != nil {
@@ -289,11 +314,11 @@ func (h *Handler) HandleDeleteSavedReport(w http.ResponseWriter, r *http.Request
 // HandleRunSavedReport handles POST /reporting/saved/{id}/run — executes a
 // saved report right now and returns its rows.
 //
-// Note what this does that the scheduler does not: it decodes the saved
-// report's definition_json into a ReportDefinition before executing it. That
-// decode is the exact step Scheduler.ExecuteAndSendReport omits, which is why
-// every scheduled run produces "no columns selected" while this endpoint
-// works. If the scheduler is ever fixed, this is the code it should share.
+// It decodes the saved report's definition_json into a ReportDefinition via
+// definitionFromSaved before executing it. Scheduler.ExecuteAndSendReport calls
+// the same helper, deliberately: an on-demand run and a scheduled run of the
+// same saved report must produce the same rows, and sharing the decode is what
+// makes that structural rather than a coincidence.
 func (h *Handler) HandleRunSavedReport(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -349,11 +374,13 @@ func definitionFromSaved(report *SavedReport) (*ReportDefinition, error) {
 // HandleCreateReportSchedule handles POST /reporting/schedules.
 //
 // The schedule is persisted, and the response says plainly whether anything
-// will ever run it. With no executor attached — the state of every deployment
-// today — the row is written with status STORED and the response carries
-// execution.enabled = false plus the list of blockers. Returning a bare 201
-// here would let an operator believe their controller is getting a report
-// every Monday morning when nothing will ever fire.
+// will ever run it. With an executor attached — what cmd/server/main.go wires —
+// the row is written ACTIVE, registered with the cron engine immediately (no
+// restart needed) and the response carries execution.enabled = true along with
+// the executor's description of how the finished report is delivered. With no
+// executor the row is written STORED and the response carries the blockers.
+// Returning a bare 201 either way would let an operator believe their
+// controller is getting a report every Monday morning when nothing will fire.
 func (h *Handler) HandleCreateReportSchedule(w http.ResponseWriter, r *http.Request) {
 	var schedule ReportSchedule
 	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
@@ -429,6 +456,11 @@ func (h *Handler) HandleListReportSchedules(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleDeleteReportSchedule handles DELETE /reporting/schedules/{id}.
+//
+// The row is deleted first, then the cron entry is unregistered. Doing it in
+// that order means a failure between the two leaves a job whose next run finds
+// no row — harmless — rather than a deleted schedule that keeps emailing until
+// the next restart.
 func (h *Handler) HandleDeleteReportSchedule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -441,13 +473,19 @@ func (h *Handler) HandleDeleteReportSchedule(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if h.scheduleExecutor != nil {
+		h.scheduleExecutor.RemoveSchedule(id)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// scheduleFormats are the output formats a schedule may request. Only CSV has
-// an implemented rendering path in the (unwired) scheduler; XLSX and PDF are
-// accepted because the export endpoints support them and a schedule is only a
-// stored preference today.
+// scheduleFormats are the output formats a schedule may request.
+//
+// Only CSV has a rendering path in Scheduler.ExecuteAndSendReport, which
+// renders CSV regardless of what is stored here. XLSX and PDF remain accepted
+// because the on-demand export endpoints support XLSX and the stored preference
+// is what a future ExecuteAndSendReport will honour; see that function.
 var scheduleFormats = map[string]string{"CSV": "CSV", "XLSX": "XLSX", "PDF": "PDF"}
 
 func normalizeScheduleFormat(raw string) (string, error) {

@@ -68,9 +68,10 @@ func TestScanBlueprint_Length(t *testing.T) {
 		lengthAbsent  bool
 		studLenAbsent bool
 	}{
-		// The tick-mark form populates stud_length (via studRegex) but NOT
-		// length — see TestScanBlueprint_TickMarkLengthIsMissed below.
-		{name: "tick mark", text: "10' studs", lengthAbsent: true, wantStudLen: "10'"},
+		// The tick-mark form populates both length (via lengthRegex) and
+		// stud_length (via studRegex, which needs the "stud" keyword).
+		{name: "tick mark", text: "10' studs", wantLength: "10'", wantStudLen: "10'"},
+		{name: "tick mark without the stud keyword", text: "12' joists", wantLength: "12'", studLenAbsent: true},
 		{name: "the word foot", text: "8 foot walls", wantLength: "8'", studLenAbsent: true},
 		{name: "the word feet", text: "12 feet of blocking", wantLength: "12'", studLenAbsent: true},
 		{name: "ft abbreviation", text: "16ft beams", wantLength: "16'", studLenAbsent: true},
@@ -103,26 +104,15 @@ func TestScanBlueprint_Length(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. lengthRegex ends its alternation with \b:
+// CORRECTNESS: the tick-mark form must populate "length". A word boundary only
+// exists between a word character and a non-word one, so an alternation ending
+// in `'` cannot be followed by \b:
 //
 //	(\d+)\s*(?:'|foot|feet|ft)\b
 //
-// A word boundary only exists between a word character and a non-word one. The
-// apostrophe is a non-word character and so is the space that follows it in
-// "10' studs", so \b never matches and the tick-mark notation — the way feet
-// are written on essentially every construction drawing — is not extracted
-// into "length" at all. The `foot`/`feet`/`ft` spellings work because they end
-// in word characters.
-//
-// backend/internal/vision/service.go:15 —
-//
-//	lengthRegex  = regexp.MustCompile(`(\d+)\s*(?:'|foot|feet|ft)\b`)
-//
-// The \b needs to apply only to the alphabetic alternatives, e.g.
-// `(\d+)\s*(?:'|(?:foot|feet|ft)\b)`.
+// never matches "10' studs" — the way feet are written on essentially every
+// construction drawing. The \b must apply only to the alphabetic alternatives.
 func TestScanBlueprint_TickMarkLengthIsMissed(t *testing.T) {
-	t.Skip("KNOWN BUG: vision/service.go:15 puts \\b after an alternation ending in an apostrophe, so \"10' studs\" never populates the length dimension")
-
 	for _, text := range []string{"10' studs", "12' joists", "16' beams"} {
 		resp := NewService().ScanBlueprint(BlueprintScanRequest{BlueprintText: text})
 		if _, ok := resp.ExtractedDimensions["length"]; !ok {
@@ -131,21 +121,56 @@ func TestScanBlueprint_TickMarkLengthIsMissed(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. The same trailing-\b problem in the treatment abbreviation check:
+// CORRECTNESS: every feet notation a drawing uses must reach "length", and
+// nothing else may. This is the exhaustive form of the alternation above.
+func TestScanBlueprint_LengthNotations(t *testing.T) {
+	tests := []struct {
+		text string
+		want string // "" means no length may be extracted
+	}{
+		{"10' studs", "10'"},
+		{"10 ft beams", "10'"},
+		{"10ft beams", "10'"},
+		{"10 feet of blocking", "10'"},
+		{"10 foot walls", "10'"},
+		{"10'", "10'"},
+		{"joists are 10 FT", "10'"},
+		{"2x4 spf", ""},
+		{"quantity 24 pieces", ""},
+		{`16" oc`, ""},
+		{"10 fter", ""},     // \b still guards the alphabetic spellings
+		{"10 footings", ""}, // ditto
+		{"16 feetings", ""}, // ditto
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.text, func(t *testing.T) {
+			resp := NewService().ScanBlueprint(BlueprintScanRequest{BlueprintText: tc.text})
+			got, ok := resp.ExtractedDimensions["length"]
+			if tc.want == "" {
+				if ok {
+					t.Errorf("extracted length %q from %q, want none", got, tc.text)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Errorf("length = %q (present=%v), want %q", got, ok, tc.want)
+			}
+		})
+	}
+}
+
+// CORRECTNESS: the same trailing-\b problem in the treatment abbreviation
+// check:
 //
 //	\bpt\b|\bp\.t\.\b
 //
-// "p.t." ends in a period, so the trailing \b cannot match when the next
-// character is a space. The abbreviation the pattern was written for is never
-// detected, so a drawing marked "2x6 p.t. decking" produces no treatment
-// finding and no mismatch warning against an untreated configurator selection.
-//
-// backend/internal/vision/service.go:89 —
-//
-//	ptRegex := regexp.MustCompile(`\bpt\b|\bp\.t\.\b`)
+// "p.t." ends in a period, so the trailing \b can never match. The abbreviation
+// the pattern was written for is then never detected, and a drawing marked
+// "2x6 p.t. decking" produces no treatment finding and no mismatch warning
+// against an untreated configurator selection.
 func TestScanBlueprint_DottedPTAbbreviationIsMissed(t *testing.T) {
-	t.Skip("KNOWN BUG: vision/service.go:89 ends the p.t. alternative with \\b after a period, so the dotted abbreviation is never matched")
-
 	for _, text := range []string{"2x6 p.t. decking", "use p.t. for sill plates"} {
 		resp := NewService().ScanBlueprint(BlueprintScanRequest{BlueprintText: text})
 		if _, ok := resp.ExtractedDimensions["treatment"]; !ok {
@@ -154,21 +179,13 @@ func TestScanBlueprint_DottedPTAbbreviationIsMissed(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. detectMismatches compares the configurator's length against
-// "stud_length" only, and studRegex requires the literal word "stud"
-// immediately after the measurement. The general "length" dimension — which
-// the scanner does extract, from "8 foot" / "12ft" / "16 feet" — is never
-// compared to anything. A drawing reading "2x6 joists, 8 feet" against a
-// configurator selection of 2x6-10 produces no length warning.
-//
-// backend/internal/vision/service.go:154 —
-//
-//	if bpLength, ok := resp.ExtractedDimensions["stud_length"]; ok {
-//
-// should fall back to resp.ExtractedDimensions["length"].
+// CORRECTNESS: detectMismatches must fall back to the general "length"
+// dimension. "stud_length" requires the literal word "stud" immediately after
+// the measurement, so comparing it alone leaves the length the scanner does
+// extract from "8 foot" / "12ft" / "16 feet" compared against nothing: a
+// drawing reading "2x6 joists, 8 feet" against a configurator selection of
+// 2x6-10 produces no length warning.
 func TestDetectMismatches_ExtractedLengthIsNeverCompared(t *testing.T) {
-	t.Skip("KNOWN BUG: vision/service.go:154 compares only stud_length, so the general 'length' dimension is extracted and then never used")
-
 	resp := NewService().ScanBlueprint(BlueprintScanRequest{
 		BlueprintText:    "2x6 joists, 8 feet long",
 		ConfigSelections: map[string]string{"Dimensions": "2x6-10"},
@@ -291,9 +308,10 @@ func TestScanBlueprint_Treatment(t *testing.T) {
 		{"pressure treat", "pressure treat the sill plate", true},
 		{"standalone pt", "2x6 pt decking", true},
 		{"pt at the start", "pt lumber", true},
-		// The dotted "p.t." form is NOT detected — see
+		// The dotted "p.t." form — see
 		// TestScanBlueprint_DottedPTAbbreviationIsMissed.
-		{"dotted p.t. is missed", "2x6 p.t. decking", false},
+		{"dotted p.t.", "2x6 p.t. decking", true},
+		{"dotted p.t. at the end of the text", "sill plates: p.t.", true},
 		{"apartment must not match", "apartment building framing", false},
 		{"receipt must not match", "see receipt for details", false},
 		{"optional must not match", "optional upgrade", false},

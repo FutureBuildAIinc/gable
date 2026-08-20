@@ -564,18 +564,15 @@ func TestFindBestMatch_DateWindow(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. A withdrawal and a deposit of equal magnitude are opposite
-// directions of money, but findBestMatch compares absolute values only, so a
-// -$500 cheque clears against a +$500 receipt entry. That silently reconciles
-// a $1,000 real discrepancy to zero.
+// REGRESSION (this was a documented, pinned defect). A withdrawal and a deposit of equal magnitude
+// are opposite directions of money, but findBestMatch used to compare absolute
+// values only, so a -$500 cheque cleared against a +$500 receipt entry. That
+// silently reconciled a $1,000 real discrepancy to zero.
 //
-// backend/internal/bankrecon/service.go:192-220 — findBestMatch takes
-// abs(txn.Amount) and abs(entry.TotalDebit) and never compares direction. The
-// journal entry's own direction is available (TotalDebit vs TotalCredit on the
-// cash account) but is not consulted.
+// findBestMatch now compares signed amounts: the entry's debit total is cash
+// in, so it can only clear a deposit of the same size. A withdrawal is left
+// UNMATCHED for manual review — see TestFindBestMatch_WithdrawalsAreNotAutoCleared.
 func TestFindBestMatch_MustNotMatchOppositeDirections(t *testing.T) {
-	t.Skip("KNOWN BUG: bankrecon/service.go:192 findBestMatch compares absolute amounts, so a withdrawal clears against a same-size deposit entry")
-
 	svc := newSvc(newFakeRepo(), nil)
 	deposit := postedEntry(day("2026-03-04"), 50000) // money in, per the GL
 
@@ -589,17 +586,33 @@ func TestFindBestMatch_MustNotMatchOppositeDirections(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. autoMatch re-scans the full journal-entry list for every bank
-// line and never removes an entry once it has been consumed, so N identical
-// bank lines all clear against the SAME journal entry. The reconciliation then
-// reports N cleared items backed by one real posting.
+// LIMITATION, documented deliberately: a withdrawal never auto-clears.
 //
-// backend/internal/bankrecon/service.go:160-183 — autoMatch loops over txns
-// calling findBestMatch(txns[i], entries) with the same unfiltered `entries`
-// slice each time, and findBestMatch returns the first amount+date hit.
-func TestAutoMatch_MustNotReuseOneEntryForManyBankLines(t *testing.T) {
-	t.Skip("KNOWN BUG: bankrecon/service.go:178 autoMatch never consumes a matched journal entry, so duplicate bank lines all clear against one posting")
+// gl.ListJournalEntries returns entry headers only, and a balanced entry has
+// TotalDebit == TotalCredit, so the header cannot say which side of the entry
+// the CASH account was on. With no way to prove direction, auto-matching a
+// withdrawal would be a guess, and a wrong guess hides a discrepancy of twice
+// the amount. Withdrawals are therefore left for ManualMatch.
+//
+// Lifting this needs a wider GL read — journal lines joined to the bank
+// account's gl_account_id, so the cash-side debit/credit is known — which is a
+// repository change beyond the scope of the direction fix.
+func TestFindBestMatch_WithdrawalsAreNotAutoCleared(t *testing.T) {
+	svc := newSvc(newFakeRepo(), nil)
+	entry := postedEntry(day("2026-03-04"), 50000)
+	withdrawal := BankTransaction{TransactionDate: day("2026-03-04"), Amount: -50000}
 
+	if got := svc.findBestMatch(withdrawal, []gl.JournalEntry{entry}); got != nil {
+		t.Fatalf("withdrawal auto-cleared against entry %s; direction cannot be proved from an entry header", got.ID)
+	}
+}
+
+// REGRESSION (this was a documented, pinned defect). autoMatch re-scanned the full journal-entry
+// list for every bank line and never removed an entry once it had been
+// consumed, so N identical bank lines all cleared against the SAME journal
+// entry. The reconciliation then reported N cleared items backed by one real
+// posting. A matched entry is now removed from the candidate set.
+func TestAutoMatch_MustNotReuseOneEntryForManyBankLines(t *testing.T) {
 	repo := newFakeRepo()
 	acctID := uuid.New()
 	// Two genuinely separate $250.00 deposits on the same day.
@@ -773,20 +786,14 @@ func TestCreateSession_StatementBalanceConversion(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. An overdrawn account has a negative statement balance, and the
-// dollars->cents conversion adds +0.5 before a truncating int64 conversion.
-// Truncation goes toward zero, so for negatives the +0.5 rounds the WRONG way
-// and the session opens one cent light. ImportCSV gets this right (it
-// subtracts 0.5 when the amount is negative); CreateSession does not.
+// REGRESSION (this was a documented, pinned defect). An overdrawn account has a negative statement
+// balance, and the dollars->cents conversion used to add +0.5 before a
+// truncating int64 conversion. Truncation goes toward zero, so for negatives
+// the +0.5 rounded the WRONG way and the session opened one cent light.
 //
-// backend/internal/bankrecon/service.go:280 —
-//
-//	stmtBalanceCents := int64(req.StatementBalance*100.0 + 0.5)
-//
-// vs the correct form already present at service.go:108-110.
+// Both this conversion and ImportCSV's now go through money.DollarsToCents,
+// which rounds half away from zero in both directions.
 func TestCreateSession_NegativeStatementBalanceLosesACent(t *testing.T) {
-	t.Skip("KNOWN BUG: bankrecon/service.go:280 rounds negative statement balances toward zero, opening an overdrawn session one cent light")
-
 	tests := []struct {
 		dollars float64
 		want    int64

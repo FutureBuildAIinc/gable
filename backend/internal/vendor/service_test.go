@@ -150,22 +150,12 @@ func TestCreateVendor_ExplicitPaymentTerms(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. The default is applied only when payment_terms is absent from the
-// JSON. A request that sends `"payment_terms": ""` — which is what an HTML form
-// with an untouched text input produces — decodes to a non-nil pointer to the
-// empty string, so the default is skipped and the vendor is created with no
-// terms at all. AP then has nothing to compute a due date from.
-//
-// backend/internal/vendor/service.go:36-38 —
-//
-//	if req.PaymentTerms != nil {
-//	    v.PaymentTerms = *req.PaymentTerms
-//	}
-//
-// The guard needs to be `!= nil && *req.PaymentTerms != ""`.
+// CORRECTNESS: the default must survive an explicit but empty payment_terms.
+// A request that sends `"payment_terms": ""` — which is what an HTML form with
+// an untouched text input produces — decodes to a non-nil pointer to the empty
+// string. Treating that as an override creates a vendor with no terms at all,
+// and AP then has nothing to compute a due date from.
 func TestCreateVendor_EmptyPaymentTermsMustFallBackToTheDefault(t *testing.T) {
-	t.Skip("KNOWN BUG: vendor/service.go:36 lets an explicit empty payment_terms overwrite the Net 30 default, creating a vendor with no terms")
-
 	repo := newFakeRepo()
 	v, err := NewService(repo).CreateVendor(context.Background(), CreateVendorRequest{
 		Name:         "Empty Terms Co",
@@ -456,14 +446,10 @@ func TestHandleCreate_MalformedBodyIs400(t *testing.T) {
 	}
 }
 
-// CORRECTNESS: an empty vendor list must serialise as [] rather than null.
-// This one currently fails that expectation, so it is recorded as a bug.
-//
-// backend/internal/vendor/handler.go:37-45 — HandleList encodes the repository
-// slice directly; a nil slice becomes JSON null.
+// CORRECTNESS: an empty vendor list must serialise as [] rather than null,
+// matching every other list endpoint in the codebase. HandleList must not
+// encode a nil repository slice straight through.
 func TestHandleList_EmptyIsArrayNotNull(t *testing.T) {
-	t.Skip("KNOWN BUG: vendor/handler.go:44 encodes a nil vendor slice as JSON null instead of [], unlike every other list endpoint in the codebase")
-
 	rec := do(t, newTestMux(newFakeRepo()), http.MethodGet, "/api/v1/vendors", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

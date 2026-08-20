@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -20,17 +21,34 @@ import (
 // (not a human) approves a vendor invoice via automatic 3-way matching.
 var SystemApproverID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
+// POSource is the slice of the purchase-order service the matcher needs. It is
+// declared here, by the consumer, so RunMatch can be exercised against a fake
+// PO instead of requiring a live *purchase_order.Service (whose repository is a
+// concrete struct holding a *database.DB, i.e. Postgres). *purchase_order.Service
+// satisfies it as-is.
+type POSource interface {
+	GetPO(ctx context.Context, id uuid.UUID) (*purchase_order.PurchaseOrder, error)
+}
+
+// APSource is the slice of the accounts-payable service the matcher needs,
+// declared by the consumer for the same reason. *ap.Service satisfies it as-is.
+type APSource interface {
+	ListVendorInvoices(ctx context.Context, vendorID *uuid.UUID, status string) ([]ap.VendorInvoice, error)
+	GetVendorInvoice(ctx context.Context, id uuid.UUID) (*ap.VendorInvoice, error)
+	ApproveInvoice(ctx context.Context, invoiceID uuid.UUID, approverID uuid.UUID) (*ap.VendorInvoice, error)
+}
+
 // Service handles 3-way PO matching business logic.
 type Service struct {
 	db     *database.DB
 	repo   Repository
-	poSvc  *purchase_order.Service
-	apSvc  *ap.Service
+	poSvc  POSource
+	apSvc  APSource
 	logger *slog.Logger
 }
 
 // NewService creates a new matching service.
-func NewService(db *database.DB, repo Repository, poSvc *purchase_order.Service, apSvc *ap.Service, logger *slog.Logger) *Service {
+func NewService(db *database.DB, repo Repository, poSvc POSource, apSvc APSource, logger *slog.Logger) *Service {
 	return &Service{
 		db:     db,
 		repo:   repo,
@@ -123,7 +141,10 @@ func (s *Service) RunMatch(ctx context.Context, poID uuid.UUID) (*MatchResult, e
 			Description:   poLine.Description,
 			POQty:         poLine.Quantity,
 			ReceivedQty:   poLine.QtyReceived,
-			POUnitCost:    int64(poLine.Cost * 100.0),
+			// Round, never truncate: $10.99 is 1098.9999999999998 in float64
+			// and a bare cast made every downstream price comparison start a
+			// cent wrong.
+			POUnitCost: money.DollarsToCents(poLine.Cost),
 		}
 
 		// Get corresponding invoice line (matched by position)
@@ -132,30 +153,14 @@ func (s *Service) RunMatch(ctx context.Context, poID uuid.UUID) (*MatchResult, e
 			detail.InvoiceUnitPrice = invLine.UnitPrice
 		}
 
-		// Calculate variances
-		detail.QtyVariancePct = calcVariancePct(detail.POQty, detail.ReceivedQty)
-		if detail.POUnitCost > 0 {
-			detail.PriceVariancePct = calcVariancePctInt(detail.POUnitCost, detail.InvoiceUnitPrice)
-		}
-
-		// Determine line status
-		qtyOK := math.Abs(detail.QtyVariancePct) <= cfg.QtyTolerancePct
-		priceOK := math.Abs(detail.PriceVariancePct) <= cfg.PriceTolerancePct
-
-		// Also check dollar tolerance for price
-		priceDiffCents := abs64(detail.POUnitCost - detail.InvoiceUnitPrice)
-		if priceDiffCents <= cfg.DollarTolerance {
-			priceOK = true
-		}
-
-		// If no invoice line exists, it is an exception (unless qty received matches PO)
+		// If no invoice line exists, it is an exception: there is nothing to
+		// match the receipt against.
 		hasInvoice := vendorInvoice != nil && i < len(vendorInvoice.Lines)
 
-		if qtyOK && priceOK && hasInvoice {
-			detail.LineStatus = MatchStatusMatched
+		detail.LineStatus = evaluateLine(&detail, cfg, hasInvoice)
+		if detail.LineStatus == MatchStatusMatched {
 			matchedCount++
 		} else {
-			detail.LineStatus = MatchStatusException
 			exceptionCount++
 		}
 
@@ -251,7 +256,7 @@ func (s *Service) UpdateConfig(ctx context.Context, req UpdateMatchConfigRequest
 		cfg.PriceTolerancePct = *req.PriceTolerancePct
 	}
 	if req.DollarTolerance != nil {
-		cfg.DollarTolerance = int64(*req.DollarTolerance*100.0 + 0.5)
+		cfg.DollarTolerance = money.DollarsToCents(*req.DollarTolerance)
 	}
 	if req.AutoApproveOnMatch != nil {
 		cfg.AutoApproveOnMatch = *req.AutoApproveOnMatch
@@ -264,6 +269,71 @@ func (s *Service) UpdateConfig(ctx context.Context, req UpdateMatchConfigRequest
 }
 
 // --- Helpers ---
+
+// evaluateLine fills in the variance fields of a match line and returns its
+// status. It is the whole tolerance decision for one line, kept separate from
+// RunMatch's I/O so it can be exercised directly.
+//
+// A three-way match compares ORDERED -> RECEIVED -> INVOICED. Every hop has to
+// hold:
+//
+//   - ordered vs received catches short and over shipments;
+//   - received vs invoiced catches being billed for goods that never arrived.
+//     This hop used to be missing entirely — InvoicedQty was stored and read by
+//     nothing — so a vendor who shipped 10 units and invoiced 1,000 passed the
+//     quantity check, which is precisely the fraud a three-way match exists to
+//     stop.
+//
+// QtyVariancePct reports whichever of the two hops is worse, so the persisted
+// detail explains the exception; POQty, ReceivedQty and InvoicedQty are all
+// stored alongside it, so the individual hops stay recoverable.
+func evaluateLine(detail *MatchLineDetail, cfg *MatchConfig, hasInvoice bool) MatchStatus {
+	receiptVariancePct := calcVariancePct(detail.POQty, detail.ReceivedQty)
+	detail.QtyVariancePct = receiptVariancePct
+	qtyOK := math.Abs(receiptVariancePct) <= cfg.QtyTolerancePct
+
+	if hasInvoice {
+		invoicedVariancePct := calcVariancePct(detail.ReceivedQty, detail.InvoicedQty)
+		if math.Abs(invoicedVariancePct) > math.Abs(receiptVariancePct) {
+			detail.QtyVariancePct = invoicedVariancePct
+		}
+		if math.Abs(invoicedVariancePct) > cfg.QtyTolerancePct {
+			qtyOK = false
+		}
+	}
+
+	if detail.POUnitCost > 0 {
+		detail.PriceVariancePct = calcVariancePctInt(detail.POUnitCost, detail.InvoiceUnitPrice)
+	}
+	priceOK := math.Abs(detail.PriceVariancePct) <= cfg.PriceTolerancePct
+
+	// The dollar tolerance is a FLOOR beside the percentage check — "do not
+	// raise an exception for less than this many dollars" — not an override.
+	// It applies to the extended line amount, the money actually at stake.
+	//
+	// It used to be applied to the per-UNIT price and to set priceOK = true
+	// unconditionally, so with the shipped $50 default a $10 stud invoiced at
+	// $55 passed no matter how many thousands of them were on the line.
+	if !priceOK && abs64(lineAmountDiffCents(detail)) <= cfg.DollarTolerance {
+		priceOK = true
+	}
+
+	if qtyOK && priceOK && hasInvoice {
+		return MatchStatusMatched
+	}
+	return MatchStatusException
+}
+
+// lineAmountDiffCents is the whole-line dollar difference between what the
+// vendor billed and what the PO priced, in cents: the unit difference times
+// the quantity being billed.
+func lineAmountDiffCents(detail *MatchLineDetail) int64 {
+	qty := detail.InvoicedQty
+	if qty == 0 {
+		qty = detail.ReceivedQty
+	}
+	return money.RoundToCents(float64(detail.InvoiceUnitPrice-detail.POUnitCost) * qty)
+}
 
 func calcVariancePct(expected, actual float64) float64 {
 	if expected == 0 {

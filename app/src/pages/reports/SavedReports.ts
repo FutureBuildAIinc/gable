@@ -153,11 +153,15 @@ export class SavedReports extends LitElement {
             });
             this.execution = res.execution;
 
-            // Do NOT say "scheduled" when nothing runs it. The server tells us
-            // which of the two happened; repeat it rather than assuming.
+            // Do NOT say "scheduled" when nothing runs it, and do not say
+            // "delivered" when the server only logs the send. The server tells
+            // us which of the two happened and what its delivery actually is;
+            // repeat it rather than assuming. The full delivery sentence stays
+            // in the banner below, which is on screen for as long as the modal
+            // is, rather than in a toast that disappears.
             ToastService.show(
                 res.execution.enabled
-                    ? 'Schedule created and registered'
+                    ? 'Schedule created and registered — it will run on the server'
                     : 'Schedule saved — but scheduled delivery is not enabled, so it will not run',
                 res.execution.enabled ? 'success' : 'info',
             );
@@ -191,10 +195,14 @@ export class SavedReports extends LitElement {
     }
 
     /**
-     * The disclosure banner. Rendered whenever execution is disabled — which is
-     * always, today. Without it this modal reads as a working automation
-     * feature, and an operator would have no way to discover that their weekly
-     * financial report is never sent.
+     * The disclosure banner, rendered whenever the server reports that nothing
+     * executes stored schedules. Without it this modal reads as a working
+     * automation feature, and an operator would have no way to discover that
+     * their weekly financial report is never sent.
+     *
+     * Both this and _renderDeliveryNotice below are driven entirely by the
+     * server's `execution` block — never by a local assumption about which
+     * state we are in — so whichever one is true is the one that renders.
      */
     private _renderExecutionNotice() {
         if (!this.execution || this.execution.enabled) return nothing;
@@ -218,6 +226,30 @@ export class SavedReports extends LitElement {
         `;
     }
 
+    /**
+     * What actually happens to a report once it has run.
+     *
+     * "The schedule runs" and "the report reached the controller's inbox" are
+     * two different claims, and the server makes only the first on its own. The
+     * default deployment's email service is log-only: the run genuinely queries
+     * the data and produces a real CSV, and the send is recorded in the server
+     * log rather than transmitted. Showing execution.enabled without this would
+     * reintroduce the same false confidence one step further along.
+     */
+    private _renderDeliveryNotice() {
+        if (!this.execution?.enabled || !this.execution.delivery) return nothing;
+        return html`
+            <div
+                class="bg-blue-50 border border-blue-300 text-blue-900 rounded p-4 mb-4"
+                data-testid="schedule-delivery-notice"
+                role="status"
+            >
+                <p class="font-semibold">${this.execution.summary}</p>
+                <p class="text-sm mt-2">${this.execution.delivery}</p>
+            </div>
+        `;
+    }
+
     private _renderScheduleModal() {
         if (!this.scheduleFor) return nothing;
         return html`
@@ -237,6 +269,7 @@ export class SavedReports extends LitElement {
 
                     <div class="p-6 space-y-6">
                         ${this._renderExecutionNotice()}
+                        ${this._renderDeliveryNotice()}
 
                         <div>
                             <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">

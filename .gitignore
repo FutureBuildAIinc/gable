@@ -1,9 +1,9 @@
-# Environment files
+# Environment files. Only the `.env.example` templates are tracked; copy one to
+# `.env` locally. The frontend works with no `.env` at all — an unset
+# VITE_API_URL routes through the Vite proxy (see app/.env.example).
 **/.env
 **/.env.*
 !**/.env.example
-# app/.env is tracked as a stub (empty VITE_API_URL → routes through Vite proxy).
-!app/.env
 
 # Local docker compose override (developer-specific tweaks)
 docker-compose.override.yml

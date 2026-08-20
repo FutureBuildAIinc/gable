@@ -477,7 +477,24 @@ func main() {
 	reportingSvc := reporting.NewService(reportingRepo)
 	reportingHandler := reporting.NewHandler(reportingSvc)
 	reportingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
-	reportingHandler.RegisterBuilderRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+
+	// Scheduled report delivery. Loads every ACTIVE row from report_schedules,
+	// runs each on the cron engine, and emails the rendered CSV/XLSX to its
+	// recipients via emailSvc — which is the log-only LogEmailService, so the
+	// report is genuinely generated and the send is recorded in the log rather
+	// than transmitted. The schedule API publishes that distinction itself
+	// (execution.enabled plus execution.delivery), derived from this executor,
+	// so wiring it here is what flips the API from "saved but never run" to
+	// "runs". Stops in step 3.6 of graceful shutdown, before the DB pool closes.
+	reportScheduler := reporting.NewScheduler(reportingSvc, emailSvc)
+	if err := reportScheduler.Start(context.Background()); err != nil {
+		logger.Error("report scheduler failed to start", "error", err)
+	}
+	wireReportSchedules(mux, reportingHandler, reportScheduler)
+	logger.Info("Scheduled report delivery enabled",
+		"cron_dialect", "six fields, seconds first",
+		"delivery", reportScheduler.DeliveryDescription())
+
 	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Delivery Module
@@ -869,6 +886,13 @@ func main() {
 	logger.Info("Shutdown step 3.5/4: stopping reorder scheduler...")
 	reorderScheduler.Stop()
 	logger.Info("Shutdown step 3.5/4: reorder scheduler stopped")
+
+	// Step 3.6: Stop the scheduled-report cron. Same reasoning as 3.5: no new
+	// report query may start against a draining pool, and an in-flight run
+	// finishes (including its last_run_at/next_run_at write) before step 4.
+	logger.Info("Shutdown step 3.6/4: stopping report scheduler...")
+	reportScheduler.Stop()
+	logger.Info("Shutdown step 3.6/4: report scheduler stopped")
 
 	// Step 3.7: Stop the exposure safety-net cron and drain the in-process
 	// event bus before the pool closes, so a queued notification handler

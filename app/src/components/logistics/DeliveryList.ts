@@ -4,6 +4,10 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
+// Side-effect import: this module's template renders <gable-assign-order-modal>, and the element
+// only registers when its defining module is evaluated. Without this the tag
+// stays unknown and the modal silently never appears.
+import './AssignOrderModal';
 import { MapPin, Box, FileText, ArrowRight, ArrowUp, ArrowDown, RotateCcw, Navigation, Play, CheckCircle2, Clock } from 'lucide';
 import type { Delivery, RouteStatus } from '../../types/delivery';
 import { deliveryService } from '../../services/deliveryService';

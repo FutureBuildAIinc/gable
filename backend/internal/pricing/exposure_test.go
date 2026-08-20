@@ -780,13 +780,13 @@ func TestComputeRollup_SumsMagnitudesNotSignedValues(t *testing.T) {
 	}
 }
 
-// KNOWN BUG (skipped): the per-quote dollar rollup double-counts a line whose
-// escalator was superseded by a re-send.
+// REGRESSION (this was a documented, pinned defect): the per-quote dollar rollup double-counted a
+// line whose escalator was superseded by a re-send.
 //
 // rollupQuote derives the *state* from ListEscalatorsForQuote, which filters on
-// is_active — so the gate decision is correct. But it derives the *dollars*
-// from sumLatestExposurePerLine, which walks the whole quote_exposure_events
-// ledger with no is_active filter.
+// is_active — so the gate decision was always correct. But it derived the
+// *dollars* from sumLatestExposurePerLine, which walked the whole
+// quote_exposure_events ledger with no is_active filter.
 //
 // SnapshotService.SnapshotQuoteLines (the DRAFT→SENT re-send path) deactivates
 // the prior escalators and writes fresh ones, but it does NOT write a CLEARED
@@ -799,14 +799,10 @@ func TestComputeRollup_SumsMagnitudesNotSignedValues(t *testing.T) {
 // Impact: quotes.exposure_dollars, the at-risk list and the owner portfolio
 // report overstate exposure after a re-quote. Blocking behaviour is unaffected.
 //
-// Fix: scope sumLatestExposurePerLine to events whose quote_line_id still has
-// an active escalator (or have SnapshotService emit CLEARED for superseded
-// lines). Un-skip this test with the fix.
+// Fixed: rollupQuote now passes the active escalators' line ids into
+// sumLatestExposurePerLine, which skips events for any other line — so the
+// dollar path and the state path are derived from the same escalator set.
 func TestScanner_RollupExcludesLinesWhoseEscalatorWasSuperseded(t *testing.T) {
-	t.Skip("KNOWN BUG: sumLatestExposurePerLine ignores price_escalators.is_active, " +
-		"so a re-quoted line's stale exposure_dollars is counted again in the quote rollup " +
-		"(observed: 620 where 120 is correct)")
-
 	exposure := newFakeExposureRepo()
 	quotes := newFakeQuoteReader()
 	quoteID := uuid.New()

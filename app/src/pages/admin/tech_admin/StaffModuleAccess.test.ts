@@ -239,26 +239,33 @@ describe('Staff tab — granting and revoking', () => {
     expect(backend.staff.find((s) => s.id === YUKI)!.modules).toEqual([])
   })
 
-  // KNOWN BUG (ported as-is from the private `community` branch): after a failed
-  // grant the checkbox stays where the click put it, so an access-control screen
-  // shows access that was never granted. `_handleToggleStaffAccess` sets
-  // `staffError` and returns without resyncing, and Lit's `.checked=${hasAccess}`
-  // binding does not rewrite the property because `hasAccess` never changed from
-  // the value last committed — lit-html skips a PropertyPart whose value is
-  // unchanged, even though the user has since mutated the DOM. Same in reverse
-  // for a failed revoke: the box clears while the grant is still live. The error
-  // banner is shown, and the server is untouched (asserted above), so this is
-  // misleading display rather than an authorization hole. Fix: in the catch
-  // branch of `_handleToggleStaffAccess`, write the model value back onto the
-  // input (`(e.target as HTMLInputElement).checked = hasAccess`) before
-  // re-rendering.
-  it.skip('KNOWN BUG: resets the checkbox to the server value after a failed grant', async () => {
+  // Regression: after a failed grant the checkbox used to stay where the click
+  // put it, so an access-control screen showed access that was never granted.
+  // `_handleToggleStaffAccess` set `staffError` and returned without resyncing,
+  // and Lit's `.checked=${hasAccess}` binding did not rewrite the property
+  // because `hasAccess` never changed from the value last committed — lit-html
+  // skips a PropertyPart whose value is unchanged, even though the user has
+  // since mutated the DOM. The catch branch now writes the model value straight
+  // back onto the input.
+  it('resets the checkbox to the server value after a failed grant', async () => {
     serve({ fail: new Set([`POST /api/v1/admin/staff/${YUKI}/modules`]) })
     const el = await openStaffTab()
 
     await toggle(el, grantBox(el, 'Yuki Tan'), true)
 
     expect(grantBox(el, 'Yuki Tan').checked).toBe(false)
+  })
+
+  it('restores the checkbox after a failed revoke', async () => {
+    // Same bug in reverse: the box cleared while the grant was still live.
+    serve({ fail: new Set([`DELETE /api/v1/admin/staff/${DANA}/modules/ai_lm`]) })
+    const el = await openStaffTab()
+
+    await toggle(el, grantBox(el, 'Dana Ramirez'), false)
+
+    expect(text(el)).toContain('Failed to revoke module access')
+    expect(backend.staff.find((s) => s.id === DANA)!.modules).toEqual(['ai_lm'])
+    expect(grantBox(el, 'Dana Ramirez').checked).toBe(true)
   })
 })
 

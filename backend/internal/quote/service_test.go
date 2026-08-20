@@ -298,22 +298,22 @@ func TestCreateQuote_PickupClearsVehicleAndFreight(t *testing.T) {
 	}
 }
 
-// KNOWN BUG — a pickup quote still charges freight in its total.
+// REGRESSION (this was a documented, pinned defect) — a pickup quote must not charge freight.
 //
-// quote/service.go:44-45 adds FreightAmount to TotalAmount, and only afterwards
-// (lines 58-61) does the PICKUP branch reset FreightAmount to 0. The freight is
-// already baked into TotalAmount by then, so the stored quote shows
-// freight_amount = 0 while total_amount silently includes it — the customer is
-// billed for delivery on an order they are collecting themselves, and the total
-// no longer reconciles with its own components.
+// CreateQuote used to add FreightAmount to TotalAmount and only afterwards let
+// the PICKUP branch reset FreightAmount to 0. The freight was already baked
+// into TotalAmount by then, so the stored quote showed freight_amount = 0
+// while total_amount silently included it — the customer was billed for
+// delivery on an order they were collecting themselves, and the total no
+// longer reconciled with its own components.
 //
-// UpdateQuote has the same ordering (lines 158-166), and is worse: it never
-// applies the DeliveryType default, so only an explicit "PICKUP" clears freight.
+// UpdateQuote had the same ordering, and was worse: it never applied the
+// DeliveryType default, so only an explicit "PICKUP" cleared freight.
 //
-// This test asserts the CORRECT total and is skipped until the source is fixed.
+// Fixed: quote.normalizeDeliveryAndTotal defaults the delivery type, clears
+// vehicle + freight for a pickup, and only then sums the total. Both
+// CreateQuote and UpdateQuote go through it.
 func TestCreateQuote_PickupExcludesFreightFromTotal(t *testing.T) {
-	t.Skip("KNOWN BUG: quote/service.go:44 adds freight to the total before line 60 clears it for PICKUP — see comment above")
-
 	svc := NewService(&fakeRepo{})
 	q := &Quote{
 		CustomerID:    uuid.New(),
@@ -333,9 +333,14 @@ func TestCreateQuote_PickupExcludesFreightFromTotal(t *testing.T) {
 	}
 }
 
-// CHARACTERIZATION: records the freight-on-pickup behaviour described above,
-// for both the explicit and the defaulted delivery type.
-func TestCreateQuote_PickupFreightInTotal_Characterization(t *testing.T) {
+// CORRECTNESS: the defaulted delivery type behaves exactly like an explicit
+// PICKUP — freight is dropped from the total, not just from the column.
+//
+// This test previously pinned the buggy total of 175 as a CHARACTERIZATION of
+// freight-on-pickup. The fix that unskipped
+// TestCreateQuote_PickupExcludesFreightFromTotal invalidates that pin, so the
+// expectation moves to the correct 100 (lines only) for both delivery types.
+func TestCreateQuote_PickupDropsFreightForExplicitAndDefaultedType(t *testing.T) {
 	for _, deliveryType := range []string{"PICKUP", "" /* defaults to PICKUP */} {
 		svc := NewService(&fakeRepo{})
 		q := &Quote{
@@ -350,12 +355,41 @@ func TestCreateQuote_PickupFreightInTotal_Characterization(t *testing.T) {
 		if q.DeliveryType != "PICKUP" {
 			t.Fatalf("DeliveryType = %q, want it to end up PICKUP", q.DeliveryType)
 		}
-		if q.TotalAmount != 175 {
-			t.Errorf("deliveryType=%q: TotalAmount = %v, current behaviour keeps the freight (175)",
+		if q.TotalAmount != 100 {
+			t.Errorf("deliveryType=%q: TotalAmount = %v, want 100 — a pickup carries no freight",
 				deliveryType, q.TotalAmount)
 		}
 		if q.FreightAmount != 0 {
-			t.Errorf("deliveryType=%q: FreightAmount = %v, current behaviour zeroes it", deliveryType, q.FreightAmount)
+			t.Errorf("deliveryType=%q: FreightAmount = %v, want 0", deliveryType, q.FreightAmount)
+		}
+	}
+}
+
+// CORRECTNESS: UpdateQuote applies the same normalization — an edit that
+// switches a delivered quote to pickup must take the freight back out of the
+// total, and an edit that omits the delivery type gets the PICKUP default.
+func TestUpdateQuote_PickupExcludesFreightFromTotal(t *testing.T) {
+	for _, deliveryType := range []string{"PICKUP", "" /* defaults to PICKUP */} {
+		id := uuid.New()
+		repo := &fakeRepo{getQuote: &Quote{ID: id, State: QuoteStateDraft}}
+		q := &Quote{
+			ID:            id,
+			Lines:         []QuoteLine{qline(1, 100)},
+			DeliveryType:  deliveryType,
+			FreightAmount: 75,
+		}
+		if err := NewService(repo).UpdateQuote(context.Background(), q); err != nil {
+			t.Fatalf("UpdateQuote: %v", err)
+		}
+		if q.TotalAmount != 100 {
+			t.Errorf("deliveryType=%q: TotalAmount = %v, want 100 — a pickup carries no freight",
+				deliveryType, q.TotalAmount)
+		}
+		if q.FreightAmount != 0 {
+			t.Errorf("deliveryType=%q: FreightAmount = %v, want 0", deliveryType, q.FreightAmount)
+		}
+		if q.VehicleID != nil {
+			t.Errorf("deliveryType=%q: VehicleID = %v, want nil on a pickup", deliveryType, q.VehicleID)
 		}
 	}
 }

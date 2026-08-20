@@ -181,30 +181,14 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 			httputil.RespondError(w, r, "CSV parse error", http.StatusUnprocessableEntity, parseErr)
 			return
 		}
-		for _, item := range csvItems {
-			entries = append(entries, CatalogEntry{
-				VendorSKU:   item.SKU,
-				Description: item.Description,
-				UnitCost:    item.UnitPrice,
-				UOM:         item.UOM,
-				MinOrderQty: item.MinOrderQty,
-				PackQty:     float64(item.PackSize),
-			})
-		}
+		entries = toCatalogEntries(csvItems)
 	} else {
 		x12Items, parseErr := h.bgSvc.Parse832Catalog(string(data))
 		if parseErr != nil {
 			httputil.RespondError(w, r, "X12 parse error", http.StatusUnprocessableEntity, parseErr)
 			return
 		}
-		for _, item := range x12Items {
-			entries = append(entries, CatalogEntry{
-				VendorSKU:   item.SKU,
-				Description: item.Description,
-				UnitCost:    item.UnitPrice,
-				UOM:         item.UOM,
-			})
-		}
+		entries = toCatalogEntries(x12Items)
 	}
 
 	// Persist to DB
@@ -221,6 +205,30 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 		"parsed_count": len(entries),
 		"saved_count":  count,
 	})
+}
+
+// toCatalogEntries maps parsed supplier catalog items onto the rows persisted
+// against a trading partner. CatalogEntry.VendorSKU is the PARTNER's own
+// identifier (that is what an inbound 855/810 quotes back at us), so it must
+// come from SupplierCatalogEntry.VendorSKU, never from our internal SKU. The
+// mapping is identical for both the CSV and the X12 source, including
+// MinOrderQty and PackQty, which the parsers default to 1.
+func toCatalogEntries(items []SupplierCatalogEntry) []CatalogEntry {
+	if len(items) == 0 {
+		return nil
+	}
+	entries := make([]CatalogEntry, 0, len(items))
+	for _, item := range items {
+		entries = append(entries, CatalogEntry{
+			VendorSKU:   item.VendorSKU,
+			Description: item.Description,
+			UnitCost:    item.UnitPrice,
+			UOM:         item.UOM,
+			MinOrderQty: item.MinOrderQty,
+			PackQty:     float64(item.PackSize),
+		})
+	}
+	return entries
 }
 
 func (h *EDIHandler) ListCatalog(w http.ResponseWriter, r *http.Request) {

@@ -6,8 +6,10 @@ package reporting
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // --- fake email sender ---------------------------------------------------
@@ -43,6 +45,20 @@ func (f *fakeSender) count() int {
 }
 
 var _ EmailSender = (*fakeSender)(nil)
+
+// describingSender is a sender that states what it does with a message, the way
+// notification.LogEmailService does.
+type describingSender struct {
+	fakeSender
+	desc string
+}
+
+func (d *describingSender) DeliveryDescription() string { return d.desc }
+
+var (
+	_ EmailSender       = (*describingSender)(nil)
+	_ DeliveryDescriber = (*describingSender)(nil)
+)
 
 // --- cron expression handling -------------------------------------------
 
@@ -190,35 +206,29 @@ func TestExecuteAndSendReport_MissingReportSendsNothing(t *testing.T) {
 	}
 }
 
-// CHARACTERIZATION of a KNOWN BUG. ExecuteAndSendReport declares
-// `var def ReportDefinition` and never populates it from the saved report's
-// DefinitionJSON — the source comments say the mapping is "omitted for
-// brevity". Every scheduled report therefore executes an empty definition,
-// which BuildAndExecuteQuery rejects with "no columns selected", so no
-// scheduled report has ever produced output.
+// CORRECTNESS, replacing a characterization test of the bug that used to live
+// here: ExecuteAndSendReport declared `var def ReportDefinition` and never
+// populated it from the saved report's DefinitionJSON, so every scheduled run
+// executed an empty definition and died at "no columns selected".
 //
-// backend/internal/reporting/scheduler.go:94-96 —
-//
-//	var def ReportDefinition
-//	// ... populate def from report.DefinitionJSON ...
-//	results, err := s.service.ExecuteReportDefinition(ctx, &def, report.EntityType)
-//
-// The test asserts the currently-observable consequence: the call fails and no
-// email is sent, even for a saved report with a perfectly good definition. When
-// the mapping is implemented this test will fail, which is the intended signal.
-func TestExecuteAndSendReport_DropsTheSavedDefinition(t *testing.T) {
+// It now decodes through definitionFromSaved — the same helper
+// POST /reporting/saved/{id}/run uses. This test pins that the decode step is
+// on the path at all: a definition_json that cannot be decoded produces the
+// decode error, which is only reachable if the decode happens. It cannot go
+// further, because Service.ExecuteReportDefinition requires a real
+// *PostgresRepository, and the bug was a data-shape bug that only a real
+// database can disprove. The evidence that the decoded definition is genuinely
+// honoured — right columns, right rows, in the delivered CSV — is
+// TestScheduledReport_EndToEndAgainstPostgres in scheduler_postgres_test.go.
+func TestExecuteAndSendReport_DecodesTheSavedDefinition(t *testing.T) {
 	repo := newFakeRepo()
 	repo.saved["r1"] = &SavedReport{
 		ID:         "r1",
 		Name:       "AR by customer",
 		EntityType: "invoices",
-		DefinitionJSON: map[string]any{
-			"columns": []any{
-				map[string]any{"field": "customer_name", "label": "Customer"},
-				map[string]any{"field": "total_amount", "label": "Total", "aggregation": "SUM"},
-			},
-			"groupings": []any{map[string]any{"field": "customer_name"}},
-		},
+		// A channel cannot be marshalled, so this fails inside
+		// definitionFromSaved and nowhere else.
+		DefinitionJSON: map[string]any{"columns": make(chan int)},
 	}
 
 	sender := &fakeSender{}
@@ -228,10 +238,225 @@ func TestExecuteAndSendReport_DropsTheSavedDefinition(t *testing.T) {
 		ID: "s1", ReportID: "r1", Recipients: []string{"finance@example.com"},
 	})
 	if err == nil {
-		t.Fatal("expected the empty-definition failure; if this now succeeds the DefinitionJSON mapping has been implemented and this characterization test should become a correctness test")
+		t.Fatal("want an error when the stored definition cannot be decoded")
+	}
+	if !strings.Contains(err.Error(), "report definition") {
+		t.Errorf("error = %v, want the definition-decode failure — if the decode were skipped again, "+
+			"this would instead fail later with an execution error and every scheduled report would ship no columns", err)
 	}
 	if sender.count() != 0 {
 		t.Errorf("sent %d emails, want 0", sender.count())
+	}
+}
+
+// CORRECTNESS: a schedule whose saved report has vanished must fail, and must
+// not be reported as a successful send.
+func TestExecuteAndSendReport_StopsBeforeSendingOnExecutionFailure(t *testing.T) {
+	repo := newFakeRepo()
+	repo.saved["r1"] = &SavedReport{
+		ID:         "r1",
+		Name:       "AR by customer",
+		EntityType: "invoices",
+		DefinitionJSON: map[string]any{
+			"columns": []any{map[string]any{"field": "customer_name", "label": "Customer"}},
+		},
+	}
+
+	sender := &fakeSender{}
+	sched := NewScheduler(NewService(repo), sender)
+
+	// The fake repository is not a *PostgresRepository, so execution fails.
+	// What matters is the ordering: nothing is emailed and no run is recorded.
+	if err := sched.ExecuteAndSendReport(context.Background(), ReportSchedule{
+		ID: "s1", ReportID: "r1", Recipients: []string{"finance@example.com"},
+	}); err == nil {
+		t.Fatal("want an error when the query cannot be executed")
+	}
+	if sender.count() != 0 {
+		t.Errorf("sent %d emails after an execution failure, want 0", sender.count())
+	}
+	if _, ok := repo.nextRuns["s1"]; ok {
+		t.Error("recorded a run for a report that was never delivered")
+	}
+}
+
+// --- rendering -----------------------------------------------------------
+
+// CORRECTNESS: the attachment's extension must describe its actual bytes. PDF
+// is accepted by the API but has no renderer, so a PDF schedule gets CSV — and
+// the recipient has to be told, or they get a spreadsheet where they expected a
+// document and no way to find out why.
+func TestRenderSchedule_ExtensionMatchesTheBytes(t *testing.T) {
+	columns := []ReportColumn{{Field: "customer_name", Label: "Customer"}}
+	results := []map[string]interface{}{{"customer_name": "Kelbrook Homes"}}
+
+	t.Run("CSV", func(t *testing.T) {
+		buf, ext, note, err := renderSchedule("CSV", columns, results)
+		if err != nil {
+			t.Fatalf("renderSchedule: %v", err)
+		}
+		if ext != ".csv" {
+			t.Errorf("ext = %q, want .csv", ext)
+		}
+		if note != "" {
+			t.Errorf("note = %q, want none when the requested format was produced", note)
+		}
+		if !strings.Contains(buf.String(), "Customer") {
+			t.Errorf("CSV = %q, want the column label as a header", buf.String())
+		}
+	})
+
+	t.Run("an empty format defaults to CSV", func(t *testing.T) {
+		_, ext, _, err := renderSchedule("", columns, results)
+		if err != nil {
+			t.Fatalf("renderSchedule: %v", err)
+		}
+		if ext != ".csv" {
+			t.Errorf("ext = %q, want .csv", ext)
+		}
+	})
+
+	t.Run("XLSX", func(t *testing.T) {
+		buf, ext, note, err := renderSchedule("XLSX", columns, results)
+		if err != nil {
+			t.Fatalf("renderSchedule: %v", err)
+		}
+		if ext != ".xlsx" {
+			t.Errorf("ext = %q, want .xlsx", ext)
+		}
+		if note != "" {
+			t.Errorf("note = %q, want none when the requested format was produced", note)
+		}
+		// A real xlsx is a zip archive; "PK" is its magic number.
+		if !strings.HasPrefix(buf.String(), "PK") {
+			t.Errorf("XLSX attachment does not start with the zip magic number; got %q", buf.String()[:min(4, buf.Len())])
+		}
+	})
+
+	t.Run("PDF falls back to CSV and says so", func(t *testing.T) {
+		buf, ext, note, err := renderSchedule("PDF", columns, results)
+		if err != nil {
+			t.Fatalf("renderSchedule: %v", err)
+		}
+		if ext != ".csv" {
+			t.Errorf("ext = %q, want .csv — CSV bytes must not be named .pdf", ext)
+		}
+		if !strings.Contains(note, "CSV") {
+			t.Errorf("note = %q, want it to tell the recipient the format was substituted", note)
+		}
+		if !strings.Contains(buf.String(), "Customer") {
+			t.Errorf("attachment = %q, want the CSV fallback content", buf.String())
+		}
+	})
+}
+
+// Report names are operator free text and end up in a filename — and, the
+// moment a real SMTP sender replaces the log-only one, in a MIME header.
+func TestSanitizeFilename(t *testing.T) {
+	cases := map[string]string{
+		"AR by customer":     "AR_by_customer",
+		"Q1/Q2 \"summary\"":  "Q1_Q2__summary",
+		"../../etc/passwd":   "etc_passwd",
+		"report\r\nInjected": "report__Injected",
+		"":                   "report",
+		"///":                "report",
+	}
+	for in, want := range cases {
+		if got := sanitizeFilename(in); got != want {
+			t.Errorf("sanitizeFilename(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// --- delivery disclosure --------------------------------------------------
+
+// CORRECTNESS: the scheduler's account of how a report reaches its recipients
+// must come from the sender that is actually injected. A hard-coded sentence
+// would keep claiming "emailed" after someone swapped the sender out, or keep
+// claiming "log-only" after someone wired SMTP.
+func TestScheduler_DeliveryDescriptionComesFromTheSender(t *testing.T) {
+	t.Run("a sender that describes itself is quoted", func(t *testing.T) {
+		sched := NewScheduler(NewService(newFakeRepo()), &describingSender{desc: "carrier pigeon"})
+		if got := sched.DeliveryDescription(); got != "carrier pigeon" {
+			t.Errorf("DeliveryDescription() = %q, want the sender's own words", got)
+		}
+	})
+
+	t.Run("a sender that does not claims nothing beyond the handoff", func(t *testing.T) {
+		got := NewScheduler(NewService(newFakeRepo()), &fakeSender{}).DeliveryDescription()
+		if got == "" {
+			t.Fatal("DeliveryDescription() is empty")
+		}
+		if strings.Contains(got, "log") {
+			t.Errorf("DeliveryDescription() = %q, want no claim about a sender that did not describe itself", got)
+		}
+	})
+}
+
+// --- registration lifecycle ----------------------------------------------
+
+// CORRECTNESS: re-registering a schedule ID must replace the previous entry.
+// Two live entries for one schedule would email the report twice.
+func TestAddSchedule_ReregisteringReplacesTheEntry(t *testing.T) {
+	sched := NewScheduler(NewService(newFakeRepo()), &fakeSender{})
+	s := ReportSchedule{ID: "s1", ReportID: "r1", CronExpression: "0 0 8 * * *"}
+
+	if err := sched.AddSchedule(context.Background(), s); err != nil {
+		t.Fatalf("AddSchedule: %v", err)
+	}
+	s.CronExpression = "0 0 9 * * *"
+	if err := sched.AddSchedule(context.Background(), s); err != nil {
+		t.Fatalf("AddSchedule (second): %v", err)
+	}
+
+	if got := len(sched.cron.Entries()); got != 1 {
+		t.Errorf("cron holds %d entries for one schedule, want 1 — the report would be emailed once per stale entry", got)
+	}
+	if sched.registeredCount() != 1 {
+		t.Errorf("jobIDs holds %d entries, want 1", sched.registeredCount())
+	}
+}
+
+// CORRECTNESS: deleting a schedule must stop it firing. A cron entry outlives
+// the row it came from, so a deleted schedule would otherwise keep emailing
+// until the next restart.
+func TestRemoveSchedule_UnregistersTheJob(t *testing.T) {
+	sched := NewScheduler(NewService(newFakeRepo()), &fakeSender{})
+	if err := sched.AddSchedule(context.Background(), ReportSchedule{
+		ID: "s1", ReportID: "r1", CronExpression: "0 0 8 * * *",
+	}); err != nil {
+		t.Fatalf("AddSchedule: %v", err)
+	}
+
+	sched.RemoveSchedule("s1")
+
+	if sched.isRegistered("s1") {
+		t.Error("the schedule is still registered after RemoveSchedule")
+	}
+	if got := len(sched.cron.Entries()); got != 0 {
+		t.Errorf("cron holds %d entries after removal, want 0", got)
+	}
+
+	// Removing something that was never registered is not an error.
+	sched.RemoveSchedule("never-registered")
+}
+
+// The next-run time recorded in the database must come from the same parser the
+// engine fires on, or next_run_at would advertise a different schedule from the
+// one that actually runs.
+func TestNextRunAfter_UsesTheEngineDialect(t *testing.T) {
+	base := time.Date(2026, 8, 20, 10, 30, 0, 0, time.UTC)
+
+	next, err := nextRunAfter("0 0 9 * * *", base)
+	if err != nil {
+		t.Fatalf("nextRunAfter: %v", err)
+	}
+	if want := time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC); !next.Equal(want) {
+		t.Errorf("next = %v, want %v", next, want)
+	}
+
+	if _, err := nextRunAfter("0 9 * * *", base); err == nil {
+		t.Error("a five-field expression must not yield a next-run time; the engine would refuse it")
 	}
 }
 

@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatCents } from '../../lib/utils.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchJournalEntries, fetchAccounts, createJournalEntry, postJournalEntry, voidJournalEntry } from '../../services/GLService';
 import type { JournalEntry, GLAccount, CreateJournalEntryRequest } from '../../types/gl';
@@ -64,6 +65,15 @@ export class JournalEntries extends LitElement {
         }
     }
 
+    // NOTE — this page is deliberately asymmetric about money units, and it is
+    // correct. The *read* side (the entries table below) is int64 **cents**, as
+    // every ERP endpoint is, so it renders through the shared `formatCents()`.
+    // The *write* side (this draft form) is **dollars**: `gl/handler.go:218`
+    // declares `Debit float64` and `:253` does `int64(math.Round(lr.Debit*100))`,
+    // so the operator types dollars and the backend converts. The running totals
+    // below are therefore already dollars and must NOT be divided by 100 — doing
+    // that would post a journal entry 100x too small. Pinned in
+    // `erp-money-formatting.test.ts` ("takes the draft entry in dollars").
     private get _totalDebit() {
         return this.lines.reduce((sum, l) => sum + (parseFloat(l.debit) || 0), 0);
     }
@@ -139,10 +149,6 @@ export class JournalEntries extends LitElement {
         } catch (err) {
             ToastService.show(err instanceof Error ? err.message : 'Failed to void journal entry', 'error');
         }
-    }
-
-    private _formatCents(cents: number) {
-        return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
     }
 
     render() {
@@ -313,7 +319,7 @@ export class JournalEntries extends LitElement {
                                             </span>
                                         </td>
                                         <td class="px-4 py-2.5 text-right font-mono text-zinc-200">
-                                            ${this._formatCents(e.total_debit)}
+                                            ${formatCents(e.total_debit)}
                                         </td>
                                         <td class="px-4 py-2.5 text-right space-x-1">
                                             ${e.status === 'DRAFT' ? html`

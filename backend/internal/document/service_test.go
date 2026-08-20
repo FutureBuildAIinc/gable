@@ -278,22 +278,17 @@ func TestGenerateInvoicePDF_ShowsTheInvoiceDate(t *testing.T) {
 	mustContain(t, assertPDF(t, doc), "2026-03-04")
 }
 
-// KNOWN BUG. The invoice PDF prints only the line extensions and a
-// tax-inclusive "TOTAL DUE". There is no subtotal row and no tax row, so the
+// CORRECTNESS: the invoice PDF must not jump from the line extensions straight
+// to a tax-inclusive "TOTAL DUE". Without a subtotal row and a tax row the
 // lines visibly do not add up to the total: a $100.00 order with 12% BC tax
 // renders as lines summing to $100.00 above a TOTAL DUE of $112.00 with
 // nothing to explain the $12.00.
 //
 // The Invoice model already carries Subtotal, TaxRate and TaxAmount
 // (invoice/model.go:29-32) and the tax rate is resolved per branch, so the
-// data is present and simply not rendered. Showing tax separately is also a
-// statutory requirement in the GST/HST jurisdictions this product targets.
-//
-// backend/internal/document/service.go:71-78 — the row immediately after the line loop
-// jumps straight from the lines to TOTAL DUE.
+// data is present. Showing tax separately is also a statutory requirement in
+// the GST/HST jurisdictions this product targets.
 func TestGenerateInvoicePDF_MustShowSubtotalAndTax(t *testing.T) {
-	t.Skip("KNOWN BUG: document/service.go:71 renders only a tax-inclusive TOTAL DUE; the invoice PDF has no subtotal or tax line, so the lines do not add up to the total")
-
 	prodID := uuid.New()
 	repo := newRepo(&product.Product{ID: prodID, SKU: "2X4-8", Description: "SPF Stud"})
 	svc := NewService(repo)

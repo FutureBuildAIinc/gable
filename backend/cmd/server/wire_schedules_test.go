@@ -5,10 +5,14 @@ package main
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -18,10 +22,10 @@ import (
 // ports. The frontend calls exactly these; a route that stops being registered
 // is a silent 404 in the UI rather than a build failure, so it is pinned here.
 //
-// Both groups ride registration calls main.go already makes
-// (reporting.Handler.RegisterBuilderRoutes and product.Handler.RegisterRoutes),
-// which is why neither port required a main.go edit. This test is what makes
-// that claim checkable.
+// The product routes ride a registration call main.go already makes; the
+// reporting ones go through wireReportSchedules, which main.go calls so the
+// route registration and the scheduler attachment have one home. This test is
+// what makes that claim checkable.
 var scheduleAPISurface = []struct{ method, path string }{
 	{http.MethodPost, "/api/v1/reporting/schedules"},
 	{http.MethodGet, "/api/v1/reporting/schedules"},
@@ -38,7 +42,7 @@ var productGeometryAPISurface = []struct{ method, path string }{
 // this test only resolves routes, it does not serve them.
 func newPortedSurfaceMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	wireReportSchedules(mux, reporting.NewHandler(nil))
+	wireReportSchedules(mux, reporting.NewHandler(nil), nil)
 	product.NewHandler(nil).RegisterRoutes(mux, reportScheduleGuard())
 	return mux
 }
@@ -85,19 +89,56 @@ func TestScheduleRoutesRejectInsufficientRole(t *testing.T) {
 	}
 }
 
-// The scheduler is intentionally not started. If someone attaches one without
-// first fixing ExecuteAndSendReport and supplying an EmailSender, the API
-// would begin claiming schedules run while every run still failed silently.
-// This pins the current, honest state at the wiring layer; the API-level
-// disclosure is asserted in internal/reporting/schedule_handler_test.go.
-func TestWiringDoesNotAttachAScheduleExecutor(t *testing.T) {
-	if scheduleExecutorAttached() {
-		t.Error("an executor is attached to the schedule handler, but reporting.Scheduler is still known-broken: ExecuteAndSendReport drops the report definition and no EmailSender is implemented")
-	}
+// CORRECTNESS: attaching an executor is the whole switch. The schedule API's
+// claim that stored schedules run is read off the attached executor rather than
+// stated independently, so this asserts the two halves of that: pass a
+// scheduler and the handler reports execution enabled; pass nil and it does
+// not. Nothing else in the tree may set that flag.
+//
+// This replaces a test that pinned the opposite — that no executor was ever
+// attached — which was correct while reporting.Scheduler was known-broken and
+// is now the wrong expectation: main.go attaches a working one. The
+// API-response shape of the disclosure is asserted in
+// internal/reporting/schedule_handler_test.go.
+func TestWireReportSchedules_ExecutorDrivesTheExecutionDisclosure(t *testing.T) {
+	t.Run("a scheduler enables execution", func(t *testing.T) {
+		h := reporting.NewHandler(nil)
+		wireReportSchedules(http.NewServeMux(), h, reporting.NewScheduler(nil, nil))
+
+		if !h.ScheduleExecutionEnabled() {
+			t.Error("an executor was wired but the handler still reports that schedules do not run")
+		}
+	})
+
+	t.Run("no scheduler leaves the honest disclosure in place", func(t *testing.T) {
+		h := reporting.NewHandler(nil)
+		wireReportSchedules(http.NewServeMux(), h, nil)
+
+		if h.ScheduleExecutionEnabled() {
+			t.Error("the handler claims schedules run with no executor attached")
+		}
+	})
 }
 
-// scheduleExecutorAttached reports whether wireReportSchedules attaches a
-// schedule executor. It is a function rather than a constant so that enabling
-// execution requires deleting it, which forces whoever does so to read the
-// blocker list in wire_schedules.go.
-func scheduleExecutorAttached() bool { return false }
+// The server wires notification.LogEmailService as its EmailService, and the
+// scheduler passes that same value on as its EmailSender. This pins the
+// composition — if the two interfaces drift apart, main.go stops compiling, but
+// if someone swaps the email service for one that no longer satisfies
+// reporting.EmailSender the failure should be here and legible.
+func TestLogEmailServiceIsAUsableReportEmailSender(t *testing.T) {
+	var sender reporting.EmailSender = notification.NewLogEmailService(
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if err := sender.SendEmailWithAttachment(context.Background(),
+		[]string{"controller@example.com"}, "Scheduled Report: AR aging",
+		"Attached.", "ar_aging.csv", []byte("Customer,Total\n")); err != nil {
+		t.Fatalf("SendEmailWithAttachment: %v", err)
+	}
+
+	// And it tells the schedule API what it really does, so execution.delivery
+	// cannot claim mail was sent when it was logged.
+	desc := reporting.NewScheduler(nil, sender).DeliveryDescription()
+	if !strings.Contains(desc, "log-only") {
+		t.Errorf("delivery description = %q, want it to disclose that email is log-only", desc)
+	}
+}

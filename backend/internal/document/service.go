@@ -68,6 +68,36 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		)
 	}
 
+	// Subtotal and tax must be shown separately, or the line extensions
+	// visibly do not add up to TOTAL DUE. Showing the tax as its own line is
+	// also a statutory requirement in the GST/HST jurisdictions this product
+	// targets. An invoice written before those columns were populated carries
+	// zero in both, and total == subtotal + tax means the total IS the
+	// subtotal in that case — so nothing is invented.
+	subtotal, taxAmount := inv.Subtotal, inv.TaxAmount
+	if subtotal == 0 && taxAmount == 0 {
+		subtotal = inv.TotalAmount
+	}
+
+	m.AddRow(10,
+		text.NewCol(12, fmt.Sprintf("SUBTOTAL: $%.2f", float64(subtotal)/100.0), props.Text{
+			Top:   5,
+			Align: align.Right,
+			Size:  10,
+		}),
+	)
+
+	taxLabel := "TAX"
+	if inv.TaxRate > 0 {
+		taxLabel = fmt.Sprintf("TAX @ %.2f%%", inv.TaxRate*100)
+	}
+	m.AddRow(10,
+		text.NewCol(12, fmt.Sprintf("%s: $%.2f", taxLabel, float64(taxAmount)/100.0), props.Text{
+			Align: align.Right,
+			Size:  10,
+		}),
+	)
+
 	m.AddRow(15,
 		text.NewCol(12, fmt.Sprintf("TOTAL DUE: $%.2f", float64(inv.TotalAmount)/100.0), props.Text{
 			Top:   5,

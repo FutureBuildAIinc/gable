@@ -11,10 +11,19 @@ import (
 
 // Pre-compiled regexes for performance (avoid recompilation on every request).
 var (
-	dimRegex     = regexp.MustCompile(`(\d+)\s*x\s*(\d+)`)
-	lengthRegex  = regexp.MustCompile(`(\d+)\s*(?:'|foot|feet|ft)\b`)
+	dimRegex = regexp.MustCompile(`(\d+)\s*x\s*(\d+)`)
+	// The trailing \b applies only to the alphabetic spellings. A word
+	// boundary cannot follow the apostrophe of the tick-mark form, so
+	// `(?:'|foot|feet|ft)\b` never matches "10' studs" — the way feet are
+	// written on essentially every construction drawing.
+	lengthRegex  = regexp.MustCompile(`(\d+)\s*(?:'|(?:foot|feet|ft)\b)`)
 	studRegex    = regexp.MustCompile(`(\d+)\s*(?:'|foot|ft)\s*stud`)
 	spacingRegex = regexp.MustCompile(`(\d+)(?:"|''|in|inch)\s*(?:o\.?c\.?|on\s*center)`)
+	// Standalone "pt" needs boundaries on both sides so "apartment",
+	// "receipt" and "optional" do not match. The dotted "p.t." form must NOT
+	// have a trailing \b: it ends in a period, a non-word character, so a
+	// boundary can never follow it and the alternative would be dead.
+	ptRegex = regexp.MustCompile(`\bpt\b|\bp\.t\.`)
 )
 
 // Service provides simulated AI blueprint extraction and mismatch detection.
@@ -86,7 +95,6 @@ func (s *Service) ScanBlueprint(req BlueprintScanRequest) *BlueprintScanResponse
 		resp.ExtractedDimensions["treatment"] = "Treatable"
 	} else {
 		// Check for standalone "pt" or "p.t." abbreviation with word boundaries
-		ptRegex := regexp.MustCompile(`\bpt\b|\bp\.t\.\b`)
 		if ptRegex.MatchString(text) {
 			resp.ExtractedDimensions["treatment"] = "Treatable"
 		}
@@ -150,8 +158,17 @@ func (s *Service) detectMismatches(resp *BlueprintScanResponse, selections map[s
 		}
 	}
 
-	// Check length mismatch
-	if bpLength, ok := resp.ExtractedDimensions["stud_length"]; ok {
+	// Check length mismatch. "stud_length" is the more specific reading and
+	// wins when present, but it requires the literal word "stud" after the
+	// measurement. Without the fallback to the general "length" dimension, a
+	// drawing reading "2x6 joists, 8 feet" is extracted and then never compared
+	// against anything. Only one of the two is used, so a drawing carrying both
+	// still produces at most one Length finding.
+	bpLength, haveLength := resp.ExtractedDimensions["stud_length"]
+	if !haveLength {
+		bpLength, haveLength = resp.ExtractedDimensions["length"]
+	}
+	if haveLength {
 		if configDim, ok := selections["Dimensions"]; ok && configDim != "" {
 			// Extract length from config dimensions (e.g., "2x6-10" → "10")
 			parts := strings.Split(configDim, "-")
@@ -163,7 +180,7 @@ func (s *Service) detectMismatches(resp *BlueprintScanResponse, selections map[s
 						BlueprintValue: bpLength,
 						ConfigValue:    configLength,
 						Severity:       "warning",
-						Message:        fmt.Sprintf("Blueprint specifies %s stud length but configurator has %s", bpLength, configLength),
+						Message:        fmt.Sprintf("Blueprint specifies a length of %s but configurator has %s", bpLength, configLength),
 					})
 				}
 			}

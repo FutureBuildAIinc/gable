@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatCents } from '../../lib/utils.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchTrialBalance } from '../../services/GLService';
 import type { TrialBalanceRow } from '../../types/gl';
@@ -51,11 +52,6 @@ export class TrialBalance extends LitElement {
         }
     }
 
-    private _formatCents(cents: number) {
-        if (cents === 0) return '--';
-        return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-    }
-
     private get _totalDebit() {
         return this.rows.reduce((sum, r) => sum + r.debit, 0);
     }
@@ -101,13 +97,13 @@ export class TrialBalance extends LitElement {
                     <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl text-center">
                         <div class="py-4">
                             <p class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Debits</p>
-                            <p class="text-2xl font-bold font-mono text-blue-400">${this._formatCents(this._totalDebit)}</p>
+                            <p class="text-2xl font-bold font-mono text-blue-400">${formatCents(this._totalDebit)}</p>
                         </div>
                     </div>
                     <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl text-center">
                         <div class="py-4">
                             <p class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Credits</p>
-                            <p class="text-2xl font-bold font-mono text-rose-400">${this._formatCents(this._totalCredit)}</p>
+                            <p class="text-2xl font-bold font-mono text-rose-400">${formatCents(this._totalCredit)}</p>
                         </div>
                     </div>
                     <div class="backdrop-blur-md bg-white/5 border ${this._isBalanced ? 'border-emerald-500/30' : 'border-red-500/30'} rounded-xl text-center">
@@ -118,7 +114,7 @@ export class TrialBalance extends LitElement {
                             </p>
                             ${!this._isBalanced ? html`
                                 <p class="text-xs text-red-400/70 mt-1 font-mono">
-                                    Diff: ${this._formatCents(Math.abs(this._totalDebit - this._totalCredit))}
+                                    Diff: ${formatCents(Math.abs(this._totalDebit - this._totalCredit))}
                                 </p>
                             ` : nothing}
                         </div>
@@ -164,8 +160,8 @@ export class TrialBalance extends LitElement {
                                                 <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                                                     <td class="px-4 py-2.5 font-mono text-emerald-400 pl-8">${row.account_code}</td>
                                                     <td class="px-4 py-2.5 text-white">${row.account_name}</td>
-                                                    <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${row.debit > 0 ? this._formatCents(row.debit) : '--'}</td>
-                                                    <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${row.credit > 0 ? this._formatCents(row.credit) : '--'}</td>
+                                                    <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${row.debit > 0 ? formatCents(row.debit) : '--'}</td>
+                                                    <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${row.credit > 0 ? formatCents(row.credit) : '--'}</td>
                                                 </tr>
                                             `)}
                                             <tr class="border-b border-white/10">
@@ -173,10 +169,10 @@ export class TrialBalance extends LitElement {
                                                     Subtotal ${TYPE_LABELS[type]}:
                                                 </td>
                                                 <td class="px-4 py-1.5 text-right font-mono text-xs text-zinc-400 border-t border-white/5">
-                                                    ${typeDebit > 0 ? this._formatCents(typeDebit) : '--'}
+                                                    ${typeDebit > 0 ? formatCents(typeDebit) : '--'}
                                                 </td>
                                                 <td class="px-4 py-1.5 text-right font-mono text-xs text-zinc-400 border-t border-white/5">
-                                                    ${typeCredit > 0 ? this._formatCents(typeCredit) : '--'}
+                                                    ${typeCredit > 0 ? formatCents(typeCredit) : '--'}
                                                 </td>
                                             </tr>
                                         `;
@@ -187,10 +183,10 @@ export class TrialBalance extends LitElement {
                                             Total
                                         </td>
                                         <td class="px-4 py-3 text-right font-mono text-lg ${this._isBalanced ? 'text-emerald-400' : 'text-red-400'}">
-                                            ${this._formatCents(this._totalDebit)}
+                                            ${formatCents(this._totalDebit)}
                                         </td>
                                         <td class="px-4 py-3 text-right font-mono text-lg ${this._isBalanced ? 'text-emerald-400' : 'text-red-400'}">
-                                            ${this._formatCents(this._totalCredit)}
+                                            ${formatCents(this._totalCredit)}
                                         </td>
                                     </tr>
                                 </tbody>

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -176,8 +177,8 @@ func (r *PostgresRepository) GetMatchLineDetails(ctx context.Context, matchResul
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan match line detail: %w", err)
 		}
-		d.POUnitCost = int64(poUnitCost*100.0 + 0.5)
-		d.InvoiceUnitPrice = int64(invoiceUnitPrice*100.0 + 0.5)
+		d.POUnitCost = money.DollarsToCents(poUnitCost)
+		d.InvoiceUnitPrice = money.DollarsToCents(invoiceUnitPrice)
 		details = append(details, d)
 	}
 	return details, nil
@@ -208,7 +209,7 @@ func (r *PostgresRepository) GetConfig(ctx context.Context) (*MatchConfig, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get match config: %w", err)
 	}
-	cfg.DollarTolerance = int64(dollarTolerance*100.0 + 0.5)
+	cfg.DollarTolerance = money.DollarsToCents(dollarTolerance)
 	return &cfg, nil
 }
 

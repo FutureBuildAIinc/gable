@@ -33,7 +33,10 @@ func (s *Service) CreateVendor(ctx context.Context, req CreateVendorRequest) (*V
 		Phone:        req.Phone,
 		PaymentTerms: "Net 30",
 	}
-	if req.PaymentTerms != nil {
+	// An explicit but empty payment_terms — what an untouched text input on an
+	// HTML form posts — must not clear the house default: AP has nothing to
+	// compute a due date from when the terms are blank.
+	if req.PaymentTerms != nil && *req.PaymentTerms != "" {
 		v.PaymentTerms = *req.PaymentTerms
 	}
 

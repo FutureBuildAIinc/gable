@@ -41,34 +41,47 @@ func (s *Service) WithSnapshotService(snapshotSvc SnapshotService) {
 }
 
 func (s *Service) CreateQuote(ctx context.Context, q *Quote) error {
-	// 1. Calculate Totals
-	var total float64
-	for i := range q.Lines {
-		line := &q.Lines[i]
-		line.LineTotal = line.Quantity * line.UnitPrice
-		total += line.LineTotal
-	}
-	// Include freight in total
-	total += q.FreightAmount
-	q.TotalAmount = total
-
-	// 2. Set Defaults
+	// 1. Set Defaults
 	if q.State == "" {
 		q.State = QuoteStateDraft
 	}
 	if q.Source == "" {
 		q.Source = "manual"
 	}
+
+	// 2. Normalize delivery, then total. Order matters: freight must be
+	//    cleared for a pickup BEFORE it is rolled into the total.
+	normalizeDeliveryAndTotal(q)
+
+	return s.repo.CreateQuote(ctx, q)
+}
+
+// normalizeDeliveryAndTotal applies the delivery-type default, clears the
+// vehicle and freight on a pickup, and only then recomputes the line totals
+// and the quote total.
+//
+// The clearing has to happen first. Adding freight to the total and zeroing
+// FreightAmount afterwards stored a quote whose freight_amount was 0 while its
+// total_amount still contained the freight: the customer was billed for
+// delivery on an order they were collecting themselves, and the total no
+// longer reconciled with its own components.
+func normalizeDeliveryAndTotal(q *Quote) {
 	if q.DeliveryType == "" {
 		q.DeliveryType = "PICKUP"
 	}
-	// Clear vehicle if pickup
 	if q.DeliveryType == "PICKUP" {
 		q.VehicleID = nil
 		q.FreightAmount = 0
 	}
 
-	return s.repo.CreateQuote(ctx, q)
+	var total float64
+	for i := range q.Lines {
+		line := &q.Lines[i]
+		line.LineTotal = line.Quantity * line.UnitPrice
+		total += line.LineTotal
+	}
+	total += q.FreightAmount
+	q.TotalAmount = total
 }
 
 func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
@@ -168,23 +181,12 @@ func (s *Service) UpdateQuote(ctx context.Context, q *Quote) error {
 		return fmt.Errorf("only DRAFT quotes can be edited")
 	}
 
-	// Recalculate totals
-	var total float64
-	for i := range q.Lines {
-		line := &q.Lines[i]
-		line.LineTotal = line.Quantity * line.UnitPrice
-		total += line.LineTotal
-	}
-	// Include freight in total
-	total += q.FreightAmount
-	q.TotalAmount = total
+	// Recalculate totals. Same normalization as CreateQuote — an edit that
+	// switches a quote to pickup must drop the freight from the total, and an
+	// edit that omits the delivery type gets the same PICKUP default a create
+	// would, rather than silently keeping freight on an unspecified quote.
+	normalizeDeliveryAndTotal(q)
 	q.State = QuoteStateDraft
-
-	// Clear vehicle if pickup
-	if q.DeliveryType == "PICKUP" {
-		q.VehicleID = nil
-		q.FreightAmount = 0
-	}
 
 	return s.repo.UpdateQuoteWithLines(ctx, q)
 }

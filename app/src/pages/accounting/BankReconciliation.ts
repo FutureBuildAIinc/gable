@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatCents } from '../../lib/utils.ts';
 import type { BankAccount, BankTransaction, ReconciliationSession } from '../../types/bankrecon';
 import {
     listBankAccounts,
@@ -167,8 +168,15 @@ export class BankReconciliation extends LitElement {
         }
     }
 
-    private _formatCents(cents: number) {
-        return `$${(Math.abs(cents) / 100).toFixed(2)}${cents < 0 ? ' DR' : ''}`;
+    /**
+     * Bank-statement notation: the amount itself is formatted by the shared
+     * `formatCents()` (so it groups thousands like every other ERP screen), and
+     * this page's own convention — a negative balance shown as a magnitude with
+     * a " DR" suffix rather than a minus sign — is applied here, at the call
+     * site, instead of forking the formatter.
+     */
+    private _formatBalance(cents: number) {
+        return cents < 0 ? `${formatCents(-cents)} DR` : formatCents(cents);
     }
 
     private _statusColor(status: string) {
@@ -218,11 +226,11 @@ export class BankReconciliation extends LitElement {
         const s = this.activeSession;
 
         const summaryItems = [
-            { label: 'Statement Balance', value: this._formatCents(s.statement_balance), color: 'text-blue-500' },
-            { label: 'GL Balance', value: this._formatCents(s.gl_balance), color: 'text-violet-500' },
-            { label: 'Cleared', value: `${s.cleared_count} items (${this._formatCents(s.cleared_total)})`, color: 'text-emerald-500' },
-            { label: 'Outstanding', value: `${s.outstanding_count} items (${this._formatCents(s.outstanding_total)})`, color: 'text-yellow-500' },
-            { label: 'Difference', value: this._formatCents(s.difference), color: s.difference === 0 ? 'text-emerald-500' : 'text-red-500' },
+            { label: 'Statement Balance', value: this._formatBalance(s.statement_balance), color: 'text-blue-500' },
+            { label: 'GL Balance', value: this._formatBalance(s.gl_balance), color: 'text-violet-500' },
+            { label: 'Cleared', value: `${s.cleared_count} items (${this._formatBalance(s.cleared_total)})`, color: 'text-emerald-500' },
+            { label: 'Outstanding', value: `${s.outstanding_count} items (${this._formatBalance(s.outstanding_total)})`, color: 'text-yellow-500' },
+            { label: 'Difference', value: this._formatBalance(s.difference), color: s.difference === 0 ? 'text-emerald-500' : 'text-red-500' },
         ];
 
         return html`
@@ -292,7 +300,7 @@ export class BankReconciliation extends LitElement {
                                             ${new Date(txn.transaction_date).toLocaleDateString()}
                                         </td>
                                         <td class="px-3 py-2.5 font-mono font-semibold ${txn.amount >= 0 ? 'text-emerald-400' : 'text-red-400'}">
-                                            ${this._formatCents(txn.amount)}
+                                            ${this._formatBalance(txn.amount)}
                                         </td>
                                         <td class="px-3 py-2.5 text-slate-300">${txn.description}</td>
                                         <td class="px-3 py-2.5 text-slate-500 text-xs font-mono">${txn.reference}</td>
@@ -426,9 +434,9 @@ export class BankReconciliation extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300">
                                             ${new Date(s.period_start).toLocaleDateString()} - ${new Date(s.period_end).toLocaleDateString()}
                                         </td>
-                                        <td class="px-3 py-2.5 text-slate-300 font-mono">${this._formatCents(s.statement_balance)}</td>
+                                        <td class="px-3 py-2.5 text-slate-300 font-mono">${this._formatBalance(s.statement_balance)}</td>
                                         <td class="px-3 py-2.5 font-mono font-semibold ${s.difference === 0 ? 'text-emerald-400' : 'text-red-400'}">
-                                            ${this._formatCents(s.difference)}
+                                            ${this._formatBalance(s.difference)}
                                         </td>
                                         <td class="px-3 py-2.5">
                                             <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${s.status === 'COMPLETED' ? '#22c55e' : '#3b82f6'}">

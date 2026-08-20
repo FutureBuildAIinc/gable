@@ -114,26 +114,24 @@ describe('formatCents', () => {
 
   describe('negative amounts (credits, refunds, overpayments)', () => {
     it('keeps the magnitude correct for negative cents', () => {
-      // Magnitude is right even though the sign placement is not (see below).
       expect(formatCents(-7388)).toContain('73.88')
       expect(formatCents(-123456)).toContain('1,234.56')
     })
 
-    it('currently emits the minus sign inside the currency symbol', () => {
-      // Characterization of today's behavior so the it.fails below is unambiguous.
-      expect(formatCents(-7388)).toBe('$-73.88')
+    // Regression: formatCents() used to build the string as `$` +
+    // Number#toLocaleString(), so a negative amount rendered "$-73.88" instead of
+    // the en-US convention "-$73.88". That reached users anywhere the ERP shows a
+    // credit: an overpaid invoice (InvoiceDetail computes
+    // `total_amount - totalPaid`), credit memos, and the Trial Balance difference
+    // row. It now formats through Intl's `style: 'currency'`, which places the
+    // sign outside the symbol.
+    it('renders negative money as -$73.88, not $-73.88', () => {
+      expect(formatCents(-7388)).toBe('-$73.88')
     })
 
-    // BUG: formatCents() builds the string as `$` + Number#toLocaleString(), so a
-    // negative amount renders "$-73.88" instead of the en-US convention "-$73.88".
-    // This reaches users anywhere the ERP shows a credit: an overpaid invoice
-    // (InvoiceDetail computes `total_amount - totalPaid`), credit memos, and the
-    // Trial Balance difference row. Fix: use
-    // Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }) instead
-    // of string-concatenating the "$", then delete `.fails` here and the
-    // characterization test above.
-    it.fails('should render negative money as -$73.88, not $-73.88', () => {
-      expect(formatCents(-7388)).toBe('-$73.88')
+    it('never renders a negative zero', () => {
+      // -0 cents is zero; "-$0.00" on a balance row reads as a real credit.
+      expect(formatCents(-0)).toBe('$0.00')
     })
   })
 })

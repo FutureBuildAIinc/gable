@@ -8,14 +8,29 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/xuri/excelize/v2"
 )
 
 // ExportCSV streams the report definition results directly to an io.Writer.
-func ExportCSV(w io.Writer, columns []ReportColumn, results []map[string]interface{}) error {
+//
+// csv.Writer buffers, so most write failures on the destination only surface
+// at Flush time. The deferred flush therefore records writer.Error() into the
+// named return: without it a failing destination (a closed HTTP connection, a
+// full disk) yields a nil error and an empty export, which the scheduled-report
+// path would happily mail out as an attachment.
+func ExportCSV(w io.Writer, columns []ReportColumn, results []map[string]interface{}) (err error) {
 	writer := csv.NewWriter(w)
-	defer writer.Flush()
+	defer func() {
+		writer.Flush()
+		if flushErr := writer.Error(); flushErr != nil && err == nil {
+			err = fmt.Errorf("failed to flush CSV: %w", flushErr)
+		}
+	}()
 
 	// Write Headers
 	headers := make([]string, len(columns))
@@ -84,7 +99,7 @@ func ExportXLSX(w io.Writer, columns []ReportColumn, results []map[string]interf
 			if err != nil {
 				return err
 			}
-			f.SetCellValue(sheetName, cell, row[col.Field])
+			f.SetCellValue(sheetName, cell, excelValue(row[col.Field]))
 		}
 	}
 
@@ -96,6 +111,19 @@ func ExportXLSX(w io.Writer, columns []ReportColumn, results []map[string]interf
 	return nil
 }
 
+// formatValue renders one cell of a report.
+//
+// The pgx cases are not decoration. BuildAndExecuteQuery reads rows with
+// pgx.Rows.Values(), which hands back the driver's own Go representation, and
+// three of those are unreadable under %v — which is what every money, id and
+// date column in entitySchemas decodes to:
+//
+//	numeric     -> pgtype.Numeric -> "{200000 -2 false finite true}"
+//	uuid        -> [16]byte       -> "[167 93 18 229 ...]"
+//	timestamptz -> time.Time      -> "2026-08-20 16:16:40.520731 -0700 PDT"
+//
+// A CSV full of those is not a report. They are rendered here as a decimal, a
+// canonical UUID and an RFC 3339 timestamp instead.
 func formatValue(val interface{}) string {
 	if val == nil {
 		return ""
@@ -111,7 +139,60 @@ func formatValue(val interface{}) string {
 		return fmt.Sprintf("%f", v)
 	case bool:
 		return strconv.FormatBool(v)
+	case pgtype.Numeric:
+		return formatNumeric(v)
+	case *pgtype.Numeric:
+		if v == nil {
+			return ""
+		}
+		return formatNumeric(*v)
+	case [16]byte:
+		return uuid.UUID(v).String()
+	case time.Time:
+		return v.Format(time.RFC3339)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// excelValue converts a pgx driver value into something excelize can write.
+//
+// It differs from formatValue on purpose: a spreadsheet cell should hold a
+// number, not the text of a number, or the recipient cannot sum a column.
+// excelize already understands the Go primitives and time.Time; the two pgx
+// representations it does not understand are converted here, and everything
+// else is passed through untouched.
+func excelValue(val interface{}) interface{} {
+	switch v := val.(type) {
+	case pgtype.Numeric:
+		if f, err := v.Float64Value(); err == nil && f.Valid {
+			return f.Float64
+		}
+		return formatNumeric(v)
+	case *pgtype.Numeric:
+		if v == nil {
+			return nil
+		}
+		return excelValue(*v)
+	case [16]byte:
+		return uuid.UUID(v).String()
+	default:
+		return val
+	}
+}
+
+// formatNumeric renders a Postgres numeric at its stored scale, so a money
+// column exports as 2000.00 rather than as either a struct dump or a float that
+// has been through binary rounding.
+func formatNumeric(n pgtype.Numeric) string {
+	if !n.Valid {
+		return ""
+	}
+	// MarshalJSON emits the numeric in its exact decimal form; the non-finite
+	// values (NaN, Infinity) come back quoted.
+	b, err := n.MarshalJSON()
+	if err != nil {
+		return ""
+	}
+	return strings.Trim(string(b), `"`)
 }

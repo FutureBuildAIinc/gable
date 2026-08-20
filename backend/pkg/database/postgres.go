@@ -80,7 +80,24 @@ func (db *DB) Close() {
 }
 
 // RunInTx executes a function within a database transaction.
-func (db *DB) RunInTx(ctx context.Context, fn func(ctx context.Context) error) error {
+//
+// The return value is NAMED, and that is load-bearing. The commit happens in the
+// deferred function, which runs after the `return` statement has already set the
+// result. With an unnamed return, `err = tx.Commit(ctx)` in the defer writes to a
+// local that nothing reads, so a failing COMMIT was reported to the caller as
+// success — every "atomic" guarantee in this repository rested on that
+// assignment being visible.
+//
+// A commit can fail for reasons the function body never sees: a deferred
+// constraint firing, serialization failure, disk or connection loss between the
+// last statement and the COMMIT. Those are exactly the cases where a caller must
+// not believe the write landed. `internal/payment` has a branch that logs
+// "gateway charged but DB commit failed" precisely for this, and it was
+// unreachable.
+//
+// Nested calls join the caller's transaction and do not commit; the outermost
+// RunInTx owns the boundary.
+func (db *DB) RunInTx(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	// Check if we are already in a transaction
 	if _, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
 		// Already in a transaction, just run the function
@@ -98,8 +115,8 @@ func (db *DB) RunInTx(ctx context.Context, fn func(ctx context.Context) error) e
 			panic(p)
 		} else if err != nil {
 			_ = tx.Rollback(ctx)
-		} else {
-			err = tx.Commit(ctx)
+		} else if cerr := tx.Commit(ctx); cerr != nil {
+			err = fmt.Errorf("failed to commit transaction: %w", cerr)
 		}
 	}()
 

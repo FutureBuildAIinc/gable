@@ -452,15 +452,32 @@ func (s *ExposureScanner) rollupQuote(ctx context.Context, quoteID uuid.UUID, t 
 	if err != nil {
 		return err
 	}
+	// The dollars have to be scoped to the same escalators the state came
+	// from. ListEscalatorsForQuote filters on is_active; the event ledger does
+	// not, so a line whose escalator was superseded by a re-send (which
+	// deactivates the old escalator without writing a CLEARED event) still has
+	// a stale FLAGGED event as its latest, and its old exposure_dollars were
+	// resurrected into every later rollup.
+	activeLines := make(map[uuid.UUID]struct{}, len(escalators))
+	for _, esc := range escalators {
+		if esc.QuoteLineID != nil {
+			activeLines[*esc.QuoteLineID] = struct{}{}
+		}
+	}
+
 	// sumLatestExposurePerLine already collapses to a single unsigned dollar
 	// total — feed it through computeRollup as a single-element slice so the
 	// pure function remains the only place that owns the math.
-	lineTotal := s.sumLatestExposurePerLine(ctx, quoteID)
+	lineTotal := s.sumLatestExposurePerLine(ctx, quoteID, activeLines)
 	worst, total := computeRollup(escalators, []float64{lineTotal})
 	return s.quoteRepo.UpdateQuoteExposure(ctx, quoteID, string(worst), total, t)
 }
 
-func (s *ExposureScanner) sumLatestExposurePerLine(ctx context.Context, quoteID uuid.UUID) float64 {
+// sumLatestExposurePerLine totals the latest exposure dollars per quote line,
+// counting only lines listed in activeLines — the lines that still carry an
+// active escalator. That keeps the dollar rollup and the state rollup derived
+// from the same set of escalators.
+func (s *ExposureScanner) sumLatestExposurePerLine(ctx context.Context, quoteID uuid.UUID, activeLines map[uuid.UUID]struct{}) float64 {
 	events, err := s.exposure.GetEventsByQuote(ctx, quoteID)
 	if err != nil {
 		return 0
@@ -473,6 +490,9 @@ func (s *ExposureScanner) sumLatestExposurePerLine(ctx context.Context, quoteID 
 	perLine := map[uuid.UUID]float64{}
 	for _, ev := range events {
 		if ev.QuoteLineID == nil || ev.ExposureDollars == nil {
+			continue
+		}
+		if _, ok := activeLines[*ev.QuoteLineID]; !ok {
 			continue
 		}
 		switch ev.EventType {

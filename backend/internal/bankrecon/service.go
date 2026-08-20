@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -105,10 +106,7 @@ func (s *Service) ImportCSV(ctx context.Context, req ImportCSVRequest) (*ImportR
 			result.SkippedRows++
 			continue
 		}
-		amountCents := int64(amountFloat*100.0 + 0.5)
-		if amountFloat < 0 {
-			amountCents = int64(amountFloat*100.0 - 0.5)
-		}
+		amountCents := money.DollarsToCents(amountFloat)
 
 		description := ""
 		if len(fields) > 2 {
@@ -170,31 +168,63 @@ func (s *Service) autoMatch(ctx context.Context, bankAccountID uuid.UUID, reconI
 	}
 
 	matched := 0
+	// A journal entry is one real posting and can clear exactly one bank
+	// line. Without consuming it, N identical bank lines all matched the SAME
+	// entry and the reconciliation reported N cleared items backed by one
+	// posting — the classic duplicate-deposit hole.
+	available := make([]gl.JournalEntry, len(entries))
+	copy(available, entries)
+
 	for i := range txns {
 		if txns[i].Status != TransactionStatusUnmatched {
 			continue
 		}
 
-		best := s.findBestMatch(txns[i], entries)
+		best := s.findBestMatch(txns[i], available)
 		if best != nil {
-			txns[i].MatchedJournalEntryID = &best.ID
+			matchedID := best.ID
+			txns[i].MatchedJournalEntryID = &matchedID
 			txns[i].Status = TransactionStatusMatched
 			if err := s.repo.UpdateBankTransaction(ctx, &txns[i]); err != nil {
+				// Nothing was recorded, so the entry stays available.
 				continue
 			}
+			available = removeEntry(available, matchedID)
 			matched++
 		}
 	}
 	return matched, nil
 }
 
-// findBestMatch finds the best GL journal entry match for a bank transaction.
-func (s *Service) findBestMatch(txn BankTransaction, entries []gl.JournalEntry) *gl.JournalEntry {
-	txnAmount := txn.Amount // cents
-	if txnAmount < 0 {
-		txnAmount = -txnAmount
+// removeEntry drops the journal entry with the given id, so a posting that has
+// already cleared a bank line cannot clear a second one.
+func removeEntry(entries []gl.JournalEntry, id uuid.UUID) []gl.JournalEntry {
+	for i := range entries {
+		if entries[i].ID == id {
+			return append(entries[:i:i], entries[i+1:]...)
+		}
 	}
+	return entries
+}
 
+// findBestMatch finds the best GL journal entry match for a bank transaction.
+//
+// Direction is part of the identity of the money. A bank line's sign says
+// which way the cash moved (positive = deposit, negative = withdrawal); a
+// journal entry's cash movement is a DEBIT to the cash account for money in.
+// Comparing absolute values let a -$500 cheque clear against a +$500 receipt,
+// silently reconciling a $1,000 discrepancy to zero, so the comparison is
+// signed here.
+//
+// Note the shape of the data this can work with: gl.ListJournalEntries returns
+// entry headers only, and every balanced entry has TotalDebit == TotalCredit,
+// so the header cannot express which side the CASH account was on. The signed
+// comparison therefore auto-clears deposits only; a withdrawal is left
+// UNMATCHED for manual matching rather than cleared against the wrong
+// posting. Auto-matching withdrawals needs the per-line cash-account
+// direction, which means widening the GL read (entry lines joined to the bank
+// account's gl_account_id) — a repository change tracked separately.
+func (s *Service) findBestMatch(txn BankTransaction, entries []gl.JournalEntry) *gl.JournalEntry {
 	for i := range entries {
 		entry := &entries[i]
 		if entry.Status != gl.StatusPosted {
@@ -207,16 +237,9 @@ func (s *Service) findBestMatch(txn BankTransaction, entries []gl.JournalEntry) 
 			continue
 		}
 
-		// Check amount match (compare absolute values)
-		entryAmount := entry.TotalDebit // Use debit total for comparison
-		if entryAmount < 0 {
-			entryAmount = -entryAmount
-		}
-		if txnAmount < 0 {
-			txnAmount = -txnAmount
-		}
-
-		if entryAmount == txnAmount {
+		// Signed amount match: the debit total is cash in, so it can only
+		// clear a deposit of exactly the same size.
+		if entry.TotalDebit == txn.Amount {
 			return entry
 		}
 	}
@@ -277,7 +300,11 @@ func (s *Service) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		return nil, fmt.Errorf("invalid period_end: %w", err)
 	}
 
-	stmtBalanceCents := int64(req.StatementBalance*100.0 + 0.5)
+	// An overdrawn account has a negative statement balance. The old
+	// `money.DollarsToCents(x)` form rounds toward zero for negatives, so
+	// -$100.00 opened the session at -9999 cents — one cent light, and the
+	// whole reconciliation then fails to tie out.
+	stmtBalanceCents := money.DollarsToCents(req.StatementBalance)
 
 	session := &ReconciliationSession{
 		BankAccountID:    req.BankAccountID,

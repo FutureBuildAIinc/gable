@@ -43,7 +43,12 @@ export interface ReportSchedule {
   report_id: string;
   cron_expression: string;
   recipients: string[];
-  /** 'STORED' = persisted but nothing executes it; 'ACTIVE' = a runner is attached. */
+  /**
+   * 'ACTIVE' = a runner is attached and this schedule is registered with it.
+   * 'STORED' = persisted but nothing executes it — what rows created before
+   * scheduled delivery was implemented carry. Those are not started
+   * retroactively; recreating the schedule writes it ACTIVE.
+   */
   status: string;
   format: ReportScheduleFormat;
   last_run_at?: string;
@@ -53,18 +58,29 @@ export interface ReportSchedule {
 }
 
 /**
- * Whether stored schedules actually run, as reported by the backend.
+ * Whether stored schedules actually run, as reported by the backend, and what
+ * "run" means there.
  *
- * This is not decoration. The server currently has no working scheduled-report
- * runner, so a saved schedule never fires. Every schedule response carries this
- * block and the UI is expected to show it — an operator who configures "AR
- * aging to the controller every Monday" and sees only a success toast would
- * reasonably assume it is happening.
+ * This is not decoration, and it is not a constant either — the server derives
+ * every field from what it actually has wired. Do not hard-code the answer in
+ * the UI: an operator who configures "AR aging to the controller every Monday"
+ * and sees only a success toast would reasonably assume it is happening, and
+ * that assumption has to be checked against the server on every response.
  */
 export interface ScheduleExecution {
   enabled: boolean;
   summary: string;
   blockers?: string[];
+  /**
+   * What becomes of a generated report, in the server's own words. Present only
+   * when `enabled`.
+   *
+   * "The schedule runs" and "the report was emailed" are different claims. The
+   * default deployment's email service is log-only, so a run really does query
+   * the data and render a real CSV, but the message is written to the server
+   * log rather than sent. Show this wherever `enabled` is shown.
+   */
+  delivery?: string;
   /** The cron grammar POST accepts. Six fields, seconds first. */
   cron_dialect: string;
 }

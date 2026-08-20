@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -50,10 +51,10 @@ func (s *Service) CreateVendorInvoice(ctx context.Context, req CreateVendorInvoi
 	// Calculate subtotal from lines
 	var subtotalCents int64
 	for _, line := range req.Lines {
-		lineTotalCents := int64(line.UnitPrice*line.Quantity*100.0 + 0.5)
+		lineTotalCents := money.DollarsToCents(line.UnitPrice * line.Quantity)
 		subtotalCents += lineTotalCents
 	}
-	taxCents := int64(req.TaxAmount*100.0 + 0.5)
+	taxCents := money.DollarsToCents(req.TaxAmount)
 	totalCents := subtotalCents + taxCents
 
 	var inv *VendorInvoice
@@ -78,8 +79,8 @@ func (s *Service) CreateVendorInvoice(ctx context.Context, req CreateVendorInvoi
 
 		// Add line items
 		for _, lineReq := range req.Lines {
-			unitPriceCents := int64(lineReq.UnitPrice*100.0 + 0.5)
-			lineTotalCents := int64(lineReq.UnitPrice*lineReq.Quantity*100.0 + 0.5)
+			unitPriceCents := money.DollarsToCents(lineReq.UnitPrice)
+			lineTotalCents := money.DollarsToCents(lineReq.UnitPrice * lineReq.Quantity)
 
 			line := &VendorInvoiceLine{
 				InvoiceID:   inv.ID,
@@ -164,7 +165,7 @@ func (s *Service) PayVendor(ctx context.Context, req CreateAPPaymentRequest) (*A
 		return nil, fmt.Errorf("invalid payment_date: %w", err)
 	}
 
-	amountCents := int64(req.Amount*100.0 + 0.5)
+	amountCents := money.DollarsToCents(req.Amount)
 
 	var pmt *APPayment
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {

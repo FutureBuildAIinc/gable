@@ -10,7 +10,7 @@ import (
 	"github.com/gablelbm/gable/pkg/middleware"
 )
 
-// wireReportSchedules registers the ad-hoc report builder surface, which now
+// wireReportSchedules registers the ad-hoc report builder surface, which
 // includes the scheduled-report CRUD routes:
 //
 //	POST   /api/v1/reporting/schedules
@@ -18,51 +18,40 @@ import (
 //	DELETE /api/v1/reporting/schedules/{id}
 //	POST   /api/v1/reporting/saved/{id}/run
 //
-// It is exactly equivalent to the RegisterBuilderRoutes call main.go already
-// makes, because the four new routes were added to that method. main.go
-// therefore needs NO change for these endpoints to be served; this function
-// exists so the schedule wiring, its role guard and the scheduler decision
-// below have one obvious home, and so wire_schedules_test.go can pin the
-// surface without importing main's initializer.
+// and attaches the executor that runs stored schedules.
 //
-// # THE CRON SCHEDULER IS DELIBERATELY NOT STARTED
+// # The executor is the single switch
 //
-// reporting.Scheduler is NOT constructed here and NOT started. Schedules are
-// created, listed and deleted; nothing executes them. Three things block
-// execution, and all three must be fixed together — closing any one alone
-// still yields a scheduler that fails silently on a timer:
+// reporting.Handler.WithScheduleExecutor is the ONLY thing that makes the
+// schedule endpoints report execution.enabled = true and write new schedules
+// with status ACTIVE, and the handler derives both from whether an executor is
+// present rather than from a constant. So passing a live *reporting.Scheduler
+// here is what flips the API's account of itself, and passing nil is what
+// restores the honest "saved but never run" disclosure. The claim and the
+// reality are the same fact read twice; they cannot drift.
 //
-//  1. Scheduler.ExecuteAndSendReport declares `var def ReportDefinition` and
-//     never populates it from the saved report's DefinitionJSON, so every run
-//     executes an empty definition and dies at "no columns selected".
-//     reporting.definitionFromSaved — the decode the working
-//     POST /api/v1/reporting/saved/{id}/run endpoint performs — is what it is
-//     missing.
-//  2. No reporting.EmailSender implementation exists anywhere in this
-//     repository. notification.LogEmailService has SendInvoice and
-//     SendDeliveryNotification, not SendEmailWithAttachment; the only
-//     implementer is a test fake, and there is no SMTP configuration either.
-//  3. NewScheduler uses cron.WithSeconds(), so expressions need six fields.
-//     The API now rejects five-field crontab strings up front via
-//     reporting.ValidateCronExpression rather than storing schedules that
-//     could never register, and advertises the dialect on the read path.
+// main.go passes a scheduler. A composition that wants the routes without a
+// runner — a read-only replica, a test — passes nil and gets an API that says
+// so on every response.
 //
-// Starting a scheduler in that state would schedule guaranteed failures and
-// log them where nobody looks, while the UI showed "ACTIVE". So the API tells
-// the truth instead: schedules are persisted with status STORED, and every
-// schedule response carries an `execution` block with enabled=false and the
-// blocker list above (reporting.ScheduleExecution).
+// # What execution actually means
 //
-// TO ENABLE EXECUTION once all three are closed, add to this function:
+// A run decodes the saved report's definition_json, queries Postgres and
+// renders the result to CSV (or XLSX). Delivery then goes to whatever
+// notification.EmailService main.go wired, which today is the log-only
+// LogEmailService — so the report is really generated and the send is really
+// recorded, but nothing leaves the process. That distinction is published, not
+// buried: the executor describes itself through reporting.DeliveryDescriber and
+// the description travels on every schedule response as execution.delivery.
 //
-//	sched := reporting.NewScheduler(reportingSvc, emailSender)
-//	h = h.WithScheduleExecutor(sched)
-//	if err := sched.Start(ctx); err != nil { ... }
-//
-// WithScheduleExecutor is the single switch that flips execution.enabled to
-// true and makes new schedules ACTIVE, so the API's claim about itself and the
-// runtime reality cannot drift apart.
-func wireReportSchedules(mux *http.ServeMux, h *reporting.Handler) {
+// Note also the cron dialect: expressions need SIX fields, seconds first. The
+// API rejects five-field crontab strings up front via
+// reporting.ValidateCronExpression rather than storing schedules the engine
+// would refuse, and advertises the dialect on the read path.
+func wireReportSchedules(mux *http.ServeMux, h *reporting.Handler, executor reporting.ScheduleExecutor) {
+	if executor != nil {
+		h = h.WithScheduleExecutor(executor)
+	}
 	h.RegisterBuilderRoutes(mux, reportScheduleGuard())
 }
 

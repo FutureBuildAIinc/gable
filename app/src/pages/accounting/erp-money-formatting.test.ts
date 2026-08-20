@@ -5,20 +5,20 @@
  * ERP money rendering outside `formatCents()`.
  *
  * CLAUDE.md is unambiguous: "When rendering money on **ERP pages**, use
- * `formatCents()` from `app/src/lib/utils.ts`". Five pages do not — each
- * carries its own private `_formatCents`, and no two of the five agree:
+ * `formatCents()` from `app/src/lib/utils.ts`". Five pages used not to — each
+ * carried its own private `_formatCents`, and no two of the five agreed:
  *
- *   lib/utils.ts:17                     `$` + toLocaleString(undefined, {min:2, max:2})
- *   accounting/TrialBalance.ts:54       `--` at zero, then toLocaleString('en-US', {min:2})
- *   accounting/JournalEntries.ts:144    toLocaleString('en-US', {min:2})
- *   accounting/BankReconciliation.ts:170 abs()/100 .toFixed(2) + " DR" when negative
- *   accounting/POMatching.ts:74         (cents/100).toFixed(2)
- *   purchasing/PurchaseOrderDetail.ts:162 (cents/100).toFixed(2)
+ *   accounting/TrialBalance.ts          `--` at zero, then toLocaleString('en-US', {min:2})
+ *   accounting/JournalEntries.ts        toLocaleString('en-US', {min:2})
+ *   accounting/BankReconciliation.ts    abs()/100 .toFixed(2) + " DR" when negative
+ *   accounting/POMatching.ts            (cents/100).toFixed(2)
+ *   purchasing/PurchaseOrderDetail.ts   (cents/100).toFixed(2)
  *
- * The `.toFixed(2)` three drop thousands separators entirely, so a six-figure
- * freight allocation renders `$123456.78`. These tests are the record of that
- * divergence: what each page renders today, and — pinned with `it.fails` — what
- * the documented convention says it should render.
+ * The `.toFixed(2)` three dropped thousands separators entirely, so a six-figure
+ * freight allocation rendered `$123456.78`. All five now delegate to the shared
+ * helper; the only page-specific behaviour left is expressed at its call site
+ * (BankReconciliation's " DR" suffix, TrialBalance's `--` for an empty side of
+ * the ledger). These tests are the record of that consolidation.
  *
  * Every page here loads through `fetchWithAuth`, so stubbing `fetch` drives all
  * four from one place.
@@ -116,16 +116,15 @@ describe('trial balance', () => {
     expect(text(el)).not.toContain('Diff:')
   })
 
-  // BUG (app/src/pages/accounting/TrialBalance.ts:54-57): the private formatter
-  // short-circuits `cents === 0` to "--" *inside* the helper, not at the call
+  // Regression (app/src/pages/accounting/TrialBalance.ts): the private formatter
+  // short-circuited `cents === 0` to "--" *inside* the helper, not at the call
   // site. The table cells already guard with `row.debit > 0 ? … : '--'`, so the
-  // only place this branch actually fires is the three summary cards at the top
-  // of the page: a ledger with no postings shows "Total Debits --" instead of
+  // only place that branch actually fired was the three summary cards at the top
+  // of the page: a ledger with no postings showed "Total Debits --" instead of
   // "Total Debits $0.00". A dash there reads as "not loaded", which is a
-  // different (and more alarming) statement than "zero".
-  // Fix: drop the zero case from the helper; the call sites that want a dash
-  // already ask for one.
-  it.fails('should render a zero total as $0.00, not as a dash', async () => {
+  // different (and more alarming) statement than "zero". The page now uses the
+  // shared `formatCents()`; the call sites that want a dash still ask for one.
+  it('renders a zero total as $0.00, not as a dash', async () => {
     serve({ '/gl/trial-balance': [] as TrialBalanceRow[] })
     const el = await mountAsync<LitElement>('gable-trial-balance')
 
@@ -251,14 +250,15 @@ describe('bank reconciliation', () => {
     serve({ '/bankrecon/sessions': [session(1_234_567, 0)], '/bankrecon/accounts': [] })
     const el = await mountAsync<LitElement>('gable-bank-reconciliation')
 
-    expect(text(el)).toContain('12345.67')
-    expect(text(el)).not.toContain('1234567.00')
+    expect(text(el)).toContain('$12,345.67')
+    expect(text(el)).not.toContain('$1,234,567.00')
   })
 
   it('marks a negative difference "DR" and drops the minus sign', async () => {
-    // Characterization: this copy alone uses debit/credit notation instead of a
-    // sign, so -$500.00 reads "$500.00 DR" here and "$-500.00" everywhere else
-    // in the ERP.
+    // This page uses debit/credit notation instead of a sign, so -$500.00 reads
+    // "$500.00 DR" here and "-$500.00" everywhere else in the ERP. The notation
+    // lives at the call site (`_formatBalance`); the digits come from the shared
+    // `formatCents()`.
     serve({ '/bankrecon/sessions': [session(1_234_567, -50_000)], '/bankrecon/accounts': [] })
     const el = await mountAsync<LitElement>('gable-bank-reconciliation')
 
@@ -274,18 +274,17 @@ describe('bank reconciliation', () => {
     expect(diff.every((a) => !a.endsWith('DR'))).toBe(true)
   })
 
-  // BUG (app/src/pages/accounting/BankReconciliation.ts:170-171): `.toFixed(2)`
-  // with no locale formatting, so a bank balance renders "$12345.67" with no
-  // thousands separator — on the one screen whose entire job is comparing two
-  // large numbers digit by digit. CLAUDE.md says ERP pages must use
-  // `formatCents()`, which groups.
-  // Fix: replace the private helper with `formatCents()` from lib/utils.ts and
-  // keep the DR suffix (or drop it in favour of a signed amount) at the call site.
-  it.fails('should group thousands on a bank balance', async () => {
+  // Regression (app/src/pages/accounting/BankReconciliation.ts): the private
+  // helper used `.toFixed(2)` with no locale formatting, so a bank balance
+  // rendered "$12345.67" with no thousands separator — on the one screen whose
+  // entire job is comparing two large numbers digit by digit. CLAUDE.md says ERP
+  // pages must use `formatCents()`, which groups.
+  it('groups thousands on a bank balance', async () => {
     serve({ '/bankrecon/sessions': [session(1_234_567, 0)], '/bankrecon/accounts': [] })
     const el = await mountAsync<LitElement>('gable-bank-reconciliation')
 
     expect(text(el)).toContain('$12,345.67')
+    expect(text(el)).not.toContain('$12345.67')
   })
 })
 
@@ -332,30 +331,34 @@ describe('PO matching', () => {
     return calls
   }
 
-  it('currently multiplies the typed tolerance by 100 before sending it', async () => {
-    // Characterization of today's behaviour, so the it.fails below is unambiguous.
-    expect(await saveTolerance('73.88')).toContainEqual({ dollar_tolerance: 7388 })
+  // Regression (app/src/pages/accounting/POMatching.ts): the change handler used
+  // to send `Math.round(dollars * 100)` — cents — but the endpoint takes DOLLARS.
+  // `matching/model.go` declares `DollarTolerance *float64 // dollars, converted
+  // to cents` on `UpdateMatchConfigRequest`, and `matching/service.go` applies it
+  // with `money.DollarsToCents(*req.DollarTolerance)`. The value was therefore
+  // scaled by 100 twice: a tolerance typed as $73.88 was stored as 7,388 dollars
+  // = 738,800 cents.
+  //
+  // This is not cosmetic. `dollar_tolerance` is the absolute-dollar floor beside
+  // the percentage check in the three-way match (`matching/service.go`,
+  // `if !priceOK && abs64(lineAmountDiffCents(detail)) <= cfg.DollarTolerance`):
+  // a tolerance 100x too large makes PO matching wave through the vendor
+  // overbilling it exists to catch, and (with auto-approve on) post it. The round
+  // trip was visibly wrong too — after saving, the field re-read as "7388.00".
+  //
+  // The read side keeps its `/100`, which is correct: the GET returns int64 cents
+  // (`MatchConfig.DollarTolerance int64 // cents`).
+  it('sends the tolerance in the dollars the API documents', async () => {
+    expect(await saveTolerance('73.88')).toContainEqual({ dollar_tolerance: 73.88 })
   })
 
-  // BUG (app/src/pages/accounting/POMatching.ts:160): the change handler sends
-  // `Math.round(dollars * 100)` — cents — but the endpoint takes DOLLARS.
-  // `matching/model.go:70` declares `DollarTolerance *float64 // dollars,
-  // converted to cents` and `matching/service.go:254` does
-  // `int64(*req.DollarTolerance*100.0 + 0.5)`. The value is therefore scaled by
-  // 100 twice: a tolerance typed as $73.88 is stored as 738,800 cents —
-  // $7,388.00.
-  //
-  // This is not cosmetic. `dollar_tolerance` is the absolute-dollar escape
-  // hatch in the three-way match (`matching/service.go:147`,
-  // `if priceDiffCents <= cfg.DollarTolerance`): a tolerance 100x too large
-  // makes PO matching wave through vendor overbilling it exists to catch, and
-  // (with auto-approve on) post it. The round trip is visibly wrong too — after
-  // saving, the field re-reads as "7388.00".
-  //
-  // Fix: send the dollar figure the backend documents —
-  // `this._handleUpdateConfig('dollar_tolerance', parseFloat(value))` — and keep
-  // the `/100` on the read side, which is correct (the GET returns int64 cents).
-  it.fails('should send the tolerance in the dollars the API documents', async () => {
-    expect(await saveTolerance('73.88')).toContainEqual({ dollar_tolerance: 73.88 })
+  it('round-trips the tolerance the backend would store', async () => {
+    // What the backend does with what we send: money.DollarsToCents(73.88) =
+    // 7388 cents, which the read side renders back as "73.88". Sending cents
+    // instead re-read as "7388.00" — the visible symptom of the double scale.
+    const [sent] = await saveTolerance('73.88')
+    const storedCents = Math.round((sent.dollar_tolerance as number) * 100)
+    expect(storedCents).toBe(7388)
+    expect((storedCents / 100).toFixed(2)).toBe('73.88')
   })
 })

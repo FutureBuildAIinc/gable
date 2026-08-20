@@ -20,7 +20,8 @@ export interface FetchWithAuthOptions extends Omit<RequestInit, 'signal'> {
  * Fetch wrapper that automatically:
  * - Injects Bearer auth token from localStorage
  * - Applies request timeout via AbortController
- * - Retries on network errors (not on HTTP error status codes)
+ * - Retries on network errors (not on HTTP error status codes, not on a 401,
+ *   and not on an abort — whether the caller's or this wrapper's own timeout)
  */
 export async function fetchWithAuth(
   url: string,
@@ -70,34 +71,20 @@ export async function fetchWithAuth(
       externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
     }
 
+    // Only the transport call belongs in the try: the retry policy below is for
+    // network failures, so anything this wrapper throws *about a response it
+    // successfully received* (the 401 interceptor) has to be raised after the
+    // catch, or the generic handler treats an expired session as transient and
+    // re-issues the request.
+    let response: Response;
     try {
-      const response = await fetch(url, {
+      response = await fetch(url, {
         ...fetchOpts,
         headers,
         credentials: 'include',
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-
-      // 401 Interceptor: clear auth state, redirect to login, and throw
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('portal_token');
-        localStorage.removeItem('portal_user');
-        localStorage.removeItem('portal_config');
-
-        const path = window.location.pathname;
-        // Redirect to the appropriate login page based on the current surface
-        if (path.startsWith('/portal') && !path.endsWith('/login')) {
-          window.location.href = '/portal/login';
-        } else if (!path.startsWith('/portal') && !path.endsWith('/login')) {
-          window.location.href = '/login';
-        }
-
-        throw new Error('Session expired');
-      }
-
-      return response;
     } catch (err) {
       clearTimeout(timeoutId);
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -107,11 +94,43 @@ export async function fetchWithAuth(
         throw lastError;
       }
 
-      // Retry on network errors, not on intentional aborts from timeout
-      if (attempt < retries && lastError.name !== 'AbortError') {
+      // Don't retry an abort we raised ourselves: the request already had its
+      // full timeout budget, so a second attempt just doubles the caller's wait
+      // and hits an endpoint we already know is not answering in time.
+      if (lastError.name === 'AbortError') {
+        throw lastError;
+      }
+
+      // Retry on network errors only.
+      if (attempt < retries) {
         await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
       }
+      continue;
     }
+
+    // 401 Interceptor: clear auth state, redirect to login, and throw. Outside
+    // the try on purpose — an expired session is a terminal answer from the
+    // server, not a transient failure, and retrying it would run the
+    // localStorage-clear + redirect twice and double-write any non-idempotent
+    // request (e.g. POST /workflow/plans/{id}/push) the caller wrapped.
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('portal_token');
+      localStorage.removeItem('portal_user');
+      localStorage.removeItem('portal_config');
+
+      const path = window.location.pathname;
+      // Redirect to the appropriate login page based on the current surface
+      if (path.startsWith('/portal') && !path.endsWith('/login')) {
+        window.location.href = '/portal/login';
+      } else if (!path.startsWith('/portal') && !path.endsWith('/login')) {
+        window.location.href = '/login';
+      }
+
+      throw new Error('Session expired');
+    }
+
+    return response;
   }
 
   throw lastError!;

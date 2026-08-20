@@ -154,6 +154,14 @@ export class GableApp extends LitElement {
       '/yard/inventory': 'gable-yard-inventory-lookup',
       '/yard/count': 'gable-cycle-count',
       '/yard/receiving': 'gable-receive-po',
+      // Price exposure (lumber index protection).
+      '/quotes/exposure': 'gable-quote-exposure',
+      '/reports/exposure': 'gable-exposure-report',
+      '/admin/market-indices': 'gable-market-indices',
+      // Accounting surfaces.
+      '/accounting/accounts-payable': 'gable-accounts-payable',
+      '/accounting/balance-sheet': 'gable-balance-sheet',
+      '/accounting/profit-and-loss': 'gable-profit-and-loss',
     };
 
     return tagMap[path] || 'gable-not-found';

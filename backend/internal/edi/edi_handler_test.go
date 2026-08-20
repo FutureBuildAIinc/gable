@@ -176,28 +176,84 @@ func TestTradingPartnerJSON_FieldNames(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. ImportCatalog files the wrong SKU as the vendor SKU.
+// CORRECTNESS: ImportCatalog must file the PARTNER's SKU as the vendor SKU.
 // SupplierCatalogEntry carries both SKU (ours) and VendorSKU (theirs), and the
 // CatalogEntry it is mapped into stores the partner's SKU so a vendor invoice
-// or 855 acknowledgement can be matched back. The mapping copies item.SKU —
-// our internal code — into CatalogEntry.VendorSKU on BOTH the CSV and the X12
-// path, so the partner's own identifier is discarded.
+// or 855 acknowledgement can be matched back. Copying item.SKU — our internal
+// code — into CatalogEntry.VendorSKU discards the partner's own identifier.
+// MinOrderQty and PackQty must survive the mapping on both the CSV and the X12
+// source; the X12 branch used to drop them.
 //
-// backend/internal/edi/edi_handler.go:186 (CSV) and edi_handler.go:202 (X12) —
-//
-//	entries = append(entries, CatalogEntry{
-//	    VendorSKU: item.SKU,   // should be item.VendorSKU
-//
-// Compounding it, the X12 branch also drops MinOrderQty and PackQty, which the
-// CSV branch does carry.
-//
-// This test body is intentionally empty: the mapping lives inside a handler
-// that calls a concrete *EDIRepository, so it cannot be driven without
-// Postgres. The parser half of the evidence is asserted in
+// The persistence path needs Postgres, so the mapping itself is exercised
+// through toCatalogEntries, the pure function the handler now delegates to.
+// The parser half of the evidence is asserted in
 // TestParseCSVCatalog_HeaderDrivenMapping, which shows SKU and VendorSKU are
 // distinct values by the time the handler sees them.
-func TestImportCatalog_FilesTheInternalSKUAsTheVendorSKU(t *testing.T) {
-	t.Skip("KNOWN BUG: edi/edi_handler.go:186 and :202 copy item.SKU into CatalogEntry.VendorSKU, discarding the trading partner's own identifier")
+func TestToCatalogEntries_FilesThePartnerSKUAsTheVendorSKU(t *testing.T) {
+	got := toCatalogEntries([]SupplierCatalogEntry{{
+		VendorName:  "ACME",
+		SKU:         "2X4-8",  // ours
+		VendorSKU:   "AL-2X4", // theirs
+		Description: "2x4-8 SPF Stud",
+		UnitPrice:   4.75,
+		UOM:         "EA",
+		MinOrderQty: 10,
+		PackSize:    294,
+	}})
+
+	if len(got) != 1 {
+		t.Fatalf("mapped %d entries, want 1", len(got))
+	}
+	e := got[0]
+	if e.VendorSKU != "AL-2X4" {
+		t.Errorf("VendorSKU = %q, want the trading partner's own identifier AL-2X4", e.VendorSKU)
+	}
+	if e.Description != "2x4-8 SPF Stud" {
+		t.Errorf("Description = %q", e.Description)
+	}
+	if e.UnitCost != 4.75 {
+		t.Errorf("UnitCost = %v, want 4.75", e.UnitCost)
+	}
+	if e.UOM != "EA" {
+		t.Errorf("UOM = %q, want EA", e.UOM)
+	}
+	if e.MinOrderQty != 10 {
+		t.Errorf("MinOrderQty = %v, want 10", e.MinOrderQty)
+	}
+	if e.PackQty != 294 {
+		t.Errorf("PackQty = %v, want 294", e.PackQty)
+	}
+}
+
+// CORRECTNESS: the same mapping is used for both upload formats, so an 832 and
+// a CSV describing the same item must persist the same row. The X12 branch
+// previously had its own copy that dropped MinOrderQty and PackQty.
+func TestImportCatalog_X12AndCSVMapIdentically(t *testing.T) {
+	bg := newBG()
+
+	x12Items, err := bg.Parse832Catalog("N1*SU*ACME~LIN*1*VP*AL-2X4*SK*2X4-8~PID*F****2x4-8 SPF Stud~CTP*RS*RES*4.75*1*EA~")
+	if err != nil {
+		t.Fatalf("Parse832Catalog: %v", err)
+	}
+	csvItems, err := bg.ParseCSVCatalog(
+		"vendor_sku,sku,description,unit_price,uom\nAL-2X4,2X4-8,2x4-8 SPF Stud,4.75,EA\n", "ACME")
+	if err != nil {
+		t.Fatalf("ParseCSVCatalog: %v", err)
+	}
+
+	fromX12, fromCSV := toCatalogEntries(x12Items), toCatalogEntries(csvItems)
+	if len(fromX12) != 1 || len(fromCSV) != 1 {
+		t.Fatalf("mapped %d X12 and %d CSV entries, want 1 each", len(fromX12), len(fromCSV))
+	}
+	if fromX12[0] != fromCSV[0] {
+		t.Errorf("the two upload formats produced different rows:\n x12: %+v\n csv: %+v", fromX12[0], fromCSV[0])
+	}
+	if fromX12[0].VendorSKU != "AL-2X4" {
+		t.Errorf("VendorSKU = %q, want AL-2X4", fromX12[0].VendorSKU)
+	}
+	if fromX12[0].MinOrderQty != 1 || fromX12[0].PackQty != 1 {
+		t.Errorf("MinOrderQty=%v PackQty=%v, want the parser defaults of 1", fromX12[0].MinOrderQty, fromX12[0].PackQty)
+	}
 }
 
 // TestEDIRepository_IsNotUnitTestable documents a testability gap rather than

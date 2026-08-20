@@ -85,12 +85,32 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 // ---------- location endpoints ----------
 
+// createLocationRequest is the create payload. It exists only so that "active"
+// can be told apart from "active": false: Location.Active is a plain bool whose
+// zero value is the same as an explicit false, which is why the default has to
+// be resolved here, at the JSON boundary, rather than in the service. The outer
+// *bool shadows the embedded Location.Active during decoding because
+// encoding/json prefers the shallower field of the same name.
+type createLocationRequest struct {
+	Location
+	Active *bool `json:"active"`
+}
+
+// resolve returns the location to persist, defaulting active to true when the
+// caller did not mention it and honouring an explicit false when they did.
+func (req createLocationRequest) resolve() Location {
+	loc := req.Location
+	loc.Active = req.Active == nil || *req.Active
+	return loc
+}
+
 func (h *Handler) CreateLocation(w http.ResponseWriter, r *http.Request) {
-	var loc Location
-	if err := json.NewDecoder(r.Body).Decode(&loc); err != nil {
+	var req createLocationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "Invalid input", http.StatusBadRequest, err)
 		return
 	}
+	loc := req.resolve()
 	if err := h.service.CreateLocation(r.Context(), &loc); err != nil {
 		httputil.RespondError(w, r, "failed to create location", http.StatusBadRequest, err)
 		return
@@ -178,11 +198,12 @@ func (h *Handler) ListBranches(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateBranch(w http.ResponseWriter, r *http.Request) {
-	var loc Location
-	if err := json.NewDecoder(r.Body).Decode(&loc); err != nil {
+	var req createLocationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "invalid input", http.StatusBadRequest, err)
 		return
 	}
+	loc := req.resolve()
 	loc.Type = LocTypeBranch
 	loc.ParentID = nil
 	if err := h.service.CreateLocation(r.Context(), &loc); err != nil {

@@ -5,14 +5,21 @@
  * Saved Reports — the surface where an operator schedules a report for
  * recurring delivery.
  *
- * The thing worth testing here is not the form. It is the disclosure. Nothing
- * in this deployment executes a stored schedule: the backend has no working
- * scheduled-report runner and no email sender, and it says so in every schedule
- * response via `execution.enabled = false`. A UI that took the 201 at face
- * value and showed "Scheduled!" would leave a controller waiting for a report
- * that is never sent, and there is no error anywhere to discover it from.
+ * The thing worth testing here is not the form. It is the disclosure. The
+ * backend states, on every schedule response, whether anything executes stored
+ * schedules (`execution.enabled`) and what becomes of a report once it has run
+ * (`execution.delivery`), and it derives both from what it actually has wired.
+ * A UI that took the 201 at face value and showed "Scheduled!" would leave a
+ * controller waiting for a report that is never sent, and there is no error
+ * anywhere to discover it from.
  *
- * So: the notice must render, and the success message must not claim delivery.
+ * So both states are exercised here, and neither is assumed:
+ *
+ *   - execution disabled → the amber notice with its blockers must render, and
+ *     the success message must not claim delivery.
+ *   - execution enabled  → that notice must go away by itself, and the delivery
+ *     notice must appear, because "the schedule runs" is not the same claim as
+ *     "the report was emailed" — the shipped email service is log-only.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './SavedReports'
@@ -33,19 +40,21 @@ const SAVED_REPORTS = [
   },
 ]
 
+// Both fixtures mirror what internal/reporting emits, so a change to the
+// server's wording shows up here rather than being quietly reinterpreted.
 const EXECUTION_DISABLED = {
   enabled: false,
-  summary: 'Schedules are saved but never run: scheduled report delivery is not enabled in this deployment.',
+  summary: 'Schedules are saved but never run: no scheduled-report executor is attached in this deployment.',
   blockers: [
-    'reporting.Scheduler is not wired into the server; nothing loads or fires schedules.',
-    'No EmailSender implementation exists, so a generated report has nowhere to be delivered.',
+    'No reporting.Scheduler is attached to the schedule handler, so nothing loads or fires stored schedules.',
   ],
   cron_dialect: 'Six fields, seconds first (e.g. "0 0 9 * * *").',
 }
 
 const EXECUTION_ENABLED = {
   enabled: true,
-  summary: 'Schedules run on the server\'s cron engine and are emailed to their recipients.',
+  summary: 'Schedules run on the server\'s cron engine: each run executes the saved report and renders it to CSV.',
+  delivery: 'Email is log-only in this deployment: the report is generated and handed to notification.LogEmailService, which records it in the server log instead of sending.',
   cron_dialect: 'Six fields, seconds first (e.g. "0 0 9 * * *").',
 }
 
@@ -117,8 +126,10 @@ describe('SavedReports: schedules that do not run say so', () => {
     const notice = el.querySelector('[data-testid="schedule-execution-notice"]')
     expect(notice).not.toBeNull()
     expect(notice!.textContent).toContain('never run')
-    // The reasons, not just a vague warning.
-    expect(notice!.textContent).toContain('No EmailSender implementation exists')
+    // The reason, not just a vague warning.
+    expect(notice!.textContent).toContain('nothing loads or fires stored schedules')
+    // And no claim about delivery, since nothing is delivered.
+    expect(el.querySelector('[data-testid="schedule-delivery-notice"]')).toBeNull()
   })
 
   it('does not claim the report will be delivered after saving a schedule', async () => {
@@ -134,7 +145,7 @@ describe('SavedReports: schedules that do not run say so', () => {
     expect(message).not.toMatch(/^Schedule created and registered/)
   })
 
-  it('hides the notice and confirms registration when delivery IS enabled', async () => {
+  it('hides the notice and confirms registration when execution IS enabled', async () => {
     const toast = vi.spyOn(ToastService, 'show').mockImplementation(() => {})
     const { el } = await openScheduleModal(EXECUTION_ENABLED)
 
@@ -142,6 +153,30 @@ describe('SavedReports: schedules that do not run say so', () => {
 
     await fillAndSubmit(el)
     expect(String(toast.mock.calls.at(-1)?.[0] ?? '')).toContain('registered')
+  })
+
+  // The second half of the disclosure. A running scheduler produces a real
+  // report; the shipped email service then logs it instead of sending it.
+  // Reporting only the first half would be a subtler version of the same lie.
+  it('still says how the report is delivered when execution is enabled', async () => {
+    const { el } = await openScheduleModal(EXECUTION_ENABLED)
+
+    const notice = el.querySelector('[data-testid="schedule-delivery-notice"]')
+    expect(notice).not.toBeNull()
+    expect(notice!.textContent).toContain('log-only')
+  })
+
+  // The UI must not invent a delivery claim the server did not make. A server
+  // wired to a real sender says nothing here, and neither should the UI.
+  it('says nothing about delivery when the server does not', async () => {
+    const { el } = await openScheduleModal({
+      enabled: true,
+      summary: 'Schedules run on the server\'s cron engine.',
+      cron_dialect: 'Six fields, seconds first (e.g. "0 0 9 * * *").',
+    })
+
+    expect(el.querySelector('[data-testid="schedule-delivery-notice"]')).toBeNull()
+    expect(el.querySelector('[data-testid="schedule-execution-notice"]')).toBeNull()
   })
 })
 

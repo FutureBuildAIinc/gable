@@ -12,6 +12,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -45,17 +46,29 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 	}
 
 	// C3: Calculate tax if not already set
+	callerSuppliedSubtotal := inv.Subtotal != 0
 	if inv.Subtotal == 0 {
 		var subtotal int64
 		for _, line := range inv.Lines {
-			subtotal += int64(float64(line.PriceEach) * line.Quantity)
+			// Round, never truncate: 100 cents x 8.29 is exactly 829 in
+			// decimal but 828.99999999999989 in float64, and a truncating
+			// cast would drop a whole cent. order/service.go rounds the same
+			// extension, so truncating here made an order and the invoice
+			// generated from it disagree on the same line.
+			subtotal += money.RoundToCents(float64(line.PriceEach) * line.Quantity)
 		}
 		inv.Subtotal = subtotal
 	}
-	// Callers that pre-computed tax (e.g. POS account-charge sales, where the
-	// register already ran the exemption-aware calculation) pass TotalAmount
-	// set and are honored as-is. Everything else gets branch-rate tax here.
-	if inv.TotalAmount == 0 {
+	// Callers that pre-computed the invoice (e.g. POS account-charge sales,
+	// where the register already ran the exemption-aware calculation) supply
+	// BOTH the subtotal and the tax-inclusive total, and are honored as-is.
+	//
+	// A total on its own is not evidence that anyone calculated tax: order
+	// fulfilment passed the order's PRE-TAX total that way, which silently
+	// produced an invoice with TaxRate 0, TaxAmount 0 and a pre-tax total —
+	// and that untaxed figure was what PostInvoiceToLedger booked to the GL
+	// and the AR subledger. So a total without a subtotal is recomputed.
+	if inv.TotalAmount == 0 || !callerSuppliedSubtotal {
 		if inv.TaxRate == 0 {
 			// Source the rate from the invoice's branch (locations.default_tax_rate),
 			// so app-created invoices match the jurisdiction (e.g. 0.12 in BC) instead
@@ -71,7 +84,10 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 				inv.TaxRate = DefaultTaxRate
 			}
 		}
-		inv.TaxAmount = int64(float64(inv.Subtotal) * inv.TaxRate)
+		// Round half up: $10.00 at 8.25% is exactly 82.5 cents, and truncating
+		// it to 82 under-collects on every invoice whose tax lands on a
+		// fractional cent — a systematic downward bias, not a wash.
+		inv.TaxAmount = money.RoundToCents(float64(inv.Subtotal) * inv.TaxRate)
 		inv.TotalAmount = inv.Subtotal + inv.TaxAmount
 	}
 

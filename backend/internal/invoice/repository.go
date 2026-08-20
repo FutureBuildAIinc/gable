@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -186,9 +187,9 @@ func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Inv
 		}
 		return nil, fmt.Errorf("failed to get invoice: %w", err)
 	}
-	inv.TotalAmount = int64(totalAmountFloat*100.0 + 0.5)
-	inv.Subtotal = int64(subtotalFloat*100.0 + 0.5)
-	inv.TaxAmount = int64(taxAmountFloat*100.0 + 0.5)
+	inv.TotalAmount = money.DollarsToCents(totalAmountFloat)
+	inv.Subtotal = money.DollarsToCents(subtotalFloat)
+	inv.TaxAmount = money.DollarsToCents(taxAmountFloat)
 
 	// Get Lines with product names
 	queryLines := `
@@ -209,7 +210,7 @@ func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Inv
 		if err := rows.Scan(&l.ID, &l.InvoiceID, &l.ProductID, &l.ProductSKU, &l.ProductName, &l.Quantity, &priceEachFloat, &l.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan invoice line: %w", err)
 		}
-		l.PriceEach = int64(priceEachFloat*100.0 + 0.5)
+		l.PriceEach = money.DollarsToCents(priceEachFloat)
 		inv.Lines = append(inv.Lines, l)
 	}
 
@@ -246,9 +247,9 @@ func (r *PostgresRepository) ListInvoices(ctx context.Context) ([]Invoice, error
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan invoice: %w", err)
 		}
-		inv.TotalAmount = int64(totalAmountFloat*100.0 + 0.5)
-		inv.Subtotal = int64(subtotalFloat*100.0 + 0.5)
-		inv.TaxAmount = int64(taxAmountFloat*100.0 + 0.5)
+		inv.TotalAmount = money.DollarsToCents(totalAmountFloat)
+		inv.Subtotal = money.DollarsToCents(subtotalFloat)
+		inv.TaxAmount = money.DollarsToCents(taxAmountFloat)
 		invoices = append(invoices, inv)
 	}
 	return invoices, nil
@@ -292,9 +293,9 @@ func (r *PostgresRepository) ListInvoicesPaginated(ctx context.Context, limit, o
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan invoice: %w", err)
 		}
-		inv.TotalAmount = int64(totalAmountFloat*100.0 + 0.5)
-		inv.Subtotal = int64(subtotalFloat*100.0 + 0.5)
-		inv.TaxAmount = int64(taxAmountFloat*100.0 + 0.5)
+		inv.TotalAmount = money.DollarsToCents(totalAmountFloat)
+		inv.Subtotal = money.DollarsToCents(subtotalFloat)
+		inv.TaxAmount = money.DollarsToCents(taxAmountFloat)
 		invoices = append(invoices, inv)
 	}
 	return invoices, total, nil
@@ -354,7 +355,7 @@ func (r *PostgresRepository) ListCreditMemos(ctx context.Context, customerID uui
 		if err := rows.Scan(&cm.ID, &cm.InvoiceID, &cm.CustomerID, &amountFloat, &cm.Reason, &cm.Status, &cm.CreatedAt, &cm.AppliedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan credit memo: %w", err)
 		}
-		cm.Amount = int64(amountFloat*100.0 + 0.5)
+		cm.Amount = money.DollarsToCents(amountFloat)
 		memos = append(memos, cm)
 	}
 	return memos, nil

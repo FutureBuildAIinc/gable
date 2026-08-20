@@ -146,3 +146,37 @@ describe('converted-app registry', () => {
     }
   })
 })
+
+/**
+ * Every declared route must resolve to a real page tag.
+ *
+ * `GableApp._pathToTag` falls back to `gable-not-found` for anything it does not
+ * recognise, so adding a route to this table without adding it to that map ships
+ * a nav item that lands on the 404 page. There is no type error, no lint error,
+ * and no test failure — and unit tests that mount a page component directly keep
+ * passing, so CI stays green while the page is unreachable.
+ *
+ * That is exactly how six shipped surfaces (at-risk quotes, the exposure report,
+ * market indices, AP, balance sheet and P&L) became unreachable at once. This
+ * test is the guard.
+ */
+describe('every route resolves to a page tag', () => {
+  it('has no route that falls through to gable-not-found', async () => {
+    const { GableApp } = await import('./app')
+    const app = new GableApp()
+
+    // _pathToTag is private to the component; reach it deliberately rather than
+    // widening the public surface just to test this invariant.
+    const pathToTag = (p: string): string =>
+      (app as unknown as { _pathToTag(path: string): string })._pathToTag(p)
+
+    const unreachable = routes
+      // Parameterised paths are matched by the router before the tag lookup, and
+      // redirects never render a page of their own.
+      .filter((r) => !r.path.includes(':') && !r.redirect)
+      .filter((r) => pathToTag(r.path) === 'gable-not-found')
+      .map((r) => r.path)
+
+    expect(unreachable).toEqual([])
+  })
+})

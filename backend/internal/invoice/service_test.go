@@ -179,25 +179,20 @@ func TestCreateInvoice_PrecomputedSubtotalIsPreserved(t *testing.T) {
 	}
 }
 
-// KNOWN BUG — line extension truncates instead of rounding.
+// REGRESSION (this was a documented, pinned defect) — the line extension rounds, never truncates.
 //
-// invoice/service.go:51
+// invoice/service.go used to compute
 //
 //	subtotal += int64(float64(line.PriceEach) * line.Quantity)
 //
-// int64() truncates toward zero, so any fractional cent is dropped, and a
-// binary float that lands a hair BELOW an exact integer loses a whole cent:
+// int64() truncates toward zero, so any fractional cent was dropped, and a
+// binary float that lands a hair BELOW an exact integer lost a whole cent:
 // 100 cents x 8.29 is exactly 829 in decimal but 828.99999999999989 in float64,
 // which truncates to 828.
 //
-// The same computation in order/service.go:91 uses math.Round. An order and the
-// invoice generated from it can therefore disagree on the same line.
-//
-// This test asserts the CORRECT (round-half-up) result and is skipped until the
-// source is fixed.
+// The same computation in order/service.go:91 uses math.Round, so an order and
+// the invoice generated from it disagreed on the same line. Both now round.
 func TestCreateInvoice_LineExtensionRounding(t *testing.T) {
-	t.Skip("KNOWN BUG: invoice/service.go:51 truncates the line extension instead of rounding (order/service.go:91 rounds) — see comment above")
-
 	tests := []struct {
 		name      string
 		priceEach int64
@@ -224,37 +219,6 @@ func TestCreateInvoice_LineExtensionRounding(t *testing.T) {
 				t.Errorf("Subtotal = %d, want %d (%d cents x %v)", inv.Subtotal, tc.want, tc.priceEach, tc.qty)
 			}
 		})
-	}
-}
-
-// CHARACTERIZATION: pins the truncating behaviour the bug above describes, so
-// the numbers today's invoices carry are recorded. Delete this test when the
-// rounding is fixed and un-skip TestCreateInvoice_LineExtensionRounding.
-func TestCreateInvoice_LineExtensionTruncation_Characterization(t *testing.T) {
-	tests := []struct {
-		priceEach int64
-		qty       float64
-		current   int64
-		correct   int64
-	}{
-		{100, 8.29, 828, 829},
-		{2999, 1.1, 3298, 3299},
-		{123, 4.56, 560, 561},
-		{489, 2.1, 1026, 1027},
-		{1699, 2.3, 3907, 3908},
-	}
-
-	for _, tc := range tests {
-		repo := &fakeRepo{}
-		svc := NewService(repo, nil, nil, nil)
-		inv := &Invoice{CustomerID: uuid.New(), Lines: []InvoiceLine{line(tc.priceEach, tc.qty)}}
-		if err := svc.CreateInvoice(txCtx(), inv); err != nil {
-			t.Fatalf("CreateInvoice: %v", err)
-		}
-		if inv.Subtotal != tc.current {
-			t.Errorf("%d cents x %v: Subtotal = %d, current behaviour is %d (correct value is %d)",
-				tc.priceEach, tc.qty, inv.Subtotal, tc.current, tc.correct)
-		}
 	}
 }
 
@@ -358,21 +322,16 @@ func TestCreateInvoice_TotalEqualsSubtotalPlusTax(t *testing.T) {
 	}
 }
 
-// KNOWN BUG — tax truncates at the half-cent boundary.
+// REGRESSION (this was a documented, pinned defect) — tax rounds half up, it does not truncate.
 //
-// invoice/service.go:74
+// invoice/service.go used to compute
 //
 //	inv.TaxAmount = int64(float64(inv.Subtotal) * inv.TaxRate)
 //
-// $10.00 at 8.25% is exactly 82.5 cents. int64() truncates to 82, so the
-// dealer under-collects. Truncation is systematically biased downward on every
-// invoice whose tax has a fractional cent; standard practice is half-up.
-//
-// This test asserts the CORRECT (round-half-up) amounts and is skipped until
-// the source is fixed.
+// $10.00 at 8.25% is exactly 82.5 cents. int64() truncated to 82, so the
+// dealer under-collected. Truncation is systematically biased downward on
+// every invoice whose tax has a fractional cent; standard practice is half-up.
 func TestCreateInvoice_TaxHalfCentRounding(t *testing.T) {
-	t.Skip("KNOWN BUG: invoice/service.go:74 truncates tax instead of rounding half-up — see comment above")
-
 	tests := []struct {
 		subtotal int64
 		rate     float64
@@ -403,46 +362,17 @@ func TestCreateInvoice_TaxHalfCentRounding(t *testing.T) {
 	}
 }
 
-// CHARACTERIZATION: pins the truncating tax behaviour described above.
-func TestCreateInvoice_TaxTruncation_Characterization(t *testing.T) {
-	tests := []struct {
-		subtotal int64
-		rate     float64
-		current  int64
-		correct  int64
-	}{
-		{1000, 0.0825, 82, 83},
-		{600, 0.0825, 49, 50},
-		{200, 0.0825, 16, 17},
-		{1234, 0.0825, 101, 102},
-		{333, 0.05, 16, 17},
-	}
-
-	for _, tc := range tests {
-		repo := &fakeRepo{}
-		svc := NewService(repo, nil, nil, nil)
-		inv := &Invoice{
-			CustomerID: uuid.New(),
-			Subtotal:   tc.subtotal,
-			TaxRate:    tc.rate,
-			Lines:      []InvoiceLine{line(1, 1)},
-		}
-		if err := svc.CreateInvoice(txCtx(), inv); err != nil {
-			t.Fatalf("CreateInvoice: %v", err)
-		}
-		if inv.TaxAmount != tc.current {
-			t.Errorf("subtotal=%d rate=%v: TaxAmount = %d, current behaviour is %d (correct is %d)",
-				tc.subtotal, tc.rate, inv.TaxAmount, tc.current, tc.correct)
-		}
-	}
-}
-
 // --- the pre-set-total escape hatch -----------------------------------------
 
-// CHARACTERIZATION: a non-zero TotalAmount suppresses the entire tax block —
-// rate, tax amount and total are all left exactly as the caller supplied them.
-// POS depends on this (it pre-computes exemption-aware tax); order fulfilment
-// is broken by it (see the KNOWN BUG test below).
+// CORRECTNESS: a caller that pre-computed the whole invoice — subtotal AND
+// tax-inclusive total — is honored exactly as supplied: rate, tax amount and
+// total are left alone and the branch rate is never consulted. POS depends on
+// this (it pre-computes exemption-aware tax, including the tax-inclusive
+// summary line of a split tender).
+//
+// The escape hatch requires BOTH numbers. A total on its own is not evidence
+// that anyone calculated tax — see
+// TestCreateInvoice_OrderFulfilmentPathIsTaxed below.
 func TestCreateInvoice_PresetTotalSuppressesTax(t *testing.T) {
 	repo := &fakeRepo{branchRate: 0.12, branchOK: true}
 	svc := NewService(repo, nil, nil, nil)
@@ -467,27 +397,26 @@ func TestCreateInvoice_PresetTotalSuppressesTax(t *testing.T) {
 	}
 }
 
-// KNOWN BUG — order fulfilment produces an untaxed invoice.
+// REGRESSION (this was a documented, pinned defect) — order fulfilment must produce a taxed invoice.
 //
-// order/service.go:297-303 builds the invoice with TotalAmount set to the
+// order/service.go used to build the invoice with TotalAmount set to the
 // order's PRE-TAX total, above the comment
 //
 //	"CreateInvoice recomputes subtotal/tax and sets the tax-inclusive TotalAmount"
 //
-// but a non-zero TotalAmount makes invoice/service.go:58 skip the tax block
-// entirely. The invoice is stored with TaxRate 0, TaxAmount 0 and a pre-tax
-// TotalAmount, and that untaxed figure is what gets posted to the GL and the AR
-// subledger by PostInvoiceToLedger.
+// but any non-zero TotalAmount made CreateInvoice skip the tax block entirely.
+// The invoice was stored with TaxRate 0, TaxAmount 0 and a pre-tax
+// TotalAmount, and that untaxed figure is what got posted to the GL and the AR
+// subledger by PostInvoiceToLedger. The delivery-completion path
+// (cmd/server/main.go) builds the same invoice WITHOUT TotalAmount, so it was
+// taxed correctly — the same order billed a different amount depending on
+// which path invoiced it.
 //
-// The delivery-completion path (cmd/server/main.go:960) builds the same invoice
-// WITHOUT TotalAmount, so it is taxed correctly — the same order bills a
-// different amount depending on which path invoices it.
-//
-// This test reproduces the order-fulfilment construction and asserts the
-// documented, correct outcome. Skipped until the source is fixed.
+// Fixed on both sides: order fulfilment no longer passes the pre-tax total,
+// and CreateInvoice now treats a total WITHOUT a caller-supplied subtotal as
+// no evidence of a tax calculation and recomputes it. This test reproduces the
+// old order-fulfilment construction, so it pins the invoice-side guard.
 func TestCreateInvoice_OrderFulfilmentPathIsTaxed(t *testing.T) {
-	t.Skip("KNOWN BUG: order/service.go:297-303 passes the pre-tax order total as TotalAmount, which suppresses tax in invoice/service.go:58 — see comment above")
-
 	repo := &fakeRepo{branchRate: 0.12, branchOK: true}
 	svc := NewService(repo, nil, nil, nil)
 
@@ -515,34 +444,6 @@ func TestCreateInvoice_OrderFulfilmentPathIsTaxed(t *testing.T) {
 	if inv.TotalAmount != 11200 {
 		t.Errorf("TotalAmount = %d, want the tax-inclusive 11200 — a fulfilled order must bill tax",
 			inv.TotalAmount)
-	}
-}
-
-// CHARACTERIZATION: records what the order-fulfilment path produces today.
-func TestCreateInvoice_OrderFulfilmentPathIsUntaxed_Characterization(t *testing.T) {
-	repo := &fakeRepo{branchRate: 0.12, branchOK: true}
-	svc := NewService(repo, nil, nil, nil)
-
-	inv := &Invoice{
-		OrderID:     uuid.New(),
-		CustomerID:  uuid.New(),
-		BranchID:    uuid.New(),
-		TotalAmount: 10000,
-		Status:      InvoiceStatusUnpaid,
-		Lines:       []InvoiceLine{line(10000, 1)},
-	}
-	if err := svc.CreateInvoice(txCtx(), inv); err != nil {
-		t.Fatalf("CreateInvoice: %v", err)
-	}
-	if inv.TaxAmount != 0 || inv.TaxRate != 0 {
-		t.Errorf("current behaviour is an untaxed invoice; got TaxAmount=%d TaxRate=%v", inv.TaxAmount, inv.TaxRate)
-	}
-	if inv.TotalAmount != 10000 {
-		t.Errorf("TotalAmount = %d, current behaviour keeps the pre-tax order total 10000", inv.TotalAmount)
-	}
-	// The stored invoice violates the tax-inclusive identity the taxed path holds.
-	if inv.Subtotal+inv.TaxAmount == inv.TotalAmount && inv.Subtotal != 10000 {
-		t.Errorf("unexpected: subtotal=%d tax=%d total=%d", inv.Subtotal, inv.TaxAmount, inv.TotalAmount)
 	}
 }
 

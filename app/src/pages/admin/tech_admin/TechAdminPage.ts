@@ -285,7 +285,20 @@ export class TechAdminPage extends LitElement {
         }
     }
 
-    private async _handleToggleStaffAccess(member: StaffMember, grant: boolean) {
+    /**
+     * Grant or revoke AI_LM for one staff member. State is the server's, never
+     * the click's: on success we refetch the roster, and on failure we put the
+     * checkbox back where the server says it is.
+     *
+     * The DOM write in the catch is load-bearing. `.checked=${hasAccess}` is a
+     * lit-html PropertyPart, and lit skips committing a part whose value equals
+     * the one last committed — but the user has since mutated the DOM property
+     * by clicking, so re-rendering with the same `hasAccess` leaves the box
+     * showing the failed click. On an access-control screen that reads as access
+     * that was never granted (or, in reverse, as a revoke that never happened).
+     */
+    private async _handleToggleStaffAccess(member: StaffMember, input: HTMLInputElement) {
+        const grant = input.checked;
         try {
             this.staffError = null;
             if (grant) {
@@ -297,6 +310,7 @@ export class TechAdminPage extends LitElement {
         } catch (err) {
             console.error(err);
             this.staffError = err instanceof Error ? err.message : 'Failed to update access';
+            input.checked = member.modules.includes(AI_LM_MODULE_ID);
         }
     }
 
@@ -729,7 +743,7 @@ export class TechAdminPage extends LitElement {
                                                 type="checkbox"
                                                 class="h-4 w-4 rounded border-white/20 bg-deep-space text-gable-green focus:ring-gable-green/50 cursor-pointer accent-gable-green"
                                                 .checked=${hasAccess}
-                                                @change=${(e: Event) => this._handleToggleStaffAccess(member, (e.target as HTMLInputElement).checked)}
+                                                @change=${(e: Event) => this._handleToggleStaffAccess(member, e.target as HTMLInputElement)}
                                                 title=${hasAccess ? 'Revoke AI_LM access' : 'Grant AI_LM access'}
                                             />
                                         </td>

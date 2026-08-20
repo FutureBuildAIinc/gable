@@ -43,10 +43,13 @@ func (s *Service) CreateLocation(ctx context.Context, loc *Location) error {
 		return fmt.Errorf("non-branch locations require a parent_id")
 	}
 
-	// Default active=true unless explicitly false.
-	if !loc.Active {
-		loc.Active = true
-	}
+	// loc.Active is taken as given. The "default to active unless explicitly
+	// false" rule cannot be expressed here: Location.Active is a plain bool
+	// whose zero value is indistinguishable from an explicit false, so forcing
+	// it true here would make an inactive location impossible to create (an
+	// importer bringing in a decommissioned yard would silently reactivate it).
+	// The default is applied at the HTTP boundary instead, where
+	// createLocationRequest.Active is a *bool — see handler.go.
 
 	return s.repo.CreateLocation(ctx, loc)
 }

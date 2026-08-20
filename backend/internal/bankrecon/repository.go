@@ -123,7 +123,7 @@ func (r *PostgresRepository) CreateBankTransaction(ctx context.Context, txn *Ban
 	`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		txn.ID, txn.BankAccountID, txn.ReconciliationID, txn.TransactionDate,
-		float64(txn.Amount)/100.0, txn.Description, txn.Reference,
+		txn.Amount, txn.Description, txn.Reference,
 		txn.MatchedJournalEntryID, txn.Status, txn.CreatedAt,
 	)
 	if err != nil {
@@ -140,7 +140,7 @@ func (r *PostgresRepository) GetBankTransaction(ctx context.Context, id uuid.UUI
 		FROM bank_transactions WHERE id = $1
 	`
 	var txn BankTransaction
-	var amount float64
+	var amount int64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&txn.ID, &txn.BankAccountID, &txn.ReconciliationID, &txn.TransactionDate,
 		&amount, &txn.Description, &txn.Reference,
@@ -149,7 +149,7 @@ func (r *PostgresRepository) GetBankTransaction(ctx context.Context, id uuid.UUI
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bank transaction: %w", err)
 	}
-	txn.Amount = int64(amount*100.0 + 0.5)
+	txn.Amount = amount
 	return &txn, nil
 }
 
@@ -172,7 +172,7 @@ func (r *PostgresRepository) ListTransactions(ctx context.Context, bankAccountID
 	var txns []BankTransaction
 	for rows.Next() {
 		var txn BankTransaction
-		var amount float64
+		var amount int64
 		if err := rows.Scan(
 			&txn.ID, &txn.BankAccountID, &txn.ReconciliationID, &txn.TransactionDate,
 			&amount, &txn.Description, &txn.Reference,
@@ -180,7 +180,7 @@ func (r *PostgresRepository) ListTransactions(ctx context.Context, bankAccountID
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan transaction: %w", err)
 		}
-		txn.Amount = int64(amount*100.0 + 0.5)
+		txn.Amount = amount
 		txns = append(txns, txn)
 	}
 	return txns, nil
@@ -217,10 +217,10 @@ func (r *PostgresRepository) CreateSession(ctx context.Context, s *Reconciliatio
 	`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		s.ID, s.BankAccountID, s.PeriodStart, s.PeriodEnd,
-		float64(s.StatementBalance)/100.0, float64(s.GLBalance)/100.0,
-		s.ClearedCount, float64(s.ClearedTotal)/100.0,
-		s.OutstandingCount, float64(s.OutstandingTotal)/100.0,
-		float64(s.Difference)/100.0, s.Status, s.CreatedAt,
+		s.StatementBalance, s.GLBalance,
+		s.ClearedCount, s.ClearedTotal,
+		s.OutstandingCount, s.OutstandingTotal,
+		s.Difference, s.Status, s.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create reconciliation session: %w", err)
@@ -241,7 +241,7 @@ func (r *PostgresRepository) GetSession(ctx context.Context, id uuid.UUID) (*Rec
 		WHERE rs.id = $1
 	`
 	var s ReconciliationSession
-	var stmtBal, glBal, clearTotal, outTotal, diff float64
+	var stmtBal, glBal, clearTotal, outTotal, diff int64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&s.ID, &s.BankAccountID, &s.BankAccountName,
 		&s.PeriodStart, &s.PeriodEnd,
@@ -253,11 +253,11 @@ func (r *PostgresRepository) GetSession(ctx context.Context, id uuid.UUID) (*Rec
 	if err != nil {
 		return nil, fmt.Errorf("failed to get reconciliation session: %w", err)
 	}
-	s.StatementBalance = int64(stmtBal*100.0 + 0.5)
-	s.GLBalance = int64(glBal*100.0 + 0.5)
-	s.ClearedTotal = int64(clearTotal*100.0 + 0.5)
-	s.OutstandingTotal = int64(outTotal*100.0 + 0.5)
-	s.Difference = int64(diff*100.0 + 0.5)
+	s.StatementBalance = stmtBal
+	s.GLBalance = glBal
+	s.ClearedTotal = clearTotal
+	s.OutstandingTotal = outTotal
+	s.Difference = diff
 	return &s, nil
 }
 
@@ -271,10 +271,10 @@ func (r *PostgresRepository) UpdateSession(ctx context.Context, s *Reconciliatio
 		WHERE id = $1
 	`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		s.ID, float64(s.StatementBalance)/100.0, float64(s.GLBalance)/100.0,
-		s.ClearedCount, float64(s.ClearedTotal)/100.0,
-		s.OutstandingCount, float64(s.OutstandingTotal)/100.0,
-		float64(s.Difference)/100.0, s.Status, s.CompletedBy, s.CompletedAt,
+		s.ID, s.StatementBalance, s.GLBalance,
+		s.ClearedCount, s.ClearedTotal,
+		s.OutstandingCount, s.OutstandingTotal,
+		s.Difference, s.Status, s.CompletedBy, s.CompletedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update reconciliation session: %w", err)
@@ -304,7 +304,7 @@ func (r *PostgresRepository) ListSessions(ctx context.Context, bankAccountID *uu
 	var sessions []ReconciliationSession
 	for rows.Next() {
 		var s ReconciliationSession
-		var stmtBal, glBal, clearTotal, outTotal, diff float64
+		var stmtBal, glBal, clearTotal, outTotal, diff int64
 		if err := rows.Scan(
 			&s.ID, &s.BankAccountID, &s.BankAccountName,
 			&s.PeriodStart, &s.PeriodEnd,
@@ -315,11 +315,11 @@ func (r *PostgresRepository) ListSessions(ctx context.Context, bankAccountID *uu
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
-		s.StatementBalance = int64(stmtBal*100.0 + 0.5)
-		s.GLBalance = int64(glBal*100.0 + 0.5)
-		s.ClearedTotal = int64(clearTotal*100.0 + 0.5)
-		s.OutstandingTotal = int64(outTotal*100.0 + 0.5)
-		s.Difference = int64(diff*100.0 + 0.5)
+		s.StatementBalance = stmtBal
+		s.GLBalance = glBal
+		s.ClearedTotal = clearTotal
+		s.OutstandingTotal = outTotal
+		s.Difference = diff
 		sessions = append(sessions, s)
 	}
 	return sessions, nil

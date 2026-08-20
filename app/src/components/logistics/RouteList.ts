@@ -4,6 +4,10 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
+// Side-effect import: this module's template renders <gable-create-route-modal>, and the element
+// only registers when its defining module is evaluated. Without this the tag
+// stays unknown and the modal silently never appears.
+import './CreateRouteModal';
 import { Plus, User, Truck, Clock, MapPin } from 'lucide';
 import type { Route, RouteStatus } from '../../types/delivery';
 import { deliveryService } from '../../services/deliveryService';

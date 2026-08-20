@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -85,7 +86,7 @@ func (r *PostgresRepository) ListAccounts(ctx context.Context) ([]GLAccount, err
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}
-		a.Balance = int64(balanceFloat*100.0 + 0.5)
+		a.Balance = money.DollarsToCents(balanceFloat)
 		accounts = append(accounts, a)
 	}
 	return accounts, nil
@@ -119,7 +120,7 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 		}
 		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
-	a.Balance = int64(balanceFloat*100.0 + 0.5)
+	a.Balance = money.DollarsToCents(balanceFloat)
 	return &a, nil
 }
 
@@ -259,14 +260,14 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 		if err := rows.Scan(&l.ID, &l.EntryID, &l.AccountID, &l.AccountCode, &l.AccountName, &l.Description, &debitFloat, &creditFloat); err != nil {
 			return nil, fmt.Errorf("failed to scan journal line: %w", err)
 		}
-		l.Debit = int64(debitFloat*100.0 + 0.5)
-		l.Credit = int64(creditFloat*100.0 + 0.5)
+		l.Debit = money.DollarsToCents(debitFloat)
+		l.Credit = money.DollarsToCents(creditFloat)
 		totalDebit += debitFloat
 		totalCredit += creditFloat
 		e.Lines = append(e.Lines, l)
 	}
-	e.TotalDebit = int64(totalDebit*100.0 + 0.5)
-	e.TotalCredit = int64(totalCredit*100.0 + 0.5)
+	e.TotalDebit = money.DollarsToCents(totalDebit)
+	e.TotalCredit = money.DollarsToCents(totalCredit)
 
 	return &e, nil
 }
@@ -299,8 +300,8 @@ func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalE
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan journal entry: %w", err)
 		}
-		e.TotalDebit = int64(totalDebitFloat*100.0 + 0.5)
-		e.TotalCredit = int64(totalCreditFloat*100.0 + 0.5)
+		e.TotalDebit = money.DollarsToCents(totalDebitFloat)
+		e.TotalCredit = money.DollarsToCents(totalCreditFloat)
 		entries = append(entries, e)
 	}
 	return entries, nil
@@ -343,8 +344,8 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 		if err := rows.Scan(&row.AccountID, &row.AccountCode, &row.AccountName, &row.AccountType, &debitFloat, &creditFloat); err != nil {
 			return nil, fmt.Errorf("failed to scan trial balance row: %w", err)
 		}
-		row.Debit = int64(debitFloat*100.0 + 0.5)
-		row.Credit = int64(creditFloat*100.0 + 0.5)
+		row.Debit = money.DollarsToCents(debitFloat)
+		row.Credit = money.DollarsToCents(creditFloat)
 		result = append(result, row)
 	}
 	return result, nil
@@ -362,7 +363,7 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 // cents is done in SQL, where the arithmetic is exact numeric, rather than by
 // scanning into float64 and multiplying in Go. The float path is not merely
 // imprecise here, it is reliably wrong for negative balances: the idiom used
-// elsewhere in this file, `int64(x*100.0 + 0.5)`, rounds half *up* rather than
+// elsewhere in this file, `money.DollarsToCents(x)`, rounds half *up* rather than
 // half away from zero, and Go truncates float→int toward zero, so a -$100.00
 // balance becomes -9999 cents instead of -10000. On a balance sheet that error
 // lands once per contra/unnatural-balance account and breaks

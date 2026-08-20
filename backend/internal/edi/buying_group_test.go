@@ -201,25 +201,15 @@ func TestParse832Catalog_DegenerateInput(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. The LIN segment is LIN01=line-number followed by
+// CORRECTNESS: the LIN segment is LIN01=line-number followed by
 // (qualifier, value) pairs — exactly as the code's own comment documents:
-// "LIN*1*VP*VENDOR-SKU*SK*OUR-SKU". The parser starts its pair walk at index 1,
-// which is the line number, so it reads ("1","VP"), ("VENDOR-SKU","SK") and
-// never sees a real qualifier. Neither VendorSKU nor SKU is ever populated
-// from an 832 document.
+// "LIN*1*VP*VENDOR-SKU*SK*OUR-SKU". The pair walk must therefore start at
+// LIN02 (index 2); starting at index 1 reads ("1","VP"), ("VENDOR-SKU","SK")
+// and never sees a real qualifier, leaving both identifiers empty.
 //
 // The consequence compounds: ImportCatalog skips any entry whose SKU and
-// VendorSKU are both empty (buying_group.go:319), so a parsed 832 catalog
-// imports zero items.
-//
-// backend/internal/edi/buying_group.go:116 —
-//
-//	for i := 1; i < len(elements)-1; i += 2 {
-//
-// should start at i = 2.
+// VendorSKU are both empty, so a mis-parsed 832 catalog imports zero items.
 func TestParse832Catalog_LINIdentifiersAreDropped(t *testing.T) {
-	t.Skip("KNOWN BUG: edi/buying_group.go:116 walks LIN qualifier/value pairs from index 1 (the line number), so VendorSKU and SKU are never parsed from an 832")
-
 	bg := newBG()
 	entries, err := bg.Parse832Catalog("N1*SU*ACME~LIN*1*VP*AL-2X4*SK*2X4-8~CTP*RS*RES*4.75*1*EA~")
 	if err != nil {
@@ -236,17 +226,11 @@ func TestParse832Catalog_LINIdentifiersAreDropped(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. X12 PID puts the free-text description in PID05, which is
+// CORRECTNESS: X12 PID puts the free-text description in PID05, which is
 // elements[5] — the code's own example segment, PID*F****Description, splits
-// into six elements with the description last. The parser reads elements[4],
-// which is the empty PID04 placeholder, so descriptions are always blank.
-//
-// backend/internal/edi/buying_group.go:133 (832) and buying_group.go:286 (846):
-//
-//	currentEntry.Description = elements[4]
+// into six elements with the description last. Reading elements[4] picks up
+// the empty PID04 placeholder, so descriptions come out blank.
 func TestParse832Catalog_PIDDescriptionIsDropped(t *testing.T) {
-	t.Skip("KNOWN BUG: edi/buying_group.go:133 reads the PID description from elements[4] (empty PID04) instead of elements[5] (PID05)")
-
 	bg := newBG()
 	entries, err := bg.Parse832Catalog("N1*SU*V~LIN*1*VP*A1~PID*F****2X4-8 SPF STUD~CTP*RS*RES*4.75*1*EA~")
 	if err != nil {
@@ -341,6 +325,24 @@ func TestParse846Inquiry_MultipleLinesAndFlush(t *testing.T) {
 	}
 }
 
+// CORRECTNESS: the 846's PID has the same shape as the 832's — the free-text
+// description is PID05, which is elements[5]. Reading elements[4] picks up the
+// empty PID04 placeholder, so an inventory advice arrives with no description
+// and a buyer cannot tell what the availability figure refers to.
+func TestParse846Inquiry_PIDDescription(t *testing.T) {
+	bg := newBG()
+	results, err := bg.Parse846Inquiry("N1*SU*V~LIN*1*VP*AL-2X4~PID*F****2X4-8 SPF STUD~QTY*33*500*EA~")
+	if err != nil {
+		t.Fatalf("Parse846Inquiry: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("parsed %d results, want 1", len(results))
+	}
+	if results[0].Description != "2X4-8 SPF STUD" {
+		t.Errorf("Description = %q, want %q", results[0].Description, "2X4-8 SPF STUD")
+	}
+}
+
 func TestParse846Inquiry_DegenerateInput(t *testing.T) {
 	for _, doc := range []string{"", "~~~", "QTY*33*5*EA~", "LDT*AF*7*DA~"} {
 		bg := newBG()
@@ -354,18 +356,10 @@ func TestParse846Inquiry_DegenerateInput(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. Same off-by-one as the 832 parser: the qualifier scan starts at
-// index 1 and steps by two, so it only ever inspects odd indices, while "VP"
-// sits at index 2 in LIN*1*VP*SKU. The loop bound (len-1) then stops before
-// the last element too. VendorSKU is never populated from an 846.
-//
-// backend/internal/edi/buying_group.go:267 —
-//
-//	for i := 1; i < len(elements)-1; i += 2 {
-//	    if elements[i] == "VP" && i+1 < len(elements) {
+// CORRECTNESS: the 846 LIN has the same shape as the 832's. A qualifier scan
+// starting at index 1 and stepping by two only ever inspects odd indices,
+// while "VP" sits at index 2 in LIN*1*VP*SKU, so VendorSKU stays empty.
 func TestParse846Inquiry_VendorSKUIsDropped(t *testing.T) {
-	t.Skip("KNOWN BUG: edi/buying_group.go:267 scans LIN qualifiers at odd indices only, so VP never matches and VendorSKU stays empty")
-
 	bg := newBG()
 	results, err := bg.Parse846Inquiry("N1*SU*V~LIN*1*VP*AL-2X4~QTY*33*500*EA~")
 	if err != nil {
@@ -562,20 +556,13 @@ func TestImportCatalog_SameSKUFromDifferentVendorsCoexist(t *testing.T) {
 	}
 }
 
-// KNOWN BUG. Deduplication keys on (VendorSKU, VendorName) only. An entry that
-// carries our own SKU but no vendor SKU — which ImportCatalog explicitly
-// admits, since it only skips when BOTH are empty — collides with every other
-// vendor-SKU-less entry from the same vendor. The second product silently
-// overwrites the first.
-//
-// backend/internal/edi/buying_group.go:327 —
-//
-//	if existing.VendorSKU == entry.VendorSKU && existing.VendorName == entry.VendorName {
-//
-// The comparison needs to fall back to SKU when VendorSKU is empty.
+// CORRECTNESS: deduplication must not key on (VendorSKU, VendorName) alone. An
+// entry that carries our own SKU but no vendor SKU — which ImportCatalog
+// explicitly admits, since it only skips when BOTH are empty — would otherwise
+// collide with every other vendor-SKU-less entry from the same vendor, and the
+// second product would silently overwrite the first. The comparison falls back
+// to SKU when VendorSKU is empty.
 func TestImportCatalog_EmptyVendorSKUMustNotCollapseDistinctProducts(t *testing.T) {
-	t.Skip("KNOWN BUG: edi/buying_group.go:327 dedupes on VendorSKU alone, so two products from one vendor with no vendor SKU overwrite each other")
-
 	bg := newBG()
 	res := bg.ImportCatalog([]SupplierCatalogEntry{
 		{VendorName: "ACME", SKU: "2X4-8", UnitPrice: 4.75},

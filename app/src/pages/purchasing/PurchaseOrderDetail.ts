@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state, property, query } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
+import { formatCents } from '../../lib/utils.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import { LocationService } from '../../services/LocationService';
@@ -157,10 +158,6 @@ export class PurchaseOrderDetail extends LitElement {
             ...this.receiveData,
             [lineId]: { ...this.receiveData[lineId], locationId },
         };
-    }
-
-    private _formatCents(cents: number) {
-        return `$${(cents / 100).toFixed(2)}`;
     }
 
     render() {
@@ -319,7 +316,7 @@ export class PurchaseOrderDetail extends LitElement {
                                         ${icon(CheckCircle, 20, 'w-5 h-5 text-emerald-400')}
                                         <div>
                                             <span class="text-emerald-400 font-semibold">
-                                                Freight Applied -- ${this._formatCents(fc.total_amount_cents)}
+                                                Freight Applied -- ${formatCents(fc.total_amount_cents)}
                                             </span>
                                             ${fc.carrier_name ? html`
                                                 <span class="text-zinc-400 ml-2">from ${fc.carrier_name}</span>
@@ -349,8 +346,8 @@ export class PurchaseOrderDetail extends LitElement {
                                             ${fc.allocations.map(a => html`
                                                 <tr>
                                                     <td class="py-2 text-zinc-300">${a.description || a.po_line_id.slice(0, 8)}</td>
-                                                    <td class="py-2 text-right font-mono text-zinc-300">${this._formatCents(a.allocated_cents)}</td>
-                                                    <td class="py-2 text-right font-mono text-zinc-300">${this._formatCents(a.per_unit_cents)}</td>
+                                                    <td class="py-2 text-right font-mono text-zinc-300">${formatCents(a.allocated_cents)}</td>
+                                                    <td class="py-2 text-right font-mono text-zinc-300">${formatCents(a.per_unit_cents)}</td>
                                                 </tr>
                                             `)}
                                         </tbody>
@@ -382,7 +379,7 @@ export class PurchaseOrderDetail extends LitElement {
                                     </div>
                                     <div>
                                         <p class="text-xs text-zinc-500 uppercase">Total Freight</p>
-                                        <p class="text-emerald-400 font-bold text-lg">${this._formatCents(this.freightPreview.freight_charge.total_amount_cents)}</p>
+                                        <p class="text-emerald-400 font-bold text-lg">${formatCents(this.freightPreview.freight_charge.total_amount_cents)}</p>
                                     </div>
                                 </div>
 
@@ -399,8 +396,8 @@ export class PurchaseOrderDetail extends LitElement {
                                             ${this.freightPreview.allocations.map(a => html`
                                                 <tr>
                                                     <td class="px-4 py-2 text-zinc-300">${a.description || a.po_line_id.slice(0, 8)}</td>
-                                                    <td class="px-4 py-2 text-right font-mono text-amber-400">${this._formatCents(a.allocated_cents)}</td>
-                                                    <td class="px-4 py-2 text-right font-mono text-zinc-300">${this._formatCents(a.per_unit_cents)}</td>
+                                                    <td class="px-4 py-2 text-right font-mono text-amber-400">${formatCents(a.allocated_cents)}</td>
+                                                    <td class="px-4 py-2 text-right font-mono text-zinc-300">${formatCents(a.per_unit_cents)}</td>
                                                 </tr>
                                             `)}
                                         </tbody>

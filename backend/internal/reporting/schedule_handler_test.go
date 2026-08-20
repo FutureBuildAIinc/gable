@@ -11,16 +11,21 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/golang-jwt/jwt/v5"
 )
 
-// The scheduled-report CRUD surface. Schedules can be created, listed and
-// deleted — but nothing in this repository executes them, and these tests
-// exist mostly to pin that the API says so.
+// The scheduled-report CRUD surface, and the disclosure that travels with it.
 //
 // The failure mode being guarded against is not a crash. It is an operator
 // configuring "AR aging to the controller every Monday at 9", getting a 201,
-// and finding out a quarter later that no email was ever sent. An API that
-// stores a schedule it cannot run must say it cannot run it.
+// and finding out a quarter later that no email was ever sent. So the response
+// states whether anything runs the schedule, and — when something does — what
+// that something actually does with the finished report. Both are read off the
+// attached executor at request time, never asserted independently, which is
+// what these tests pin: attach an executor and the disclosure flips by itself;
+// detach it and it flips back.
 
 func newScheduleTestMux(repo *fakeRepo, executor ScheduleExecutor) (*Handler, *http.ServeMux) {
 	h := NewHandler(NewService(repo))
@@ -41,8 +46,12 @@ func do(mux *http.ServeMux, method, path, body string) *httptest.ResponseRecorde
 
 // recordingExecutor is a stand-in for a working scheduler.
 type recordingExecutor struct {
-	added []ReportSchedule
-	err   error
+	added   []ReportSchedule
+	removed []string
+	err     error
+	// delivery, when non-empty, makes this executor describe itself the way
+	// *Scheduler does.
+	delivery string
 }
 
 func (e *recordingExecutor) AddSchedule(_ context.Context, s ReportSchedule) error {
@@ -53,16 +62,37 @@ func (e *recordingExecutor) AddSchedule(_ context.Context, s ReportSchedule) err
 	return nil
 }
 
-// *Scheduler is the intended production implementation of the seam. If its
-// signature drifts, this stops compiling rather than silently leaving the
-// handler unwireable.
-var _ ScheduleExecutor = (*Scheduler)(nil)
+func (e *recordingExecutor) RemoveSchedule(id string) {
+	e.removed = append(e.removed, id)
+}
+
+// describingExecutor is a recordingExecutor that also reports how the finished
+// report is delivered.
+type describingExecutor struct {
+	recordingExecutor
+	desc string
+}
+
+func (e *describingExecutor) DeliveryDescription() string { return e.desc }
+
+// *Scheduler is the production implementation of the seam, attached in
+// cmd/server/main.go. If its signature drifts, this stops compiling rather than
+// silently leaving the handler unwireable.
+var (
+	_ ScheduleExecutor = (*Scheduler)(nil)
+	_ ScheduleExecutor = (*recordingExecutor)(nil)
+	_ ScheduleExecutor = (*describingExecutor)(nil)
+)
 
 // --- the honesty contract -------------------------------------------------
 
-// CORRECTNESS: with no executor attached — the state of every deployment in
-// this repository — a created schedule must be reported as NOT running, and
-// must be persisted with a status that says so.
+// CORRECTNESS: with no executor attached, a created schedule must be reported
+// as NOT running, and must be persisted with a status that says so.
+//
+// cmd/server/main.go does attach one, so this is not the shipped server's
+// state; it is the state of any composition that serves the schedule routes
+// without a scheduler, and the disclosure has to survive that case rather than
+// assume the happy wiring.
 func TestCreateReportSchedule_SaysItWillNotRun(t *testing.T) {
 	repo := newFakeRepo()
 	repo.saved["r1"] = &SavedReport{ID: "r1", Name: "AR aging", EntityType: "invoices"}
@@ -81,7 +111,7 @@ func TestCreateReportSchedule_SaysItWillNotRun(t *testing.T) {
 	}
 
 	if got.Execution.Enabled {
-		t.Error("the API claims schedules execute, but nothing in this repository runs them")
+		t.Error("the API claims schedules execute with no executor attached to run them")
 	}
 	if got.Execution.Summary == "" {
 		t.Error("execution.summary is empty; a client has nothing to show the operator")
@@ -169,6 +199,77 @@ func TestCreateReportSchedule_WithExecutorReportsRunning(t *testing.T) {
 	}
 	if len(exec.added) != 1 {
 		t.Errorf("registered %d schedules with the executor, want 1", len(exec.added))
+	}
+}
+
+// CORRECTNESS: "the schedule runs" and "the report is delivered" are different
+// claims. This deployment's email service is log-only, so a run produces a real
+// CSV and records the send rather than transmitting it. execution.delivery
+// carries the executor's own account of that, so enabling execution cannot
+// quietly upgrade "we generated it" into "we emailed it".
+func TestScheduleExecution_ReportsHowTheReportIsDelivered(t *testing.T) {
+	exec := &describingExecutor{desc: "Email is log-only in this deployment."}
+	_, mux := newScheduleTestMux(newFakeRepo(), exec)
+
+	w := do(mux, http.MethodGet, "/api/v1/reporting/schedules", "")
+	var got ReportScheduleListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.Execution.Enabled {
+		t.Fatal("execution.enabled = false with an executor attached")
+	}
+	if got.Execution.Delivery != exec.desc {
+		t.Errorf("execution.delivery = %q, want the executor's own description %q", got.Execution.Delivery, exec.desc)
+	}
+	if strings.Contains(got.Execution.Summary, "emailed") {
+		t.Errorf("execution.summary = %q claims delivery; that claim belongs in execution.delivery, "+
+			"which is derived from the sender that is actually wired", got.Execution.Summary)
+	}
+}
+
+// An executor that says nothing about delivery must not have words put in its
+// mouth: the field is simply absent.
+func TestScheduleExecution_DeliveryIsOmittedWhenUnknown(t *testing.T) {
+	_, mux := newScheduleTestMux(newFakeRepo(), &recordingExecutor{})
+
+	w := do(mux, http.MethodGet, "/api/v1/reporting/schedules", "")
+	if strings.Contains(w.Body.String(), `"delivery"`) {
+		t.Errorf("response advertises a delivery mode the executor never stated: %s", w.Body)
+	}
+}
+
+// CORRECTNESS: deleting a schedule must unregister it from the running engine.
+// A cron entry outlives the row it came from, so a deleted schedule would
+// otherwise keep emailing a financial report until the next restart — to
+// recipients an operator has explicitly removed.
+func TestDeleteReportSchedule_UnregistersItFromTheExecutor(t *testing.T) {
+	repo := newFakeRepo()
+	repo.schedules = []ReportSchedule{{ID: "s1", ReportID: "r1", Status: ScheduleStatusActive}}
+	exec := &recordingExecutor{}
+	_, mux := newScheduleTestMux(repo, exec)
+
+	if w := do(mux, http.MethodDelete, "/api/v1/reporting/schedules/s1", ""); w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (body %s)", w.Code, w.Body)
+	}
+	if len(exec.removed) != 1 || exec.removed[0] != "s1" {
+		t.Errorf("executor was asked to remove %v, want [s1]", exec.removed)
+	}
+}
+
+// A failed delete must not unregister the job: the row is still there and still
+// due to run.
+func TestDeleteReportSchedule_KeepsTheJobWhenTheDeleteFails(t *testing.T) {
+	repo := newFakeRepo()
+	repo.savedErr = errors.New("db down")
+	exec := &recordingExecutor{}
+	_, mux := newScheduleTestMux(repo, exec)
+
+	if w := do(mux, http.MethodDelete, "/api/v1/reporting/schedules/s1", ""); w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	if len(exec.removed) != 0 {
+		t.Errorf("unregistered %v despite the row surviving", exec.removed)
 	}
 }
 
@@ -364,11 +465,11 @@ func TestDeleteReportSchedule_RepositoryFailureIs500(t *testing.T) {
 
 // --- running a saved report ----------------------------------------------
 
-// CORRECTNESS, and the direct contrast with the scheduler's known bug:
-// definitionFromSaved is the decode step that turns a saved report's untyped
-// definition_json into the typed ReportDefinition the query builder needs.
-// Scheduler.ExecuteAndSendReport omits exactly this step, which is why every
-// scheduled run fails with "no columns selected". The run endpoint performs it.
+// CORRECTNESS: definitionFromSaved is the decode step that turns a saved
+// report's untyped definition_json into the typed ReportDefinition the query
+// builder needs. Both the run endpoint and Scheduler.ExecuteAndSendReport go
+// through it, so an on-demand run and a scheduled run of the same saved report
+// cannot disagree about what that report means.
 func TestDefinitionFromSaved_DecodesTheStoredDefinition(t *testing.T) {
 	report := &SavedReport{
 		ID:         "r1",
@@ -415,6 +516,53 @@ func TestDefinitionFromSaved_EmptyDefinitionIsNotAnError(t *testing.T) {
 	}
 	if len(def.Columns) != 0 {
 		t.Errorf("columns = %+v, want none", def.Columns)
+	}
+}
+
+// CORRECTNESS: saved_reports.created_by is a nullable uuid. The handler used to
+// write the literal string "system" when a request carried no JWT claims, which
+// Postgres rejects with `invalid input syntax for type uuid: "system"` — so
+// POST /reporting/save returned 500 in any deployment not presenting a
+// UUID-subject token, and no report could be saved, let alone scheduled. An
+// unrecorded author must be recorded as unrecorded.
+func TestSaveReport_DoesNotFabricateAnAuthor(t *testing.T) {
+	cases := []struct {
+		name    string
+		subject string
+		want    string
+	}{
+		{"no claims at all", "", ""},
+		{"a non-UUID subject is not stored", "system", ""},
+		{"a UUID subject is stored", "3f1d2a54-9f6e-4a1d-8b6c-2a4e5f6d7c8b", "3f1d2a54-9f6e-4a1d-8b6c-2a4e5f6d7c8b"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			_, mux := newScheduleTestMux(repo, nil)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/reporting/save",
+				strings.NewReader(`{"name":"AR aging","entity_type":"invoices","definition_json":{}}`))
+			if tc.subject != "" {
+				req = req.WithContext(context.WithValue(req.Context(),
+					middleware.UserContextKey, &middleware.UserClaims{
+						RegisteredClaims: jwt.RegisteredClaims{Subject: tc.subject},
+					}))
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body %s)", w.Code, w.Body)
+			}
+			saved, ok := repo.saved[""]
+			if !ok {
+				t.Fatalf("nothing persisted; repo holds %v", repo.saved)
+			}
+			if saved.CreatedBy != tc.want {
+				t.Errorf("created_by = %q, want %q — anything that is not a UUID cannot be stored in that column", saved.CreatedBy, tc.want)
+			}
+		})
 	}
 }
 

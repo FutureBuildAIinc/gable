@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -82,10 +83,10 @@ func (r *PostgresRepository) GetVendorInvoice(ctx context.Context, id uuid.UUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vendor invoice: %w", err)
 	}
-	inv.Subtotal = int64(subtotal*100.0 + 0.5)
-	inv.TaxAmount = int64(taxAmount*100.0 + 0.5)
-	inv.Total = int64(total*100.0 + 0.5)
-	inv.AmountPaid = int64(amountPaid*100.0 + 0.5)
+	inv.Subtotal = money.DollarsToCents(subtotal)
+	inv.TaxAmount = money.DollarsToCents(taxAmount)
+	inv.Total = money.DollarsToCents(total)
+	inv.AmountPaid = money.DollarsToCents(amountPaid)
 	return &inv, nil
 }
 
@@ -117,10 +118,10 @@ func (r *PostgresRepository) ListVendorInvoices(ctx context.Context, vendorID *u
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan vendor invoice: %w", err)
 		}
-		inv.Subtotal = int64(subtotal*100.0 + 0.5)
-		inv.TaxAmount = int64(taxAmount*100.0 + 0.5)
-		inv.Total = int64(total*100.0 + 0.5)
-		inv.AmountPaid = int64(amountPaid*100.0 + 0.5)
+		inv.Subtotal = money.DollarsToCents(subtotal)
+		inv.TaxAmount = money.DollarsToCents(taxAmount)
+		inv.Total = money.DollarsToCents(total)
+		inv.AmountPaid = money.DollarsToCents(amountPaid)
 		invoices = append(invoices, inv)
 	}
 	return invoices, nil
@@ -185,8 +186,8 @@ func (r *PostgresRepository) GetInvoiceLines(ctx context.Context, invoiceID uuid
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan invoice line: %w", err)
 		}
-		line.UnitPrice = int64(unitPrice*100.0 + 0.5)
-		line.LineTotal = int64(lineTotal*100.0 + 0.5)
+		line.UnitPrice = money.DollarsToCents(unitPrice)
+		line.LineTotal = money.DollarsToCents(lineTotal)
 		lines = append(lines, line)
 	}
 	return lines, nil
@@ -258,7 +259,7 @@ func (r *PostgresRepository) ListPayments(ctx context.Context, vendorID *uuid.UU
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan AP payment: %w", err)
 		}
-		pmt.Amount = int64(amount*100.0 + 0.5)
+		pmt.Amount = money.DollarsToCents(amount)
 		payments = append(payments, pmt)
 	}
 	return payments, nil
@@ -291,11 +292,11 @@ func (r *PostgresRepository) GetAgingSummary(ctx context.Context) ([]APAgingSumm
 		if err := rows.Scan(&s.VendorID, &s.VendorName, &current, &past30, &past60, &past90, &total); err != nil {
 			return nil, fmt.Errorf("failed to scan aging: %w", err)
 		}
-		s.Current = int64(current*100.0 + 0.5)
-		s.Past30 = int64(past30*100.0 + 0.5)
-		s.Past60 = int64(past60*100.0 + 0.5)
-		s.Past90 = int64(past90*100.0 + 0.5)
-		s.Total = int64(total*100.0 + 0.5)
+		s.Current = money.DollarsToCents(current)
+		s.Past30 = money.DollarsToCents(past30)
+		s.Past60 = money.DollarsToCents(past60)
+		s.Past90 = money.DollarsToCents(past90)
+		s.Total = money.DollarsToCents(total)
 		summaries = append(summaries, s)
 	}
 	return summaries, nil

@@ -113,12 +113,11 @@ func (s *BuyingGroupService) Parse832Catalog(data string) ([]SupplierCatalogEntr
 				MinOrderQty:   1,
 				PackSize:      1,
 			}
-			for i := 1; i < len(elements)-1; i += 2 {
+			// LIN01 (elements[1]) is the line number; the identifier pairs
+			// start at LIN02 (elements[2]) and repeat as (qualifier, value).
+			for i := 2; i < len(elements)-1; i += 2 {
 				qualifier := elements[i]
-				value := ""
-				if i+1 < len(elements) {
-					value = elements[i+1]
-				}
+				value := elements[i+1]
 				switch qualifier {
 				case "VP":
 					currentEntry.VendorSKU = value
@@ -128,9 +127,10 @@ func (s *BuyingGroupService) Parse832Catalog(data string) ([]SupplierCatalogEntr
 			}
 
 		case "PID":
-			// PID*F****Description — Product description
-			if currentEntry != nil && len(elements) >= 5 {
-				currentEntry.Description = elements[4]
+			// PID*F****Description — the free-text description is PID05,
+			// which is elements[5] (PID02..PID04 are the empty placeholders).
+			if currentEntry != nil && len(elements) >= 6 {
+				currentEntry.Description = elements[5]
 			}
 
 		case "CTP":
@@ -264,8 +264,9 @@ func (s *BuyingGroupService) Parse846Inquiry(data string) ([]InventoryInquiryRes
 				VendorName: vendorName,
 				AsOfDate:   time.Now().Format("2006-01-02"),
 			}
-			for i := 1; i < len(elements)-1; i += 2 {
-				if elements[i] == "VP" && i+1 < len(elements) {
+			// LIN01 is the line number; (qualifier, value) pairs start at LIN02.
+			for i := 2; i < len(elements)-1; i += 2 {
+				if elements[i] == "VP" {
 					current.VendorSKU = elements[i+1]
 				}
 			}
@@ -282,8 +283,9 @@ func (s *BuyingGroupService) Parse846Inquiry(data string) ([]InventoryInquiryRes
 			}
 
 		case "PID":
-			if current != nil && len(elements) >= 5 {
-				current.Description = elements[4]
+			// PID05 (elements[5]) carries the free-text description.
+			if current != nil && len(elements) >= 6 {
+				current.Description = elements[5]
 			}
 
 		case "LDT":
@@ -302,6 +304,19 @@ func (s *BuyingGroupService) Parse846Inquiry(data string) ([]InventoryInquiryRes
 
 	s.logger.Info("Parsed EDI 846 inquiry", "vendor", vendorName, "item_count", len(results))
 	return results, nil
+}
+
+// catalogKey is the identity of a catalog entry for deduplication: a vendor
+// plus whichever identifier actually identifies the product. The vendor's own
+// SKU wins when present; otherwise our internal SKU is used, so two distinct
+// products from the same vendor that carry no vendor SKU do not collapse onto
+// each other. The qualifier prefix stops a vendor SKU colliding with an
+// internal SKU that happens to share its text.
+func catalogKey(e SupplierCatalogEntry) string {
+	if e.VendorSKU != "" {
+		return e.VendorName + "\x00VP\x00" + e.VendorSKU
+	}
+	return e.VendorName + "\x00SK\x00" + e.SKU
 }
 
 // ImportCatalog stores parsed catalog entries in the in-memory catalog.
@@ -323,8 +338,9 @@ func (s *BuyingGroupService) ImportCatalog(entries []SupplierCatalogEntry) *Cata
 
 		// Check for existing entry and update or add
 		found := false
+		key := catalogKey(entry)
 		for i, existing := range s.catalog {
-			if existing.VendorSKU == entry.VendorSKU && existing.VendorName == entry.VendorName {
+			if catalogKey(existing) == key {
 				s.catalog[i] = entry
 				result.ItemsUpdated++
 				found = true
