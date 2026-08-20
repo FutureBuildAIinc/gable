@@ -65,6 +65,16 @@ type Config struct {
 	// Logging
 	LogLevel string // DEBUG, INFO, WARN, ERROR (default: INFO)
 
+	// EDI
+	//
+	// EDIOutputDir is where generated X12 documents are written. It defaults to
+	// a path relative to the working directory rather than an absolute one:
+	// the previous hardcoded "/app/edi_out" only exists inside the container
+	// image, so every local and non-container self-host run failed to create it
+	// with "permission denied" — logged and then ignored, leaving EDI output
+	// silently broken. Container deployments set EDI_OUTPUT_DIR=/app/edi_out.
+	EDIOutputDir string // EDI_OUTPUT_DIR
+
 	// Database Pool
 	DBMaxConns        int32 // Max open connections (default: 10)
 	DBMinConns        int32 // Min idle connections (default: 2)
@@ -86,6 +96,8 @@ func Load() (*Config, error) {
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://gable_user:gable_password@localhost:5434/gable_db?sslmode=disable"),
 		JWKSURL:     getEnv("JWKS_URL", ""),
 		AuthIssuer:  getEnv("AUTH_ISSUER", ""),
+
+		EDIOutputDir: getEnv("EDI_OUTPUT_DIR", "edi_out"),
 
 		// Run Payments — defaults to sandbox mode
 		RunPaymentsAPIKey:      getEnv("RUN_PAYMENTS_API_KEY", ""),

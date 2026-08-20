@@ -59,6 +59,9 @@ services:
       # JWKS endpoint. Do NOT set AUTH_MODE=dev on a reachable host.
       - key: AUTH_MODE
         value: production
+      - key: EDI_OUTPUT_DIR
+        value: /app/edi_out
+        scope: RUN_TIME
       - key: JWKS_URL
         value: https://auth.example.com/.well-known/jwks.json
       - key: CORS_ORIGINS

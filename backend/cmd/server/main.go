@@ -322,7 +322,13 @@ func main() {
 	poRepo := purchase_order.NewRepository(db)
 
 	// EDI Module
-	ediSvc := edi.NewService("/app/edi_out", logger) // Absolute path for container deployment
+	// EDI_OUTPUT_DIR, defaulting to a path relative to the working directory.
+	// This was hardcoded to "/app/edi_out" — a path that only exists inside the
+	// container image — so every local run and every non-container self-host
+	// logged "Failed to create EDI output dir: permission denied" at boot and
+	// carried on with EDI output silently broken. Set EDI_OUTPUT_DIR=/app/edi_out
+	// in container deployments.
+	ediSvc := edi.NewService(cfg.EDIOutputDir, logger)
 
 	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
 	poSvc.WithAIClient(aiClient)
