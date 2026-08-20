@@ -9,7 +9,7 @@ Gable (Go module `github.com/gablelbm/gable`) is an open-source ERP platform pur
 
 | Branch | Purpose |
 |---|---|
-| `master` | Stable, fork-ready trunk. Releases are cut from here. |
+| `main` | Stable, fork-ready trunk. Releases are cut from here. |
 | `staging` | Integration branch. Contributions land here first (see `CONTRIBUTING.md`). |
 
 **This repository does not deploy anything and points at no live environment.** `.do/app-demo.yaml` and `.do/app-staging.yaml` are *example* Digital Ocean App Platform specs for self-hosters: every hostname, repo and database name in them is a placeholder (`your-org/gable`, `*.example.com`, `your-db-cluster`), and both set `AUTH_MODE=production` with a placeholder `JWKS_URL`. Operational notes are in `.do/README.md`.

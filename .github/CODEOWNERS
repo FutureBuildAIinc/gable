@@ -15,7 +15,7 @@
 #   3. Replace every handle here with the real one, or collapse them all to
 #      @FutureBuildAIinc/maintainers if the split is premature.
 #   4. Enable "Require review from Code Owners" in the branch protection rules
-#      for `master` and `staging`.
+#      for `main` and `staging`.
 #
 # Syntax: last matching pattern wins, so the specific overrides at the bottom
 # take precedence over the catch-all at the top.

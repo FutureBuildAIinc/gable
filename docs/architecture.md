@@ -31,7 +31,7 @@ against a placeholder `JWKS_URL`. Operational notes live in `.do/README.md`.
 
 | Spec | Tracks branch | Example domain | Logical DB |
 |---|---|---|---|
-| `.do/app-demo.yaml` | `master` | `demo.example.com` | `gable_demo_db` |
+| `.do/app-demo.yaml` | `main` | `demo.example.com` | `gable_demo_db` |
 | `.do/app-staging.yaml` | `staging` | `staging.example.com` | `gable_staging_db` |
 
 Both examples reference one DO Managed Postgres 16 cluster (the `gable-db`

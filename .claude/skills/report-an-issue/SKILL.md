@@ -248,7 +248,7 @@ Close by telling them what happens next and what they *could* do:
 
 - If the fix is a one-liner you already located, offer to make it — then hand off to
   **`check-my-contribution`** to run the pre-flight before opening the PR (which targets
-  **`staging`**, not `master`).
+  **`staging`**, not `main`).
 - If it needs a maintainer decision, say so. A well-scoped issue is a complete contribution;
   they do not owe anyone a patch.
 

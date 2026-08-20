@@ -50,11 +50,11 @@ Development flows through two branches:
 
 | Branch | Purpose |
 |---|---|
-| `master` | Stable trunk. Fork-ready. Releases are cut from here. |
+| `main` | Stable trunk. Fork-ready. Releases are cut from here. |
 | `staging` | Integration branch. Contributions land here first. |
 
 **Open your pull request against `staging`.** After review, maintainers
-fast-forward `staging → master`. Do not target `master` directly.
+fast-forward `staging → main`. Do not target `main` directly.
 
 ## Pull request workflow
 
@@ -170,9 +170,10 @@ repository:
 
 > **OpenLBM Standard & CLA:** <https://github.com/FutureBuildAIinc/openlbm>
 
-The license texts under [`LICENSES/`](./LICENSES/) in this repo are drafts
-pending counsel review; where they and the published Standard disagree, the
-published Standard governs.
+The license texts under [`LICENSES/`](./LICENSES/) are copies of the published
+Standard, shipped so this repository is self-contained. The published Standard
+is canonical; where a copy here and it ever disagree, the published Standard
+governs.
 
 By submitting a pull request, you confirm that:
 

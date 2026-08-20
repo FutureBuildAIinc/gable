@@ -36,7 +36,9 @@ do not appear in the table above:
 
 ## Status
 
-The OpenLBM license texts under `LICENSES/` are **drafts pending counsel** and
-are not yet effective as final legal instruments. The canonical Standard is at
-<https://github.com/FutureBuildAIinc/openlbm>; where it and these drafts
-disagree, the published Standard governs.
+The OpenLBM license texts under `LICENSES/` are **effective**. They are copies
+of the published Standard, which is canonical and lives at
+<https://github.com/FutureBuildAIinc/openlbm>. Where a copy here and the
+published Standard ever disagree, the published Standard governs — the copies
+are shipped so the repository is self-contained and REUSE-compliant offline,
+not as a second source of truth.

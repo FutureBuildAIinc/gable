@@ -176,8 +176,8 @@ git commit -m "docs: correct local Postgres port to 5434 (matches docker-compose
 ```
 
 > If `git switch` fails with `invalid reference: origin/staging`, this clone doesn't have the
-> `staging` branch — branch from `origin/master` and still open the PR **against `staging`**
-> on GitHub. Maintainers fast-forward `staging → master`.
+> `staging` branch — branch from `origin/main` and still open the PR **against `staging`**
+> on GitHub. Maintainers fast-forward `staging → main`.
 
 Fill in `.github/PULL_REQUEST_TEMPLATE.md`, ticking **Documentation** under type of change.
 In the summary, say:

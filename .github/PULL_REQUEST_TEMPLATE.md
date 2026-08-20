@@ -1,8 +1,8 @@
 <!--
 Thanks for contributing to Gable!
 
-Target branch: open this PR against `staging` (NOT `master`). Maintainers
-fast-forward `staging → master` after review. See CONTRIBUTING.md.
+Target branch: open this PR against `staging` (NOT `main`). Maintainers
+fast-forward `staging → main` after review. See CONTRIBUTING.md.
 -->
 
 ## Summary
@@ -43,7 +43,7 @@ faster.
 
 **General:**
 
-- [ ] This PR targets **`staging`**, not `master`.
+- [ ] This PR targets **`staging`**, not `main`.
 - [ ] Commits are focused (one logical change each) with clear messages.
 - [ ] New DB columns follow the conventions (UUID PKs, `DECIMAL(19,4)` for
       quantities, money-as-cents in app code, every quantity paired with a UOM).

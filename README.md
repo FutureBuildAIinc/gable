@@ -96,7 +96,7 @@ summarized in [`NOTICE`](./NOTICE) and
 
 We welcome contributions. Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) for
 the build steps, branch model (**PRs target `staging`**, which maintainers
-fast-forward to `master`), the pre-flight checklist, and how inbound
+fast-forward to `main`), the pre-flight checklist, and how inbound
 contributions are licensed via the CLA.
 
 Please also read our [Code of Conduct](./CODE_OF_CONDUCT.md). To report a

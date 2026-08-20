@@ -227,8 +227,8 @@ From [`CLAUDE.md`](../../../CLAUDE.md) § Pre-Flight Checks — verify each that
 
 ## 6 · The PR itself
 
-- **Target branch is `staging`.** Not `master`. `CONTRIBUTING.md`, the PR template, and the
-  README all say so; maintainers fast-forward `staging → master` after review.
+- **Target branch is `staging`.** Not `main`. `CONTRIBUTING.md`, the PR template, and the
+  README all say so; maintainers fast-forward `staging → main` after review.
   ```bash
   gh pr create --base staging --fill    # if you use the GitHub CLI
   ```

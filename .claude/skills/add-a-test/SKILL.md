@@ -245,7 +245,7 @@ git commit -m "test(invoice): table-driven coverage for tax rate resolution and 
 ```
 
 > If `git switch` fails with `invalid reference: origin/staging`, this clone doesn't have
-> `staging` yet — branch from `origin/master` and still open the PR **against `staging`**.
+> `staging` yet — branch from `origin/main` and still open the PR **against `staging`**.
 
 Then run **`check-my-contribution`** (it verifies the SPDX header matches the directory —
 `backend/internal/` → `LicenseRef-OpenLBM-Commons-1.0`, `app/` →

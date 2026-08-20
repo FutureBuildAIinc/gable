@@ -7,7 +7,7 @@ live environment.
 
 | Spec | Tracks branch | Example domain | Logical DB |
 |---|---|---|---|
-| `app-demo.yaml` | `master` | `demo.example.com` | `gable_demo_db` |
+| `app-demo.yaml` | `main` | `demo.example.com` | `gable_demo_db` |
 | `app-staging.yaml` | `staging` | `staging.example.com` | `gable_staging_db` |
 
 Both examples reference a single DO Managed Postgres cluster
@@ -90,7 +90,7 @@ Push to the matching branch — DO auto-deploys because every service has
 `deploy_on_push: true`:
 
 ```bash
-git push origin master      # -> the "demo" example app
+git push origin main      # -> the "demo" example app
 git push origin staging     # -> the "staging" example app
 ```
 

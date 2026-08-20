@@ -136,8 +136,8 @@ one; and if it finds a real bug it files an issue rather than writing the wrong 
 
 These apply whether or not you used AI.
 
-**1 · Pull requests target `staging`, never `master`.**
-Maintainers fast-forward `staging → master` after review. See
+**1 · Pull requests target `staging`, never `main`.**
+Maintainers fast-forward `staging → main` after review. See
 [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 **2 · Never commit a secret.**

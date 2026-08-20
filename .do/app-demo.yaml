@@ -30,7 +30,7 @@ services:
     source_dir: /
     github:
       repo: your-org/gable
-      branch: master
+      branch: main
       deploy_on_push: true
     instance_count: 1
     instance_size_slug: basic-xxs
@@ -78,7 +78,7 @@ services:
     source_dir: /
     github:
       repo: your-org/gable
-      branch: master
+      branch: main
       deploy_on_push: true
     instance_count: 1
     instance_size_slug: basic-xxs
@@ -115,7 +115,7 @@ jobs:
     source_dir: /
     github:
       repo: your-org/gable
-      branch: master
+      branch: main
     instance_count: 1
     instance_size_slug: basic-xxs
     # App Platform exec-splits run_command on whitespace and passes the tokens

@@ -39,17 +39,17 @@ be named in the advisory.
 
 ## Supported branches
 
-Security fixes are developed against `master` and flow out through the normal
+Security fixes are developed against `main` and flow out through the normal
 promotion path.
 
 | Branch | Supported | Notes |
 |---|---|---|
-| `master` | ✅ Yes | Current trunk. Security fixes land here first. |
-| `staging` | ⚠️ In transit | Receives fixes on their way to `master`; not a long-term support target. |
-| Forks / vendored copies | ❌ No | Re-base onto a patched `master` and re-apply local changes. |
+| `main` | ✅ Yes | Current trunk. Security fixes land here first. |
+| `staging` | ⚠️ In transit | Receives fixes on their way to `main`; not a long-term support target. |
+| Forks / vendored copies | ❌ No | Re-base onto a patched `main` and re-apply local changes. |
 | Pre-public history / old tags | ❌ No | Not maintained. |
 
-There is no separate long-term-support line yet. Run a recent `master` to stay
+There is no separate long-term-support line yet. Run a recent `main` to stay
 patched.
 
 ## Response window

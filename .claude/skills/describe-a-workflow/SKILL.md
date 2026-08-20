@@ -240,7 +240,7 @@ git commit -m "docs: capture will-call / pickup workflow spec"
 ```
 
 > If `git switch` fails with `invalid reference: origin/staging`, this clone doesn't have the
-> `staging` branch yet — run `git fetch origin` again, or branch from `origin/master` and still
+> `staging` branch yet — run `git fetch origin` again, or branch from `origin/main` and still
 > open the PR **against `staging`** on GitHub.
 
 Then run the **`check-my-contribution`** skill before pushing (it verifies the SPDX header
