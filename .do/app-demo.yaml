@@ -128,6 +128,13 @@ jobs:
         value: ${gable-db.DATABASE_URL}
         scope: RUN_TIME
         type: SECRET
+      # Set here and ONLY here. A demo that cannot be returned to a known state
+      # by redeploying is not much of a demo, so this environment opts in to the
+      # destructive reset described above. Do not copy this key into a staging,
+      # production or self-hosted spec: it truncates the ledger.
+      - key: DEMO_SEED
+        value: "true"
+        scope: RUN_TIME
 
 databases:
   - name: gable-db

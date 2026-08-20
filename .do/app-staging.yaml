@@ -105,6 +105,11 @@ jobs:
   # without the gate, every deploy of this spec would silently destroy the
   # target database's operational data. Set DEMO_SEED=true ONLY on a
   # throwaway demo environment. The binary enforces the same gate itself.
+  #
+  # DEMO_SEED is deliberately ABSENT from this spec. Staging keeps whatever is
+  # in it across deploys; only .do/app-demo.yaml opts in to the reset. If you
+  # ever need to reseed staging, set the variable for one deploy and remove it
+  # again — do not add it here.
   - name: migrate-and-seed
     kind: POST_DEPLOY
     dockerfile_path: backend/Dockerfile
