@@ -32,7 +32,7 @@ type ProductCategory struct {
 	ID        uuid.UUID  `json:"id"`
 	Name      string     `json:"name"`
 	Slug      string     `json:"slug"`
-	Path      string     `json:"path"`   // ltree path, e.g. "lumber.framing"
+	Path      string     `json:"path"` // ltree path, e.g. "lumber.framing"
 	ParentID  *uuid.UUID `json:"parent_id,omitempty"`
 	SortOrder int        `json:"sort_order"`
 	IsActive  bool       `json:"is_active"`
@@ -69,20 +69,20 @@ type CategoryPricingRule struct {
 // ResolvedCategoryPrice is the output of the category resolution algorithm.
 type ResolvedCategoryPrice struct {
 	Rule         *CategoryPricingRule `json:"rule,omitempty"`
-	MatchType    string              `json:"match_type"`    // "account_exact", "account_ancestor", "tier_exact", "tier_ancestor", "none"
-	CategoryPath string              `json:"category_path"`
-	CostPrice    float64             `json:"cost_price"` // product's average unit cost for MARKUP/MARGIN rules
+	MatchType    string               `json:"match_type"` // "account_exact", "account_ancestor", "tier_exact", "tier_ancestor", "none"
+	CategoryPath string               `json:"category_path"`
+	CostPrice    float64              `json:"cost_price"` // product's average unit cost for MARKUP/MARGIN rules
 }
 
 // MatrixCell represents a single cell in the pricing matrix grid.
 type MatrixCell struct {
-	CategoryID   uuid.UUID           `json:"category_id"`
-	CategoryName string              `json:"category_name"`
-	CategoryPath string              `json:"category_path"`
-	Tier         string              `json:"tier"`
+	CategoryID   uuid.UUID            `json:"category_id"`
+	CategoryName string               `json:"category_name"`
+	CategoryPath string               `json:"category_path"`
+	Tier         string               `json:"tier"`
 	Rule         *CategoryPricingRule `json:"rule,omitempty"`
-	Inherited    bool                `json:"inherited"`
-	SourcePath   string              `json:"source_path,omitempty"`
+	Inherited    bool                 `json:"inherited"`
+	SourcePath   string               `json:"source_path,omitempty"`
 }
 
 // MatrixResponse is the admin API response for the full pricing matrix.
@@ -103,17 +103,17 @@ type CategoryRuleFilter struct {
 
 // CategoryPricingAudit represents a row in the audit trail table.
 type CategoryPricingAudit struct {
-	ID          uuid.UUID              `json:"id"`
-	RuleID      uuid.UUID              `json:"rule_id"`
-	Action      string                 `json:"action"`
-	OldValues   map[string]any         `json:"old_values,omitempty"`
-	NewValues   map[string]any         `json:"new_values,omitempty"`
-	PerformedBy string                 `json:"performed_by"`
-	PerformedAt time.Time              `json:"performed_at"`
-	CategoryID  *uuid.UUID             `json:"category_id,omitempty"`
-	TargetType  string                 `json:"target_type,omitempty"`
-	Tier        string                 `json:"tier,omitempty"`
-	CustomerID  *uuid.UUID             `json:"customer_id,omitempty"`
+	ID          uuid.UUID      `json:"id"`
+	RuleID      uuid.UUID      `json:"rule_id"`
+	Action      string         `json:"action"`
+	OldValues   map[string]any `json:"old_values,omitempty"`
+	NewValues   map[string]any `json:"new_values,omitempty"`
+	PerformedBy string         `json:"performed_by"`
+	PerformedAt time.Time      `json:"performed_at"`
+	CategoryID  *uuid.UUID     `json:"category_id,omitempty"`
+	TargetType  string         `json:"target_type,omitempty"`
+	Tier        string         `json:"tier,omitempty"`
+	CustomerID  *uuid.UUID     `json:"customer_id,omitempty"`
 }
 
 // PaginatedRulesResponse wraps a paginated list of category pricing rules.

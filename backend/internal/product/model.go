@@ -69,6 +69,37 @@ type Product struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+// Geometry is the mutable slice of a Product that the geometry editor owns:
+// the parametric L/W/H triple, the stackable flag and the provenance label.
+//
+// EVERY FIELD IS A POINTER, and that is the entire point of the type. nil means
+// "not recorded" and must survive all the way to a SQL NULL; it is materially
+// different from a recorded 0.0 (a zero-volume box) or a recorded false (a SKU
+// an operator has explicitly marked un-stackable). Downstream, AI_LM's
+// resolveGeometry() falls back to its own override table only for null, so
+// collapsing nil to a zero value here would hand the load planner a phantom
+// box it has no way to detect. Keep these pointers.
+type Geometry struct {
+	LengthIn       *float64 `json:"length_in"`
+	WidthIn        *float64 `json:"width_in"`
+	HeightIn       *float64 `json:"height_in"`
+	Stackable      *bool    `json:"stackable"`
+	GeometrySource *string  `json:"geometry_source"`
+}
+
+// HasDimensions reports whether any of the three linear dimensions was
+// recorded. A SKU with no dimensions at all has no geometry to attribute a
+// provenance to — see Service.UpdateDimensions.
+func (g Geometry) HasDimensions() bool {
+	return g.LengthIn != nil || g.WidthIn != nil || g.HeightIn != nil
+}
+
+// GeometrySourceParametric is the provenance recorded for an operator-entered
+// L/W/H triple. It matches the value the seed data and the integration layer's
+// resolveGeometrySource() use, and is the forward-compat seam for a future
+// 'mesh' source (migration 080).
+const GeometrySourceParametric = "parametric"
+
 // ReorderAlert represents a product that's below its reorder point
 type ReorderAlert struct {
 	ProductID    uuid.UUID  `json:"product_id"`

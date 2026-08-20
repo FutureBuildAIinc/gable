@@ -83,13 +83,13 @@ func WithBranchContext(ctx context.Context, bc *BranchContext) context.Context {
 }
 
 // BranchMiddleware enforces the multi-branch contract on a request:
-//   1. Reads `X-Branch-Id` from the request.
-//   2. Validates the header against the `user_locations` join table for
-//      non-admin users; rejects with 403 on miss.
-//   3. Admin/owner users may omit the header to query across all branches.
-//   4. Honors the `multi_branch_enabled` kill switch in `system_settings`:
-//      when false (or unset), the middleware behaves as if every request
-//      is admin (no header required, no validation).
+//  1. Reads `X-Branch-Id` from the request.
+//  2. Validates the header against the `user_locations` join table for
+//     non-admin users; rejects with 403 on miss.
+//  3. Admin/owner users may omit the header to query across all branches.
+//  4. Honors the `multi_branch_enabled` kill switch in `system_settings`:
+//     when false (or unset), the middleware behaves as if every request
+//     is admin (no header required, no validation).
 type BranchMiddleware struct {
 	db *database.DB
 

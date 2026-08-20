@@ -15,21 +15,21 @@ import (
 // Maps entity -> field_name -> SQL column expression
 var entitySchemas = map[string]map[string]string{
 	"invoices": {
-		"id":           "i.id",
+		"id":             "i.id",
 		"invoice_number": "i.invoice_number",
-		"status":       "i.status",
-		"total_amount": "i.total_amount",
-		"created_at":   "i.created_at",
-		"customer_id":  "i.customer_id",
-		"customer_name": "c.name",
+		"status":         "i.status",
+		"total_amount":   "i.total_amount",
+		"created_at":     "i.created_at",
+		"customer_id":    "i.customer_id",
+		"customer_name":  "c.name",
 	},
 	"orders": {
-		"id":           "o.id",
-		"order_number": "o.order_number",
-		"status":       "o.status",
-		"total_amount": "o.total_amount",
-		"created_at":   "o.created_at",
-		"customer_id":  "o.customer_id",
+		"id":            "o.id",
+		"order_number":  "o.order_number",
+		"status":        "o.status",
+		"total_amount":  "o.total_amount",
+		"created_at":    "o.created_at",
+		"customer_id":   "o.customer_id",
 		"customer_name": "c.name",
 	},
 	"inventory": {
@@ -42,8 +42,8 @@ var entitySchemas = map[string]map[string]string{
 }
 
 var entityBaseQuery = map[string]string{
-	"invoices": "FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id",
-	"orders":   "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id",
+	"invoices":  "FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id",
+	"orders":    "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id",
 	"inventory": "FROM inventory inv LEFT JOIN products p ON inv.product_id = p.id",
 }
 
@@ -67,7 +67,7 @@ func BuildAndExecuteQuery(ctx context.Context, pool *pgxpool.Pool, def *ReportDe
 		if !ok {
 			return nil, fmt.Errorf("invalid column: %s", col.Field)
 		}
-		
+
 		if col.Aggregation != "" {
 			switch strings.ToUpper(col.Aggregation) {
 			case "SUM", "COUNT", "AVG", "MIN", "MAX":
@@ -123,7 +123,7 @@ func BuildAndExecuteQuery(ctx context.Context, pool *pgxpool.Pool, def *ReportDe
 
 	// Construct Query String
 	query := fmt.Sprintf("SELECT %s\n%s", strings.Join(selectCols, ", "), baseQuery)
-	
+
 	if len(whereClauses) > 0 {
 		query += fmt.Sprintf("\nWHERE %s", strings.Join(whereClauses, " AND "))
 	}
@@ -144,13 +144,13 @@ func BuildAndExecuteQuery(ctx context.Context, pool *pgxpool.Pool, def *ReportDe
 
 	var results []map[string]interface{}
 	fieldDescriptions := rows.FieldDescriptions()
-	
+
 	for rows.Next() {
 		rowVals, err := rows.Values()
 		if err != nil {
 			return nil, err
 		}
-		
+
 		rowData := make(map[string]interface{})
 		for i, fd := range fieldDescriptions {
 			rowData[string(fd.Name)] = rowVals[i]

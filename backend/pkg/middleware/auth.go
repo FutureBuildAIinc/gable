@@ -37,8 +37,8 @@ type UserClaims struct {
 
 	// FutureBuild Brain custom claims — populated when tokens are issued by Brain's OIDC.
 	OrgID    string `json:"org_id,omitempty"`    // Brain tenant/org UUID
-	Role     string `json:"role,omitempty"`       // Brain role: owner, admin, member
-	PlanTier string `json:"plan_tier,omitempty"`  // Brain plan: free, pro, enterprise
+	Role     string `json:"role,omitempty"`      // Brain role: owner, admin, member
+	PlanTier string `json:"plan_tier,omitempty"` // Brain plan: free, pro, enterprise
 }
 
 // Key for Context

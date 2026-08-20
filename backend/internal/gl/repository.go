@@ -30,6 +30,9 @@ type Repository interface {
 	// Trial Balance
 	GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error)
 
+	// Financial Statements
+	GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]AccountActivity, error)
+
 	// Fiscal Periods
 	ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error)
 	GetFiscalPeriodForDate(ctx context.Context, date time.Time) (*FiscalPeriod, error)
@@ -343,6 +346,62 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 		row.Debit = int64(debitFloat*100.0 + 0.5)
 		row.Credit = int64(creditFloat*100.0 + 0.5)
 		result = append(result, row)
+	}
+	return result, nil
+}
+
+// --- Financial Statements ---
+
+// GetAccountActivity returns per-account posted debit/credit totals in cents
+// for the given account types. A nil start means inception-to-date (what a
+// balance sheet needs); a non-nil start bounds the window below (what an
+// income statement needs). end is inclusive. entry_date is a DATE column
+// (migration 025), so both bounds compare cleanly with no time-of-day edge.
+//
+// Money note: the conversion from the DECIMAL(12,2) dollar columns to int64
+// cents is done in SQL, where the arithmetic is exact numeric, rather than by
+// scanning into float64 and multiplying in Go. The float path is not merely
+// imprecise here, it is reliably wrong for negative balances: the idiom used
+// elsewhere in this file, `int64(x*100.0 + 0.5)`, rounds half *up* rather than
+// half away from zero, and Go truncates float→int toward zero, so a -$100.00
+// balance becomes -9999 cents instead of -10000. On a balance sheet that error
+// lands once per contra/unnatural-balance account and breaks
+// assets = liabilities + equity outright. Keeping the arithmetic in numeric
+// removes the failure mode rather than rounding it more carefully.
+func (r *PostgresRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]AccountActivity, error) {
+	// Deliberately not filtered on a.is_active: an account that is deactivated
+	// while still carrying a balance does not stop being part of the entity's
+	// financial position, and excluding it would silently unbalance the sheet.
+	query := `
+		SELECT a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''),
+		       COALESCE(ROUND(SUM(l.debit) * 100), 0)::bigint  AS debit_cents,
+		       COALESCE(ROUND(SUM(l.credit) * 100), 0)::bigint AS credit_cents
+		FROM gl_accounts a
+		JOIN gl_journal_lines l ON l.account_id = a.id
+		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+		WHERE e.status = 'POSTED'
+		  AND e.entry_date <= $1
+		  AND ($2::date IS NULL OR e.entry_date >= $2::date)
+		  AND a.type = ANY($3)
+		GROUP BY a.id, a.code, a.name, a.type, a.subtype
+		ORDER BY a.code
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, end, start, accountTypes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account activity: %w", err)
+	}
+	defer rows.Close()
+
+	var result []AccountActivity
+	for rows.Next() {
+		var row AccountActivity
+		if err := rows.Scan(&row.AccountID, &row.AccountCode, &row.AccountName, &row.AccountType, &row.AccountSubtype, &row.Debit, &row.Credit); err != nil {
+			return nil, fmt.Errorf("failed to scan account activity row: %w", err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read account activity: %w", err)
 	}
 	return result, nil
 }

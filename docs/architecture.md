@@ -7,7 +7,7 @@
 ## 1. System Principles
 - **Modular Monolith:** Single deployment binary; ~40 modules under `backend/internal/`, wired in `backend/cmd/server/main.go`.
 - **Zero-Trust Modules:** Modules never access another module's database tables directly — cross-module needs go through the other module's service or repository types.
-- **Synchronous Interop:** All inter-module effects are synchronous Go calls today. (An event bus is a Phase 2+ consideration — see blueprint. There is no NATS client in the codebase.)
+- **Synchronous Interop:** Every inter-module *write* is a synchronous Go call. The one asynchronous path is notification side-effects for price exposure, fanned out over the in-process `pkg/eventbus` (§4.2). There is no message broker and no NATS client in the codebase.
 - **Interface Seams Where They Earn Their Keep:** Most coupling is concrete `*Service` injection; consumer-defined interfaces + adapters in `main.go` exist where cycles had to be broken (`quote.AutoPOService`, `delivery.InvoiceServiceInterface`, `pos.PriceCalculator`, `gl` → `integrations.GLAdapter`).
 - **Apps Platform (Phase 0 landed):** Modules are becoming *apps* — declared manifests, a DB-backed registry (`apps` table), per-instance enable/disable, and an Apps admin page. See the blueprint for the full model.
 
@@ -76,11 +76,38 @@ defined by the consumer with an adapter in `main.go`.
 debit in one transaction (`order.FulfillOrder` → `invoice.PostInvoiceToLedger`
 → `gl.SyncInvoice` + `account.PostTransaction`).
 
-### 4.2. Asynchronous events — future design (not implemented)
-There is **no event bus**. If/when one lands (Phase 2+ of the blueprint), the
-intended shape is subjects like `sales.order.confirmed` fanning out to
-inventory/logistics/billing consumers. Until then, do not design features
-that assume eventual consistency between modules.
+### 4.2. Asynchronous events — one in-process bus, no broker
+`backend/pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam.
+It is used by exactly one feature: the lumber price-exposure scanner publishes
+`quote.exposure.*` events, and `notification.ExposureNotifier` subscribes on
+`quote.exposure.>` to send salesperson and customer email. Subjects follow NATS
+token syntax (`*` = one token, `>` = one or more trailing tokens) so a future
+broker can bind the same strings.
+
+There is still **no broker**: nothing is added to `go.mod`, `docker-compose.yml`
+or the deploy specs, and Gable remains a single Go binary.
+
+What the bus does **not** provide, versus a real broker:
+
+| Property | In-process bus |
+|---|---|
+| Durability | None — events live in a bounded in-memory channel and are lost on restart |
+| Cross-process delivery | None — only subscribers inside the same process see an event |
+| Redelivery / ack | None — a handler error is logged and the event dropped (at-most-once) |
+| Backpressure | None — `Publish` never blocks; a full subscriber queue drops |
+| Replay | None — a subscriber registered after a publish never sees it |
+
+Consequences for design: **do not put a write on the bus.** Every durable fact
+in the exposure subsystem lives in Postgres (`quote_exposure_events`,
+`price_escalators.current_state`, the `quotes` rollup columns), and the nightly
+safety-net scan (`quote.ExposureScheduler`) recomputes state from Postgres, so
+a dropped event costs notification latency, not correctness. Do not design
+features that assume eventual consistency between modules.
+
+Swapping in a durable broker (Phase 2+ of the blueprint) is an implementation
+change behind `eventbus.Bus`: producers and consumers only see `Publisher`,
+`Subscriber`, `Handler` and `Event`, and `Subscribe` already carries a
+`durable` consumer name for that purpose.
 
 ## 5. API Strategy
 - **Style:** RESTful JSON.

@@ -91,6 +91,11 @@ func (m *MockGLRepository) UpdateAccount(ctx context.Context, acct *gl.GLAccount
 func (m *MockGLRepository) GetTrialBalance(ctx context.Context, asOf time.Time) ([]gl.TrialBalanceRow, error) {
 	return nil, nil
 }
+
+// AP never reads financial statements; this satisfies gl.Repository only.
+func (m *MockGLRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]gl.AccountActivity, error) {
+	return nil, nil
+}
 func (m *MockGLRepository) ListFiscalPeriods(ctx context.Context) ([]gl.FiscalPeriod, error) {
 	return nil, nil
 }

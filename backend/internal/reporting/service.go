@@ -172,35 +172,39 @@ func (s *Service) GetCustomerStatement(ctx context.Context, customerID, startStr
 }
 
 func (s *Service) CreateSavedReport(ctx context.Context, report *SavedReport) error {
-return s.repo.CreateSavedReport(ctx, report)
+	return s.repo.CreateSavedReport(ctx, report)
 }
 
 func (s *Service) GetSavedReport(ctx context.Context, id string) (*SavedReport, error) {
-return s.repo.GetSavedReport(ctx, id)
+	return s.repo.GetSavedReport(ctx, id)
 }
 
 func (s *Service) ListSavedReports(ctx context.Context) ([]SavedReport, error) {
-return s.repo.ListSavedReports(ctx)
+	return s.repo.ListSavedReports(ctx)
 }
 
 func (s *Service) UpdateSavedReport(ctx context.Context, report *SavedReport) error {
-return s.repo.UpdateSavedReport(ctx, report)
+	return s.repo.UpdateSavedReport(ctx, report)
 }
 
 func (s *Service) DeleteSavedReport(ctx context.Context, id string) error {
-return s.repo.DeleteSavedReport(ctx, id)
+	return s.repo.DeleteSavedReport(ctx, id)
 }
 
 func (s *Service) CreateReportSchedule(ctx context.Context, schedule *ReportSchedule) error {
-return s.repo.CreateReportSchedule(ctx, schedule)
+	return s.repo.CreateReportSchedule(ctx, schedule)
 }
 
 func (s *Service) ListReportSchedules(ctx context.Context) ([]ReportSchedule, error) {
-return s.repo.ListReportSchedules(ctx)
+	return s.repo.ListReportSchedules(ctx)
 }
 
 func (s *Service) UpdateReportScheduleNextRun(ctx context.Context, scheduleID string, nextRun time.Time) error {
-return s.repo.UpdateReportScheduleNextRun(ctx, scheduleID, nextRun)
+	return s.repo.UpdateReportScheduleNextRun(ctx, scheduleID, nextRun)
+}
+
+func (s *Service) DeleteReportSchedule(ctx context.Context, id string) error {
+	return s.repo.DeleteReportSchedule(ctx, id)
 }
 
 func (s *Service) ExecuteReportDefinition(ctx context.Context, def *ReportDefinition, entityType string) ([]map[string]interface{}, error) {

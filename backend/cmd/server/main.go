@@ -495,6 +495,25 @@ func main() {
 	deliveryHandler := delivery.NewHandler(deliverySvc)
 	deliveryHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "driver"))
 
+	// Lumber index-aware quote price protection (the exposure module).
+	// Snapshots a baseline index when a quote is sent, detects moves past the
+	// per-customer threshold, applies the snapshotted policy, and gates order
+	// confirm/fulfil and delivery route assignment. Notification side-effects
+	// travel over the in-process pkg/eventbus — see cmd/server/wire_exposure.go.
+	// Must come after deliverySvc, its last dependency.
+	exposureWiring := wireExposure(exposureDeps{
+		Mux:           mux,
+		DB:            db,
+		Logger:        logger,
+		AuditLog:      auditLog,
+		EscalatorRepo: escalatorRepo,
+		QuoteRepo:     quoteRepo,
+		QuoteSvc:      quoteSvc,
+		OrderSvc:      orderSvc,
+		DeliverySvc:   deliverySvc,
+		EmailSvc:      emailSvc,
+	})
+
 	// SMS Notification Service
 	var smsSvc notification.SMSService
 	if cfg.TwilioAccountSID != "" {
@@ -621,6 +640,11 @@ func main() {
 	projectSvc := project.NewService(projectRepo)
 	projectHandler := project.NewHandler(projectSvc)
 	projectHandler.RegisterRoutes(mux, portalMw)
+
+	// Staff roster and per-module access grants. This is the write side of
+	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff
+	// reads back. Route list and the admin/owner guard: cmd/server/wire_staff.go.
+	wireStaffAdmin(mux, db, auditLog)
 
 	// Integration API. One X-Integration-Key-gated surface shared by the
 	// FB-Brain cross-system endpoints and by AI_LM (github.com/gablelbm/
@@ -839,6 +863,13 @@ func main() {
 	logger.Info("Shutdown step 3.5/4: stopping reorder scheduler...")
 	reorderScheduler.Stop()
 	logger.Info("Shutdown step 3.5/4: reorder scheduler stopped")
+
+	// Step 3.7: Stop the exposure safety-net cron and drain the in-process
+	// event bus before the pool closes, so a queued notification handler
+	// cannot fire against a dead pool.
+	logger.Info("Shutdown step 3.7/4: stopping exposure wiring...")
+	exposureWiring.Shutdown(ctx)
+	logger.Info("Shutdown step 3.7/4: exposure wiring stopped")
 
 	// Step 4: Close database connection pool
 	logger.Info("Shutdown step 4/4: closing database pool...")

@@ -197,7 +197,14 @@ describe('gable-app-shell — the active module menu band', () => {
     const el = await shellAt('/accounting/journal-entries')
     const links = Array.from(el.querySelectorAll('a[href^="/accounting"]')).map((a) => text(a))
 
-    expect(links).toEqual(['Chart of Accounts', 'Journal Entries', 'Trial Balance'])
+    expect(links).toEqual([
+      'Chart of Accounts',
+      'Journal Entries',
+      'Trial Balance',
+      'Profit & Loss',
+      'Balance Sheet',
+      'Accounts Payable',
+    ])
   })
 
   it('lights the menu item matching the current path', async () => {

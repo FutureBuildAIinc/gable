@@ -38,6 +38,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/products/reorder-alerts", guard(h.HandleReorderAlerts))
 	mux.HandleFunc("GET /api/v1/products/{id}", guard(h.HandleGetProduct))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/margins", guard(h.HandleUpdateMarginRules))
+	mux.HandleFunc("PATCH /api/v1/products/{id}/dimensions", guard(h.HandleUpdateDimensions))
 }
 
 // HandleGetProduct handles GET /products/{id}
@@ -140,4 +141,60 @@ func (h *Handler) HandleUpdateMarginRules(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// HandleUpdateDimensions handles PATCH /products/{id}/dimensions — the write
+// side of the PIM's canonical parametric 3D geometry, which AI_LM's Load
+// Builder reads back over GET /api/integration/products.
+//
+// The request body is decoded straight into a Geometry, whose fields are all
+// pointers. That is what makes an omitted or explicitly-null field clear the
+// column to SQL NULL instead of writing a zero:
+//
+//	{"length_in": null}  -> length_in IS NULL   ("no geometry recorded")
+//	{"length_in": 0}     -> length_in = 0       (a real, if odd, measurement)
+//	{}                   -> every column NULL   (the editor's "clear" path)
+//
+// A 200 with the persisted Geometry is returned so a client can see exactly
+// which fields ended up null without a follow-up GET.
+func (h *Handler) HandleUpdateDimensions(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		httputil.RespondError(w, r, "id is required", http.StatusBadRequest, nil)
+		return
+	}
+
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
+		return
+	}
+
+	var g Geometry
+	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.UpdateDimensions(r.Context(), id, g); err != nil {
+		httputil.RespondError(w, r, "Failed to update dimensions", http.StatusInternalServerError, err)
+		return
+	}
+
+	updated, err := h.service.GetProduct(r.Context(), id)
+	if err != nil {
+		// The write succeeded; only the read-back failed. Reporting 500 here
+		// would tell the operator their edit was lost when it was not.
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(Geometry{
+		LengthIn:       updated.LengthIn,
+		WidthIn:        updated.WidthIn,
+		HeightIn:       updated.HeightIn,
+		Stackable:      updated.Stackable,
+		GeometrySource: updated.GeometrySource,
+	})
 }

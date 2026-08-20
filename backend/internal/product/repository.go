@@ -23,6 +23,7 @@ type Repository interface {
 	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error
 	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
+	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error
 }
 
 // PostgresRepository implements Repository using pgx
@@ -312,4 +313,32 @@ func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.U
 	query := `UPDATE products SET reorder_point = $1, reorder_qty = $2, updated_at = NOW() WHERE id = $3`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, reorderPoint, reorderQty, id)
 	return err
+}
+
+// updateDimensionsQuery is the geometry write. It is a package-level constant
+// rather than a local so TestUpdateDimensionsQuery_WritesRawNulls can assert
+// that no COALESCE / NULLIF ever creeps back into it: substituting a default
+// here is exactly how the nullable-geometry contract would be lost.
+const updateDimensionsQuery = `
+	UPDATE products
+	SET length_in = $1, width_in = $2, height_in = $3,
+	    stackable = $4, geometry_source = $5, updated_at = NOW()
+	WHERE id = $6`
+
+// UpdateDimensions writes the parametric 3D geometry (inches) that the PIM owns
+// as the canonical digital-twin source consumed by AI_LM's Load Builder.
+//
+// Every column is written from a POINTER and is deliberately NOT COALESCEd: a
+// nil field lands in Postgres as SQL NULL, which is the only way to record "no
+// geometry entered for this SKU". Substituting 0 (or TRUE for stackable) here
+// would make GET /api/integration/products report a real zero-volume box, and
+// AI_LM's resolveGeometry() would trust it instead of falling back to its own
+// defaults. See migration 080_ailm_integration_contract.sql.
+func (r *PostgresRepository) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, updateDimensionsQuery,
+		g.LengthIn, g.WidthIn, g.HeightIn, g.Stackable, g.GeometrySource, id)
+	if err != nil {
+		return fmt.Errorf("failed to update product dimensions: %w", err)
+	}
+	return nil
 }

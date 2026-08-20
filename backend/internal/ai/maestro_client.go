@@ -43,9 +43,9 @@ type maestroChatRequest struct {
 
 type maestroChatResponse struct {
 	Data struct {
-		SessionID string          `json:"session_id"`
-		Reply     string          `json:"reply"`
-		Intent    string          `json:"intent"`
+		SessionID   string          `json:"session_id"`
+		Reply       string          `json:"reply"`
+		Intent      string          `json:"intent"`
 		ToolResults json.RawMessage `json:"tool_results,omitempty"`
 	} `json:"data"`
 	Error *struct {

@@ -65,7 +65,7 @@ type BranchSummary struct {
 	Code     string    `json:"code"`
 	Name     string    `json:"name"`
 	Active   bool      `json:"active"`
-	IsHome   bool      `json:"is_home,omitempty"`   // populated by /me/branches
+	IsHome   bool      `json:"is_home,omitempty"` // populated by /me/branches
 	Timezone string    `json:"timezone,omitempty"`
 }
 

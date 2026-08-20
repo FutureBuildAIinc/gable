@@ -154,6 +154,22 @@ func (f *fakeRepo) UpdateReportScheduleNextRun(_ context.Context, id string, nex
 	return nil
 }
 
+func (f *fakeRepo) DeleteReportSchedule(_ context.Context, id string) error {
+	if f.savedErr != nil {
+		return f.savedErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.schedules[:0]
+	for _, s := range f.schedules {
+		if s.ID != id {
+			kept = append(kept, s)
+		}
+	}
+	f.schedules = kept
+	return nil
+}
+
 var _ Repository = (*fakeRepo)(nil)
 
 // --- date-window handling ------------------------------------------------

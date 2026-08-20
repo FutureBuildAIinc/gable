@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // GetRegisterBranch resolves a register's branch (via its assigned location).

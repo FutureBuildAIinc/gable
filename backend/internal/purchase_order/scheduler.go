@@ -252,4 +252,3 @@ func (s *Scheduler) settingInt(ctx context.Context, key string, def int) int {
 	}
 	return n
 }
-

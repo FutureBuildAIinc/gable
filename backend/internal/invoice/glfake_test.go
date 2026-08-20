@@ -107,6 +107,11 @@ func (f *fakeGLRepo) GetTrialBalance(context.Context, time.Time) ([]gl.TrialBala
 	return nil, nil
 }
 
+// Invoice never reads financial statements; this satisfies gl.Repository only.
+func (f *fakeGLRepo) GetAccountActivity(context.Context, *time.Time, time.Time, []string) ([]gl.AccountActivity, error) {
+	return nil, nil
+}
+
 func (f *fakeGLRepo) ListFiscalPeriods(context.Context) ([]gl.FiscalPeriod, error) {
 	return f.periods, nil
 }

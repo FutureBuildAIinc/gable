@@ -29,6 +29,15 @@ export interface Product {
     vendor_id?: string;      // Canonical FK -> vendors.id
     upc?: string;
     weight_lbs?: number;
+    // Canonical parametric geometry (inches). `null` means "no geometry
+    // recorded for this SKU" and is NOT the same as 0 — AI_LM's load planner
+    // falls back to its own defaults only for null, and would treat a 0 as a
+    // real zero-volume box. Keep these nullable; see migration 080.
+    length_in?: number | null;
+    width_in?: number | null;
+    height_in?: number | null;
+    stackable?: boolean | null;       // null = unknown
+    geometry_source?: string | null;  // 'parametric' (future: 'mesh')
     reorder_point?: number;
     reorder_qty?: number;
     total_quantity?: number;

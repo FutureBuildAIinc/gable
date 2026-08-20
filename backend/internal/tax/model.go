@@ -25,11 +25,11 @@ type TaxLine struct {
 	ItemCode     string  `json:"item_code"`
 	Description  string  `json:"description"`
 	Quantity     float64 `json:"quantity"`
-	Amount       int64   `json:"amount"`        // Pre-tax amount in cents
-	TaxAmount    int64   `json:"tax_amount"`     // Tax in cents
-	TaxRate      float64 `json:"tax_rate"`       // Effective tax rate (0.0825 = 8.25%)
-	Jurisdiction string  `json:"jurisdiction"`   // e.g., "TX", "Harris County"
-	TaxCode      string  `json:"tax_code"`       // Avalara tax code (e.g., "P0000000" for tangible personal property)
+	Amount       int64   `json:"amount"`       // Pre-tax amount in cents
+	TaxAmount    int64   `json:"tax_amount"`   // Tax in cents
+	TaxRate      float64 `json:"tax_rate"`     // Effective tax rate (0.0825 = 8.25%)
+	Jurisdiction string  `json:"jurisdiction"` // e.g., "TX", "Harris County"
+	TaxCode      string  `json:"tax_code"`     // Avalara tax code (e.g., "P0000000" for tangible personal property)
 	Exempt       bool    `json:"exempt"`
 }
 
@@ -47,9 +47,9 @@ type TaxResult struct {
 type TaxExemption struct {
 	ID                uuid.UUID  `json:"id" db:"id"`
 	CustomerID        uuid.UUID  `json:"customer_id" db:"customer_id"`
-	ExemptReason      string     `json:"exempt_reason" db:"exempt_reason"`       // e.g., "RESALE", "GOVERNMENT", "CONTRACTOR"
+	ExemptReason      string     `json:"exempt_reason" db:"exempt_reason"` // e.g., "RESALE", "GOVERNMENT", "CONTRACTOR"
 	CertificateNumber string     `json:"certificate_number" db:"certificate_number"`
-	IssuingState      string     `json:"issuing_state" db:"issuing_state"`        // 2-letter state code
+	IssuingState      string     `json:"issuing_state" db:"issuing_state"` // 2-letter state code
 	EffectiveDate     time.Time  `json:"effective_date" db:"effective_date"`
 	ExpiryDate        *time.Time `json:"expiry_date,omitempty" db:"expiry_date"`
 	IsActive          bool       `json:"is_active" db:"is_active"`
@@ -58,11 +58,11 @@ type TaxExemption struct {
 
 // TaxPreviewRequest is sent by the frontend to get a tax estimate on a cart or invoice.
 type TaxPreviewRequest struct {
-	CustomerID  *uuid.UUID     `json:"customer_id,omitempty"`
-	ShipFrom    TaxAddress     `json:"ship_from"`
-	ShipTo      TaxAddress     `json:"ship_to"`
-	Lines       []TaxLineInput `json:"lines"`
-	DocumentType string        `json:"document_type"` // "SalesInvoice", "ReturnInvoice"
+	CustomerID   *uuid.UUID     `json:"customer_id,omitempty"`
+	ShipFrom     TaxAddress     `json:"ship_from"`
+	ShipTo       TaxAddress     `json:"ship_to"`
+	Lines        []TaxLineInput `json:"lines"`
+	DocumentType string         `json:"document_type"` // "SalesInvoice", "ReturnInvoice"
 	// RateHint is the caller-resolved fallback rate (e.g. the branch's
 	// locations.default_tax_rate) used by the flat-rate path when Avalara is
 	// not configured. Zero means "use the service's configured flat rate".

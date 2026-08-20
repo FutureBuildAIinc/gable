@@ -6,6 +6,7 @@ package gl
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"log/slog"
@@ -245,6 +246,167 @@ func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]Tr
 		asOfDate = time.Now()
 	}
 	return s.repo.GetTrialBalance(ctx, asOfDate)
+}
+
+// --- Financial Statements ---
+
+// statementDateLayout is the wire format for statement date parameters.
+const statementDateLayout = "2006-01-02"
+
+// GetProfitAndLoss assembles an income statement covering [startDate, endDate]
+// inclusive. Both dates are YYYY-MM-DD.
+func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*ProfitAndLossReport, error) {
+	start, err := time.Parse(statementDateLayout, startDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start date %q: %w", startDate, err)
+	}
+	end, err := time.Parse(statementDateLayout, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date %q: %w", endDate, err)
+	}
+	if end.Before(start) {
+		return nil, fmt.Errorf("end date %s precedes start date %s", endDate, startDate)
+	}
+
+	rows, err := s.repo.GetAccountActivity(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense})
+	if err != nil {
+		return nil, err
+	}
+	return assembleProfitAndLoss(startDate, endDate, rows), nil
+}
+
+// GetBalanceSheet assembles a statement of financial position as of asOfDate
+// (YYYY-MM-DD).
+func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate string) (*BalanceSheetReport, error) {
+	asOf, err := time.Parse(statementDateLayout, asOfDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid as_of date %q: %w", asOfDate, err)
+	}
+
+	// Both halves are inception-to-date. The permanent accounts give the
+	// face of the sheet; the temporary ones give retained earnings, which
+	// has no account of its own to read.
+	position, err := s.repo.GetAccountActivity(ctx, nil, asOf,
+		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity})
+	if err != nil {
+		return nil, err
+	}
+	earnings, err := s.repo.GetAccountActivity(ctx, nil, asOf,
+		[]string{AccountTypeRevenue, AccountTypeExpense})
+	if err != nil {
+		return nil, err
+	}
+	return assembleBalanceSheet(asOfDate, position, earnings), nil
+}
+
+// signedBalance returns an account's balance in the direction that increases
+// it: debit-normal accounts (assets, expenses) as debit − credit, and
+// credit-normal accounts (liabilities, equity, revenue) as credit − debit.
+// The result is signed — an account carrying the opposite of its natural
+// balance reports a negative figure rather than being silently flipped.
+func signedBalance(row AccountActivity) int64 {
+	switch row.AccountType {
+	case AccountTypeAsset, AccountTypeExpense:
+		return row.Debit - row.Credit
+	default:
+		return row.Credit - row.Debit
+	}
+}
+
+func lineItem(row AccountActivity) AccountLineItem {
+	return AccountLineItem{
+		AccountID:   row.AccountID.String(),
+		AccountCode: row.AccountCode,
+		AccountName: row.AccountName,
+		Amount:      signedBalance(row),
+	}
+}
+
+// assembleProfitAndLoss builds an income statement from revenue and expense
+// activity. Pure: no I/O, no clock, no database.
+func assembleProfitAndLoss(startDate, endDate string, rows []AccountActivity) *ProfitAndLossReport {
+	report := &ProfitAndLossReport{
+		StartDate: startDate,
+		EndDate:   endDate,
+		Revenue:   []AccountLineItem{},
+		COGS:      []AccountLineItem{},
+		Expenses:  []AccountLineItem{},
+	}
+
+	for _, row := range rows {
+		item := lineItem(row)
+		switch row.AccountType {
+		case AccountTypeRevenue:
+			report.Revenue = append(report.Revenue, item)
+			report.TotalRevenue += item.Amount
+		case AccountTypeExpense:
+			if strings.EqualFold(row.AccountSubtype, COGSSubtype) {
+				report.COGS = append(report.COGS, item)
+				report.TotalCOGS += item.Amount
+			} else {
+				report.Expenses = append(report.Expenses, item)
+				report.TotalExpenses += item.Amount
+			}
+		}
+	}
+
+	report.GrossProfit = report.TotalRevenue - report.TotalCOGS
+	report.NetIncome = report.GrossProfit - report.TotalExpenses
+	return report
+}
+
+// assembleBalanceSheet builds a statement of financial position. position
+// carries asset/liability/equity activity; earnings carries revenue/expense
+// activity, from which retained earnings is derived. Pure: no I/O.
+//
+// The identity assets = liabilities + equity holds for any ledger whose posted
+// entries each balance, because summing (debit − credit) over every account of
+// every type is zero by construction:
+//
+//	assets − liabilities − equity − revenue + expenses = 0
+//	assets = liabilities + equity + (revenue − expenses)
+//	assets = liabilities + equity + retained earnings
+//
+// which is why retained earnings has to be folded into total equity here.
+func assembleBalanceSheet(asOfDate string, position, earnings []AccountActivity) *BalanceSheetReport {
+	report := &BalanceSheetReport{
+		AsOfDate:    asOfDate,
+		Assets:      []AccountLineItem{},
+		Liabilities: []AccountLineItem{},
+		Equity:      []AccountLineItem{},
+	}
+
+	for _, row := range position {
+		item := lineItem(row)
+		switch row.AccountType {
+		case AccountTypeAsset:
+			report.Assets = append(report.Assets, item)
+			report.TotalAssets += item.Amount
+		case AccountTypeLiability:
+			report.Liabilities = append(report.Liabilities, item)
+			report.TotalLiabilities += item.Amount
+		case AccountTypeEquity:
+			report.Equity = append(report.Equity, item)
+			report.TotalEquity += item.Amount
+		}
+	}
+
+	for _, row := range earnings {
+		switch row.AccountType {
+		case AccountTypeRevenue, AccountTypeExpense:
+			// signedBalance already points each type the right way:
+			// revenue credit-normal, expense debit-normal. Retained
+			// earnings is revenue less expenses.
+			if row.AccountType == AccountTypeRevenue {
+				report.RetainedEarnings += signedBalance(row)
+			} else {
+				report.RetainedEarnings -= signedBalance(row)
+			}
+		}
+	}
+
+	report.TotalEquity += report.RetainedEarnings
+	return report
 }
 
 // --- Fiscal Periods ---
@@ -512,6 +674,7 @@ func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID,
 //     counted amount; the shortage is an expense)
 //   - over  (positive): DR Cash, CR Cash Over/Short (book cash rises; the
 //     overage is a credit against the expense)
+//
 // A zero variance posts nothing and returns uuid.Nil.
 func (s *Service) PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error) {
 	if overShortCents == 0 {

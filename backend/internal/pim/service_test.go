@@ -44,6 +44,9 @@ func (r *stubProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float
 func (r *stubProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uuid.UUID) error {
 	return nil
 }
+func (r *stubProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry) error {
+	return nil
+}
 
 type stubPIMRepo struct {
 	createMediaErr error

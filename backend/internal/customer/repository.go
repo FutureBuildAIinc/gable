@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -26,6 +26,9 @@ type Repository interface {
 
 	UpdateBalance(ctx context.Context, id uuid.UUID, delta float64) error
 	UpdateSalesperson(ctx context.Context, customerID uuid.UUID, salespersonID *uuid.UUID) error
+
+	GetEscalationPolicy(ctx context.Context, customerID uuid.UUID) (*EscalationPolicy, error)
+	SetEscalationPolicy(ctx context.Context, p *EscalationPolicy) error
 
 	CreateContact(ctx context.Context, c *Contact) error
 	GetContact(ctx context.Context, id uuid.UUID) (*Contact, error)

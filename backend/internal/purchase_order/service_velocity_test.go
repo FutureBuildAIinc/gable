@@ -63,6 +63,9 @@ func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, id uuid.UUID, 
 func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }
+func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry) error {
+	return nil
+}
 
 // TestRefreshReorderTargets_Math pins the reorder-point formula
 // (avg_daily * lead_time * 1.5, ceil'd) for a known velocity. If a refactor

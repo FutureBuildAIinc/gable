@@ -67,9 +67,9 @@ type POSReturnLine struct {
 type ReturnLineRequest struct {
 	ProductID   uuid.UUID `json:"product_id"`
 	Description string    `json:"description,omitempty"`
-	Quantity    float64   `json:"quantity"`   // positive units returned
+	Quantity    float64   `json:"quantity"` // positive units returned
 	UOM         string    `json:"uom,omitempty"`
-	UnitPrice   float64   `json:"unit_price"` // Dollars
+	UnitPrice   float64   `json:"unit_price"`        // Dollars
 	Restock     *bool     `json:"restock,omitempty"` // default true; false for damaged goods
 }
 

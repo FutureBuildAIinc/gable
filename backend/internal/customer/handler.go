@@ -5,6 +5,7 @@ package customer
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gablelbm/gable/pkg/httputil"
@@ -34,6 +35,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/customers/{id}", guard(h.HandleGetCustomer))
 	mux.HandleFunc("POST /api/v1/customers", guard(h.HandleCreateCustomer))
 	mux.HandleFunc("PATCH /api/v1/customers/{id}/salesperson", guard(h.HandleUpdateSalesperson))
+	mux.HandleFunc("GET /api/v1/customers/{id}/escalation-policy", guard(h.HandleGetEscalationPolicy))
+	mux.HandleFunc("PUT /api/v1/customers/{id}/escalation-policy", guard(h.HandleSetEscalationPolicy))
 	mux.HandleFunc("GET /api/v1/price_levels", guard(h.HandleListPriceLevels))
 
 	// Contact routes
@@ -60,6 +63,59 @@ func (h *Handler) HandleGetCustomer(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(c)
+}
+
+// HandleGetEscalationPolicy returns the customer's lumber-index
+// price-protection policy.
+func (h *Handler) HandleGetEscalationPolicy(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
+		return
+	}
+	p, err := h.service.GetEscalationPolicy(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to load escalation policy", http.StatusInternalServerError, err)
+		return
+	}
+	if p == nil {
+		httputil.RespondError(w, r, "Customer not found", http.StatusNotFound, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(p)
+}
+
+// HandleSetEscalationPolicy validates and persists the policy, then returns
+// the reloaded row so the caller sees any server-side normalization.
+func (h *Handler) HandleSetEscalationPolicy(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
+		return
+	}
+	var p EscalationPolicy
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	p.CustomerID = id
+	if err := h.service.SetEscalationPolicy(r.Context(), &p); err != nil {
+		switch {
+		case errors.Is(err, ErrAgreementRequired), errors.Is(err, ErrInvalidPolicy):
+			httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+		default:
+			httputil.RespondError(w, r, "failed to update escalation policy", http.StatusInternalServerError, err)
+		}
+		return
+	}
+	updated, err := h.service.GetEscalationPolicy(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to reload escalation policy", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updated)
 }
 
 func (h *Handler) HandleCreateCustomer(w http.ResponseWriter, r *http.Request) {

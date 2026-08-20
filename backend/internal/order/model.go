@@ -50,10 +50,10 @@ type OrderLine struct {
 	ProductID        uuid.UUID  `json:"product_id"`
 	ProductSKU       string     `json:"product_sku,omitempty"`
 	ProductName      string     `json:"product_name,omitempty"`
-	Quantity         float64    `json:"quantity"`          // Physical quantity (not money)
-	PriceEach        int64      `json:"price_each"`        // Cents
-	UnitCost         int64      `json:"unit_cost"`         // Cents
-	CommissionRate   float64    `json:"commission_rate"`   // Percentage (kept as float)
+	Quantity         float64    `json:"quantity"`        // Physical quantity (not money)
+	PriceEach        int64      `json:"price_each"`      // Cents
+	UnitCost         int64      `json:"unit_cost"`       // Cents
+	CommissionRate   float64    `json:"commission_rate"` // Percentage (kept as float)
 	IsSpecialOrder   bool       `json:"is_special_order"`
 	VendorID         *uuid.UUID `json:"vendor_id,omitempty"`
 	SpecialOrderCost int64      `json:"special_order_cost,omitempty"` // Cents
@@ -67,8 +67,8 @@ type CreateOrderRequest struct {
 
 type OrderLineRequest struct {
 	ProductID        uuid.UUID  `json:"product_id"`
-	Quantity         float64    `json:"quantity"`          // Physical quantity (not money)
-	PriceEach        int64      `json:"price_each"`        // Cents
+	Quantity         float64    `json:"quantity"`   // Physical quantity (not money)
+	PriceEach        int64      `json:"price_each"` // Cents
 	IsSpecialOrder   bool       `json:"is_special_order"`
 	VendorID         *uuid.UUID `json:"vendor_id"`
 	SpecialOrderCost int64      `json:"special_order_cost"` // Cents

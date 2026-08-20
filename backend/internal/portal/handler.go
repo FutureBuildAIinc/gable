@@ -38,7 +38,6 @@ func portalWriteJSON(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-
 // RegisterRoutes registers all portal API routes.
 // Public routes (login, config) are registered directly on the mux.
 // Protected routes are wrapped with portal auth middleware.

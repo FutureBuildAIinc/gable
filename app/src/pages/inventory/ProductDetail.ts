@@ -8,15 +8,16 @@ import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import type { ProductDetail as ProductDetailType, PIMContent } from '../../types/pim.ts';
 import { PIMService } from '../../services/PIMService.ts';
-import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse } from 'lucide';
+import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse, Box } from 'lucide';
 import './tabs/ProductOverviewTab.ts';
 import './tabs/ProductContentTab.ts';
 import './tabs/ProductMediaTab.ts';
 import './tabs/ProductCollateralTab.ts';
 import './tabs/ProductSEOTab.ts';
 import './tabs/ProductStockTab.ts';
+import './tabs/ProductGeometryTab.ts';
 
-type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock';
+type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock' | 'geometry';
 
 interface TabDef {
     id: TabId;
@@ -31,6 +32,7 @@ const TABS: TabDef[] = [
     { id: 'collateral', label: 'Collateral', iconData: Megaphone },
     { id: 'seo', label: 'SEO', iconData: Search },
     { id: 'stock', label: 'Stock & Locations', iconData: Warehouse },
+    { id: 'geometry', label: 'Geometry', iconData: Box },
 ];
 
 @customElement('gable-product-detail')
@@ -189,6 +191,11 @@ export class GableProductDetail extends LitElement {
                             .productId=${this.product.id}
                             .productDescription=${this.product.description}
                         ></gable-product-stock-tab>
+                    ` : nothing}
+                    ${this.activeTab === 'geometry' ? html`
+                        <gable-product-geometry-tab
+                            .productId=${this.product.id}
+                        ></gable-product-geometry-tab>
                     ` : nothing}
                 </div>
             </div>

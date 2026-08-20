@@ -51,6 +51,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Trial Balance
 	mux.HandleFunc("GET /api/v1/gl/trial-balance", guard(h.HandleTrialBalance))
 
+	// Financial Statements
+	mux.HandleFunc("GET /api/v1/gl/profit-and-loss", guard(h.HandleProfitAndLoss))
+	mux.HandleFunc("GET /api/v1/gl/balance-sheet", guard(h.HandleBalanceSheet))
+
 	// Fiscal Periods
 	mux.HandleFunc("GET /api/v1/gl/fiscal-periods", guard(h.HandleListFiscalPeriods))
 	mux.HandleFunc("POST /api/v1/gl/fiscal-periods/{id}/close", guard(h.HandleCloseFiscalPeriod))
@@ -329,6 +333,73 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rows)
+}
+
+// --- Financial Statements ---
+
+// HandleProfitAndLoss serves GET /api/v1/gl/profit-and-loss?start=&end=.
+// Both parameters are YYYY-MM-DD and inclusive; start defaults to the first of
+// the current month and end to today.
+func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	startStr := r.URL.Query().Get("start")
+	if startStr == "" {
+		startStr = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
+	}
+	endStr := r.URL.Query().Get("end")
+	if endStr == "" {
+		endStr = now.Format("2006-01-02")
+	}
+
+	// Validate here so that a malformed range answers 400 and anything the
+	// service reports afterwards is a genuine server fault (500). The service
+	// re-checks both — it is a public method with other potential callers.
+	start, err := time.Parse("2006-01-02", startStr)
+	if err != nil {
+		httputil.RespondError(w, r, "invalid start date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+	end, err := time.Parse("2006-01-02", endStr)
+	if err != nil {
+		httputil.RespondError(w, r, "invalid end date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+	if end.Before(start) {
+		httputil.RespondError(w, r, "end date precedes start date", http.StatusBadRequest, nil)
+		return
+	}
+
+	report, err := h.svc.GetProfitAndLoss(r.Context(), startStr, endStr)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+// HandleBalanceSheet serves GET /api/v1/gl/balance-sheet?as_of=.
+// as_of is YYYY-MM-DD and inclusive; it defaults to today.
+func (h *Handler) HandleBalanceSheet(w http.ResponseWriter, r *http.Request) {
+	asOfStr := r.URL.Query().Get("as_of")
+	if asOfStr == "" {
+		asOfStr = time.Now().Format("2006-01-02")
+	}
+
+	if _, err := time.Parse("2006-01-02", asOfStr); err != nil {
+		httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+
+	report, err := h.svc.GetBalanceSheet(r.Context(), asOfStr)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
 }
 
 // --- Fiscal Periods ---

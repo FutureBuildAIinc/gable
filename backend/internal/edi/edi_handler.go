@@ -14,9 +14,9 @@ import (
 
 // EDIHandler provides admin-facing API endpoints for managing EDI trading partners.
 type EDIHandler struct {
-	repo    *EDIRepository
-	bgSvc   *BuyingGroupService
-	ediSvc  *Service
+	repo   *EDIRepository
+	bgSvc  *BuyingGroupService
+	ediSvc *Service
 }
 
 // NewEDIHandler creates a new EDI admin handler.

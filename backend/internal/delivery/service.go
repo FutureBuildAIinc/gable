@@ -13,11 +13,20 @@ import (
 )
 
 type Service struct {
-	repo       Repository
-	routing    *ORSClient // nil if OpenRouteService not configured (keyless dev/demo)
-	notifier   DeliveryNotifierInterface
-	invoiceSvc InvoiceServiceInterface // nil if invoice service not wired
-	logger     *slog.Logger
+	repo         Repository
+	routing      *ORSClient // nil if OpenRouteService not configured (keyless dev/demo)
+	notifier     DeliveryNotifierInterface
+	invoiceSvc   InvoiceServiceInterface // nil if invoice service not wired
+	exposureGate ExposureGate            // nil if lumber-index gating not wired
+	logger       *slog.Logger
+}
+
+// ExposureGate is the lumber-index pre-ship gate. Implemented by
+// pricing.PostgresExposureChecker. RequireClearForOrder returns a non-nil
+// error when the order's source quote has unresolved index exposure, blocking
+// assignment to a delivery route.
+type ExposureGate interface {
+	RequireClearForOrder(ctx context.Context, orderID uuid.UUID) error
 }
 
 // InvoiceServiceInterface auto-creates invoices from orders on delivery completion.
@@ -69,6 +78,12 @@ func (s *Service) WithNotifier(n DeliveryNotifierInterface) {
 // WithInvoiceService sets the invoice service for auto-invoicing on delivery completion.
 func (s *Service) WithInvoiceService(invoiceSvc InvoiceServiceInterface) {
 	s.invoiceSvc = invoiceSvc
+}
+
+// WithExposureGate wires the lumber-index pre-ship gate. Optional: nil
+// disables exposure gating on route assignment.
+func (s *Service) WithExposureGate(gate ExposureGate) {
+	s.exposureGate = gate
 }
 
 // Fleet Management
@@ -294,6 +309,15 @@ func (s *Service) DispatchRoute(ctx context.Context, id uuid.UUID) error {
 // Delivery Management
 
 func (s *Service) AssignOrderToRoute(ctx context.Context, req AssignOrderRequest) (*Delivery, *CapacityWarning, error) {
+	// Pre-ship exposure gate: block assigning an order to a route when its
+	// source quote has unresolved lumber-index exposure (ACK_REQUIRED /
+	// BLOCKED). Cleared via acknowledgment or owner override on the order.
+	if s.exposureGate != nil {
+		if err := s.exposureGate.RequireClearForOrder(ctx, req.OrderID); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// Verify route exists and get vehicle info
 	route, err := s.repo.GetRoute(ctx, req.RouteID)
 	if err != nil {

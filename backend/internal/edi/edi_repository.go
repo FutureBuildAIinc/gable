@@ -23,7 +23,7 @@ type TradingPartner struct {
 	GSSenderID           string    `json:"gs_sender_id" db:"gs_sender_id"`
 	GSReceiverID         string    `json:"gs_receiver_id" db:"gs_receiver_id"`
 	EDIVersion           string    `json:"edi_version" db:"edi_version"`
-	TransportType        string    `json:"transport_type" db:"transport_type"` // SFTP, AS2, FILE
+	TransportType        string    `json:"transport_type" db:"transport_type"`     // SFTP, AS2, FILE
 	TransportConfig      string    `json:"transport_config" db:"transport_config"` // JSON
 	SupportedDocuments   []string  `json:"supported_documents" db:"supported_documents"`
 	IsActive             bool      `json:"is_active" db:"is_active"`

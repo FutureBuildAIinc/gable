@@ -26,6 +26,7 @@ type Repository interface {
 	CreateReportSchedule(ctx context.Context, schedule *ReportSchedule) error
 	ListReportSchedules(ctx context.Context) ([]ReportSchedule, error)
 	UpdateReportScheduleNextRun(ctx context.Context, scheduleID string, nextRun time.Time) error
+	DeleteReportSchedule(ctx context.Context, id string) error
 }
 
 type PostgresRepository struct {
@@ -324,14 +325,17 @@ func (r *PostgresRepository) DeleteSavedReport(ctx context.Context, id string) e
 	return err
 }
 
+// The timestamp columns are cast with ::text because ReportSchedule carries
+// them as strings. Selecting a bare TIMESTAMPTZ into a *string fails at scan
+// time in pgx, so the casts are load-bearing, not cosmetic.
 func (r *PostgresRepository) CreateReportSchedule(ctx context.Context, schedule *ReportSchedule) error {
 	query := `
-INSERT INTO report_schedules (report_id, cron_expression, recipients, status)
-VALUES ($1, $2, $3, $4)
-RETURNING id, created_at, updated_at
+INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, created_at::text, updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status).
+		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status, schedule.Format).
 		Scan(&schedule.ID, &schedule.CreatedAt, &schedule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create report schedule: %w", err)
@@ -341,7 +345,8 @@ RETURNING id, created_at, updated_at
 
 func (r *PostgresRepository) ListReportSchedules(ctx context.Context) ([]ReportSchedule, error) {
 	query := `
-SELECT id, report_id, cron_expression, recipients, status, last_run_at, next_run_at, created_at, updated_at
+SELECT id, report_id, cron_expression, recipients, status, format,
+       last_run_at::text, next_run_at::text, created_at::text, updated_at::text
 FROM report_schedules
 ORDER BY created_at DESC
 `
@@ -356,13 +361,23 @@ ORDER BY created_at DESC
 		var schedule ReportSchedule
 		if err := rows.Scan(
 			&schedule.ID, &schedule.ReportID, &schedule.CronExpression,
-			&schedule.Recipients, &schedule.Status, &schedule.LastRunAt,
-			&schedule.NextRunAt, &schedule.CreatedAt, &schedule.UpdatedAt); err != nil {
+			&schedule.Recipients, &schedule.Status, &schedule.Format,
+			&schedule.LastRunAt, &schedule.NextRunAt,
+			&schedule.CreatedAt, &schedule.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan report schedule: %w", err)
 		}
 		schedules = append(schedules, schedule)
 	}
 	return schedules, nil
+}
+
+func (r *PostgresRepository) DeleteReportSchedule(ctx context.Context, id string) error {
+	query := `DELETE FROM report_schedules WHERE id = $1`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete report schedule: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) UpdateReportScheduleNextRun(ctx context.Context, scheduleID string, nextRun time.Time) error {

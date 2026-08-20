@@ -33,6 +33,34 @@ export interface RoutingSettings {
     key_hint?: string;
 }
 
+/**
+ * A row of the dealer staff roster (`staff`). This is NOT an ERP user — it is
+ * the identity AI_LM authenticates against via POST /api/integration/validate-staff.
+ *
+ * `modules` is the raw set of granted module ids, deliberately NOT filtered by
+ * the global `modules.<id>.enabled` flag: the grant checkbox must keep showing
+ * what was granted even while the module is switched off globally, otherwise
+ * flipping the kill switch would look like it had wiped every grant.
+ */
+export interface StaffMember {
+    id: string;
+    email: string;
+    full_name: string;
+    staff_no?: string;
+    role: string;
+    active: boolean;
+    created_at: string;
+    updated_at: string;
+    modules: string[];
+}
+
+/** Global state of an integration module — the kill switch, not a grant. */
+export interface ModuleInfo {
+    id: string;
+    name: string;
+    enabled: boolean;
+}
+
 export const techAdminService = {
     async listKeys(): Promise<APIKey[]> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/keys`);
@@ -120,6 +148,51 @@ export const techAdminService = {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete routing API key');
+    },
+
+    // --- Staff Management & Module Access ---
+    //
+    // These five calls are the write side of AI_LM's login path: the roster and
+    // grants they edit are exactly what POST /api/integration/validate-staff
+    // reads. Entitlement there is active AND granted AND globally enabled.
+
+    async listStaff(): Promise<StaffMember[]> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff`);
+        if (!response.ok) throw new Error('Failed to fetch staff');
+        const data = await response.json();
+        return data || [];
+    },
+
+    async listModules(): Promise<ModuleInfo[]> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/modules`);
+        if (!response.ok) throw new Error('Failed to fetch modules');
+        const data = await response.json();
+        return data || [];
+    },
+
+    async setModuleEnabled(moduleId: string, enabled: boolean): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/modules/${moduleId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        if (!response.ok) throw new Error('Failed to update module');
+    },
+
+    async grantModule(staffId: string, moduleId: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ module_id: moduleId }),
+        });
+        if (!response.ok) throw new Error('Failed to grant module access');
+    },
+
+    async revokeModule(staffId: string, moduleId: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules/${moduleId}`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) throw new Error('Failed to revoke module access');
     },
 };
 

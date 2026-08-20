@@ -73,6 +73,9 @@ describe('menuForKey', () => {
       '/accounting/chart-of-accounts',
       '/accounting/journal-entries',
       '/accounting/trial-balance',
+      '/accounting/profit-and-loss',
+      '/accounting/balance-sheet',
+      '/accounting/accounts-payable',
     ])
   })
 

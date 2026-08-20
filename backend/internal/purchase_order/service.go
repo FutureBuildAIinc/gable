@@ -781,7 +781,6 @@ func (s *Service) GetFreightCharges(ctx context.Context, poID uuid.UUID) ([]Frei
 	return charges, nil
 }
 
-
 // ReorderTargetProposal records the before/after of a single product's
 // recomputed reorder target. Surfaced in dry-run mode so an operator can
 // inspect proposed changes before flipping reorder.dry_run to false.

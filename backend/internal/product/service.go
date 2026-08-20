@@ -6,6 +6,7 @@ package product
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/google/uuid"
@@ -96,4 +97,36 @@ func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMar
 // Used by the purchase_order package's RefreshReorderTargets job.
 func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
 	return s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty)
+}
+
+// UpdateDimensions writes the parametric 3D geometry (inches) for a product.
+// The PIM is the canonical digital-twin source AI_LM's Load Builder consumes.
+//
+// The only business rule is the provenance label, and it exists to keep
+// geometry_source from lying:
+//
+//   - An explicit non-empty geometry_source from the caller always wins. This
+//     is the forward-compat seam for a future 'mesh' source.
+//   - Otherwise, a triple with at least one recorded dimension is 'parametric'
+//     — the convention the seed data and the integration layer's
+//     resolveGeometrySource() already use for operator-entered geometry.
+//   - Otherwise (the operator cleared every dimension) the source is cleared to
+//     NULL too. Leaving 'parametric' behind on a SKU with no dimensions would
+//     claim a provenance for geometry that does not exist, which is precisely
+//     the lie resolveGeometrySource() refuses to tell on the read path.
+//
+// Nothing else is defaulted. In particular a nil dimension is passed through as
+// nil rather than coerced to 0 — see the Geometry doc comment.
+func (s *Service) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error {
+	if g.GeometrySource != nil && strings.TrimSpace(*g.GeometrySource) == "" {
+		g.GeometrySource = nil
+	}
+	switch {
+	case !g.HasDimensions():
+		g.GeometrySource = nil
+	case g.GeometrySource == nil:
+		src := GeometrySourceParametric
+		g.GeometrySource = &src
+	}
+	return s.repo.UpdateDimensions(ctx, id, g)
 }

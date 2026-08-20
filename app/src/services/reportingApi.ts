@@ -36,12 +36,47 @@ export interface SavedReport {
   created_at: string;
 }
 
+export type ReportScheduleFormat = 'CSV' | 'XLSX' | 'PDF';
+
 export interface ReportSchedule {
   id: string;
   report_id: string;
   cron_expression: string;
   recipients: string[];
+  /** 'STORED' = persisted but nothing executes it; 'ACTIVE' = a runner is attached. */
   status: string;
+  format: ReportScheduleFormat;
+  last_run_at?: string;
+  next_run_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * Whether stored schedules actually run, as reported by the backend.
+ *
+ * This is not decoration. The server currently has no working scheduled-report
+ * runner, so a saved schedule never fires. Every schedule response carries this
+ * block and the UI is expected to show it — an operator who configures "AR
+ * aging to the controller every Monday" and sees only a success toast would
+ * reasonably assume it is happening.
+ */
+export interface ScheduleExecution {
+  enabled: boolean;
+  summary: string;
+  blockers?: string[];
+  /** The cron grammar POST accepts. Six fields, seconds first. */
+  cron_dialect: string;
+}
+
+export interface ReportScheduleListResponse {
+  schedules: ReportSchedule[];
+  execution: ScheduleExecution;
+}
+
+export interface ReportScheduleResponse {
+  schedule: ReportSchedule;
+  execution: ScheduleExecution;
 }
 
 export const reportingApi = {
@@ -105,5 +140,57 @@ export const reportingApi = {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error(`Delete failed`);
+  },
+
+  // Run a saved report immediately and return its rows.
+  runSavedReport: async (id: string): Promise<Record<string, unknown>[]> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/saved/${id}/run`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
+  },
+
+  // --- schedules ---------------------------------------------------------
+  // These return an envelope rather than a bare list precisely so the
+  // `execution` block travels with the data. Do not unwrap it away at this
+  // layer: the caller needs to know whether these schedules run.
+
+  listReportSchedules: async (): Promise<ReportScheduleListResponse> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/schedules`);
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
+  },
+
+  createReportSchedule: async (
+    schedule: Pick<ReportSchedule, 'report_id' | 'cron_expression' | 'recipients' | 'format'>,
+  ): Promise<ReportScheduleResponse> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(schedule)
+    });
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
+  },
+
+  deleteReportSchedule: async (id: string): Promise<void> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/schedules/${id}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error(`Delete failed`);
   }
 };
+
+/**
+ * The server's cron engine is built with seconds enabled, so it needs SIX
+ * fields. Every crontab example in the world is five, so the UI must reject
+ * those before they reach the API — where the shared error envelope would
+ * replace the reason with a bare "Bad Request".
+ */
+export function isValidCronExpression(expr: string): boolean {
+  const trimmed = expr.trim();
+  if (trimmed === '') return false;
+  if (trimmed.startsWith('@')) return true;
+  return trimmed.split(/\s+/).length === 6;
+}

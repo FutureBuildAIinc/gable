@@ -17,17 +17,17 @@ import (
 )
 
 type Service struct {
-	db             *database.DB
-	repo           Repository
-	invoiceRepo    invoice.Repository
-	account        account.Service
-	gateway        PaymentGateway // Run Payments (or nil for non-card payments)
-	publicKey      string         // Run Payments public key for Runner.js (static fallback)
-	keyStore       *KeyStore      // Optional: DB-first key resolution (Tech Admin settable)
-	brainNotifier  *BrainNotifier // FB Brain financial engine notifier (or nil)
-	brainOrgID     string         // Brain org_id for this tenant
-	auditLog       *audit.Logger
-	logger         *slog.Logger
+	db            *database.DB
+	repo          Repository
+	invoiceRepo   invoice.Repository
+	account       account.Service
+	gateway       PaymentGateway // Run Payments (or nil for non-card payments)
+	publicKey     string         // Run Payments public key for Runner.js (static fallback)
+	keyStore      *KeyStore      // Optional: DB-first key resolution (Tech Admin settable)
+	brainNotifier *BrainNotifier // FB Brain financial engine notifier (or nil)
+	brainOrgID    string         // Brain org_id for this tenant
+	auditLog      *audit.Logger
+	logger        *slog.Logger
 }
 
 func NewService(db *database.DB, repo Repository, invoiceRepo invoice.Repository, accountService account.Service) *Service {

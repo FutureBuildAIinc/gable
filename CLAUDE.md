@@ -34,7 +34,7 @@ docs/         → Architecture, design system, and database specs
 - **Database:** PostgreSQL 16+ via pgx v5 (`pkg/database` wraps a `*pgxpool.Pool`)
 - **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL` is required (fail-closed)
 - **PDF:** maroto v2 | **Excel:** excelize v2 | **Cron:** robfig/cron v3 | **Metrics:** Prometheus
-- **Note:** there is **no event bus**. No NATS client is imported anywhere in Go code, and the orphan `nats` container was removed from `docker-compose.yml` (a `NOTE` comment marks where it was). `docs/architecture.md` §4.2 describes the intended shape as future design only
+- **Event bus:** `pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam used by one feature (lumber price exposure → notification emails). There is still **no broker**: no NATS client is imported anywhere in Go code, nothing was added to `go.mod`, and the orphan `nats` container stays out of `docker-compose.yml` (a `NOTE` comment marks where it was). The bus is best-effort and at-most-once — no durability, no cross-process delivery, no redelivery, events lost on restart. Durable state lives in Postgres and the nightly exposure safety-net scan is the recovery path. See the `pkg/eventbus` package doc and `docs/architecture.md` §4.2
 
 ### Frontend
 - **Framework:** Lit 3 Web Components + TypeScript 5.9 + Vite 7
@@ -48,7 +48,7 @@ docs/         → Architecture, design system, and database specs
 - **Pattern:** Modular monolith — single Go binary, ~40 modules under `backend/internal/<module>/`
 - **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), and `handler.go` (HTTP handlers + `RegisterRoutes` — there is no separate `routes.go`). Wired together in `backend/cmd/server/main.go`
 - **Apps platform (Phase 0):** modules are becoming installable *apps* — manifest + DB registry (`apps` table, migration 074) + per-instance enable/disable via `pkg/apps`, managed at **Tech Admin → Apps** (`/admin/apps`). Converted so far: `millwork`, `governance`. Conversion recipe + phases: `docs/modularization-blueprint.md`
-- **Cross-module:** Synchronous Go interfaces (writes via NATS events are not implemented yet)
+- **Cross-module:** Synchronous Go interfaces. The one exception is notification side-effects for price exposure, published fire-and-forget over the in-process `pkg/eventbus`; no cross-module *write* goes through an event
 - **API surface:** REST JSON at `/api/v1/*` (ERP), `/api/portal/v1/*` (B2B portal, partially public), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS)
 - **Public paths** (no auth): `/health`, `/healthz/live`, `/healthz/ready`, `/metrics`, portal login/config, integration, a2a — see whitelist in `backend/cmd/server/main.go`
 
@@ -246,7 +246,7 @@ this repository's history. Each is cited by the artifact you can actually inspec
 - Migrate `customer.credit_limit`, order/invoice money fields from `float64` to `int64` cents per the convention in `Key Conventions → Database`. Many call-sites; do as a focused refactor sprint.
 - Frontend admin UI for `system_settings` (currently operators edit via psql). Unblocks self-service for the `reorder.*` keys added in #9.
 - Add an SMTP/SendGrid `EmailSender` implementation (currently only `LogEmailService` exists). Required before scheduled reports and customer-facing email features are useful in prod.
-- ~~Wire NATS or remove the orphan container~~ **Done July 2026:** orphan NATS container removed from `docker-compose.yml`; the event bus remains future design (blueprint Phase 2+).
+- ~~Wire NATS or remove the orphan container~~ **Done July 2026:** orphan NATS container removed from `docker-compose.yml`. Superseded by the in-process `pkg/eventbus` (see Tech Stack above): still no broker, and a durable backend remains blueprint Phase 2+.
 - ~~`inventory.MockRepository` missing `DeallocateStock` breaks `go vet`~~ **Already fixed** — the mock implements it (`internal/inventory/service_test.go`); `go vet ./...` is clean.
 - Convert remaining leaf modules to installable apps per `docs/modularization-blueprint.md` §5 — the five dark pages (bankrecon, matching, rebates, purchasing recommendations) are the best next candidates.
 

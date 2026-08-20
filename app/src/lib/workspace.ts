@@ -59,6 +59,7 @@ const staticZones: AppZone[] = [
     { label: 'Quotes', path: '/quotes' },
     { label: 'Quote Builder', path: '/quotes/new' },
     { label: 'Analytics', path: '/quotes/analytics' },
+    { label: 'At-Risk Quotes', path: '/quotes/exposure' },
   ] },
   { prefix: '/orders', key: 'order', label: 'Orders', icon: ClipboardList, menu: [
     { label: 'Orders', path: '/orders' },
@@ -75,6 +76,7 @@ const staticZones: AppZone[] = [
     { label: 'Report Builder', path: '/reports/builder' },
     { label: 'AR Aging', path: '/reports/ar-aging' },
     { label: 'Customer Statement', path: '/reports/customer-statement' },
+    { label: 'Exposure Portfolio', path: '/reports/exposure' },
   ] },
   { prefix: '/dispatch', key: 'delivery', label: 'Logistics', icon: Truck, menu: [
     { label: 'Dispatch Board', path: '/dispatch' },
@@ -101,6 +103,9 @@ const staticZones: AppZone[] = [
     { label: 'Chart of Accounts', path: '/accounting/chart-of-accounts' },
     { label: 'Journal Entries', path: '/accounting/journal-entries' },
     { label: 'Trial Balance', path: '/accounting/trial-balance' },
+    { label: 'Profit & Loss', path: '/accounting/profit-and-loss' },
+    { label: 'Balance Sheet', path: '/accounting/balance-sheet' },
+    { label: 'Accounts Payable', path: '/accounting/accounts-payable' },
   ] },
   { prefix: '/admin/branches', key: 'location', label: 'Branches', icon: Building2, menu: [
     { label: 'Branches', path: '/admin/branches' },
@@ -108,6 +113,7 @@ const staticZones: AppZone[] = [
   { prefix: '/admin', key: 'techadmin', label: 'Tech Admin', icon: Settings, menu: [
     { label: 'Settings', path: '/admin' },
     { label: 'Apps', path: '/admin/apps' },
+    { label: 'Market Indices', path: '/admin/market-indices' },
   ] },
   { prefix: '/sales', key: 'quote', label: 'Quotes', icon: FileText },
 ];

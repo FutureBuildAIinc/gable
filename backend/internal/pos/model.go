@@ -22,19 +22,19 @@ const (
 
 // POSTransaction represents a retail point-of-sale transaction.
 type POSTransaction struct {
-	ID          uuid.UUID         `json:"id" db:"id"`
-	BranchID    uuid.UUID         `json:"branch_id" db:"branch_id"`
-	RegisterID  string            `json:"register_id" db:"register_id"`
-	CashierID   uuid.UUID         `json:"cashier_id" db:"cashier_id"`
-	CustomerID  *uuid.UUID        `json:"customer_id,omitempty" db:"customer_id"`
-	Subtotal    int64             `json:"subtotal" db:"subtotal"`     // Cents
-	TaxAmount   int64             `json:"tax_amount" db:"tax_amount"` // Cents
-	Total       int64             `json:"total" db:"total"`           // Cents
-	ChangeDue   int64             `json:"change_due" db:"change_due"` // Cents, set at completion
-	TillSessionID *uuid.UUID      `json:"till_session_id,omitempty" db:"till_session_id"`
-	Status      TransactionStatus `json:"status" db:"status"`
-	CompletedAt *time.Time        `json:"completed_at,omitempty" db:"completed_at"`
-	CreatedAt   time.Time         `json:"created_at" db:"created_at"`
+	ID            uuid.UUID         `json:"id" db:"id"`
+	BranchID      uuid.UUID         `json:"branch_id" db:"branch_id"`
+	RegisterID    string            `json:"register_id" db:"register_id"`
+	CashierID     uuid.UUID         `json:"cashier_id" db:"cashier_id"`
+	CustomerID    *uuid.UUID        `json:"customer_id,omitempty" db:"customer_id"`
+	Subtotal      int64             `json:"subtotal" db:"subtotal"`     // Cents
+	TaxAmount     int64             `json:"tax_amount" db:"tax_amount"` // Cents
+	Total         int64             `json:"total" db:"total"`           // Cents
+	ChangeDue     int64             `json:"change_due" db:"change_due"` // Cents, set at completion
+	TillSessionID *uuid.UUID        `json:"till_session_id,omitempty" db:"till_session_id"`
+	Status        TransactionStatus `json:"status" db:"status"`
+	CompletedAt   *time.Time        `json:"completed_at,omitempty" db:"completed_at"`
+	CreatedAt     time.Time         `json:"created_at" db:"created_at"`
 
 	// Offline sync fields
 	SyncedFrom      *string    `json:"synced_from,omitempty" db:"synced_from"`             // nil = live, "offline-v1" = synced
@@ -136,13 +136,13 @@ type OfflineSyncRequest struct {
 
 // OfflineTransaction is a single completed POS transaction captured offline.
 type OfflineTransaction struct {
-	ClientID        uuid.UUID          `json:"client_id"`                   // client-generated UUID
-	RegisterID      string             `json:"register_id"`
-	CashierID       uuid.UUID          `json:"cashier_id"`
-	CustomerID      *uuid.UUID         `json:"customer_id,omitempty"`
+	ClientID        uuid.UUID            `json:"client_id"` // client-generated UUID
+	RegisterID      string               `json:"register_id"`
+	CashierID       uuid.UUID            `json:"cashier_id"`
+	CustomerID      *uuid.UUID           `json:"customer_id,omitempty"`
 	Items           []AddLineItemRequest `json:"items"`
 	Tenders         []AddTenderRequest   `json:"tenders"`
-	ClientCreatedAt time.Time          `json:"client_created_at"`
+	ClientCreatedAt time.Time            `json:"client_created_at"`
 }
 
 // OfflineSyncResponse reports results of a batch sync.

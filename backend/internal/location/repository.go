@@ -18,7 +18,7 @@ var ErrNotFound = errors.New("location not found")
 
 // locationColumns lists the columns selected by every SELECT so the scanner
 // stays in sync with model.Location. Nullable string columns are COALESCEd to
-// '' because the model uses non-pointer string fields (non-branch rows leave
+// ” because the model uses non-pointer string fields (non-branch rows leave
 // branch-only metadata NULL in the DB).
 const locationColumns = `
     id, parent_id, path, type, code, COALESCE(description, ''),

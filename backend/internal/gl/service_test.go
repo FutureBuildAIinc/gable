@@ -19,6 +19,22 @@ type MockRepository struct {
 	periods          []FiscalPeriod
 	trialBalance     []TrialBalanceRow
 	lastCreatedEntry *JournalEntry
+
+	// Financial statements: `activity` is the seeded ledger activity,
+	// `activityCalls` records how the service asked for it, and
+	// `activityErr` forces the failure path.
+	activity      []AccountActivity
+	activityCalls []activityCall
+	activityErr   error
+}
+
+// activityCall is one GetAccountActivity invocation, kept so tests can assert
+// the window and account types the service asked the repository for — the
+// date filtering itself lives in SQL and is not exercised here.
+type activityCall struct {
+	start *time.Time
+	end   time.Time
+	types []string
 }
 
 func (m *MockRepository) ListAccounts(ctx context.Context) ([]GLAccount, error) {
@@ -82,6 +98,24 @@ func (m *MockRepository) UpdateJournalEntryStatus(ctx context.Context, id uuid.U
 
 func (m *MockRepository) GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error) {
 	return m.trialBalance, nil
+}
+
+func (m *MockRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]AccountActivity, error) {
+	m.activityCalls = append(m.activityCalls, activityCall{start: start, end: end, types: accountTypes})
+	if m.activityErr != nil {
+		return nil, m.activityErr
+	}
+	want := make(map[string]bool, len(accountTypes))
+	for _, t := range accountTypes {
+		want[t] = true
+	}
+	var out []AccountActivity
+	for _, a := range m.activity {
+		if want[a.AccountType] {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 func (m *MockRepository) ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error) {

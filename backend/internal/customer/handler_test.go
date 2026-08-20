@@ -39,6 +39,10 @@ type fakeRepo struct {
 		salespersonID *uuid.UUID
 	}
 
+	// policies backs the lumber-index escalation-policy endpoints. A customer
+	// absent from this map is treated as "not found" by GetEscalationPolicy.
+	policies map[uuid.UUID]*EscalationPolicy
+
 	err      error
 	total    int
 	listArgs [][2]int
@@ -48,6 +52,7 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		customers: map[uuid.UUID]*Customer{},
 		contacts:  map[uuid.UUID]*Contact{},
+		policies:  map[uuid.UUID]*EscalationPolicy{},
 	}
 }
 
@@ -207,6 +212,27 @@ func (f *fakeRepo) DeleteContact(_ context.Context, id uuid.UUID) error {
 		return errors.New("contact not found")
 	}
 	delete(f.contacts, id)
+	return nil
+}
+
+func (f *fakeRepo) GetEscalationPolicy(_ context.Context, customerID uuid.UUID) (*EscalationPolicy, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	p, ok := f.policies[customerID]
+	if !ok {
+		return nil, nil
+	}
+	clone := *p
+	return &clone, nil
+}
+
+func (f *fakeRepo) SetEscalationPolicy(_ context.Context, p *EscalationPolicy) error {
+	if f.err != nil {
+		return f.err
+	}
+	clone := *p
+	f.policies[p.CustomerID] = &clone
 	return nil
 }
 
@@ -743,5 +769,145 @@ func TestUpdateBalance_PassesTheSignedDeltaThrough(t *testing.T) {
 				t.Errorf("balance = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// --- lumber-index escalation policy -------------------------------------
+
+// CORRECTNESS: AUTO_ESCALATE lets the scanner rewrite a customer's locked
+// quote price without asking anyone. Migration 081 enforces a signed agreement
+// with a CHECK constraint; the service must reject it first so the caller gets
+// a 400 with a readable reason instead of a 500 from Postgres.
+func TestHandleSetEscalationPolicy_AutoEscalateRequiresSignedAgreement(t *testing.T) {
+	repo := newFakeRepo()
+	id := uuid.New()
+	repo.customers[id] = &Customer{ID: id, Name: "Acme"}
+
+	body := `{"policy":"AUTO_ESCALATE","threshold_pct":5}`
+	rec := do(t, newTestMux(repo), http.MethodPut, "/api/v1/customers/"+id.String()+"/escalation-policy", body)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 — AUTO_ESCALATE without a signed agreement must be refused", rec.Code)
+	}
+	if _, ok := repo.policies[id]; ok {
+		t.Error("policy was persisted despite validation failure")
+	}
+}
+
+// CORRECTNESS: with a signed agreement on file, AUTO_ESCALATE is accepted and
+// the response echoes the persisted row.
+func TestHandleSetEscalationPolicy_AutoEscalateWithAgreementSucceeds(t *testing.T) {
+	repo := newFakeRepo()
+	id := uuid.New()
+	repo.customers[id] = &Customer{ID: id, Name: "Acme"}
+
+	body := `{"policy":"AUTO_ESCALATE","threshold_pct":3.5,"agreement_signed_at":"2026-01-15T00:00:00Z","agreement_ref":"MSA-2026-11"}`
+	rec := do(t, newTestMux(repo), http.MethodPut, "/api/v1/customers/"+id.String()+"/escalation-policy", body)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	stored, ok := repo.policies[id]
+	if !ok {
+		t.Fatal("policy was not persisted")
+	}
+	if stored.Policy != PolicyAutoEscalate || stored.ThresholdPct != 3.5 {
+		t.Errorf("stored = %+v, want AUTO_ESCALATE at 3.5%%", stored)
+	}
+	if stored.AgreementSignedAt == nil {
+		t.Error("agreement_signed_at was dropped")
+	}
+
+	var resp EscalationPolicy
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Policy != PolicyAutoEscalate || resp.ThresholdPct != 3.5 {
+		t.Errorf("response = %+v, want the persisted row echoed back", resp)
+	}
+}
+
+// CORRECTNESS: the threshold bounds mirror the migration-081 CHECK
+// (0 < threshold <= 50). A zero threshold would flag every quote on any index
+// tick; a >50% threshold means the customer has effectively opted out and
+// should say so explicitly rather than through a silent number.
+func TestHandleSetEscalationPolicy_ThresholdBounds(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+	}{
+		{"zero threshold rejected", `{"policy":"REQUIRE_ACK","threshold_pct":0}`, http.StatusBadRequest},
+		{"negative threshold rejected", `{"policy":"REQUIRE_ACK","threshold_pct":-1}`, http.StatusBadRequest},
+		{"above ceiling rejected", `{"policy":"REQUIRE_ACK","threshold_pct":50.1}`, http.StatusBadRequest},
+		{"at ceiling accepted", `{"policy":"REQUIRE_ACK","threshold_pct":50}`, http.StatusOK},
+		{"typical value accepted", `{"policy":"FLAG_FOR_REQUOTE","threshold_pct":5}`, http.StatusOK},
+		{"unknown policy rejected", `{"policy":"YOLO","threshold_pct":5}`, http.StatusBadRequest},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			id := uuid.New()
+			repo.customers[id] = &Customer{ID: id}
+			rec := do(t, newTestMux(repo), http.MethodPut, "/api/v1/customers/"+id.String()+"/escalation-policy", tc.body)
+			if rec.Code != tc.wantCode {
+				t.Errorf("status = %d, want %d; body = %s", rec.Code, tc.wantCode, rec.Body.String())
+			}
+		})
+	}
+}
+
+// CORRECTNESS: an agreement reference without a date would leave an
+// unauditable "we have a contract somewhere" marker. The service stamps
+// signed-at so the reference always carries a date.
+func TestSetEscalationPolicy_AgreementRefWithoutDateIsStamped(t *testing.T) {
+	repo := newFakeRepo()
+	id := uuid.New()
+	svc := NewService(repo)
+
+	p := &EscalationPolicy{
+		CustomerID:   id,
+		Policy:       PolicyRequireAck,
+		ThresholdPct: 4,
+		AgreementRef: "MSA-2026-42",
+	}
+	if err := svc.SetEscalationPolicy(context.Background(), p); err != nil {
+		t.Fatalf("SetEscalationPolicy: %v", err)
+	}
+	stored := repo.policies[id]
+	if stored.AgreementSignedAt == nil {
+		t.Fatal("agreement_signed_at is nil; a reference without a date is unauditable")
+	}
+}
+
+// CORRECTNESS: reading the policy of a customer that does not exist is a 404,
+// not an empty 200 that a caller would misread as "no protection configured".
+func TestHandleGetEscalationPolicy_UnknownCustomerIs404(t *testing.T) {
+	rec := do(t, newTestMux(newFakeRepo()), http.MethodGet,
+		"/api/v1/customers/"+uuid.New().String()+"/escalation-policy", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// CORRECTNESS: the path id wins over any customer_id in the body, so a caller
+// cannot rewrite another account's policy by forging the payload.
+func TestHandleSetEscalationPolicy_PathIDOverridesBodyID(t *testing.T) {
+	repo := newFakeRepo()
+	target := uuid.New()
+	victim := uuid.New()
+	repo.customers[target] = &Customer{ID: target}
+	repo.customers[victim] = &Customer{ID: victim}
+
+	body := `{"customer_id":"` + victim.String() + `","policy":"REQUIRE_ACK","threshold_pct":5}`
+	rec := do(t, newTestMux(repo), http.MethodPut, "/api/v1/customers/"+target.String()+"/escalation-policy", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := repo.policies[victim]; ok {
+		t.Error("body customer_id was honoured — a caller could rewrite another account's policy")
+	}
+	if _, ok := repo.policies[target]; !ok {
+		t.Error("path customer_id was not used")
 	}
 }

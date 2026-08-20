@@ -58,11 +58,11 @@ type InboundPOWebhook struct {
 
 // A2APurchaseOrderPayload is the nested payload for "create_purchase_order" events.
 type A2APurchaseOrderPayload struct {
-	VendorID    string                  `json:"vendor_id"`
-	Lines       []A2APurchaseOrderLine  `json:"lines"`
-	RequestedBy string                  `json:"requested_by"`
-	ProjectID   string                  `json:"project_id"`
-	RFQRef      string                  `json:"rfq_ref"`
+	VendorID    string                 `json:"vendor_id"`
+	Lines       []A2APurchaseOrderLine `json:"lines"`
+	RequestedBy string                 `json:"requested_by"`
+	ProjectID   string                 `json:"project_id"`
+	RFQRef      string                 `json:"rfq_ref"`
 }
 
 // A2APurchaseOrderLine represents a single line item in an A2A PO.

@@ -6,8 +6,10 @@ package reporting
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -54,6 +56,34 @@ type Scheduler struct {
 	emailSender EmailSender
 	cron        *cron.Cron
 	jobIDs      map[string]cron.EntryID
+}
+
+// cronDialect is the expression grammar this package accepts. It is
+// cron.WithSeconds(): SIX fields, seconds first. It is declared once here and
+// used both by NewScheduler and by ValidateCronExpression so the API can never
+// accept an expression the engine would later refuse.
+var cronDialect = cron.NewParser(
+	cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+)
+
+// ValidateCronExpression reports whether expr can be registered with this
+// package's cron engine.
+//
+// The error deliberately spells out the six-field requirement. Every crontab,
+// and every "0 8 * * *" example on the internet, is FIVE fields, and this
+// engine rejects those — an operator who pastes one otherwise gets a bare
+// parse error with no hint that a leading seconds field is missing.
+func ValidateCronExpression(expr string) error {
+	if strings.TrimSpace(expr) == "" {
+		return errors.New("cron_expression is required")
+	}
+	if _, err := cronDialect.Parse(expr); err != nil {
+		return fmt.Errorf(
+			"invalid cron_expression %q: this scheduler uses six fields with a leading seconds field "+
+				"(e.g. \"0 0 9 * * *\" for 09:00 daily), not the five-field crontab form, or a descriptor like @daily: %w",
+			expr, err)
+	}
+	return nil
 }
 
 func NewScheduler(service *Service, emailSender EmailSender) *Scheduler {
