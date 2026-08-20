@@ -13,16 +13,16 @@ import (
 // new POs at runtime. Keep this test cheap and explicit.
 func TestSourceConstants(t *testing.T) {
 	cases := map[string]string{
-		"manual":         SourceManual,
-		"reorder":        SourceReorder,
-		"special_order":  SourceSpecialOrder,
-		"a2a":            SourceA2A,
+		"manual":        SourceManual,
+		"reorder":       SourceReorder,
+		"special_order": SourceSpecialOrder,
+		"a2a":           SourceA2A,
 	}
 	expected := map[string]string{
-		"manual":         "MANUAL",
-		"reorder":        "REORDER",
-		"special_order":  "SPECIAL_ORDER",
-		"a2a":            "A2A",
+		"manual":        "MANUAL",
+		"reorder":       "REORDER",
+		"special_order": "SPECIAL_ORDER",
+		"a2a":           "A2A",
 	}
 	for key, got := range cases {
 		if got != expected[key] {

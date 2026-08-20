@@ -182,6 +182,7 @@ func TestCreateInvoice_PrecomputedSubtotalIsPreserved(t *testing.T) {
 // KNOWN BUG — line extension truncates instead of rounding.
 //
 // invoice/service.go:51
+//
 //	subtotal += int64(float64(line.PriceEach) * line.Quantity)
 //
 // int64() truncates toward zero, so any fractional cent is dropped, and a
@@ -360,6 +361,7 @@ func TestCreateInvoice_TotalEqualsSubtotalPlusTax(t *testing.T) {
 // KNOWN BUG — tax truncates at the half-cent boundary.
 //
 // invoice/service.go:74
+//
 //	inv.TaxAmount = int64(float64(inv.Subtotal) * inv.TaxRate)
 //
 // $10.00 at 8.25% is exactly 82.5 cents. int64() truncates to 82, so the
@@ -469,7 +471,9 @@ func TestCreateInvoice_PresetTotalSuppressesTax(t *testing.T) {
 //
 // order/service.go:297-303 builds the invoice with TotalAmount set to the
 // order's PRE-TAX total, above the comment
+//
 //	"CreateInvoice recomputes subtotal/tax and sets the tax-inclusive TotalAmount"
+//
 // but a non-zero TotalAmount makes invoice/service.go:58 skip the tax block
 // entirely. The invoice is stored with TaxRate 0, TaxAmount 0 and a pre-tax
 // TotalAmount, and that untaxed figure is what gets posted to the GL and the AR

@@ -6,7 +6,6 @@ package integrations
 import (
 	"crypto/subtle"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -29,6 +28,11 @@ type Handler struct {
 	customerSvc *customer.Service
 	productSvc  *product.Service
 	apiKey      string
+
+	// ailm backs the AI_LM integration surface (see ailm.go). It is a seam
+	// rather than a direct *database.DB use so the handlers can be driven over
+	// httptest without Postgres.
+	ailm ailmStore
 }
 
 func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, apiKey string) *Handler {
@@ -40,6 +44,7 @@ func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Se
 		customerSvc: customerSvc,
 		productSvc:  productSvc,
 		apiKey:      apiKey,
+		ailm:        newPGAILMStore(db),
 	}
 }
 
@@ -48,6 +53,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/integration/quotes/bulk-price", h.authMiddleware(h.BulkCalculatePrice))
 	mux.HandleFunc("POST /api/integration/quotes", h.authMiddleware(h.CreateQuote))
 	mux.HandleFunc("POST /api/integration/quotes/{id}/accept-and-convert", h.authMiddleware(h.AcceptAndConvertQuote))
+
+	// AI_LM load-management, routing and staff-authentication surface. See
+	// ailm.go for the wire contract these satisfy.
+	mux.HandleFunc("GET /api/integration/vehicles", h.authMiddleware(h.ListVehicles))
+	mux.HandleFunc("GET /api/integration/drivers", h.authMiddleware(h.ListDrivers))
+	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
+	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
+	mux.HandleFunc("POST /api/integration/validate-staff", h.authMiddleware(h.ValidateStaff))
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -65,65 +78,36 @@ func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ProductResponse is the integration-facing product model
-type ProductResponse struct {
-	ID       string  `json:"id"`
-	SKU      string  `json:"sku"`
-	Name     string  `json:"name"`
-	Category string  `json:"category"`
-	UOM      string  `json:"uom"`
-	Price    int64   `json:"price"` // cents
-}
-
-// ListProductsByCategory returns products filtered by category and/or text search
+// ListProductsByCategory returns catalog products as a bare JSON array.
+//
+//	GET /api/integration/products[?category=...][&q=...]
+//
+// Both filters are OPTIONAL. An unfiltered call is a bulk catalog pull — AI_LM's
+// GetProductsWithWeight() sends no query parameters at all — and gets the higher
+// productBulkLimit so a dealer's SKU list is not silently truncated. A filtered
+// call is a typeahead search and keeps the small productSearchLimit.
+//
+// (This endpoint previously answered 400 when neither filter was supplied,
+// which made the bulk pull impossible. See ProductResponse in ailm.go for the
+// payload, which now carries weight and PIM geometry.)
 func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request) {
-	category := r.URL.Query().Get("category")
-	query := r.URL.Query().Get("q")
-
-	if category == "" && query == "" {
-		writeError(w, http.StatusBadRequest, "category or q query parameter required")
-		return
+	f := productFilter{
+		Category: r.URL.Query().Get("category"),
+		Query:    r.URL.Query().Get("q"),
+		Limit:    productSearchLimit,
+	}
+	if f.Category == "" && f.Query == "" {
+		f.Limit = productBulkLimit
 	}
 
-	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0)
-		FROM products p WHERE 1=1`
-	args := []interface{}{}
-	argIdx := 1
-
-	if category != "" {
-		sqlQuery += fmt.Sprintf(` AND p.category = $%d`, argIdx)
-		args = append(args, category)
-		argIdx++
-	}
-	if query != "" {
-		sqlQuery += fmt.Sprintf(` AND (p.sku ILIKE $%d OR p.description ILIKE $%d)`, argIdx, argIdx)
-		args = append(args, "%"+query+"%")
-		argIdx++
-	}
-	sqlQuery += ` ORDER BY p.sku LIMIT 20`
-
-	rows, err := h.db.Pool.Query(r.Context(), sqlQuery, args...)
+	products, err := h.ailm.ListProducts(r.Context(), f)
 	if err != nil {
 		slog.Error("failed to query products", "error", err, "method", r.Method, "path", r.URL.Path)
 		writeError(w, http.StatusInternalServerError, "failed to query products")
 		return
 	}
-	defer rows.Close()
 
-	var products []ProductResponse
-	for rows.Next() {
-		var p ProductResponse
-		var priceFloat float64
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat); err != nil {
-			slog.Error("failed to scan product row", "error", err, "method", r.Method, "path", r.URL.Path)
-			writeError(w, http.StatusInternalServerError, "failed to read product data")
-			return
-		}
-		p.Price = int64(priceFloat * 100)
-		products = append(products, p)
-	}
-
-	writeJSON(w, http.StatusOK, products)
+	writeJSON(w, http.StatusOK, nonNil(products))
 }
 
 // BulkPriceRequest is the request body for bulk pricing

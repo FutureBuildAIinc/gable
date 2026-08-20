@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/config"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -45,9 +46,24 @@ func main() {
 	}
 
 	// 2. Read migration files
-	files, err := filepath.Glob("migrations/*.sql")
+	all, err := filepath.Glob("migrations/*.sql")
 	if err != nil {
 		log.Fatalf("Failed to read migration files: %v", err)
+	}
+
+	// Skip *_down.sql rollback siblings. Without this, a rollback file sitting
+	// next to its forward migration sorts immediately after it and gets applied
+	// as a migration — dropping the very columns the forward file just added,
+	// silently, on the next deploy. Rollbacks live in migrations/down/ (outside
+	// this glob) and are applied by hand; the skip is belt-and-braces so a file
+	// placed in the wrong directory cannot destroy a schema.
+	files := make([]string, 0, len(all))
+	for _, f := range all {
+		if strings.HasSuffix(filepath.Base(f), "_down.sql") {
+			log.Printf("Skipping rollback file %s (apply manually)", filepath.Base(f))
+			continue
+		}
+		files = append(files, f)
 	}
 	sort.Strings(files)
 

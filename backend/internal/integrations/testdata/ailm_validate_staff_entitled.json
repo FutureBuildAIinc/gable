@@ -1,0 +1,12 @@
+{
+  "staff_id": "66666666-6666-4666-8666-111111111111",
+  "email": "dispatcher@gable.com",
+  "name": "Dana Ramirez",
+  "entitled": true,
+  "roles": [
+    "dispatcher"
+  ],
+  "modules": [
+    "ai_lm"
+  ]
+}

@@ -218,13 +218,13 @@ func pathDepth(path string) int {
 // --- Test Fixtures ---
 
 var (
-	lumberID  = uuid.MustParse("10000000-0000-0000-0000-000000000001")
-	framingID = uuid.MustParse("10000000-0000-0000-0000-000000000002")
+	lumberID   = uuid.MustParse("10000000-0000-0000-0000-000000000001")
+	framingID  = uuid.MustParse("10000000-0000-0000-0000-000000000002")
 	hardwareID = uuid.MustParse("10000000-0000-0000-0000-000000000003")
 
 	customerBigD = uuid.MustParse("20000000-0000-0000-0000-000000000001")
 
-	product2x4 = uuid.MustParse("30000000-0000-0000-0000-000000000001")
+	product2x4  = uuid.MustParse("30000000-0000-0000-0000-000000000001")
 	productNail = uuid.MustParse("30000000-0000-0000-0000-000000000002")
 )
 

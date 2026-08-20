@@ -202,18 +202,18 @@ func TestCreateQuote_TotalAssembly(t *testing.T) {
 // amount a cents-based implementation would produce.
 func TestCreateQuote_FloatDollarAccumulation_Characterization(t *testing.T) {
 	tests := []struct {
-		name        string
-		lines       []QuoteLine
-		freight     float64
-		currentF64  float64 // what the float64 implementation yields today
-		exactCents  int64   // what an int64-cents implementation would yield
-		exactlyEqual bool   // whether currentF64 already equals the exact decimal
+		name         string
+		lines        []QuoteLine
+		freight      float64
+		currentF64   float64 // what the float64 implementation yields today
+		exactCents   int64   // what an int64-cents implementation would yield
+		exactlyEqual bool    // whether currentF64 already equals the exact decimal
 	}{
 		{
-			name:        "0.10 + 0.20 is not 0.30",
-			lines:       []QuoteLine{qline(1, 0.10), qline(1, 0.20)},
-			currentF64:  0.30000000000000004,
-			exactCents:  30,
+			name:         "0.10 + 0.20 is not 0.30",
+			lines:        []QuoteLine{qline(1, 0.10), qline(1, 0.20)},
+			currentF64:   0.30000000000000004,
+			exactCents:   30,
 			exactlyEqual: false,
 		},
 		{
@@ -221,18 +221,18 @@ func TestCreateQuote_FloatDollarAccumulation_Characterization(t *testing.T) {
 			// accumulated error cancels. Pinned as equal precisely because it is
 			// NOT reliable: the next case adds freight to the same lines and the
 			// equality disappears. Float64 money is right by luck, not by rule.
-			name:        "3 @ $19.99 plus 2 @ $4.35",
-			lines:       []QuoteLine{qline(3, 19.99), qline(2, 4.35)},
-			currentF64:  68.670000000000002,
-			exactCents:  6867,
+			name:         "3 @ $19.99 plus 2 @ $4.35",
+			lines:        []QuoteLine{qline(3, 19.99), qline(2, 4.35)},
+			currentF64:   68.670000000000002,
+			exactCents:   6867,
 			exactlyEqual: true,
 		},
 		{
-			name:        "same order with $75.50 freight",
-			lines:       []QuoteLine{qline(3, 19.99), qline(2, 4.35)},
-			freight:     75.50,
-			currentF64:  144.17000000000002,
-			exactCents:  14417,
+			name:         "same order with $75.50 freight",
+			lines:        []QuoteLine{qline(3, 19.99), qline(2, 4.35)},
+			freight:      75.50,
+			currentF64:   144.17000000000002,
+			exactCents:   14417,
 			exactlyEqual: false,
 		},
 		{
@@ -241,8 +241,8 @@ func TestCreateQuote_FloatDollarAccumulation_Characterization(t *testing.T) {
 				qline(1, 0.10), qline(1, 0.10), qline(1, 0.10), qline(1, 0.10), qline(1, 0.10),
 				qline(1, 0.10), qline(1, 0.10), qline(1, 0.10), qline(1, 0.10), qline(1, 0.10),
 			},
-			currentF64:  0.99999999999999989,
-			exactCents:  100,
+			currentF64:   0.99999999999999989,
+			exactCents:   100,
 			exactlyEqual: false,
 		},
 	}
@@ -540,8 +540,8 @@ func TestValidateStateTransition(t *testing.T) {
 // CORRECTNESS: each lifecycle transition stamps its own timestamp and no other.
 func TestUpdateState_StampsLifecycleTimestamps(t *testing.T) {
 	tests := []struct {
-		target                        QuoteState
-		wantSent, wantAcc, wantRej    bool
+		target                     QuoteState
+		wantSent, wantAcc, wantRej bool
 	}{
 		{QuoteStateSent, true, false, false},
 		{QuoteStateAccepted, false, true, false},

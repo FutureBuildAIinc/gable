@@ -7,7 +7,10 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Build and coverage output are generated, not authored. `coverage/` in
+  // particular ships vendored istanbul reporter scripts that trip
+  // `no-unused-eslint-disable` on every local `npm run test:coverage`.
+  globalIgnores(['dist', 'coverage', 'node_modules']),
   {
     files: ['**/*.ts'],
     extends: [

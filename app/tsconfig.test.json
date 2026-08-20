@@ -1,0 +1,34 @@
+{
+  // Type-checks the test suite, which tsconfig.app.json deliberately excludes
+  // (it models the shipped bundle). Without this project reference `tsc -b`
+  // never looks at a single `*.test.ts`, so a test could reference a renamed
+  // export or a stale type and still be "green" until it ran. Mirrors the same
+  // file in the gable-ai-lm repo.
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "target": "ES2022",
+    "useDefineForClassFields": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["vite/client", "node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Decorators for Lit */
+    "experimentalDecorators": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src", "vitest.config.ts"]
+}

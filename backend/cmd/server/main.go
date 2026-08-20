@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/config"
@@ -41,9 +41,9 @@ import (
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
-	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
@@ -622,13 +622,23 @@ func main() {
 	projectHandler := project.NewHandler(projectSvc)
 	projectHandler.RegisterRoutes(mux, portalMw)
 
-	// Integration API (FB-Brain cross-system endpoints)
+	// Integration API. One X-Integration-Key-gated surface shared by the
+	// FB-Brain cross-system endpoints and by AI_LM (github.com/gablelbm/
+	// gable-ai-lm), which pulls fleet/orders/catalog, writes approved delivery
+	// routes back, and authenticates its own operators through
+	// POST /api/integration/validate-staff.
+	//
+	// Every route is guarded inside integrations.Handler.authMiddleware (a
+	// constant-time compare of the X-Integration-Key header) rather than by the
+	// JWT/role middleware used for the human-facing API, because these callers
+	// are services, not sessions. With no key configured the whole surface
+	// answers 503 — including AI_LM's login path, so AI_LM cannot sign anyone in.
 	integrationAPIKey := os.Getenv("INTEGRATION_API_KEY")
 	if integrationAPIKey == "" {
 		if strings.EqualFold(cfg.AuthMode, "dev") {
 			integrationAPIKey = "fb-brain-demo-key-2026"
 		} else {
-			logger.Warn("INTEGRATION_API_KEY not set — integration endpoints disabled")
+			logger.Warn("INTEGRATION_API_KEY not set — integration endpoints disabled (AI_LM cannot authenticate)")
 		}
 	}
 	// Reuse the module-level quoteSvc (a second quote.NewService instance was
@@ -716,11 +726,11 @@ func main() {
 			"uptime": time.Since(startTime).String(),
 			"checks": map[string]interface{}{
 				"database": map[string]interface{}{
-					"status":       dbStatus,
-					"pool_total":   poolStat.TotalConns(),
-					"pool_idle":    poolStat.IdleConns(),
-					"pool_in_use":  poolStat.AcquiredConns(),
-					"pool_max":     poolStat.MaxConns(),
+					"status":      dbStatus,
+					"pool_total":  poolStat.TotalConns(),
+					"pool_idle":   poolStat.IdleConns(),
+					"pool_in_use": poolStat.AcquiredConns(),
+					"pool_max":    poolStat.MaxConns(),
 				},
 			},
 		})

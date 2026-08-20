@@ -59,7 +59,7 @@ type mediaUpdate struct {
 func (r *stubPIMRepo) GetContent(context.Context, uuid.UUID) (*PIMContent, error)  { return nil, nil }
 func (r *stubPIMRepo) UpsertContent(context.Context, *PIMContent) error            { return nil }
 func (r *stubPIMRepo) ListMedia(context.Context, uuid.UUID) ([]PIMMedia, error)    { return nil, nil }
-func (r *stubPIMRepo) DeleteMedia(context.Context, uuid.UUID) error               { return nil }
+func (r *stubPIMRepo) DeleteMedia(context.Context, uuid.UUID) error                { return nil }
 func (r *stubPIMRepo) SetPrimaryMedia(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 func (r *stubPIMRepo) ListCollateral(context.Context, uuid.UUID) ([]PIMCollateral, error) {
 	return nil, nil

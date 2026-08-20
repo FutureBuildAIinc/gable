@@ -38,11 +38,13 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // CreateProduct inserts a new product into the database
 func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) error {
 	query := `
-		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc,
+		                      weight_lbs, length_in, width_in, height_in, stackable, geometry_source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at, updated_at, average_unit_cost, target_margin, commission_rate`
 
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.VendorID, p.UPC).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.VendorID, p.UPC,
+		p.WeightLbs, p.LengthIn, p.WidthIn, p.HeightIn, p.Stackable, p.GeometrySource).Scan(
 		&p.ID,
 		&p.CreatedAt,
 		&p.UpdatedAt,
@@ -62,7 +64,9 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Product, error) {
 	query := `
 		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
+		       COALESCE(p.weight_lbs, 0),
+		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
+		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
@@ -83,6 +87,11 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 		&p.VendorID,
 		&p.UPC,
 		&p.WeightLbs,
+		&p.LengthIn,
+		&p.WidthIn,
+		&p.HeightIn,
+		&p.Stackable,
+		&p.GeometrySource,
 		&p.ReorderPoint,
 		&p.ReorderQty,
 		&p.CreatedAt,
@@ -108,7 +117,9 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error) {
 	query := `
 		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
+		       COALESCE(p.weight_lbs, 0),
+		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
+		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
@@ -137,6 +148,11 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 			&p.VendorID,
 			&p.UPC,
 			&p.WeightLbs,
+			&p.LengthIn,
+			&p.WidthIn,
+			&p.HeightIn,
+			&p.Stackable,
+			&p.GeometrySource,
 			&p.ReorderPoint,
 			&p.ReorderQty,
 			&p.CreatedAt,
@@ -170,7 +186,9 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 
 	query := `
 		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
+		       COALESCE(p.weight_lbs, 0),
+		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
+		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
@@ -200,6 +218,11 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 			&p.VendorID,
 			&p.UPC,
 			&p.WeightLbs,
+			&p.LengthIn,
+			&p.WidthIn,
+			&p.HeightIn,
+			&p.Stackable,
+			&p.GeometrySource,
 			&p.ReorderPoint,
 			&p.ReorderQty,
 			&p.CreatedAt,

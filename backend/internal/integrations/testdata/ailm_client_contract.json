@@ -1,0 +1,309 @@
+{
+  "source": "gable-ai-lm/backend/internal/gable/client.go",
+  "types": {
+    "DeliveryRoute": [
+      {
+        "json_name": "vehicle_id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "driver_id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "scheduled_date",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "stops",
+        "go_type": "[]integrations.aiLMRouteStop",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "load_manifest",
+        "go_type": "interface {}",
+        "pointer": false,
+        "omitempty": true
+      }
+    ],
+    "Driver": [
+      {
+        "json_name": "id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "name",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "status",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      }
+    ],
+    "Order": [
+      {
+        "json_name": "id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "status",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "customer_name",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "address",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "latitude",
+        "go_type": "float64",
+        "pointer": true,
+        "omitempty": true
+      },
+      {
+        "json_name": "longitude",
+        "go_type": "float64",
+        "pointer": true,
+        "omitempty": true
+      },
+      {
+        "json_name": "lines",
+        "go_type": "[]integrations.aiLMOrderLine",
+        "pointer": false,
+        "omitempty": false
+      }
+    ],
+    "OrderLine": [
+      {
+        "json_name": "product_id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "sku",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "quantity",
+        "go_type": "float64",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "weight_lbs",
+        "go_type": "float64",
+        "pointer": false,
+        "omitempty": false
+      }
+    ],
+    "Product": [
+      {
+        "json_name": "id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "sku",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "name",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "category",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "uom",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "weight_lbs",
+        "go_type": "float64",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "length_in",
+        "go_type": "float64",
+        "pointer": true,
+        "omitempty": false
+      },
+      {
+        "json_name": "width_in",
+        "go_type": "float64",
+        "pointer": true,
+        "omitempty": false
+      },
+      {
+        "json_name": "height_in",
+        "go_type": "float64",
+        "pointer": true,
+        "omitempty": false
+      },
+      {
+        "json_name": "stackable",
+        "go_type": "bool",
+        "pointer": true,
+        "omitempty": false
+      },
+      {
+        "json_name": "geometry_source",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      }
+    ],
+    "RouteStop": [
+      {
+        "json_name": "order_id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "sequence",
+        "go_type": "int",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "lat",
+        "go_type": "float64",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "lng",
+        "go_type": "float64",
+        "pointer": false,
+        "omitempty": false
+      }
+    ],
+    "StaffValidation": [
+      {
+        "json_name": "staff_id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "email",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "name",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "entitled",
+        "go_type": "bool",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "roles",
+        "go_type": "[]string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "modules",
+        "go_type": "[]string",
+        "pointer": false,
+        "omitempty": false
+      }
+    ],
+    "Vehicle": [
+      {
+        "json_name": "id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "name",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "vehicle_type",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "license_plate",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "capacity_weight_lbs",
+        "go_type": "int",
+        "pointer": true,
+        "omitempty": true
+      },
+      {
+        "json_name": "make",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "model",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "year",
+        "go_type": "int",
+        "pointer": false,
+        "omitempty": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "id": "33333333-3333-4333-8333-111111111111",
+    "sku": "LUM-248-PREM",
+    "name": "2x4x8 SPF Premium",
+    "category": "Framing Lumber",
+    "uom": "PCS",
+    "weight_lbs": 9.5,
+    "length_in": 96,
+    "width_in": 3.5,
+    "height_in": 1.5,
+    "stackable": true,
+    "geometry_source": "parametric"
+  },
+  {
+    "id": "33333333-3333-4333-8333-222222222222",
+    "sku": "HW-NAIL-16D",
+    "name": "16d Common Nails 50lb",
+    "category": "Hardware",
+    "uom": "BOX",
+    "weight_lbs": 50,
+    "length_in": null,
+    "width_in": null,
+    "height_in": null,
+    "stackable": null
+  }
+]

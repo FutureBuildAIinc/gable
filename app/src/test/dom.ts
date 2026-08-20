@@ -50,3 +50,53 @@ export function q<E extends Element>(root: ParentNode, selector: string): E {
   if (!found) throw new Error(`no element matched ${selector}`)
   return found
 }
+
+/**
+ * Let pending microtasks *and* one macrotask turn settle. `updateComplete`
+ * only drains Lit's own queue, so a component that awaits a fetch (or a lazy
+ * `import()`) in `connectedCallback` needs this before its data-driven render
+ * is observable.
+ */
+export function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** Mount, then settle again after in-flight async work started on connect. */
+export async function mountAsync<T extends LitElement>(
+  tag: string,
+  props: Partial<T> = {},
+): Promise<T> {
+  const el = await mount<T>(tag, props)
+  await flush()
+  await update(el, {})
+  return el
+}
+
+/** Click the first element matching `selector` whose collapsed text contains `label`. */
+export async function clickByText<T extends LitElement>(
+  host: T,
+  selector: string,
+  label: string,
+): Promise<void> {
+  const target = Array.from(host.querySelectorAll(selector)).find((el) =>
+    text(el).includes(label),
+  ) as HTMLElement | undefined
+  if (!target) {
+    throw new Error(
+      `no ${selector} matching "${label}" — saw: ${JSON.stringify(
+        Array.from(host.querySelectorAll(selector)).map((el) => text(el)),
+      )}`,
+    )
+  }
+  target.click()
+  await flush()
+  await update(host, {})
+}
+
+/** Build a JSON `Response`, mirroring what the Go handlers return. */
+export function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}

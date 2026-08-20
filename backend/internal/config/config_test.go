@@ -13,9 +13,9 @@ import "testing"
 func TestLoad_RejectsInsecureBaseURL(t *testing.T) {
 	t.Setenv("FB_BRAIN_ENABLED", "false") // keep the unrelated F-05 check satisfied
 	for _, v := range []string{
-		"http://evil.com",            // plaintext to a remote host
-		"http://127.0.0.1@evil.com",  // userinfo trick
-		"ftp://openrouter.ai",        // wrong scheme
+		"http://evil.com",           // plaintext to a remote host
+		"http://127.0.0.1@evil.com", // userinfo trick
+		"ftp://openrouter.ai",       // wrong scheme
 	} {
 		t.Setenv("OPENROUTER_BASE_URL", v)
 		if _, err := Load(); err == nil {
