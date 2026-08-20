@@ -3,24 +3,27 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What Is This?
-GableLBM is an open-source ERP platform purpose-built for lumber and building materials (LBM) dealers. It replaces legacy systems like Epicor BisTrack, ECI Spruce, and DMSi Agility.
+Gable (Go module `github.com/gablelbm/gable`) is an open-source ERP platform purpose-built for lumber and building materials (LBM) dealers. It is a self-hostable alternative to legacy systems like Epicor BisTrack, ECI Spruce, and DMSi Agility.
 
 ## Branches & Deployment
 
-| Branch | Auto-deploys to | Notes |
-|---|---|---|
-| `master` | **nothing** | Pristine, fork-ready trunk. No demo seed runs. Devs `make seed` locally. |
-| `staging` | https://staging.gablelbm.com | Digital Ocean App Platform, db `gable_staging`. Internal demos. |
-| `community` | https://demo.gablelbm.com | Digital Ocean App Platform, db `gable_demo`. Community PRs target this branch. |
+| Branch | Purpose |
+|---|---|
+| `master` | Stable, fork-ready trunk. Releases are cut from here. |
+| `staging` | Integration branch. Contributions land here first (see `CONTRIBUTING.md`). |
 
-Both deployed environments run with `AUTH_MODE=dev` — requests are not authenticated at all. The auth middleware is never constructed, so claims are nil and `RequireRole` passes through (`backend/pkg/middleware/auth.go`), giving every anonymous caller full admin/owner reach. The seeded `demo@gable.com` user exists in the fixture but is not what grants that access, so removing it would change nothing. This is intentional and safe (demo data is non-confidential) but must **never** propagate to a future `master` production deploy. Manifests live in `.do/app-demo.yaml` and `.do/app-staging.yaml`; operational notes in `.do/README.md`.
+**This repository does not deploy anything and points at no live environment.** `.do/app-demo.yaml` and `.do/app-staging.yaml` are *example* Digital Ocean App Platform specs for self-hosters: every hostname, repo and database name in them is a placeholder (`your-org/gable`, `*.example.com`, `your-db-cluster`), and both set `AUTH_MODE=production` with a placeholder `JWKS_URL`. Operational notes are in `.do/README.md`.
+
+`AUTH_MODE=dev` is a **local-development-only** bypass. When set, the auth middleware is never constructed, so claims are nil and `RequireRole` passes through (`backend/pkg/middleware/auth.go`) — every anonymous caller gets full admin/owner reach. No user is impersonated; there is no privileged demo login to remove. Never set it on a reachable host. See `SECURITY.md`.
 
 ## Repo Structure
 ```
 app/          → Lit 3 frontend (Vite + TypeScript + Tailwind)
 backend/      → Go backend (stdlib http.ServeMux + pgx + PostgreSQL)
 docs/         → Architecture, design system, and database specs
-.agent/       → Antigravity agent workflows
+.do/          → Example Digital Ocean App Platform deploy specs
+.claude/      → Contributor agent kit (skills + slash commands)
+.github/      → CI workflows, issue/PR templates, CODEOWNERS
 ```
 
 ## Tech Stack
@@ -31,7 +34,7 @@ docs/         → Architecture, design system, and database specs
 - **Database:** PostgreSQL 16+ via pgx v5 (`pkg/database` wraps a `*pgxpool.Pool`)
 - **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL` is required (fail-closed)
 - **PDF:** maroto v2 | **Excel:** excelize v2 | **Cron:** robfig/cron v3 | **Metrics:** Prometheus
-- **Note:** `docker-compose.yml` runs a `nats` container, but no NATS client is imported in Go code — the event bus described in `docs/architecture.md` is aspirational / not yet wired
+- **Note:** there is **no event bus**. No NATS client is imported anywhere in Go code, and the orphan `nats` container was removed from `docker-compose.yml` (a `NOTE` comment marks where it was). `docs/architecture.md` §4.2 describes the intended shape as future design only
 
 ### Frontend
 - **Framework:** Lit 3 Web Components + TypeScript 5.9 + Vite 7
@@ -198,9 +201,9 @@ it for decisions — derive live.
   NOTHING` will silently ignore future edits — verify the upsert names every column you change.
 
 ### External services are OSS-migrated (AI = OpenRouter, routing = OpenRouteService)
-The proprietary external-service layer has been replaced with single-key open options — landed on
-`master` + `community`, live on demo. Full as-built record in
-[`docs/oss-migration-handoff.md`](docs/oss-migration-handoff.md). The load-bearing bits:
+The proprietary external-service layer has been replaced with single-key open options. This is the
+as-built record — the pre-release migration notes were internal process documents and are not
+published. The load-bearing bits:
 - **AI:** one `openrouter_api_key` (+ optional `openrouter_base_url`) → one OpenAI-compatible
   `ai.Client` (`backend/internal/ai/openrouter.go`) for text + vision OCR + image gen. No more
   Anthropic/Gemini/Stability clients. Keys are runtime-settable in **Tech Admin → AI**.
@@ -222,13 +225,16 @@ Each item below is grounded in evidence in this repo. Scope is approximate;
 read the referenced files before sizing.
 
 ### Recently completed (do not re-recommend)
-- **#7** Canonical `products.vendor_id` UUID FK to vendors (commit `f100454`).
-- **#8** PO source attribution column + `/purchase-orders/source-summary` endpoint for the replenishment-automation KPI (commit `1315a37`).
-- **#9** Scheduled auto-reorder via robfig/cron + real demand signal from `order_lines` velocity, with `reorder_runs` observability table and manual triggers at `/purchase-orders/refresh-reorder-targets` and `/purchase-orders/reorder-runs` (commit `078a4cc`).
+(These landed before the public snapshot, so the original commit SHAs do not exist in
+this repository's history. Each is cited by the artifact you can actually inspect.)
+
+- **#7** Canonical `products.vendor_id` UUID FK to vendors — migration `054_product_vendor_id.sql`.
+- **#8** PO source attribution column + `GET /api/v1/purchase-orders/source-summary` for the replenishment-automation KPI — migration `055_po_source.sql`, `purchase_order/handler.go:38`.
+- **#9** Scheduled auto-reorder via robfig/cron + real demand signal from `order_lines` velocity, with a `reorder_runs` observability table (migration `056_reorder_runs.sql`) and manual triggers at `POST /api/v1/purchase-orders/refresh-reorder-targets` and `GET /api/v1/purchase-orders/reorder-runs` — `purchase_order/scheduler.go`, wired at `cmd/server/main.go:339`.
 
 ### #10 candidates — pick one based on the active discovery doc
 
-**A. Finish reporting scheduler.** `backend/internal/reporting/scheduler.go` exists but is never instantiated in `main.go` (only the handler is wired at lines 396-402). `ExecuteAndSendReport` has 3 stub TODOs (definition unmarshal at `scheduler.go:92-93`, the inline "implementation omitted" at `:91`, and schedule status update at `:116`). No `EmailSender` implementation matches the interface — `notification.LogEmailService` has different methods (`SendInvoice`, `SendDeliveryNotification`). Needs: wire in main.go, finish unmarshal of `DefinitionJSON map[string]interface{}` → `ReportDefinition`, add `SendEmailWithAttachment` to `LogEmailService`, add a `report_schedule_runs` observability table.
+**A. Finish reporting scheduler.** `backend/internal/reporting/scheduler.go` is **unwired and known-broken** — see the header comment on the file itself. It is never instantiated in `main.go` (only the reporting handler is wired, `cmd/server/main.go:470-475`) and no route reads or writes `report_schedules`, though migration `032b_report_builder_and_bi.sql` creates the table and the repository/service layer supports it. `ExecuteAndSendReport` also never populates `ReportDefinition` from the saved report's `DefinitionJSON`, so it would fail on every run; that is characterized by `TestExecuteAndSendReport_DropsTheSavedDefinition` in `scheduler_test.go`, which passes today *because* the call fails. No `EmailSender` implementation exists either — `notification.LogEmailService` has different methods (`SendInvoice`, `SendDeliveryNotification`). Needs, in order: map `DefinitionJSON map[string]interface{}` → `ReportDefinition`; add `SendEmailWithAttachment` to an email service; add CRUD routes for schedules; wire `NewScheduler` + `Start`/`Stop` in `main.go`; add a `report_schedule_runs` observability table. **Do not wire it before fixing the definition mapping** — that just schedules a guaranteed failure.
 
 **B. Will-call / pickup ticket workflow.** Orders currently flow `DRAFT → CONFIRMED → FULFILLED` with no pickup path. Real LBM dealers split delivery vs. will-call pickup as a hard distinction (the customer drives to the yard). Needs: new `will_call_tickets` table, `READY_FOR_PICKUP` order status, signature-on-pickup (POD reuse from `delivery/`), customer notification when ready. Greenfield module — biggest scope of these four.
 

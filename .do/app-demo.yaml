@@ -103,6 +103,12 @@ services:
       - path: /
 
 jobs:
+  # The seed TRUNCATEs the transactional tables (orders, deliveries, routes,
+  # quotes, the general ledger) with RESTART IDENTITY CASCADE before writing
+  # demo data. It is therefore gated on DEMO_SEED and skipped by default:
+  # without the gate, every deploy of this spec would silently destroy the
+  # target database's operational data. Set DEMO_SEED=true ONLY on a
+  # throwaway demo environment. The binary enforces the same gate itself.
   - name: migrate-and-seed
     kind: POST_DEPLOY
     dockerfile_path: backend/Dockerfile
@@ -116,7 +122,7 @@ jobs:
     # as argv to the first binary (no implicit /bin/sh). Wrapping with `sh -c`
     # is required so the `&&` chain runs ./seed after ./migrate. Without it,
     # only ./migrate executes and the seed binary is silently skipped.
-    run_command: sh -c "./migrate && ./seed"
+    run_command: sh -c 'set -e; ./migrate; if [ "$DEMO_SEED" = true ]; then echo seeding demo data; ./seed; else echo skipping demo seed, DEMO_SEED is not true; fi'
     envs:
       - key: DATABASE_URL
         value: ${gable-db.DATABASE_URL}

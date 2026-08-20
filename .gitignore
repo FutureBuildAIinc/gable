@@ -19,7 +19,7 @@ backend/seed
 # Stray binary that ended up committed at the repo root — do not re-add.
 /docker-compose
 
-# Agent/AI directories (.agent/ is tracked intentionally — see CLAUDE.md repo structure).
+# Agent/AI directories.
 #
 # `.claude/` IS tracked on purpose: it ships the shared contributor agent kit
 # (skills + slash commands) that every contributor gets on clone — see

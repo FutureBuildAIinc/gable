@@ -23,20 +23,22 @@
 
 ## 2a. Hosting
 
-Non-production environments are hosted on **Digital Ocean App Platform**
-(PaaS, Dockerfile-based). A single DO Managed Postgres 16 cluster
-(`gable-pg`) hosts two logical databases:
+This repository ships **example** Digital Ocean App Platform specs (PaaS,
+Dockerfile-based) for self-hosting — not a live deployment. Every hostname,
+repository and database name in them is a placeholder (`your-org/gable`,
+`*.example.com`, `your-db-cluster`), and both run `AUTH_MODE=production`
+against a placeholder `JWKS_URL`. Operational notes live in `.do/README.md`.
 
-| Environment | Branch | URL | Logical DB |
+| Spec | Tracks branch | Example domain | Logical DB |
 |---|---|---|---|
-| Demo | `community` | https://demo.gablelbm.com | `gable_demo` |
-| Staging | `staging` | https://staging.gablelbm.com | `gable_staging` |
+| `.do/app-demo.yaml` | `master` | `demo.example.com` | `gable_demo_db` |
+| `.do/app-staging.yaml` | `staging` | `staging.example.com` | `gable_staging_db` |
 
-`master` / production is **not** deployed by this repo. App Platform specs
-are version-controlled at `.do/app-demo.yaml` and `.do/app-staging.yaml`;
-operational notes live in `.do/README.md`. Both apps share the backend
-Docker image — the same image runs `main` (API server) as a service and
-`migrate && seed` as a post-deploy job.
+Both examples reference one DO Managed Postgres 16 cluster (the `gable-db`
+app resource) with isolated logical databases, so several environments can
+share a cluster. Both apps share the backend Docker image — the same image
+runs `main` (API server) as a service and `migrate && seed` as a post-deploy
+job.
 
 ## 3. Module Boundaries (as built)
 
@@ -47,8 +49,8 @@ existed as packages). Grouped by domain:
 | Domain | Packages | Responsibility |
 |--------|----------|---------------|
 | Catalog & Inventory | `product`, `inventory`, `pim`, `location` | Products, UOM, stock quants/moves, cycle counts, AI product content, locations/branches |
-| Sales | `quote`, `order`, `pricing`, `configurator`, `millwork` | Quotes, orders, pricing rules/categories/rebates, millwork configurator |
-| Finance | `invoice`, `payment`, `account`, `gl`, `ap`, `bankrecon`, `tax`, `matching` | Invoicing, payments, AR subledger, general ledger, AP, bank reconciliation, tax, 3-way matching |
+| Sales | `quote`, `order`, `pricing`, `configurator`, `millwork`, `parsing`, `vision` | Quotes, orders, pricing rules/categories/rebates, millwork configurator, material-list document parsing (`POST /api/v1/parsing/upload`), blueprint scanning (`POST /api/v1/vision/scan`) |
+| Finance | `invoice`, `payment`, `account`, `deposit`, `gl`, `ap`, `bankrecon`, `tax`, `matching` | Invoicing, payments, AR subledger, customer deposits/prepayments, general ledger, AP, bank reconciliation, tax, 3-way matching |
 | Purchasing | `purchase_order`, `vendor`, `edi` | POs, vendors, EDI X12, auto-reorder scheduler |
 | Logistics | `delivery` | Dispatch, routing (OpenRouteService), fleet, POD |
 | Front-of-house | `pos`, `dashboard`, `reporting`, `document` | POS terminal, dashboards, report builder, generated documents |
@@ -59,6 +61,9 @@ existed as packages). Grouped by domain:
 Platform primitives live in `backend/pkg/`: `apps` (app registry/gating),
 `middleware` (auth/branch/cors/rate-limit/idempotency/…), `database`,
 `audit`, `metrics`, `httputil`, `pagination`, `branchctx`.
+
+`internal/testutil` is a test-only helper package (DB/transaction fixtures),
+not a domain module.
 
 ## 4. Inter-Module Communication
 
@@ -81,7 +86,7 @@ that assume eventual consistency between modules.
 - **Style:** RESTful JSON.
 - **Surfaces:** `/api/v1/*` (ERP, JWT), `/api/portal/v1/*` (B2B portal — portal-session auth; `project` also mounts here), `/api/partner/v1/*` (co-op partner API), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS).
 - **Router:** Go stdlib `http.ServeMux` with method+path patterns; per-module registration via `RegisterRoutes(mux, roleGuard…)`, converging on the gated `apps.Router` as modules convert.
-- **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`); `AUTH_MODE=dev` pass-through for local/demo. Role gating via `middleware.RequireRole`.
+- **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`); `AUTH_MODE=dev` is a **local-development-only** pass-through that disables auth entirely (see `SECURITY.md`). Role gating via `middleware.RequireRole`.
 - **App gating:** converted modules' routes 404 with `{"error":"app_disabled"}` when the app is disabled in the registry.
 - **Config:** Environment variables with `godotenv` fallback.
 
@@ -104,16 +109,32 @@ that assume eventual consistency between modules.
   (`/api/partner/v1/dashboard|quotes`); `internal/governance` manages RFCs
   (`/api/v1/governance/rfcs`) with AI assistance (`governance/ai.go`);
   governance UI pages exist under `app/src/pages/governance/`.
-- **Vision (not built):** AI-mediated impact analysis of proposed changes,
+- **Planned (not built):** AI-mediated impact analysis of proposed changes,
   backlog orchestration, and a federated catalog sync layer for co-ops to
   push master SKU data to member dealer instances.
 
 ## 8. Legacy Interop & Migration Strategy
-- **Reference specs:** `industry_erps/` holds captured API specs for Epicor
-  BisTrack (REST/OpenAPI), ECI Spruce (SOAP WSDL), and DMSi Agility
-  (OpenAPI) — the raw material for future import/sync adapters.
-- **Built today:** `internal/integrations` (X12 EDI helpers, GL adapter
-  interface with mock + QuickBooks stub, FB-Brain connector).
-- **Vision (not built):** per-module `adaptors/` mappers and a dedicated sync
+
+- **No third-party vendor API specifications ship with this repository, and
+  none will.** Import/sync adapters for Epicor BisTrack, ECI Spruce and DMSi
+  Agility remain a goal, but their API definitions are those vendors'
+  copyrighted and trademarked material — we have no right to redistribute
+  them. Build adapters against each vendor's own documentation under your own
+  licensed access to their APIs. Do not expect this repo to supply the specs.
+- **Built today —** `internal/integrations`:
+    - **AI_LM dispatch contract** (`ailm.go`, `handler.go`): nine
+      `/api/integration/*` endpoints — fleet, drivers, a date's confirmed
+      orders, catalog with weight/geometry, quote pricing + creation, and
+      route write-back — consumed by the separate `gable-ai-lm` service. Wire
+      shapes are pinned against golden fixtures by `ailm_contract_test.go`.
+    - **GL adapter seam** (`integrations/gl/`): a `GLAdapter` interface with a
+      logging mock (`mock.go`) and a QuickBooks Online stub (`qbo.go`).
+      `internal/gl` depends on the interface, never on a concrete adapter.
+    - **X12 EDI** (`integrations/edi/x12/850.go` for outbound POs; the 832/846
+      catalog and trading-partner logic lives in `internal/edi`).
+- **Agent-to-agent (separate surface):** `POST /api/v1/a2a/purchase-order`
+  accepts JWS-signed inbound POs (`purchase_order.NewA2AReceiver`, wired in
+  `cmd/server/main.go`). It is not part of `internal/integrations`.
+- **Planned (not built):** per-module `adaptors/` mappers and a dedicated sync
   engine for bi-directional phase-in from legacy systems. Design these as
   *apps* once the platform work (blueprint Phases 1–2) is in place.

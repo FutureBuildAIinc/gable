@@ -75,7 +75,7 @@ func dedupeBranches(db *sql.DB) {
 func resetTransactionalData(db *sql.DB) {
 	candidates := []string{
 		"orders", "order_lines", "invoices",
-		"quotes", "quote_lines", "quote_exposure_events",
+		"quotes", "quote_lines",
 		"deliveries", "delivery_routes",
 		"customer_transactions", "payments", "credit_memos",
 		"purchase_orders", "purchase_order_lines", "reorder_runs",
@@ -85,9 +85,13 @@ func resetTransactionalData(db *sql.DB) {
 		"rebate_programs", "rebate_tiers", "rebate_claims",
 		"saved_reports", "edi_trading_partners",
 	}
-	// Only truncate tables that actually exist — the schema differs across
-	// branches/forks, and a single TRUNCATE fails atomically on the first
-	// missing table. Filtering keeps the reset working everywhere.
+	// Every name above is created by a migration in backend/migrations/. The
+	// existence filter is defensive, not a workaround for a missing table: a
+	// single TRUNCATE fails atomically on the first name Postgres cannot
+	// resolve, so this keeps the reset working against a partially-migrated
+	// database and against forks that drop a table. Do NOT add a name here
+	// that no migration creates — use the filter to survive drift, not to
+	// paper over a table this repo does not ship.
 	var existing []string
 	for _, t := range candidates {
 		var ok bool
@@ -108,7 +112,44 @@ func resetTransactionalData(db *sql.DB) {
 	log.Printf("Seed: resetTransactionalData cleared %d transactional tables (prevents cross-deploy accumulation)", len(existing))
 }
 
+// demoSeedEnv gates the entire command. Keep this name in sync with the
+// POST_DEPLOY job in .do/*.yaml — the manifest gate and this gate are two
+// halves of one contract. gable-ai-lm/backend/cmd/seed uses the same variable.
+const demoSeedEnv = "DEMO_SEED"
+
+// demoSeedRequested reports whether the operator explicitly asked for demo
+// data. Anything other than an affirmative value means no.
+func demoSeedRequested() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoSeedEnv))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func main() {
+	// Checked before anything else, so an install that did not ask for demo
+	// data needs no database and no credentials.
+	//
+	// This gate is not hygiene. Below, seedDemoData TRUNCATEs the transactional
+	// tables — orders, order_lines, deliveries, delivery_routes, quotes and the
+	// general ledger among them — with RESTART IDENTITY CASCADE. The POST_DEPLOY
+	// job in .do/*.yaml runs `./migrate && ./seed` on every deploy, so without
+	// this an ordinary push to the deploy branch silently destroys every order,
+	// route and ledger entry in the target database. That is survivable on a
+	// throwaway demo and catastrophic anywhere else, and nothing in the manifest
+	// distinguishes the two.
+	if !demoSeedRequested() {
+		log.Printf(
+			"%s is not set — skipping the demo seed. Nothing was truncated and no demo data was written. "+
+				"This is the correct outcome for a production or self-hosted install: Gable ships with an empty "+
+				"database and expects the dealer's own data. Set %s=1 only on a demo or development environment.",
+			demoSeedEnv, demoSeedEnv,
+		)
+		return
+	}
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgresql://gable_user:gable_password@localhost:5434/gable_db?sslmode=disable"

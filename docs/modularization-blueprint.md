@@ -149,6 +149,7 @@ community app packaging (out-of-tree modules) if the OSS ecosystem wants it.
   fork with extra modules keeps working.
 - **Demo/staging seeds:** all apps default `enabled=TRUE`; deploys are
   behavior-neutral until an operator toggles.
-- **History rewrite (cleanup follow-up)** is deliberately *not* in the PR;
-  purging the ~76 MB of binary blobs needs a coordinated force-push across
-  `master`/`staging`/`community`.
+- **Binary blobs in history:** not a risk here. The pre-release tree carried
+  ~76 MB of committed binaries; this repository was published from a fresh
+  snapshot that never contained them, and `.gitignore` now covers
+  `/docker-compose` and `backend/main`.

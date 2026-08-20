@@ -21,18 +21,18 @@ import (
 // hosted iframe with the dealer's public key) so only an account_token reaches
 // the server (PCI SAQ-A).
 //
-// Contract VERIFIED against Run's public OpenAPI (docs.runpayments.io) and the
-// FutureBuild reference-integration reference integration:
+// Contract VERIFIED against Run's public OpenAPI (docs.runpayments.io) and a
+// working reference integration:
 //   - Charge:        POST {base}/api/v1/charge
 //     Auth:          Authorization: Bearer <api_key>  +  mid: <MID> header
 //     Body:          {account_token, mid, amount(cents), currency, capture:'Y'|'N', vault:'Y'|'N'}
 //     Response:      {result:'A'|'B'|'C', resp_code, resp_text, trans_id, card_type}
-//                    A=Approved, B=Retry, C=Declined
+//     Result codes:  A=Approved, B=Retry, C=Declined
 //   - Void/refund:   POST {base}/api/v1/void-or-refund
 //     Body:          {trans_id, mid, amount(cents), action:'refund'|'void'}
 //   - Key refresh:   POST {base}/api/v1/api_keys/refresh  {token: <current api_key>}
-//                    → {api_key, public_key, refresh_token}
-//                    (the api_key is an EXPIRING JWT: on 401, refresh once + retry)
+//     Response:      {api_key, public_key, refresh_token}
+//     Note:          the api_key is an EXPIRING JWT — on 401, refresh once + retry
 //
 // The CARD-PRESENT rail (Clover terminal / Run Terminal API, device-driven) is a
 // separate integration that slots in behind PaymentGateway unchanged when a

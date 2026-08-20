@@ -1,10 +1,13 @@
 # Production External-Services Roadmap (downstream managed/core repo)
 
 **Status:** Planning / decision-capture (no code — forward-looking)
-**Applies to:** the future, more production-oriented **core repo** (separate from this
-open `community` repo)
-**Companion doc:** [`oss-migration-plan.md`](./oss-migration-plan.md) — the community-repo
-implementation this builds on
+**Applies to:** a future, more production-oriented **managed core repo**, separate from
+this open commons repo
+**What this builds on:** the as-built open implementation — `backend/internal/ai/openrouter.go`
+(one OpenAI-compatible client) and `backend/internal/delivery/ors.go` (OpenRouteService),
+both keyed at runtime via `system_settings`. Summarised in `CLAUDE.md` §
+"External services are OSS-migrated"; module boundaries in
+[`architecture.md`](./architecture.md).
 **Last updated:** 2026-06-18
 
 ---
