@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { LitElement, html } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { router, type RouteMatch } from './lib/router.ts';
 import { appKeyForPath, appManifests, tagForPath as appTagForPath } from './apps/registry.ts';
 import { appsService } from './services/AppsService.ts';
+import { SESSION_EXPIRED_EVENT } from './services/fetchClient.ts';
 
 // Import layout shells (eagerly — they're small and always needed)
 import './components/layout/app-shell.ts';
@@ -22,6 +23,9 @@ import './components/ui/not-found.ts';
 // Disabled-app panel (rendered when a route's owning app is toggled off)
 import './components/ui/app-disabled.ts';
 
+// Session-expired panel (rendered when an ERP request comes back 401)
+import './components/ui/session-expired.ts';
+
 @customElement('gable-app')
 export class GableApp extends LitElement {
   // Light DOM so Tailwind works
@@ -29,12 +33,15 @@ export class GableApp extends LitElement {
 
   @state() private _match: RouteMatch | null = null;
   @state() private _loading = true;
+  @state() private _sessionExpired = false;
 
   private _onAppsChanged = () => this.requestUpdate();
+  private _onSessionExpired = () => { this._sessionExpired = true; };
 
   connectedCallback() {
     super.connectedCallback();
     router.addEventListener('route-changed', this._onRouteChanged);
+    window.addEventListener(SESSION_EXPIRED_EVENT, this._onSessionExpired);
     // App enablement — fire-and-forget; gating fails open until it loads.
     appsService.addEventListener('apps-changed', this._onAppsChanged);
     void appsService.load().catch(() => {
@@ -51,6 +58,7 @@ export class GableApp extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     router.removeEventListener('route-changed', this._onRouteChanged);
+    window.removeEventListener(SESSION_EXPIRED_EVENT, this._onSessionExpired);
     appsService.removeEventListener('apps-changed', this._onAppsChanged);
   }
 
@@ -120,6 +128,7 @@ export class GableApp extends LitElement {
       '/purchasing/vendors/:id': 'gable-vendor-detail',
       '/purchasing/vendors': 'gable-vendor-list',
       '/purchasing/new': 'gable-new-purchase-order',
+      '/purchasing/recommendations': 'gable-purchasing-recommendations',
       '/purchasing/:id': 'gable-purchase-order-detail',
       '/purchasing': 'gable-purchase-order-list',
       '/admin': 'gable-tech-admin',
@@ -168,6 +177,17 @@ export class GableApp extends LitElement {
   }
 
   render() {
+    // The session-expired panel is an overlay over whatever surface is up, so
+    // it wraps the shell selection rather than replacing it.
+    return html`
+      ${this._renderSurface()}
+      ${this._sessionExpired
+        ? html`<gable-session-expired></gable-session-expired>`
+        : nothing}
+    `;
+  }
+
+  private _renderSurface() {
     if (this._loading) {
       return html`
         <div class="flex h-screen w-full items-center justify-center bg-deep-space">

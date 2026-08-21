@@ -178,10 +178,12 @@ func main() {
 		Code, Name, Addr, City, State, Zip, Phone, TaxJur string
 		TaxRate                                           float64
 	}
+	// Street names here are invented, like everywhere else in this fixture —
+	// see the address rules on the customers block below.
 	branches := []branch{
 		{"KEL-MAIN", "Kelowna Main Yard", "2450 Enterprise Way", "Kelowna", "BC", "V1X 7K2", "250-555-1000", "BC", 0.12},
-		{"WK", "West Kelowna Satellite", "2475 Dobbin Rd", "West Kelowna", "BC", "V4T 2E9", "250-555-1100", "BC", 0.12},
-		{"LK", "Lake Country Outpost", "11852 Highway 97", "Lake Country", "BC", "V4V 1E2", "250-555-1200", "BC", 0.12},
+		{"WK", "West Kelowna Satellite", "2475 Sawkerf Rd", "West Kelowna", "BC", "V4T 2E9", "250-555-1100", "BC", 0.12},
+		{"LK", "Lake Country Outpost", "11852 Kilnyard Rd", "Lake Country", "BC", "V4V 1E2", "250-555-1200", "BC", 0.12},
 	}
 	// One-time cleanup: previous seed runs created duplicate BRANCH rows because
 	// Postgres treats NULL parent_id as distinct in unique constraints. Pick the
@@ -453,6 +455,19 @@ func main() {
 
 	// =========================================================================
 	// 5. CUSTOMERS — 13 Okanagan accounts headlined by Kelbrook Construction.
+	//
+	// Fixture rules for anything address- or contact-shaped in this file:
+	//   - Street NAMES are invented, in the trade-flavoured style used by the
+	//     vendor rows above ("Fastener Way", "Aggregate Dr"). Never a real
+	//     street: a real street name plus a plausible number resolves to
+	//     somebody's actual property, and this data ships in a public repo.
+	//   - Municipality names are real, because the demo is deliberately set in
+	//     the Okanagan and a city name identifies no one.
+	//   - No postal codes on these free-text addresses. There is no reserved
+	//     "fictional" Canadian postal code, so the only safe option is to
+	//     leave them out.
+	//   - Phone numbers stay in the 555 range; emails use fictional domains or
+	//     IANA-reserved example.com. Never a real consumer ISP or provider.
 	// =========================================================================
 	type cust struct {
 		Name, Acct, Email, Phone, Addr, Tier, Terms, PriceLevel string
@@ -461,19 +476,19 @@ func main() {
 		Projects                                                []string
 	}
 	customers := []cust{
-		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.ca", "250-555-2100", "1885 Spall Rd, Kelowna BC V1Y 4R2", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Mission Hill Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
-		{"Okanagan Homes Ltd", "OKH-001", "ap@okanaganhomes.ca", "250-555-2400", "9000 Summit Pkwy, Kelowna BC V1Y 9R3", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
-		{"Lake Country Builders", "LCB-001", "admin@lakecountrybuilders.ca", "250-555-2200", "2100 Bottom Wood Lake Rd, Lake Country BC V4V 2K9", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
-		{"Predator Ridge Renos", "PRR-001", "office@predatorrenos.ca", "250-555-2300", "1525 Country Club Dr, Vernon BC V1H 1L3", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Spall", "Garage Addition - Rutland"}},
-		{"Big White Cabin Co", "BWC-001", "jim@bigwhitecabins.ca", "250-555-2800", "5315 Whitefoot Way, Big White BC V1P 1P3", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
-		{"Mission Hill Custom", "MHC-001", "invoices@missionhillcustom.ca", "250-555-2500", "3200 Mission Hill Rd, West Kelowna BC V4T 2E4", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
-		{"Westbank Decks & Fence", "WDF-001", "info@westbankdecks.ca", "250-555-2600", "150 Boucherie Rd, West Kelowna BC V4T 1Z6", "SILVER", "NET30", "Contractor", 20000, wkID, []string{"Boucherie Deck", "Smith Patio", "WK Clubhouse Veranda"}},
-		{"Vernon Valley Construction", "VVC-001", "dispatch@vernonvalley.ca", "250-555-3200", "1800 Polson Dr, Vernon BC V1T 8P5", "GOLD", "NET30", "Contractor", 35000, lkID, []string{"Vernon Lot 8 Foundation", "Polson Drive Pour"}},
-		{"Glenmore Heritage Reno", "GHR-001", "pay@glenmoreheritage.ca", "250-555-2700", "780 Bernard Ave, Kelowna BC V1Y 6P5", "GOLD", "NET30", "Contractor", 30000, kelMainID, []string{"123 Bernard Ave Restore", "456 Pandosy St Reno"}},
-		{"Knox Mountain Landscapes", "KML-001", "office@knoxmountainlandscapes.ca", "250-555-2900", "300 Knox Mountain Dr, Kelowna BC V1Y 4P8", "RETAIL", "NET30", "Retail", 10000, kelMainID, []string{"Knox Mountain Community Garden", "Waterfront Walk Beds"}},
-		{"Peachland Framing Crew", "PFC-001", "bills@peachlandframing.ca", "250-555-3000", "5500 Beach Ave, Peachland BC V0H 1X4", "GOLD", "NET30", "Contractor", 80000, wkID, []string{"Beach Ave Warehouse Framing", "Highway 97 Strip Mall"}},
-		{"Summerland Roofers", "SRR-001", "admin@summerlandroofers.ca", "250-555-3100", "200 Prairie Valley Rd, Summerland BC V0H 1Z0", "SILVER", "NET30", "Contractor", 40000, kelMainID, []string{"Summerland School Roof", "St. Stephen Anglican Reshingle"}},
-		{"Okanagan DIY Owner", "DIY-OKN", "diyfan@telus.net", "250-555-2310", "45 Maple Ln, Lake Country BC V4V 1Y2", "RETAIL", "COD", "Retail", 5000, lkID, []string{"Backyard Shed"}},
+		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.ca", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Mission Hill Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
+		{"Okanagan Homes Ltd", "OKH-001", "ap@okanaganhomes.ca", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
+		{"Lake Country Builders", "LCB-001", "admin@lakecountrybuilders.ca", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
+		{"Predator Ridge Renos", "PRR-001", "office@predatorrenos.ca", "250-555-2300", "1525 Trowel Dr, Vernon BC", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
+		{"Big White Cabin Co", "BWC-001", "jim@bigwhitecabins.ca", "250-555-2800", "5315 Snowload Way, Big White BC", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
+		{"Mission Hill Custom", "MHC-001", "invoices@missionhillcustom.ca", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
+		{"Westbank Decks & Fence", "WDF-001", "info@westbankdecks.ca", "250-555-2600", "150 Deckboard Rd, West Kelowna BC", "SILVER", "NET30", "Contractor", 20000, wkID, []string{"Shoreline Deck", "Smith Patio", "WK Clubhouse Veranda"}},
+		{"Vernon Valley Construction", "VVC-001", "dispatch@vernonvalley.ca", "250-555-3200", "1800 Rebar Dr, Vernon BC", "GOLD", "NET30", "Contractor", 35000, lkID, []string{"Vernon Lot 8 Foundation", "Rebar Drive Pour"}},
+		{"Glenmore Heritage Reno", "GHR-001", "pay@glenmoreheritage.ca", "250-555-2700", "780 Casement Ave, Kelowna BC", "GOLD", "NET30", "Contractor", 30000, kelMainID, []string{"123 Casement Ave Restore", "456 Millwright St Reno"}},
+		{"Knox Mountain Landscapes", "KML-001", "office@knoxmountainlandscapes.ca", "250-555-2900", "300 Topsoil Dr, Kelowna BC", "RETAIL", "NET30", "Retail", 10000, kelMainID, []string{"Knox Mountain Community Garden", "Waterfront Walk Beds"}},
+		{"Peachland Framing Crew", "PFC-001", "bills@peachlandframing.ca", "250-555-3000", "5500 Truss Ave, Peachland BC", "GOLD", "NET30", "Contractor", 80000, wkID, []string{"Truss Ave Warehouse Framing", "Highway 97 Strip Mall"}},
+		{"Summerland Roofers", "SRR-001", "admin@summerlandroofers.ca", "250-555-3100", "200 Ridgecap Rd, Summerland BC", "SILVER", "NET30", "Contractor", 40000, kelMainID, []string{"Summerland School Roof", "Community Chapel Reshingle"}},
+		{"Okanagan DIY Owner", "DIY-OKN", "okanagan.diy@example.com", "250-555-2310", "45 Sawhorse Ln, Lake Country BC", "RETAIL", "COD", "Retail", 5000, lkID, []string{"Backyard Shed"}},
 	}
 
 	customerIDs := make(map[string]uuid.UUID)

@@ -70,6 +70,7 @@ export const routes: RouteConfig[] = [
   { path: '/purchasing/vendors/:id', load: () => import('./pages/purchasing/VendorDetail.ts'), layout: 'erp' },
   { path: '/purchasing/vendors', load: () => import('./pages/purchasing/VendorList.ts'), layout: 'erp' },
   { path: '/purchasing/new', load: () => import('./pages/purchasing/NewPurchaseOrder.ts'), layout: 'erp' },
+  { path: '/purchasing/recommendations', load: () => import('./pages/purchasing/PurchasingRecommendations.ts'), layout: 'erp' },
   { path: '/purchasing/:id', load: () => import('./pages/purchasing/PurchaseOrderDetail.ts'), layout: 'erp' },
   { path: '/purchasing', load: () => import('./pages/purchasing/PurchaseOrderList.ts'), layout: 'erp' },
   { path: '/sales', load: async () => {}, layout: 'erp', redirect: '/quotes' },
@@ -93,7 +94,7 @@ export const routes: RouteConfig[] = [
   { path: '/dashboard', load: () => import('./pages/Dashboard.ts'), layout: 'erp' },
   // Surface picker — mounted at `/` for:
   //   - local dev (`vite dev`)                          → import.meta.env.DEV
-  //   - the public demo build (demo.gablelbm.com)        → VITE_DEMO_MODE=true
+  //   - the public demo build (the public demo build)        → VITE_DEMO_MODE=true
   // Staging and master keep `/` on the ERP dashboard.
   ...(import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true'
     ? [

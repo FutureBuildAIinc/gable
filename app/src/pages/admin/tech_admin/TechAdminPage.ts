@@ -6,7 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
-import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo } from '../../../services/TechAdminService';
+import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
     Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation, Users
@@ -61,6 +61,12 @@ export class TechAdminPage extends LitElement {
     @state() private staffError: string | null = null;
     @state() private moduleSaving = false;
 
+    // System Health state — whatever GET /healthz/ready actually reports.
+    @state() private readiness: Readiness | null = null;
+    @state() private readinessLoading = false;
+    @state() private readinessError: string | null = null;
+    @state() private readinessCheckedAt: string | null = null;
+
     connectedCallback() {
         super.connectedCallback();
         this._loadKeys();
@@ -68,6 +74,7 @@ export class TechAdminPage extends LitElement {
         this._loadRoutingSettings();
         this._loadEDIPartners();
         this._loadStaff();
+        this._loadReadiness();
     }
 
     disconnectedCallback() {
@@ -209,6 +216,22 @@ export class TechAdminPage extends LitElement {
             this.routingError = err instanceof Error ? err.message : 'Failed to delete';
         }
     }
+
+    // --- System Health methods ---
+    private _loadReadiness = async () => {
+        this.readinessLoading = true;
+        this.readinessError = null;
+        try {
+            this.readiness = await techAdminService.getReadiness();
+        } catch (err) {
+            console.error(err);
+            this.readiness = null;
+            this.readinessError = err instanceof Error ? err.message : 'Readiness probe unreachable';
+        } finally {
+            this.readinessCheckedAt = new Date().toLocaleTimeString();
+            this.readinessLoading = false;
+        }
+    };
 
     // --- EDI methods ---
     private async _loadEDIPartners() {
@@ -768,36 +791,17 @@ export class TechAdminPage extends LitElement {
     }
 
     private _renderIntegrations() {
-        const integrations = [
-            { name: 'Run Payments', description: 'Secure payment processing for card-present and online transactions. Preferred Partner.', iconData: Activity, connected: false },
-            { name: 'QuickBooks Online', description: 'Automatically sync invoices, payments, and customers with your General Ledger.', iconData: Globe, connected: false },
-            { name: 'Avalara AvaTax', description: 'Real-time tax calculation and compliance for all 50 states.', iconData: Globe, connected: false },
-            { name: 'Zapier / Make', description: 'Connect GableLBM to 5,000+ other apps via webhooks.', iconData: Activity, connected: false },
-        ];
-
+        // This tab used to lead with a hardcoded vendor grid (Run Payments,
+        // QuickBooks, Avalara, Zapier) whose cards were permanently
+        // `connected: false` and whose "Connect" button had no handler. None of
+        // those integrations exist in this codebase, so the grid was a
+        // capability claim with nothing behind it and has been removed. What
+        // remains is the EDI partner table, which is backed by
+        // /api/v1/edi/partners and really does read, toggle and delete.
         return html`
             <div class="space-y-6">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    ${integrations.map(i => html`
-                        <div class="bg-slate-steel border border-white/5 p-6 rounded-lg flex items-start justify-between hover:border-white/10 transition-colors group">
-                            <div class="flex gap-4">
-                                <div class="${cn('w-12 h-12 rounded-lg flex items-center justify-center shrink-0 transition-colors', i.connected ? 'bg-gable-green/20 text-gable-green' : 'bg-white/5 text-slate-400 group-hover:text-white')}">
-                                    ${icon(i.iconData, 24)}
-                                </div>
-                                <div>
-                                    <h3 class="text-lg font-semibold text-white mb-1">${i.name}</h3>
-                                    <p class="text-slate-400 text-sm leading-relaxed">${i.description}</p>
-                                </div>
-                            </div>
-                            <button class="${cn('inline-flex items-center gap-2 px-4 py-2 rounded font-semibold transition-colors', i.connected ? 'border border-gable-green/50 text-gable-green hover:bg-gable-green/10' : 'bg-[#00FFA3] text-black')}">
-                                ${i.connected ? 'Configure' : 'Connect'}
-                            </button>
-                        </div>
-                    `)}
-                </div>
-
                 <!-- EDI Trading Partners -->
-                <div class="space-y-6 mt-12 pt-12 border-t border-white/10">
+                <div class="space-y-6">
                     <div class="flex justify-between items-center">
                         <div>
                             <h2 class="text-xl font-bold text-white flex items-center gap-2">
@@ -884,6 +888,111 @@ export class TechAdminPage extends LitElement {
         `;
     }
 
+    /**
+     * System Health — a rendering of what GET /healthz/ready actually returns.
+     *
+     * This panel used to be static markup that read "System Health ok / All
+     * services are running normally" no matter what state anything was in. It
+     * now reports the backend's own readiness verdict, its uptime and its
+     * per-dependency checks, and says so plainly when the probe cannot be
+     * reached. It claims nothing beyond what the probe covers.
+     */
+    private _renderHealth() {
+        const status = this.readiness?.status ?? null;
+        const ok = status === 'ok';
+
+        return html`
+            <div class="space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            ${icon(Activity, 20, 'text-gable-green')}
+                            Readiness
+                        </h2>
+                        <p class="text-slate-400 text-sm">
+                            Live result of <code class="text-xs bg-white/5 px-1.5 py-0.5 rounded text-slate-300">GET /healthz/ready</code>${
+                                this.readinessCheckedAt
+                                    ? html` &middot; checked ${this.readinessCheckedAt}`
+                                    : nothing
+                            }
+                        </p>
+                    </div>
+                    <button
+                        @click=${this._loadReadiness}
+                        ?disabled=${this.readinessLoading}
+                        class="px-3 py-1.5 border border-white/10 text-slate-400 hover:text-white rounded text-sm inline-flex items-center gap-2 transition-colors disabled:opacity-50"
+                    >
+                        ${icon(RefreshCw, 14, cn(this.readinessLoading && 'animate-spin'))} Re-check
+                    </button>
+                </div>
+
+                ${this.readinessError ? html`
+                    <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex gap-3">
+                        ${icon(AlertCircle, 20, 'w-5 h-5 text-red-400 shrink-0')}
+                        <div class="text-sm">
+                            <p class="text-red-300 font-medium mb-1">Readiness probe unreachable</p>
+                            <p class="text-red-400/80">${this.readinessError}</p>
+                        </div>
+                    </div>
+                ` : nothing}
+
+                ${this.readiness ? html`
+                    <div class="bg-slate-steel border border-white/5 rounded-lg p-6 space-y-6">
+                        <div class="flex items-center gap-3">
+                            <span class="${cn(
+                                'inline-flex items-center gap-2 px-3 py-1 rounded text-sm font-semibold',
+                                ok ? 'bg-gable-green/10 text-gable-green' : 'bg-amber-500/10 text-amber-400',
+                            )}">
+                                ${icon(ok ? Check : AlertCircle, 14)}
+                                ${this.readiness.status}
+                            </span>
+                            ${this.readiness.uptime ? html`
+                                <span class="text-sm text-slate-400">uptime <span class="font-mono text-slate-300">${this.readiness.uptime}</span></span>
+                            ` : nothing}
+                        </div>
+
+                        <div class="space-y-3">
+                            ${Object.entries(this.readiness.checks ?? {}).map(([name, check]) => html`
+                                <div class="border border-white/5 rounded-lg p-4">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="text-white font-medium capitalize">${name}</span>
+                                        <span class="${cn(
+                                            'text-xs font-mono px-2 py-0.5 rounded',
+                                            check.status === 'connected' || check.status === 'ok'
+                                                ? 'bg-gable-green/10 text-gable-green'
+                                                : 'bg-red-500/10 text-red-400',
+                                        )}">${check.status}</span>
+                                    </div>
+                                    ${check.pool_max != null ? html`
+                                        <div class="grid grid-cols-4 gap-3 text-xs text-slate-400">
+                                            <div>total <span class="font-mono text-slate-300">${check.pool_total ?? 0}</span></div>
+                                            <div>idle <span class="font-mono text-slate-300">${check.pool_idle ?? 0}</span></div>
+                                            <div>in use <span class="font-mono text-slate-300">${check.pool_in_use ?? 0}</span></div>
+                                            <div>max <span class="font-mono text-slate-300">${check.pool_max}</span></div>
+                                        </div>
+                                    ` : nothing}
+                                </div>
+                            `)}
+                            ${Object.keys(this.readiness.checks ?? {}).length === 0 ? html`
+                                <p class="text-sm text-slate-500 italic">The probe reported no per-dependency checks.</p>
+                            ` : nothing}
+                        </div>
+                    </div>
+                ` : nothing}
+
+                ${!this.readiness && !this.readinessError ? html`
+                    <div class="bg-slate-steel border border-white/5 rounded-lg p-8 text-center text-slate-500 italic">
+                        Checking readiness...
+                    </div>
+                ` : nothing}
+
+                <p class="text-xs text-slate-500 flex items-center gap-1">
+                    ${icon(Shield, 12)} This panel reports only what the readiness probe covers (process liveness and database connectivity). Request-level metrics are exposed separately at /metrics; there is no in-app log viewer.
+                </p>
+            </div>
+        `;
+    }
+
     render() {
         return html`
             <div class="min-h-screen bg-deep-space p-8 space-y-8">
@@ -900,13 +1009,7 @@ export class TechAdminPage extends LitElement {
                     ${this.activeTab === 'routing' ? this._renderRoutingSettingsPanel() : nothing}
                     ${this.activeTab === 'staff' ? this._renderStaff() : nothing}
                     ${this.activeTab === 'integrations' ? this._renderIntegrations() : nothing}
-                    ${this.activeTab === 'health' ? html`
-                        <div class="bg-slate-steel border border-white/5 rounded-lg p-12 text-center">
-                            ${icon(Activity, 48, 'w-12 h-12 text-slate-500 mx-auto mb-4')}
-                            <h3 class="text-lg font-medium text-white">System Health ok</h3>
-                            <p class="text-slate-400 mt-2">All services are running normally. Logs coming soon.</p>
-                        </div>
-                    ` : nothing}
+                    ${this.activeTab === 'health' ? this._renderHealth() : nothing}
                 </div>
             </div>
         `;

@@ -5,6 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What Is This?
 Gable (Go module `github.com/gablelbm/gable`) is an open-source ERP platform purpose-built for lumber and building materials (LBM) dealers. It is a self-hostable alternative to legacy systems like Epicor BisTrack, ECI Spruce, and DMSi Agility.
 
+**The module path is not the repository path.** `backend/go.mod` declares `github.com/gablelbm/gable`; the repository is `github.com/FutureBuildAIinc/gable`. The module path is intentionally frozen — every backend import uses it, and `gable-sdk`'s CI has a gate asserting the SDK never imports `gablelbm/gable`. Do not "fix" it. It is not fetchable with `go get`; work from a checkout. Links to the repository must use `FutureBuildAIinc/gable`.
+
 ## Branches & Deployment
 
 | Branch | Purpose |

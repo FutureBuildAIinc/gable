@@ -370,9 +370,21 @@ export class ProductConfigurator extends LitElement {
               ${this._skuResult.sku}
             </div>
             <div class="text-sm text-gray-300">${this._skuResult.description}</div>
-            <button class="mt-4 bg-[#00FFA3] hover:bg-[#00FFA3]/90 text-black font-bold py-3 px-6 rounded-lg transition-colors">
+            <!--
+              A generated non-stock SKU has no catalog product row, and a quote
+              line requires a product_id (CreateQuoteRequest in types/quote.ts),
+              so there is no existing service call to add this to a quote. The
+              button renders disabled rather than looking live and doing nothing
+              on click.
+            -->
+            <button
+              disabled
+              title="Not implemented: the generated SKU cannot be added to a quote yet — copy it into the Quote Builder."
+              class="mt-4 border border-white/10 text-zinc-500 font-bold py-3 px-6 rounded-lg opacity-50 cursor-not-allowed"
+            >
               Add to Quote
             </button>
+            <p class="mt-2 text-[11px] text-gray-500">Copy the SKU above into the Quote Builder &mdash; adding it directly is not wired up in this build.</p>
           </div>
         ` : nothing}
       </div>

@@ -3,7 +3,7 @@
     "id": "44444444-4444-4444-8444-111111111111",
     "status": "CONFIRMED",
     "customer_name": "Kelbrook Homes",
-    "address": "1885 Spall Rd, Kelowna BC",
+    "address": "1885 Formwork Rd, Kelowna BC",
     "latitude": 49.8801,
     "longitude": -119.4436,
     "lines": [
@@ -25,7 +25,7 @@
     "id": "44444444-4444-4444-8444-222222222222",
     "status": "CONFIRMED",
     "customer_name": "Okanagan Builders",
-    "address": "9000 Summit Pkwy, Kelowna BC",
+    "address": "9000 Blueprint Pkwy, Kelowna BC",
     "lines": [
       {
         "product_id": "33333333-3333-4333-8333-111111111111",

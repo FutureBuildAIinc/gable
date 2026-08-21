@@ -68,7 +68,7 @@ describe('portalFetch — error handling', () => {
 
     await expect(PortalService.checkout({
       delivery_method: 'DELIVERY',
-      delivery_address: '2200 Benvoulin Rd',
+      delivery_address: '2200 Sawmill Loop',
       payment_method: 'ACCOUNT',
       notes: '',
     })).rejects.toThrow(/over credit limit/)

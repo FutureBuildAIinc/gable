@@ -50,9 +50,13 @@
 /app/Dockerfile             @FutureBuildAIinc/infra
 
 # ---------------------------------------------------------------------------
-# Licensing, legal, and brand — maintainer approval always required.
+# Licensing and legal — maintainer approval always required.
 # These files define what the project *is* legally; a bad merge here is far
 # more expensive to unwind than a bad merge in application code.
+#
+# There is deliberately no /brand/ rule: this repository ships no logo or
+# wordmark files. The marks live in the separate `brand` repository, together
+# with the trademark policy that governs them.
 # ---------------------------------------------------------------------------
 /LICENSE                    @FutureBuildAIinc/maintainers @FutureBuildAIinc/legal
 /LICENSE-MAP.md             @FutureBuildAIinc/maintainers @FutureBuildAIinc/legal
@@ -63,4 +67,3 @@
 /SECURITY.md                @FutureBuildAIinc/maintainers
 /CODE_OF_CONDUCT.md         @FutureBuildAIinc/maintainers
 /CONTRIBUTING.md            @FutureBuildAIinc/maintainers
-/brand/                     @FutureBuildAIinc/maintainers @FutureBuildAIinc/legal

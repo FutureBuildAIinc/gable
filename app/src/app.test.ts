@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { RouteConfig } from './lib/router'
 import { router } from './lib/router'
 import { appsService } from './services/AppsService'
+import { SESSION_EXPIRED_EVENT } from './services/fetchClient'
 import type { GableApp } from './app'
 import './app'
 import { mountAsync, update, q, text, flush, jsonResponse } from './test/dom'
@@ -275,5 +276,46 @@ describe('gable-app — installable-app gate', () => {
 
     expect(el.querySelector('gable-blueprint-verifier')).not.toBeNull()
     expect(el.querySelector('gable-app-disabled')).toBeNull()
+  })
+})
+
+/**
+ * The receiving half of fetchClient's 401 interceptor.
+ *
+ * The ERP has no `/login` route — authentication is an external identity
+ * provider — so the interceptor used to hard-navigate to a path that resolves
+ * to `gable-not-found`, i.e. an expired session looked like a broken link.
+ * fetchClient now fires `gable:session-expired` and the shell renders a panel
+ * over whatever surface is up. If this listener is ever dropped the event goes
+ * nowhere and the failure is silent again, so it is asserted here.
+ */
+describe('gable-app — session-expired panel', () => {
+  it('renders nothing until a 401 is announced', async () => {
+    const el = await mountAt('/orders')
+    expect(el.querySelector('gable-session-expired')).toBeNull()
+  })
+
+  it('overlays the panel on the ERP surface without unmounting the page', async () => {
+    const el = await mountAt('/orders')
+
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT))
+    await flush()
+    await update(el, {})
+
+    expect(el.querySelector('gable-session-expired')).not.toBeNull()
+    // The shell and its page stay mounted underneath — the panel is an overlay,
+    // not a replacement, so a reload returns the user where they were.
+    expect(el.querySelector('gable-app-shell')).not.toBeNull()
+  })
+
+  it('stops listening once detached', async () => {
+    const el = await mountAt('/orders')
+    el.remove()
+    await flush()
+
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT))
+    await flush()
+
+    expect(el.querySelector('gable-session-expired')).toBeNull()
   })
 })

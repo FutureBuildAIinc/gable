@@ -9,7 +9,7 @@ import { clearToken } from '../../services/PortalService.ts';
 import type { PortalConfig, PortalUser } from '../../types/portal.ts';
 import '../ui/brand-logo.ts';
 import { icon } from '../../lib/icons.ts';
-import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, ChevronRight, Bell, Users, FolderGit2 } from 'lucide';
+import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, ChevronRight, Users, FolderGit2 } from 'lucide';
 
 @customElement('gable-portal-layout')
 export class GablePortalLayout extends LitElement {
@@ -163,9 +163,12 @@ export class GablePortalLayout extends LitElement {
             </div>
             <div class="flex items-center gap-4">
               ${this._config?.support_email ? html`<span class="text-xs text-zinc-500">Support: ${this._config.support_email}</span>` : nothing}
-              <button aria-label="Notifications" class="relative p-2 text-zinc-400 hover:text-white transition-colors rounded-full hover:bg-white/5">
-                ${icon(Bell, 20)}
-              </button>
+              <!--
+                A notifications bell used to sit here with no click handler.
+                There is no notification subsystem on either side of the wire —
+                no store, no feed, no backend route — so the icon was a
+                capability claim with nothing behind it and has been removed.
+              -->
             </div>
           </header>
 

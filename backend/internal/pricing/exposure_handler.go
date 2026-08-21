@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -371,16 +372,43 @@ func splitCsv(s string) []string {
 // (AUTH_MODE=dev), where no JWT is present. Mirrors the scanner's "system".
 const devActor = "dev"
 
-// Dev-mode note: when AUTH_MODE=dev the auth middleware is not mounted, so
-// requests reach these handlers with nil claims. In production such requests
-// are rejected with 401 upstream (exposure routes are NOT in the public-path
-// whitelist), so nil claims here can only mean dev mode. We therefore treat
-// the dev caller as a full owner — consistent with the documented dev-mode
-// pass-through in which the seeded demo@gable.com user acts as admin/owner.
-// This never relaxes production access: in prod, claims are always non-nil.
+// devAuthMode reports whether this process is running with authentication
+// deliberately disabled (AUTH_MODE=dev). It is the explicit opt-in that gates
+// the permissive nil-claims handling below.
+//
+// cmd/server only leaves the auth middleware unmounted when JWKS_URL is empty
+// AND AUTH_MODE=dev (any other combination is a fatal startup error), so for
+// the shipped binary this check is equivalent to "claims are nil because dev
+// mode said so". Requiring it explicitly means that if these handlers are ever
+// mounted from a binary without that fail-closed startup check, or the auth
+// middleware is dropped from the chain by a future refactor, an unauthenticated
+// caller is denied instead of silently promoted to owner.
+func devAuthMode() bool {
+	return strings.EqualFold(os.Getenv("AUTH_MODE"), "dev")
+}
 
-// userID / userRole / userIDString read JWT claims set by the auth
-// middleware. Defensive — empty/zero on missing claims.
+// userID / userRole / userIDString read the JWT claims set by the auth
+// middleware.
+//
+// These are NOT neutral accessors: userRole and userIDString return
+// privileged defaults, not zero values, when claims are missing. That is
+// load-bearing — under AUTH_MODE=dev the auth middleware is not mounted, so
+// every request arrives with nil claims and the seeded demo operator is
+// expected to act as admin/owner (the demo's exposure override page would 403
+// for everyone otherwise). userRole is the sole gate on the emergency
+// price-exposure override (HandleOverride) and on the admin scan, so the
+// defaults are only safe because:
+//
+//   - the exposure routes are not in cmd/server's auth public-path whitelist,
+//     so with the middleware mounted a tokenless request is a 401 upstream and
+//     never reaches this code; and
+//   - the privileged default now additionally requires AUTH_MODE=dev to be set
+//     explicitly (see devAuthMode). Without it, nil claims fail closed:
+//     userRole returns "" (every role check rejects) and userIDString returns
+//     "" (HandleOverride answers 401).
+//
+// userID has no privileged default; it returns uuid.Nil on missing claims and
+// callers must treat that as "no salesperson scope resolved".
 func userID(r *http.Request) uuid.UUID {
 	claims, _ := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
 	if claims == nil {
@@ -392,20 +420,31 @@ func userID(r *http.Request) uuid.UUID {
 	return uuid.Nil
 }
 
+// userIDString returns the actor recorded on write actions. On missing claims
+// it returns devActor under AUTH_MODE=dev and "" otherwise; callers treat ""
+// as unauthenticated.
 func userIDString(r *http.Request) string {
 	claims, _ := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
 	if claims == nil {
-		return devActor // dev mode (see Dev-mode note above)
+		if devAuthMode() {
+			return devActor
+		}
+		return ""
 	}
 	return claims.Subject
 }
 
 // userRole returns the effective role for authorization decisions: the
 // single-valued "role" claim if present, else the first entry of "roles".
+// On missing claims it returns "owner" under AUTH_MODE=dev and "" otherwise
+// (see the note above these helpers — "" fails every role check).
 func userRole(r *http.Request) string {
 	claims, _ := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
 	if claims == nil {
-		return "owner" // dev mode (see Dev-mode note above)
+		if devAuthMode() {
+			return "owner"
+		}
+		return ""
 	}
 	if claims.Role != "" {
 		return claims.Role

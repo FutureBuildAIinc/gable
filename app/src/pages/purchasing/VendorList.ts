@@ -50,7 +50,17 @@ export class VendorList extends LitElement {
                             Track performance, lead times, and spend across ${this.vendors.length} vendor partners.
                         </p>
                     </div>
-                    <button class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded transition-colors">
+                    <!--
+                      VendorService.createVendor exists, but no create form was
+                      ever built for it, so this button had no handler. It
+                      renders disabled rather than looking live and doing
+                      nothing on click.
+                    -->
+                    <button
+                        disabled
+                        title="Not implemented: this build has no vendor create form."
+                        class="inline-flex items-center gap-2 border border-white/10 text-zinc-500 font-semibold px-4 py-2 rounded opacity-50 cursor-not-allowed"
+                    >
                         ${icon(Warehouse, 16, 'w-4 h-4')}
                         New Vendor
                     </button>

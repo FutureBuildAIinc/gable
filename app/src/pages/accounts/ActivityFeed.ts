@@ -7,6 +7,7 @@ import { crmApi } from '../../services/crmApi.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { format } from 'date-fns';
 import type { Activity, Contact } from '../../types/crm.ts';
+import '../../components/crm/LogActivityModal.ts';
 
 @customElement('gable-activity-feed')
 export class GableActivityFeed extends LitElement {
@@ -17,6 +18,7 @@ export class GableActivityFeed extends LitElement {
     @state() private activities: Activity[] = [];
     @state() private contacts: Contact[] = [];
     @state() private loading = true;
+    @state() private showLogModal = false;
 
     connectedCallback() {
         super.connectedCallback();
@@ -65,14 +67,11 @@ export class GableActivityFeed extends LitElement {
     }
 
     private _openLogModal() {
-        this.dispatchEvent(new CustomEvent('open-log-modal', {
-            detail: { customerId: this.customerId, contacts: this.contacts },
-            bubbles: true,
-            composed: true,
-        }));
+        this.showLogModal = true;
     }
 
     private _closeLogModal() {
+        this.showLogModal = false;
     }
 
     /** Called externally or via event to refresh data after logging an activity */
@@ -144,6 +143,18 @@ export class GableActivityFeed extends LitElement {
                             </div>
                         `
                 }
+
+                ${this.showLogModal ? html`
+                    <gable-log-activity-modal
+                        customer-id=${this.customerId}
+                        .contacts=${this.contacts}
+                        @close=${this._closeLogModal}
+                        @success=${() => {
+                            ToastService.show('Activity logged', 'success');
+                            this.refresh();
+                        }}
+                    ></gable-log-activity-modal>
+                ` : nothing}
             </div>
         `;
     }

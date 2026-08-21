@@ -47,7 +47,7 @@ func (s *Service) InviteUser(ctx context.Context, customerID uuid.UUID, req Invi
 	}
 
 	// In a real app we'd send an email here with the link like:
-	// https://portal.gablelbm.com/invite?token=invite.Token
+	// https://<your-portal-host>/invite?token=invite.Token
 	s.logger.Info("Simulated sending portal invite email", "email", req.Email, "token", invite.Token, "role", req.Role)
 
 	return &invite, nil

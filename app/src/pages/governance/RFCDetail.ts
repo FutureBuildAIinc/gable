@@ -116,12 +116,26 @@ export class GableRFCDetail extends LitElement {
                   </div>
                 </div>
 
+                <!--
+                  GovernanceService.updateRFC exists but no edit form was ever
+                  built for it, and nothing in this app renders PDFs. Both
+                  buttons render disabled rather than looking live and doing
+                  nothing on click.
+                -->
                 <div class="pt-6 border-t border-white/5 space-y-3 mt-auto">
-                  <button class="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gable-green text-black font-semibold rounded hover:shadow-glow">
+                  <button
+                    disabled
+                    title="Not implemented: this build has no RFC edit form."
+                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border border-white/10 text-zinc-500 rounded opacity-50 cursor-not-allowed"
+                  >
                     ${icon(Edit2, 16, 'w-4 h-4')}
                     Edit RFC
                   </button>
-                  <button class="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border border-white/10 text-zinc-300 rounded hover:bg-white/5">
+                  <button
+                    disabled
+                    title="Not implemented: this build has no PDF export."
+                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border border-white/10 text-zinc-500 rounded opacity-50 cursor-not-allowed"
+                  >
                     ${icon(FileText, 16, 'w-4 h-4')}
                     Export PDF
                   </button>

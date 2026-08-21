@@ -104,12 +104,20 @@ reporting, pricing, location) converge on this shape during Phase 1.
 4. Verify: `go build ./... && go test ./internal/<module>/...`,
    `npx tsc --noEmit`, toggle the app off and on against a live backend.
 
-Good next conversions (leaf modules, no enabled dependents): the five
-**dark pages** shipped but never routed — `bankrecon` (BankReconciliation.ts),
-`matching` (POMatching.ts), rebates (RebatePrograms/RebateReport under
-pricing), purchasing recommendations — plus `crm`, `salesteam`, `project`,
-`vision`, `edi`. The dark pages are the best demos: enabling the app is what
-lights the feature up.
+Good next conversions (leaf modules, no enabled dependents): `bankrecon`
+(BankReconciliation.ts), `matching` (POMatching.ts), `crm`, `salesteam`,
+`project`, `vision`, `edi`.
+
+This list used to include "dark pages" — surfaces shipped but never routed.
+That category has been cleared. Purchasing recommendations is now routed at
+`/purchasing/recommendations`; the rebate pages were deleted, because the
+backend's own `CalculateClaim` is an acknowledged stub that accepts a mock
+volume, so the UI could only ever have displayed fiction. The rebate routes and
+schema remain for whoever rebuilds it once accrual is real.
+
+A page that exists but cannot be reached is not a feature waiting to be
+enabled — it is a page nobody has run. `app/src/routes.test.ts` now fails if
+any route resolves to the 404 component.
 
 ## 6. Phases
 

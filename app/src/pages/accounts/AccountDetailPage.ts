@@ -162,9 +162,24 @@ export class GableAccountDetail extends LitElement {
                                 <span>${customer.phone}</span>
                             </div>
                         </div>
+                        <!--
+                          Both actions are unimplemented: there is no customer
+                          edit form (CustomerService exposes createCustomer and
+                          updateSalesperson only) and "New Transaction" was
+                          never given a target. They render disabled rather than
+                          looking live and doing nothing on click.
+                        -->
                         <div class="flex gap-2">
-                            <button class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Edit Profile</button>
-                            <button class="bg-[#00FFA3] text-[#0A0B10] px-3 py-1.5 rounded text-sm font-medium hover:opacity-90">New Transaction</button>
+                            <button
+                                disabled
+                                title="Not implemented: this build has no customer edit form."
+                                class="border border-white/10 text-zinc-500 px-3 py-1.5 rounded text-sm font-medium opacity-50 cursor-not-allowed"
+                            >Edit Profile</button>
+                            <button
+                                disabled
+                                title="Not implemented: start a quote from Quotes > Quote Builder instead."
+                                class="border border-white/10 text-zinc-500 px-3 py-1.5 rounded text-sm font-medium opacity-50 cursor-not-allowed"
+                            >New Transaction</button>
                         </div>
                     </div>
                 </div>

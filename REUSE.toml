@@ -44,11 +44,11 @@ SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"
 # Coverage for the rest of the tree
 # ---------------------------------------------------------------------------
 # LICENSE-MAP.md scopes only the four source components above. Everything else
-# in the repo (build manifests, meta docs, CI config, brand assets) still has to
-# carry licensing information for `reuse lint` — and therefore for the license
-# job in .github/workflows/ci.yml — to pass. The choices below follow the map's
+# in the repo (build manifests, meta docs, CI config) still has to carry
+# licensing information for `reuse lint` — and therefore for the license job in
+# .github/workflows/ci.yml — to pass. The choices below follow the map's
 # spirit: build/config that ships alongside Commons code is Commons; prose,
-# meta, and repo plumbing is Docs; brand assets are Trademark.
+# meta, and repo plumbing is Docs.
 
 # Backend build manifests and one-off developer scripts. These sit next to (and
 # describe) Commons-licensed code, so they take the Commons license. Note
@@ -102,10 +102,14 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"
 
-# Brand assets (logos, wordmarks). These are governed by the trademark/brand-use
-# policy, not by a code license — see LICENSE-MAP.md "Also in LICENSES/".
-[[annotations]]
-path = "brand/**"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
-SPDX-License-Identifier = "LicenseRef-OpenLBM-Trademark"
+# No brand-asset annotation here on purpose. This repository ships no logo or
+# wordmark files: the marks live in the separate `brand` repository alongside
+# TRADEMARK-POLICY.md and USAGE.md, which are the documents that actually
+# govern their use. The app's own logo is drawn inline
+# (app/src/components/ui/brand-logo.ts, app/public/favicon.svg) and is covered
+# by the app/ Surface annotation above.
+#
+# LICENSES/LicenseRef-OpenLBM-Trademark.txt stays: it is the brand-use policy
+# the project is bound by, and — as LICENSE-MAP.md's "Also in LICENSES/"
+# section already states — it is referenced by the project without being
+# directory-scoped. The REUSE gate tolerates a license text that no file uses.

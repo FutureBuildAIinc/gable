@@ -31,6 +31,16 @@ back so every dealer benefits.
 | Frontend | Lit 3 web components + TypeScript 5.9 + Vite 7 + Tailwind 3.4 |
 | Packaging | Docker |
 
+> **A note on the Go module path.** The backend's module is
+> `github.com/gablelbm/gable` (see [`backend/go.mod`](./backend/go.mod)), but the
+> repository lives at <https://github.com/FutureBuildAIinc/gable>. That is
+> deliberate and not a mistake: the module path predates the move to the
+> `FutureBuildAIinc` organisation and is load-bearing — every import in the
+> backend uses it, and the SDK's CI asserts that `gable-sdk` never imports it.
+> Renaming it would be a breaking change for anything that vendors the backend,
+> so it stays. **`go get github.com/gablelbm/gable` does not resolve**; clone the
+> repository instead. Build from a checkout, as the Quickstart below does.
+
 ## Quickstart
 
 **Prerequisites:** Docker, Go 1.25+, Node 20+, PostgreSQL 16.

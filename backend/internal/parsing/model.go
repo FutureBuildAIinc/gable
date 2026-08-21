@@ -31,4 +31,17 @@ type ParseResponse struct {
 	SourceImage string       `json:"source_image"` // base64 data URI of the uploaded image
 	ParseTimeMs int64        `json:"parse_time_ms"`
 	ItemCount   int          `json:"item_count"`
+
+	// Synthetic is true when Items did NOT come from the uploaded file: the
+	// AI extractor was unconfigured (no OPENROUTER_API_KEY — the default) or
+	// its call failed, so the server returned a fixed demo material list
+	// instead. SourceImage is still the caller's real upload, so a client
+	// that renders the two side by side without checking this flag shows a
+	// stranger's material list next to the user's takeoff, priced. Clients
+	// must warn before letting a synthetic list become a quote.
+	Synthetic bool `json:"synthetic"`
+
+	// SyntheticReason is a human-readable explanation, empty when
+	// Synthetic is false.
+	SyntheticReason string `json:"synthetic_reason,omitempty"`
 }

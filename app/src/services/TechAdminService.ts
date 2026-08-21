@@ -61,6 +61,26 @@ export interface ModuleInfo {
     enabled: boolean;
 }
 
+/**
+ * The body of `GET /healthz/ready` (backend cmd/server/main.go). The endpoint
+ * answers 200 with status "ok" when the database pool pings, and 503 with
+ * status "degraded" when it does not — so a non-2xx response is still a
+ * meaningful health report and must be parsed, not thrown away.
+ */
+export interface ReadinessCheck {
+    status: string;
+    pool_total?: number;
+    pool_idle?: number;
+    pool_in_use?: number;
+    pool_max?: number;
+}
+
+export interface Readiness {
+    status: string;
+    uptime: string;
+    checks: Record<string, ReadinessCheck>;
+}
+
 export const techAdminService = {
     async listKeys(): Promise<APIKey[]> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/keys`);
@@ -193,6 +213,36 @@ export const techAdminService = {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to revoke module access');
+    },
+
+    /**
+     * Readiness probe. Deliberately NOT under /api: the backend serves
+     * /healthz/ready at the root and the deploy spec (.do/app-*.yaml) routes
+     * /healthz to the backend with preserve_path_prefix, so it is same-origin
+     * in a real deployment; app/vite.config.ts forwards it in dev.
+     *
+     * A 503 is a health *report* ("degraded"), not a transport failure, so the
+     * body is parsed on any status that carries JSON. Plain `fetch` rather than
+     * fetchWithAuth: the endpoint is public (main.go PublicPaths) and a 401
+     * interceptor firing off a health poll would be wrong.
+     */
+    async getReadiness(): Promise<Readiness> {
+        const response = await fetch(`${API_URL}/healthz/ready`, {
+            headers: { Accept: 'application/json' },
+        });
+        let body: unknown;
+        try {
+            body = await response.json();
+        } catch {
+            throw new Error(
+                `Readiness endpoint returned ${response.status} with a non-JSON body`,
+            );
+        }
+        const readiness = body as Partial<Readiness>;
+        if (typeof readiness?.status !== 'string') {
+            throw new Error(`Readiness endpoint returned an unrecognised body`);
+        }
+        return { checks: {}, uptime: '', ...readiness } as Readiness;
     },
 };
 

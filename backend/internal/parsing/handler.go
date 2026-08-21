@@ -100,8 +100,10 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		aiContentType = "text/plain"
 	}
 
-	// Extract items using AI (or rule-based fallback)
-	extracted, extractErr := h.service.ExtractItemsWithAI(r.Context(), aiBytes, aiContentType)
+	// Extract items. synthetic==true means the AI extractor was unavailable
+	// and `extracted` is the canned demo list rather than anything read out
+	// of the upload — it must reach the client labelled as such.
+	extracted, synthetic, extractErr := h.service.ExtractItemsWithAI(r.Context(), aiBytes, aiContentType)
 	if extractErr != nil {
 		slog.Error("Failed to extract items", "error", extractErr)
 		httputil.RespondError(w, r, "Failed to extract items from file", http.StatusInternalServerError, extractErr)
@@ -127,6 +129,13 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		SourceImage: sourceImage,
 		ParseTimeMs: time.Since(start).Milliseconds(),
 		ItemCount:   len(items),
+		Synthetic:   synthetic,
+	}
+	if synthetic {
+		resp.SyntheticReason = "AI extraction is unavailable (OPENROUTER_API_KEY unset or the call failed). " +
+			"These line items are a fixed demo list, not the contents of the uploaded file. Do not quote them as-is."
+		slog.Warn("Returning synthetic material list for upload",
+			"filename", header.Filename, "item_count", len(items))
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -92,6 +92,7 @@ const staticZones: AppZone[] = [
   { prefix: '/purchasing', key: 'purchase_order', label: 'Purchasing', icon: ShoppingBag, menu: [
     { label: 'Purchase Orders', path: '/purchasing' },
     { label: 'New PO', path: '/purchasing/new' },
+    { label: 'Recommendations', path: '/purchasing/recommendations' },
   ] },
   { prefix: '/pricing', key: 'pricing', label: 'Pricing', icon: LayoutGrid, menu: [
     { label: 'Pricing Matrix', path: '/pricing' },

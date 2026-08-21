@@ -218,9 +218,21 @@ export class DoorConfigurator extends LitElement {
               <span class="text-3xl font-mono font-bold text-white">$${currentPrice.toFixed(2)}</span>
             </div>
 
-            <button class="w-full mt-6 bg-[#00FFA3] hover:bg-[#00FFA3]/90 text-black font-bold py-3 rounded uppercase tracking-wide transition-colors">
+            <!--
+              This page is an estimator, not an order-entry surface. A
+              configured door is not a catalog product, and an order line
+              requires a product_id (types/order.ts) — there is no service call
+              that turns a MillworkConfiguration into a line. The button renders
+              disabled rather than looking live and doing nothing on click.
+            -->
+            <button
+              disabled
+              title="Not implemented: this configurator prices a door but cannot add it to an order yet."
+              class="w-full mt-6 border border-white/10 text-zinc-500 font-bold py-3 rounded uppercase tracking-wide opacity-50 cursor-not-allowed"
+            >
               Add to Order
             </button>
+            <p class="mt-2 text-center text-[11px] text-gray-500">Estimate only &mdash; ordering is not wired up in this build.</p>
           </div>
         </div>
       </div>

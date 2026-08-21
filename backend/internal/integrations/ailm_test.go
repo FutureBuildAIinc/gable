@@ -172,7 +172,7 @@ func fixtureOrders() []IntegrationOrderResponse {
 			ID:            orderUUID,
 			Status:        "CONFIRMED",
 			CustomerName:  "Kelbrook Homes",
-			Address:       "1885 Spall Rd, Kelowna BC",
+			Address:       "1885 Formwork Rd, Kelowna BC",
 			Latitude:      f64(49.8801),
 			Longitude:     f64(-119.4436),
 			ScheduledDate: "2026-08-21",
@@ -187,7 +187,7 @@ func fixtureOrders() []IntegrationOrderResponse {
 			ID:            order2UUID,
 			Status:        "CONFIRMED",
 			CustomerName:  "Okanagan Builders",
-			Address:       "9000 Summit Pkwy, Kelowna BC",
+			Address:       "9000 Blueprint Pkwy, Kelowna BC",
 			ScheduledDate: "2026-08-21",
 			Lines: []IntegrationOrderLine{
 				{ProductID: productUUID, SKU: "LUM-248-PREM", Quantity: 40, WeightLbs: 9.5},
@@ -605,14 +605,14 @@ func TestListOrdersWireShape(t *testing.T) {
 			wantStatus: "CONFIRMED",
 			wantJSON: `[
 			  {"id":"` + orderUUID + `","status":"CONFIRMED","customer_name":"Kelbrook Homes",
-			   "address":"1885 Spall Rd, Kelowna BC","latitude":49.8801,"longitude":-119.4436,
+			   "address":"1885 Formwork Rd, Kelowna BC","latitude":49.8801,"longitude":-119.4436,
 			   "scheduled_date":"2026-08-21",
 			   "lines":[
 			     {"product_id":"` + productUUID + `","sku":"LUM-248-PREM","quantity":128,"weight_lbs":9.5},
 			     {"product_id":"` + product2UUID + `","sku":"HW-NAIL-16D","quantity":2,"weight_lbs":50}
 			   ]},
 			  {"id":"` + order2UUID + `","status":"CONFIRMED","customer_name":"Okanagan Builders",
-			   "address":"9000 Summit Pkwy, Kelowna BC","scheduled_date":"2026-08-21",
+			   "address":"9000 Blueprint Pkwy, Kelowna BC","scheduled_date":"2026-08-21",
 			   "lines":[
 			     {"product_id":"` + productUUID + `","sku":"LUM-248-PREM","quantity":40,"weight_lbs":9.5}
 			   ]}

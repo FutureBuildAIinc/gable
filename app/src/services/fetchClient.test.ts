@@ -8,7 +8,7 @@
  * "Retries on network errors (not on HTTP error status codes)".
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { fetchWithAuth } from './fetchClient'
+import { fetchWithAuth, SESSION_EXPIRED_EVENT } from './fetchClient'
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -155,6 +155,47 @@ describe('fetchWithAuth — HTTP error handling', () => {
     fetchMock.mockResolvedValue(new Response('', { status: 401 }))
     await expect(fetchWithAuth('/api/v1/orders', { retries: 0 })).rejects.toThrow()
     expect(localStorage.getItem('gable_current_branch_id')).toBe('branch-7')
+  })
+
+  /**
+   * The ERP surfaces have no sign-in page. Authentication is an external
+   * identity provider (the backend validates against JWKS_URL) and the bearer
+   * token lands in localStorage out of band, so routes.ts has `/portal/login`
+   * and nothing else. This interceptor used to `window.location.href = '/login'`
+   * on any non-portal 401, which is not a route — an expired ERP session
+   * rendered the 404 page ("Page not found") instead of anything a user could
+   * act on. It now announces the expiry and lets `app.ts` render an in-place
+   * session-expired panel.
+   */
+  it('announces an expired ERP session instead of navigating to a route that does not exist', async () => {
+    history.replaceState(null, '', '/orders')
+    const heard = vi.fn()
+    window.addEventListener(SESSION_EXPIRED_EVENT, heard)
+    fetchMock.mockResolvedValue(new Response('', { status: 401 }))
+
+    await expect(fetchWithAuth('/api/v1/orders', { retries: 0 })).rejects.toThrow('Session expired')
+
+    expect(heard).toHaveBeenCalledTimes(1)
+    // No navigation: the path is unchanged and, in particular, is not '/login'.
+    expect(window.location.pathname).toBe('/orders')
+    window.removeEventListener(SESSION_EXPIRED_EVENT, heard)
+  })
+
+  it('does not announce a session expiry on the portal, which has a real login route', async () => {
+    // The portal keeps the redirect: /portal/login IS in routes.ts. Assert from
+    // the portal's own login page so the guard against a redirect loop keeps
+    // jsdom from attempting a navigation it does not implement.
+    history.replaceState(null, '', '/portal/login')
+    const heard = vi.fn()
+    window.addEventListener(SESSION_EXPIRED_EVENT, heard)
+    fetchMock.mockResolvedValue(new Response('', { status: 401 }))
+
+    await expect(fetchWithAuth('/api/portal/v1/orders', { retries: 0 })).rejects.toThrow(
+      'Session expired',
+    )
+
+    expect(heard).not.toHaveBeenCalled()
+    window.removeEventListener(SESSION_EXPIRED_EVENT, heard)
   })
 })
 

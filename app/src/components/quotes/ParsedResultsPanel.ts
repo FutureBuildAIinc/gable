@@ -124,6 +124,28 @@ export class GableParsedResultsPanel extends LitElement {
             </button>
           </div>
 
+          ${this.result.synthetic ? html`
+            <!--
+              The item table below did NOT come from the uploaded document — no
+              AI provider is configured, so the backend returned a sample list.
+              The user's real upload is rendered beside it, so saying nothing
+              would present a canned list as a parse of their file.
+            -->
+            <div
+              data-testid="synthetic-parse-warning"
+              class="mx-6 mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4"
+            >
+              <p class="text-sm font-semibold text-amber-300">
+                These items were not read from your document
+              </p>
+              <p class="mt-1 text-sm text-amber-200/80">
+                ${this.result.synthetic_reason ||
+                  'Document extraction is unavailable, so a sample material list is shown instead.'}
+                Do not add these lines to a quote — they are placeholders.
+              </p>
+            </div>
+          ` : nothing}
+
           <!-- Content: Side by Side -->
           <div class="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-2 gap-0 min-h-0">
             <!-- Left: Original Image -->

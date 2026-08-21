@@ -10,6 +10,13 @@ const DEFAULT_TIMEOUT = 10_000; // 10 seconds
 const DEFAULT_RETRIES = 1;
 const RETRY_DELAY = 2_000; // 2 seconds
 
+/**
+ * Fired on `window` when an ERP-surface request comes back 401. The ERP has no
+ * in-app login route to redirect to, so the app shell renders a session-expired
+ * panel in place instead. The portal keeps its own /portal/login redirect.
+ */
+export const SESSION_EXPIRED_EVENT = 'gable:session-expired';
+
 export interface FetchWithAuthOptions extends Omit<RequestInit, 'signal'> {
   timeout?: number;
   retries?: number;
@@ -108,7 +115,7 @@ export async function fetchWithAuth(
       continue;
     }
 
-    // 401 Interceptor: clear auth state, redirect to login, and throw. Outside
+    // 401 Interceptor: clear auth state, surface the expiry, and throw. Outside
     // the try on purpose — an expired session is a terminal answer from the
     // server, not a transient failure, and retrying it would run the
     // localStorage-clear + redirect twice and double-write any non-idempotent
@@ -120,11 +127,21 @@ export async function fetchWithAuth(
       localStorage.removeItem('portal_config');
 
       const path = window.location.pathname;
-      // Redirect to the appropriate login page based on the current surface
-      if (path.startsWith('/portal') && !path.endsWith('/login')) {
-        window.location.href = '/portal/login';
-      } else if (!path.startsWith('/portal') && !path.endsWith('/login')) {
-        window.location.href = '/login';
+      if (path.startsWith('/portal')) {
+        // The portal owns its own sign-in page, and /portal/login is in
+        // routes.ts, so a hard navigation lands somewhere real.
+        if (!path.endsWith('/login')) {
+          window.location.href = '/portal/login';
+        }
+      } else {
+        // The ERP surfaces have NO sign-in page: authentication is an external
+        // identity provider (backend JWKS_URL) and the bearer token arrives in
+        // localStorage out of band. This used to `window.location.href =
+        // '/login'`, a path that is not in routes.ts, so an expired ERP session
+        // rendered "Page not found" instead of anything actionable. Announce it
+        // instead and let the app shell render an in-place session-expired
+        // state (app.ts listens for this).
+        window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
       }
 
       throw new Error('Session expired');

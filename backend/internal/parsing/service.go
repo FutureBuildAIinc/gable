@@ -19,7 +19,10 @@ import (
 // Service handles material list parsing and product matching.
 type Service struct {
 	productRepo product.Repository
-	aiClient    *ai.Client // nil or unconfigured = silent fallback to rule-based extraction
+	// aiClient performs the file -> text step. When it is nil or
+	// unconfigured, ExtractItemsWithAI does NOT read the file at all; see
+	// that method's doc comment for what it returns instead.
+	aiClient *ai.Client
 }
 
 // NewService creates a new parsing Service.
@@ -27,25 +30,44 @@ func NewService(productRepo product.Repository, aiClient *ai.Client) *Service {
 	return &Service{productRepo: productRepo, aiClient: aiClient}
 }
 
-// ExtractItemsWithAI uses the configured AI model to extract text from a file, then
-// parses structured items. It degrades gracefully: if the AI client is unconfigured
-// or the call fails, it silently falls back to rule-based extraction (never errors).
-func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, contentType string) ([]extractedLine, error) {
+// ExtractItemsWithAI uses the configured AI model to extract text from a file,
+// then parses structured items out of that text. It never returns an error:
+// the upload path is required to degrade rather than fail (CLAUDE.md "degrade
+// gracefully"), and service_degradation_test.go pins that invariant.
+//
+// Read this before trusting the result. The fallback is NOT "rule-based
+// extraction of fileBytes" — there is no rule-based reader for PDFs or images
+// in this package. When the AI client is nil, unconfigured, or the call fails,
+// fileBytes is discarded unread and the items come from
+// generateFallbackMaterialList: a fixed, hard-coded demo list that has nothing
+// to do with what the user uploaded. Since OPENROUTER_API_KEY is unset by
+// default, this is the DEFAULT path, not an edge case.
+//
+// The second return value reports exactly that. synthetic==true means "these
+// items are canned demo data, not the caller's file". Any caller that shows
+// the result to a user, prices it, or persists it as a quote MUST propagate
+// that flag — presenting a synthetic list as the user's takeoff is the
+// failure mode this signature exists to prevent.
+func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, contentType string) (items []extractedLine, synthetic bool, err error) {
 	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
-		slog.Warn("AI client not configured, using rule-based fallback")
-		return s.ExtractItems(generateFallbackMaterialList()), nil
+		slog.Warn("AI client not configured; returning the canned demo material list, NOT the uploaded file's contents",
+			"content_type", contentType, "bytes_discarded", len(fileBytes))
+		return s.ExtractItems(generateFallbackMaterialList()), true, nil
 	}
 
-	rawText, err := s.aiClient.ExtractMaterialList(ctx, fileBytes, contentType)
-	if err != nil {
-		slog.Error("AI extraction failed, falling back to rule-based", "error", err)
-		return s.ExtractItems(generateFallbackMaterialList()), nil
+	rawText, aiErr := s.aiClient.ExtractMaterialList(ctx, fileBytes, contentType)
+	if aiErr != nil {
+		slog.Error("AI extraction failed; returning the canned demo material list, NOT the uploaded file's contents",
+			"error", aiErr, "content_type", contentType, "bytes_discarded", len(fileBytes))
+		return s.ExtractItems(generateFallbackMaterialList()), true, nil
 	}
 
-	return s.ExtractItems(rawText), nil
+	return s.ExtractItems(rawText), false, nil
 }
 
-// generateFallbackMaterialList returns a sample material list for when AI is unavailable.
+// generateFallbackMaterialList returns a fixed demo material list that stands
+// in for a real extraction when AI is unavailable. It is unrelated to any
+// uploaded file — callers surface it as synthetic (see ExtractItemsWithAI).
 func generateFallbackMaterialList() string {
 	return `50 pcs - 2x4x8 SPF Stud
 25 pcs - 2x6x12 Doug Fir #2

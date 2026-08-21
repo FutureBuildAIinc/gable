@@ -42,9 +42,9 @@ here — do not draft a public issue.
 
 **The one exception people trip over:** the demo and staging deployments run with
 `AUTH_MODE=dev`, which intentionally disables login and treats everyone as the seeded
-`demo@gable.com` admin. On **demo.gablelbm.com** and **staging.gablelbm.com** that is
-expected and safe (the data is fake). It is only a security issue if you find it on some
-*other* reachable host. See `SECURITY.md` § "`AUTH_MODE=dev` must never reach production".
+`demo@gable.com` admin. On a deployment that is *deliberately* a demo or staging sandbox
+that is expected and safe (the data is fake). It is only a security issue if you find it on
+a host that is meant to be real. See `SECURITY.md` § "`AUTH_MODE=dev` must never reach production".
 
 ---
 
@@ -184,8 +184,8 @@ cd app && npm install && npm run dev       # SPA on :5173
 Then open <http://localhost:5173> and walk their steps.
 
 If they are only describing what they saw on demo/staging, that is still a valid report —
-say so explicitly ("reproduced on demo.gablelbm.com, not verified locally") rather than
-implying a local repro that didn't happen.
+say so explicitly ("reproduced on the demo deployment, not verified locally" — and name the
+host) rather than implying a local repro that didn't happen.
 
 **Collect the environment facts yourself** — run these and paste the real output:
 

@@ -79,7 +79,7 @@ You don't know Go. You don't know what a pull request is. That's fine.
 **Type this:**
 
 > The delivery detail screen showed the order total as $73,887.00 but the order is $738.87.
-> I saw it on demo.gablelbm.com on order SO-1042.
+> I saw it on our demo instance on order SO-1042.
 
 **What happens:** Claude runs the `report-an-issue` skill. It will:
 

@@ -46,6 +46,15 @@ export default defineConfig({
         target: process.env.VITE_API_PROXY || 'http://localhost:8080',
         changeOrigin: false,
       },
+      // The backend serves its probes at the root, not under /api. The deploy
+      // spec (.do/app-*.yaml) routes /healthz to the backend with
+      // preserve_path_prefix, so Tech Admin's System Health panel reads
+      // same-origin in a real deployment; without this rule the SPA fallback
+      // would answer it with index.html in dev.
+      '/healthz': {
+        target: process.env.VITE_API_PROXY || 'http://localhost:8080',
+        changeOrigin: false,
+      },
     },
   }
 })

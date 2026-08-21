@@ -17,6 +17,9 @@ type GLAdapter interface {
 	// PostJournalEntry sends a journal entry to the external system
 	PostJournalEntry(ctx context.Context, entry domain.JournalEntry) (string, error)
 
-	// SyncCheck validates connectivity
+	// SyncCheck validates connectivity to the external system. It must
+	// return a non-nil error whenever PostJournalEntry could not succeed —
+	// including when the adapter is an unimplemented stub. Reporting a
+	// stub as healthy hides a GL that is silently not syncing.
 	SyncCheck(ctx context.Context) error
 }

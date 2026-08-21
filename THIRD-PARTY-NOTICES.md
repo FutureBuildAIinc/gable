@@ -36,8 +36,7 @@ Apache-2.0 dependencies in this project include (Go) `MicahParks/keyfunc`,
 `MicahParks/jwkset`, `go-jose/go-jose`, `prometheus/client_golang`,
 `prometheus/client_model`, `prometheus/common`, `prometheus/procfs`,
 `pdfcpu/pdfcpu`, `richardlehane/mscfb`, `richardlehane/msoleps`,
-`go.yaml.in/yaml`, `gopkg.in/yaml.v2`; and (npm) `class-variance-authority`,
-`html5-qrcode`, and (dev tooling) `typescript`.
+`go.yaml.in/yaml`, `gopkg.in/yaml.v2`; and (npm) `html5-qrcode`, and (dev tooling) `typescript`.
 
 ---
 
@@ -107,7 +106,6 @@ Apache-2.0 dependencies in this project include (Go) `MicahParks/keyfunc`,
 | Package | License |
 |---|---|
 | chart.js | MIT |
-| class-variance-authority | Apache-2.0 |
 | clsx | MIT |
 | date-fns | MIT |
 | html5-qrcode | Apache-2.0 |
