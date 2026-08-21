@@ -401,6 +401,9 @@ func main() {
 
 	skuToID := make(map[string]uuid.UUID)
 	productPrices := make(map[string]float64)
+	// Per-unit weights, kept alongside the price map so the dispatch-day fixture
+	// can size a truckload without a second round trip to the database.
+	productWeights := make(map[string]float64)
 	for _, p := range products {
 		var id string
 		err := db.QueryRow(`INSERT INTO products (sku, description, uom_primary, weight_lbs, reorder_point, reorder_qty, base_price, category, vendor, average_unit_cost)
@@ -414,6 +417,7 @@ func main() {
 		pid := uuid.MustParse(id)
 		skuToID[p.SKU] = pid
 		productPrices[p.SKU] = p.Price
+		productWeights[p.SKU] = p.Weight
 		// Stock split: ~70% sits at Kelowna Main, ~20% West Kelowna, ~10% Lake Country.
 		for _, bID := range branchIDList {
 			db.Exec(`DELETE FROM inventory WHERE product_id=$1 AND location_id=$2`, pid, bID)
@@ -426,6 +430,12 @@ func main() {
 		db.Exec(`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, 'LK', $3)`, pid, lkID, lkQty)
 	}
 	fmt.Printf("Seed: %d Products (stocked across 3 branches)\n", len(products))
+
+	// PIM digital twin (migration 080's nullable L/W/H/stackable columns). AI_LM
+	// cannot build a load plan without it — see cmd/seed/dispatch_day.go for why
+	// some SKUs are deliberately left NULL rather than zeroed.
+	geoWith, geoWithout := applyProductGeometry(db)
+	fmt.Printf("Seed: Product geometry — %d SKUs dimensioned, %d left NULL (no unit geometry)\n", geoWith, geoWithout)
 
 	// =========================================================================
 	// 4. PRICE LEVELS
@@ -702,6 +712,14 @@ func main() {
 	fmt.Printf("Seed: %d Orders, %d Invoices\n", totalOrders, len(invoiceIDs))
 
 	// =========================================================================
+	// 7b. DISPATCH DAY — the one day AI_LM plans in a demo.
+	//     The orders above are historical and randomly dated; none of them
+	//     carries a scheduled_delivery_date or a geocoded stop, so AI_LM sees
+	//     nothing to route. This fixture supplies both. See dispatch_day.go.
+	// =========================================================================
+	seedDispatchDay(db, customerIDs, custToBranch, custSalesperson, skuToID, productPrices, productWeights, kelMainID)
+
+	// =========================================================================
 	// 8. QUOTES WITH LINES (branch-scoped)
 	// =========================================================================
 	type quoteSpec struct {
@@ -828,14 +846,21 @@ func main() {
 	fmt.Printf("Seed: %d Vehicles, %d Drivers\n", len(vehs), len(drvs))
 
 	// =========================================================================
-	// 10. DELIVERY ROUTES & DELIVERIES
+	// 10. DELIVERY ROUTES & DELIVERIES — route HISTORY (yesterday and earlier).
+	//
+	// These carry FULFILLED orders and exist to give the dispatch board a past.
+	// They are deliberately dated at least one day back: `recentDate(60)` can
+	// return today, and a randomly-dated COMPLETED or IN_TRANSIT route landing on
+	// the dispatch day puts a phantom truck on the board next to the plan AI_LM
+	// just produced — an extra route the demo has to explain away. The
+	// dispatch-day fixture (section 7b / dispatch_day.go) owns today.
 	// =========================================================================
 	routeStatuses := []string{"COMPLETED", "COMPLETED", "COMPLETED", "IN_TRANSIT", "SCHEDULED", "DRAFT"}
 	deliveryCount := 0
 	if len(vehicleIDs) > 0 && len(driverIDs) > 0 && len(orderIDs) > 0 {
 		for i := 0; i < 15; i++ {
 			rStatus := routeStatuses[rand.Intn(len(routeStatuses))]
-			sDate := recentDate(60)
+			sDate := time.Now().AddDate(0, 0, -(1 + rand.Intn(60)))
 			vid := vehicleIDs[rand.Intn(len(vehicleIDs))]
 			did := driverIDs[rand.Intn(len(driverIDs))]
 			var rid string
