@@ -99,11 +99,8 @@ ls LICENSES/
 `GPL-3.0-or-later` and `AGPL-3.0-or-later` (present for third-party compatibility, not as the
 project's own grant).
 
-> **Status you must state whenever this comes up:** the texts under `LICENSES/` are
-> **drafts pending counsel review** and are not yet effective as final legal instruments. The
-> canonical Standard is published at <https://github.com/FutureBuildAIinc/openlbm>; where the
-> drafts and the published Standard disagree, **the published Standard governs**. Say this —
-> don't let someone rely on a draft.
+> **Status you must state whenever this comes up:** the OpenLBM Standard is **published and effective at version 1.0**. The canonical texts live at <https://github.com/FutureBuildAIinc/openlbm>; the copies under `LICENSES/` in each repo are vendored so the repository is self-contained and REUSE-compliant offline. Where a vendored copy and the published Standard ever disagree, **the published Standard governs**.
+> The copies are not a second source of truth — always point the reader at the canonical repo.
 
 ## 3 · The model, in plain language
 
