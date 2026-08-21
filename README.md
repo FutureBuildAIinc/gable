@@ -52,8 +52,10 @@ make up
 # 2. Apply migrations
 make migrate
 
-# 3. (Optional) seed demo data — the "Gable Lumber & Supply" fixture
-make seed
+# 3. (Optional) seed demo data — the "Gable Lumber & Supply" fixture.
+#    DEMO_SEED=1 is REQUIRED: without it the seed writes nothing and exits 0,
+#    because it TRUNCATEs transactional tables and must never run by accident.
+DEMO_SEED=1 make seed
 
 # 4. Run backend and frontend in two terminals
 cd backend && AUTH_MODE=dev go run ./cmd/server   # API on :8080
@@ -64,9 +66,12 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 `make reset-db`.
 
 > **Why `AUTH_MODE=dev` is on that command:** it is **not** a default. The
-> backend is fail-closed — with `AUTH_MODE` unset and no `JWKS_URL`, it logs
-> `JWKS_URL not set and AUTH_MODE != dev` and exits rather than starting
-> without authentication. You must opt in explicitly, which is the point.
+> backend is fail-closed — with `AUTH_MODE` unset it refuses to start, logging
+> `CORS_ORIGINS not set and AUTH_MODE != dev` (checked first,
+> `cmd/server/main.go:96-99`) and, once that is satisfied,
+> `JWKS_URL not set and AUTH_MODE != dev` (`cmd/server/main.go:146-149`). It
+> exits rather than starting without authentication. You must opt in
+> explicitly, which is the point.
 >
 > `AUTH_MODE=dev` disables authentication and authorization entirely: no JWT
 > is verified and every role check passes, so any request reaching the port has

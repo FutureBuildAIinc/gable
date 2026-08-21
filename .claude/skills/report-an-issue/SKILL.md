@@ -176,7 +176,7 @@ If they are on a laptop with the repo, reproduce it locally so the report is gro
 ```bash
 make up                                    # Postgres on :5434
 make migrate
-make seed                                  # demo dataset
+DEMO_SEED=1 make seed                      # demo dataset (gate is required)
 cd backend && go run ./cmd/server          # API on :8080
 cd app && npm install && npm run dev       # SPA on :5173
 ```
@@ -228,7 +228,7 @@ Rules for the body:
 - **Title**: what is wrong and where, in one line. `[Bug] ` prefix (the template sets it).
   Not "delivery broken" — "[Bug] Delivery detail renders order total 100× too high".
 - **Affected area**: the real directory (`app/src/pages/...`, `backend/internal/delivery`).
-- **Steps to reproduce**: numbered, starting from a fresh `make seed`, with the specific
+- **Steps to reproduce**: numbered, starting from a fresh `DEMO_SEED=1 make seed`, with the specific
   record they used ("open order `SO-1042` from the seeded Gable Lumber & Supply data").
 - **Expected vs actual**: exact numbers and exact error text.
 - **Environment**: the real output from §4, including the `AUTH_MODE` value.

@@ -54,7 +54,7 @@ Never "fix" a doc by making it read better. Fix it by making it **true**.
 **If it's a command**, run it:
 
 ```bash
-make up && make migrate && make seed
+make up && make migrate && DEMO_SEED=1 make seed
 cd backend && go run ./cmd/server
 cd app && npm install && npm run dev
 ```
@@ -115,7 +115,7 @@ These are real inconsistencies that a docs contributor can legitimately fix:
 - **Prefer deleting a wrong sentence to hedging it.** A stale claim removed is a real
   improvement.
 - **Say "as built" or "planned"** whenever a doc describes something that doesn't exist yet.
-- **Use real, runnable examples** — with the demo dataset (`make seed` → "Gable Lumber &
+- **Use real, runnable examples** — with the demo dataset (`DEMO_SEED=1 make seed` → "Gable Lumber &
   Supply"), not invented record IDs.
 - **Keep line width consistent** with the file you're editing (most of these wrap around 80).
 - **Don't restructure a whole document** in a typo PR. One concern per PR.

@@ -18,6 +18,7 @@ help:
 	@echo "  Infra"
 	@echo "    up down logs ps pg-shell     docker compose lifecycle"
 	@echo "    migrate seed reset-db        database lifecycle"
+	@echo "                                 (seed needs DEMO_SEED=1 — see the Makefile)"
 	@echo ""
 	@echo "  Pre-flight (mirrors .github/workflows/ci.yml)"
 	@echo "    preflight                    everything CI gates on"
@@ -58,8 +59,21 @@ pg-shell:
 migrate:
 	cd backend && go run ./cmd/migrate
 
-# Populate the database with Kelowna / Gable Lumber & Supply demo data. Safe
-# to re-run; the seed uses ON CONFLICT upserts on natural keys.
+# Populate the database with Kelowna / Gable Lumber & Supply demo data.
+#
+# REQUIRES `DEMO_SEED=1`. Without it the command connects to nothing, writes
+# nothing, and exits 0 with an explanatory log line — which is the correct
+# default for a self-hosted install, and a surprise for a newcomer following
+# the Quickstart. Run it as:
+#
+#     DEMO_SEED=1 make seed
+#
+# The gate is not hygiene: the seed TRUNCATEs the transactional tables (orders,
+# invoices, quotes, deliveries, payments, the general ledger, POs …) with
+# RESTART IDENTITY CASCADE before it writes, so an accidental run against a
+# database you care about destroys data. Reference data (products, customers,
+# vendors, locations, chart of accounts) upserts on natural keys and is safe to
+# re-run. See the gate and its reasoning in backend/cmd/seed/main.go.
 seed:
 	cd backend && go run ./cmd/seed
 

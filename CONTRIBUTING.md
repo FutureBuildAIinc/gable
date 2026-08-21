@@ -20,8 +20,10 @@ make up
 # 2. Apply database migrations
 make migrate
 
-# 3. (Optional) seed demo data
-make seed
+# 3. (Optional) seed demo data. DEMO_SEED=1 is REQUIRED — without it the seed
+#    writes nothing and exits 0 (it TRUNCATEs transactional tables, so it is
+#    gated against accidental runs).
+DEMO_SEED=1 make seed
 
 # 4. Run the backend and frontend in two terminals
 cd backend && AUTH_MODE=dev go run ./cmd/server   # API on :8080
