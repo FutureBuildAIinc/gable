@@ -100,6 +100,20 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		return nil, fmt.Errorf("cart is empty")
 	}
 
+	// Tenancy: project_id arrives in the request body and is therefore
+	// caller-controlled. Verify it against the session's customer before the
+	// order is written, or a portal user could file an order against another
+	// contractor's job — and then read that job's name back on the order DTO.
+	if req.ProjectID != nil {
+		ok, pErr := s.repo.ProjectBelongsToCustomer(ctx, *req.ProjectID, customerID)
+		if pErr != nil {
+			return nil, fmt.Errorf("failed to verify project: %w", pErr)
+		}
+		if !ok {
+			return nil, ErrProjectNotFound
+		}
+	}
+
 	// Build order request from cart — PriceEach is now int64 cents
 	lines := make([]order.OrderLineRequest, 0, len(cart.Items))
 	for _, item := range cart.Items {
@@ -118,6 +132,20 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 	newOrder, err := s.orderSvc.CreateOrder(ctx, orderReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
+	}
+
+	// The project association is written after the order exists rather than
+	// threaded through order.CreateOrderRequest: project is a portal concept
+	// (projects belong to a customer, not to a branch), and order.Service has
+	// no business knowing about it. A failure here is logged, not fatal — the
+	// order is real and the customer's stock is committed; losing the board
+	// grouping is recoverable via PUT /orders/{id}/project, losing the order
+	// is not.
+	if req.ProjectID != nil {
+		if pErr := s.repo.SetOrderProject(ctx, newOrder.ID, customerID, req.ProjectID); pErr != nil {
+			s.logger.Error("Checkout: failed to attach order to project",
+				"order_id", newOrder.ID, "project_id", *req.ProjectID, "error", pErr)
+		}
 	}
 
 	// Clear cart after successful order

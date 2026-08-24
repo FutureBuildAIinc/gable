@@ -118,43 +118,13 @@ func (r *Repository) GetCustomerARSummary(ctx context.Context, customerID uuid.U
 }
 
 // ListOrdersByCustomer fetches orders with lines for a customer.
+//
+// It delegates to ListOrdersByCustomerFiltered with an empty filter so there
+// is exactly one order-list query in the package: the project association and
+// the change-feed cursor cannot be present on one read and missing from the
+// other.
 func (r *Repository) ListOrdersByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalOrderDTO, error) {
-	query := `
-		SELECT id, status, total_amount, created_at
-		FROM orders
-		WHERE customer_id = $1
-		ORDER BY created_at DESC
-		LIMIT 50
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list orders: %w", err)
-	}
-	defer rows.Close()
-
-	orders := make([]PortalOrderDTO, 0)
-	for rows.Next() {
-		var o PortalOrderDTO
-		if err := rows.Scan(&o.ID, &o.Status, &o.TotalAmount, &o.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan order: %w", err)
-		}
-		o.Lines = make([]PortalLineDTO, 0) // Initialize empty for JSON []
-		orders = append(orders, o)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration error: %w", err)
-	}
-
-	// Fetch lines for each order
-	for i := range orders {
-		lines, err := r.getOrderLines(ctx, orders[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		orders[i].Lines = lines
-	}
-
-	return orders, nil
+	return r.ListOrdersByCustomerFiltered(ctx, customerID, OrderListFilter{})
 }
 
 // getOrderLines fetches line items for an order.
@@ -188,17 +158,20 @@ func (r *Repository) getOrderLines(ctx context.Context, orderID uuid.UUID) ([]Po
 // GetOrderByIDAndCustomer fetches a single order scoped to a customer.
 func (r *Repository) GetOrderByIDAndCustomer(ctx context.Context, orderID, customerID uuid.UUID) (*PortalOrderDTO, error) {
 	query := `
-		SELECT id, status, total_amount, created_at
-		FROM orders
-		WHERE id = $1 AND customer_id = $2
+		SELECT o.id, o.status, o.total_amount::float8, o.created_at, o.updated_at,
+		       o.project_id, p.name
+		FROM orders o
+		LEFT JOIN projects p ON p.id = o.project_id
+		WHERE o.id = $1 AND o.customer_id = $2
 	`
 	var o PortalOrderDTO
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, orderID, customerID).Scan(
-		&o.ID, &o.Status, &o.TotalAmount, &o.CreatedAt,
+		&o.ID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
+		&o.ProjectID, &o.ProjectName,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("order not found")
+			return nil, ErrOrderNotFound
 		}
 		return nil, fmt.Errorf("failed to get order: %w", err)
 	}
@@ -450,16 +423,42 @@ func (r *Repository) CreateReorder(ctx context.Context, customerID, sourceOrderI
 // --- Catalog Repository Methods ---
 
 // ListCatalogProducts queries products with optional search/filter and aggregated availability.
+//
+// Two columns joined in by migration 084's capability pass: p.lead_time_days
+// (nullable — see the column comment; it is never defaulted) and the
+// product_categories coordinates behind the browsable tree.
+//
+// The CategoryID filter matches the category AND EVERY DESCENDANT, using the
+// ltree containment operator against the node's path. Clicking "Lumber" has to
+// return framing lumber and sheathing, or the tree is decoration.
 func (r *Repository) ListCatalogProducts(ctx context.Context, filter CatalogFilter) ([]catalogRow, error) {
 	query := `
 		SELECT p.id, p.sku, p.description,
 		       COALESCE(p.category, ''), COALESCE(p.species, ''), COALESCE(p.grade, ''),
-		       COALESCE(p.image_url, ''), p.uom_primary::text, COALESCE(p.base_price, 0)
+		       COALESCE(p.image_url, ''), p.uom_primary::text, COALESCE(p.base_price, 0),
+		       p.lead_time_days, p.category_id, COALESCE(pc.slug, ''), COALESCE(pc.path::text, '')
 		FROM products p
+		LEFT JOIN product_categories pc ON pc.id = p.category_id
 		WHERE 1=1
 	`
 	args := make([]interface{}, 0)
 	argIdx := 1
+
+	if filter.CategoryID != "" {
+		categoryID, err := uuid.Parse(filter.CategoryID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: category_id must be a uuid", ErrInvalidRequest)
+		}
+		path, err := r.categoryPathForID(ctx, categoryID)
+		if err != nil {
+			// An unknown category is an empty catalog, not a 500. The caller
+			// asked a well-formed question about a branch that is not there.
+			return []catalogRow{}, nil
+		}
+		query += fmt.Sprintf(` AND pc.path <@ $%d::ltree`, argIdx)
+		args = append(args, path)
+		argIdx++
+	}
 
 	if filter.Query != "" {
 		query += fmt.Sprintf(` AND (p.sku ILIKE $%d OR p.description ILIKE $%d)`, argIdx, argIdx)
@@ -497,6 +496,7 @@ func (r *Repository) ListCatalogProducts(ctx context.Context, filter CatalogFilt
 			&p.ID, &p.SKU, &p.Name,
 			&p.Category, &p.Species, &p.Grade,
 			&p.ImageURL, &p.UOM, &p.BasePrice,
+			&p.LeadTimeDays, &p.CategoryID, &p.CategorySlug, &p.CategoryPath,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan catalog product: %w", err)
 		}
@@ -514,8 +514,10 @@ func (r *Repository) GetCatalogProduct(ctx context.Context, productID uuid.UUID)
 		SELECT p.id, p.sku, p.description,
 		       COALESCE(p.category, ''), COALESCE(p.species, ''), COALESCE(p.grade, ''),
 		       COALESCE(p.image_url, ''), p.uom_primary::text, COALESCE(p.base_price, 0),
-		       COALESCE(p.weight_lbs, 0), COALESCE(p.upc, ''), COALESCE(p.vendor, '')
+		       COALESCE(p.weight_lbs, 0), COALESCE(p.upc, ''), COALESCE(p.vendor, ''),
+		       p.lead_time_days, p.category_id, COALESCE(pc.slug, ''), COALESCE(pc.path::text, '')
 		FROM products p
+		LEFT JOIN product_categories pc ON pc.id = p.category_id
 		WHERE p.id = $1
 	`
 	var p catalogRow
@@ -524,6 +526,7 @@ func (r *Repository) GetCatalogProduct(ctx context.Context, productID uuid.UUID)
 		&p.Category, &p.Species, &p.Grade,
 		&p.ImageURL, &p.UOM, &p.BasePrice,
 		&p.WeightLbs, &p.UPC, &p.Vendor,
+		&p.LeadTimeDays, &p.CategoryID, &p.CategorySlug, &p.CategoryPath,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("product not found: %w", err)

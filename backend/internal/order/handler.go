@@ -57,6 +57,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/orders/{id}", guard(h.HandleGetOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/confirm", guard(h.HandleConfirmOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/fulfill", guard(h.HandleFulfillOrder))
+	mux.HandleFunc("POST /api/v1/orders/{id}/cancel", guard(h.HandleCancelOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}/exposure-gate", guard(h.HandleExposureGate))
 	mux.HandleFunc("POST /api/v1/orders/{id}/exposure-override", guard(h.HandleExposureOverride))
 }
@@ -150,6 +151,37 @@ func (h *Handler) HandleFulfillOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httputil.RespondError(w, r, "failed to fulfill order", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleCancelOrder handles POST /orders/{id}/cancel.
+//
+// A refusal from the state machine is a 409, not a 500: "this order is already
+// cancelled" and "a fulfilled order cannot be cancelled" are both correct
+// answers to a reasonable question, and a client needs to tell them apart from
+// a server fault to know whether retrying could ever help.
+func (h *Handler) HandleCancelOrder(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+		return
+	}
+
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	// An empty body is fine — a reason is optional on the ERP side.
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	if err := h.service.CancelOrder(r.Context(), id, body.Reason); err != nil {
+		if errors.Is(err, ErrOrderAlreadyCancelled) || errors.Is(err, ErrOrderNotCancellable) {
+			httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+			return
+		}
+		httputil.RespondError(w, r, "failed to cancel order", http.StatusInternalServerError, err)
 		return
 	}
 

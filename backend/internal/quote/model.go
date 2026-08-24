@@ -67,17 +67,25 @@ type Quote struct {
 }
 
 type QuoteLine struct {
-	ID          uuid.UUID   `json:"id"`
-	QuoteID     uuid.UUID   `json:"quote_id"`
-	ProductID   uuid.UUID   `json:"product_id"`
-	SKU         string      `json:"sku"`
-	Description string      `json:"description"`
-	Quantity    float64     `json:"quantity"`
-	UOM         product.UOM `json:"uom"`
-	UnitPrice   float64     `json:"unit_price"`
-	UnitCost    float64     `json:"unit_cost"`
-	LineTotal   float64     `json:"line_total"`
-	CreatedAt   time.Time   `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	QuoteID     uuid.UUID `json:"quote_id"`
+	ProductID   uuid.UUID `json:"product_id"`
+	SKU         string    `json:"sku"`
+	Description string    `json:"description"`
+
+	// CustomerNote is what a portal user wrote when they asked for this line
+	// to be priced (migration 084). It is READ-MOSTLY on the ERP side: the
+	// quote desk shows it, and UpdateQuoteWithLines preserves it for any line
+	// whose id survives an edit, so pricing a portal request does not silently
+	// discard the contractor's own words about what they wanted.
+	CustomerNote string `json:"customer_note,omitempty"`
+
+	Quantity  float64     `json:"quantity"`
+	UOM       product.UOM `json:"uom"`
+	UnitPrice float64     `json:"unit_price"`
+	UnitCost  float64     `json:"unit_cost"`
+	LineTotal float64     `json:"line_total"`
+	CreatedAt time.Time   `json:"created_at"`
 }
 
 // QuoteAnalytics holds aggregated quote analytics data.

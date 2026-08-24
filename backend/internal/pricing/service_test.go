@@ -5,6 +5,7 @@ package pricing
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -13,6 +14,12 @@ import (
 
 type MockRepository struct {
 	contracts map[string]CustomerContract
+
+	// rules, when populated, is filtered by the same predicate the Postgres
+	// repository applies, so tests exercise the waterfall's rule branch
+	// without a database. An empty slice keeps the pre-existing behaviour
+	// (no rules match, fall through to tier/retail) unchanged.
+	rules []PricingRule
 }
 
 func (m *MockRepository) GetContract(ctx context.Context, customerID, productID uuid.UUID) (*CustomerContract, error) {
@@ -28,7 +35,56 @@ func (m *MockRepository) CreateContract(ctx context.Context, c *CustomerContract
 }
 
 func (m *MockRepository) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity float64) ([]PricingRule, error) {
-	return nil, nil
+	var out []PricingRule
+	for _, r := range m.rules {
+		if !r.IsActive {
+			continue
+		}
+		if r.ProductID != nil && *r.ProductID != productID {
+			continue
+		}
+		if r.CustomerID != nil && (customerID == nil || *r.CustomerID != *customerID) {
+			continue
+		}
+		if r.MinQuantity > quantity {
+			continue
+		}
+		if r.MaxQuantity != nil && *r.MaxQuantity < quantity {
+			continue
+		}
+		out = append(out, r)
+	}
+	// Same ordering the SQL applies: priority DESC, then rule_type ASC.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority > out[j].Priority
+		}
+		return out[i].RuleType < out[j].RuleType
+	})
+	return out, nil
+}
+
+func (m *MockRepository) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]float64, error) {
+	seen := map[float64]bool{}
+	out := make([]float64, 0)
+	for _, r := range m.rules {
+		if !r.IsActive || r.RuleType != RuleTypeQuantityBreak || r.MinQuantity <= 1 {
+			continue
+		}
+		if r.ProductID != nil && *r.ProductID != productID {
+			continue
+		}
+		if r.CustomerID != nil && (customerID == nil || *r.CustomerID != *customerID) {
+			continue
+		}
+		if seen[r.MinQuantity] {
+			continue
+		}
+		seen[r.MinQuantity] = true
+		out = append(out, r.MinQuantity)
+	}
+	sort.Float64s(out)
+	return out, nil
 }
 
 func (m *MockRepository) CreateRule(ctx context.Context, r *PricingRule) error {

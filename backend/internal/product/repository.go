@@ -24,6 +24,7 @@ type Repository interface {
 	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error
+	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error
 }
 
 // PostgresRepository implements Repository using pgx
@@ -313,6 +314,26 @@ func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.U
 	query := `UPDATE products SET reorder_point = $1, reorder_qty = $2, updated_at = NOW() WHERE id = $3`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, reorderPoint, reorderQty, id)
 	return err
+}
+
+// UpdateLeadTime writes the dealer-published lead time (migration 084).
+//
+// leadTimeDays is a POINTER for the same reason the geometry columns are: nil
+// must reach the column as SQL NULL. NULL means "the dealer has not published
+// a lead time", and the portal catalog renders it as null so a consumer's
+// lead-time-vs-delivery-date warning stays silent rather than being computed
+// from a zero. Writing 0 here would say "available today", which is a
+// different — and schedulable — claim.
+func (r *PostgresRepository) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error {
+	query := `UPDATE products SET lead_time_days = $1, updated_at = NOW() WHERE id = $2`
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query, leadTimeDays, id)
+	if err != nil {
+		return fmt.Errorf("failed to update lead time: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("product not found")
+	}
+	return nil
 }
 
 // updateDimensionsQuery is the geometry write. It is a package-level constant

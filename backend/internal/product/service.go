@@ -99,6 +99,20 @@ func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorde
 	return s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty)
 }
 
+// UpdateLeadTime publishes (or clears) the dealer's lead time for a product.
+//
+// The only rule is that a published lead time cannot be negative. nil is
+// passed through untouched: it is the "unpublished" state the portal catalog
+// renders as JSON null, and it must stay distinguishable from a published 0.
+// Guessing a plausible number here would be worse than publishing nothing —
+// a crew gets scheduled around a lead time.
+func (s *Service) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error {
+	if leadTimeDays != nil && *leadTimeDays < 0 {
+		return fmt.Errorf("lead_time_days must be zero or positive")
+	}
+	return s.repo.UpdateLeadTime(ctx, id, leadTimeDays)
+}
+
 // UpdateDimensions writes the parametric 3D geometry (inches) for a product.
 // The PIM is the canonical digital-twin source AI_LM's Load Builder consumes.
 //

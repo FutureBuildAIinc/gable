@@ -28,6 +28,36 @@ type catalogRow struct {
 	WeightLbs float64
 	UPC       string
 	Vendor    string
+
+	// LeadTimeDays is a POINTER so an unpublished lead time stays NULL all the
+	// way to the JSON. Collapsing it to 0 here would publish "available today"
+	// for every product the dealer has never entered a lead time for.
+	LeadTimeDays *int
+	CategoryID   *uuid.UUID
+	CategorySlug string
+	CategoryPath string
+}
+
+// toDTO projects a raw row onto the customer-facing DTO, minus the pricing and
+// availability enrichment the caller adds. Having one place that does this is
+// what keeps the list and the detail views from drifting apart — the detail
+// view used to be a hand-copied duplicate of the list's field assignments.
+func (row catalogRow) toDTO() CatalogProductDTO {
+	return CatalogProductDTO{
+		ID:           row.ID,
+		SKU:          row.SKU,
+		Name:         row.Name,
+		Category:     row.Category,
+		Species:      row.Species,
+		Grade:        row.Grade,
+		ImageURL:     row.ImageURL,
+		UOM:          row.UOM,
+		BasePrice:    row.BasePrice,
+		LeadTimeDays: row.LeadTimeDays,
+		CategoryID:   row.CategoryID,
+		CategorySlug: row.CategorySlug,
+		CategoryPath: row.CategoryPath,
+	}
 }
 
 // ListCatalog returns catalog products enriched with customer-specific pricing and availability.
@@ -45,17 +75,7 @@ func (s *Service) ListCatalog(ctx context.Context, customerID uuid.UUID, filter 
 
 	products := make([]CatalogProductDTO, 0, len(rows))
 	for _, row := range rows {
-		dto := CatalogProductDTO{
-			ID:        row.ID,
-			SKU:       row.SKU,
-			Name:      row.Name,
-			Category:  row.Category,
-			Species:   row.Species,
-			Grade:     row.Grade,
-			ImageURL:  row.ImageURL,
-			UOM:       row.UOM,
-			BasePrice: row.BasePrice,
-		}
+		dto := row.toDTO()
 
 		// Pricing waterfall
 		if s.pricingSvc != nil && cust != nil {
@@ -95,20 +115,11 @@ func (s *Service) GetCatalogProduct(ctx context.Context, customerID, productID u
 	}
 
 	dto := &CatalogDetailDTO{
-		CatalogProductDTO: CatalogProductDTO{
-			ID:        row.ID,
-			SKU:       row.SKU,
-			Name:      row.Name,
-			Category:  row.Category,
-			Species:   row.Species,
-			Grade:     row.Grade,
-			ImageURL:  row.ImageURL,
-			UOM:       row.UOM,
-			BasePrice: row.BasePrice,
-		},
-		WeightLbs: row.WeightLbs,
-		UPC:       row.UPC,
-		Vendor:    row.Vendor,
+		CatalogProductDTO: row.toDTO(),
+		WeightLbs:         row.WeightLbs,
+		UPC:               row.UPC,
+		Vendor:            row.Vendor,
+		VolumeBreaks:      []VolumeBreakDTO{},
 	}
 
 	// Pricing waterfall
@@ -126,11 +137,70 @@ func (s *Service) GetCatalogProduct(ctx context.Context, customerID, productID u
 		dto.PriceSource = "retail"
 	}
 
+	// Volume breaks. A failure here degrades to an empty ladder rather than
+	// failing the whole product page: the price the customer pays today is
+	// already resolved above, and "no breaks shown" is a safe under-promise
+	// where "product unavailable" is not.
+	if breaks, bErr := s.VolumeBreaks(ctx, customerID, row.ID, row.BasePrice); bErr == nil {
+		dto.VolumeBreaks = breaks
+	} else {
+		s.logger.Warn("Catalog: volume breaks unavailable",
+			"product_id", row.ID, "customer_id", customerID, "error", bErr)
+	}
+
 	// Inventory
 	dto.Available = s.getAvailableQty(ctx, row.ID)
 	dto.InStock = dto.Available > 0
 
 	return dto, nil
+}
+
+// VolumeBreaks returns this customer's quantity ladder for a product.
+//
+// It delegates the arithmetic entirely to pricing.Service.VolumeBreaks, which
+// derives every rung by asking the real waterfall what it would charge at that
+// quantity. The portal's job here is tenancy (the customer comes from the
+// session, never from the request) and DTO shape — not pricing.
+func (s *Service) VolumeBreaks(ctx context.Context, customerID, productID uuid.UUID, basePrice float64) ([]VolumeBreakDTO, error) {
+	out := make([]VolumeBreakDTO, 0)
+	if s.pricingSvc == nil {
+		return out, nil
+	}
+
+	cust, err := s.customerSvc.GetCustomer(ctx, customerID)
+	if err != nil {
+		// Without the customer there is no tier, no contract and no
+		// account-scoped rule, so any ladder computed here would be a
+		// different customer's. Return nothing rather than a retail ladder
+		// dressed up as theirs.
+		return out, nil
+	}
+
+	breaks, err := s.pricingSvc.VolumeBreaks(ctx, cust, productID, basePrice)
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range breaks {
+		out = append(out, VolumeBreakDTO{
+			MinQuantity:  b.MinQuantity,
+			UnitPrice:    b.UnitPrice,
+			PriceSource:  string(b.Source),
+			Details:      b.Details,
+			SavesPerUnit: b.SavesPerUnit,
+		})
+	}
+	return out, nil
+}
+
+// VolumeBreaksForProduct is the standalone read behind
+// GET /catalog/{id}/volume-breaks, for a consumer that wants the ladder
+// without re-fetching the whole product.
+func (s *Service) VolumeBreaksForProduct(ctx context.Context, customerID, productID uuid.UUID) ([]VolumeBreakDTO, error) {
+	row, err := s.repo.GetCatalogProduct(ctx, productID)
+	if err != nil {
+		return nil, fmt.Errorf("product not found: %w", err)
+	}
+	return s.VolumeBreaks(ctx, customerID, row.ID, row.BasePrice)
 }
 
 // getAvailableQty computes total available quantity across all locations.

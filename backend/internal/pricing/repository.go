@@ -17,6 +17,7 @@ type Repository interface {
 	GetContract(ctx context.Context, customerID, productID uuid.UUID) (*CustomerContract, error)
 	CreateContract(ctx context.Context, c *CustomerContract) error
 	GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity float64) ([]PricingRule, error)
+	ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]float64, error)
 	CreateRule(ctx context.Context, r *PricingRule) error
 	ListRules(ctx context.Context) ([]PricingRule, error)
 }
@@ -107,6 +108,57 @@ func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uui
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+// ListBreakQuantities returns the distinct quantity thresholds at which a
+// QUANTITY_BREAK rule could apply to this (product, customer) pair.
+//
+// The scope predicate is deliberately identical to GetMatchingRules' —
+// same product/customer NULL-or-equal matching, same active/date window — so
+// the candidates this returns are exactly the rules the waterfall could reach.
+// The two differences are intentional:
+//
+//   - No quantity band. That is the point: we are asking "where does the band
+//     start", not "which band contains q".
+//   - job_id IS NULL only. A catalog break ladder is not job-scoped, and
+//     letting a caller pass a job id here would let it probe job pricing.
+//
+// DISTINCT collapses the duplicate rule rows the seeder's `ON CONFLICT DO
+// NOTHING` leaves behind on a table with no unique constraint (see the note in
+// cmd/seed/main.go's pricing-rules block); a contractor should see one rung per
+// threshold, not fifty.
+func (r *PostgresRepository) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]float64, error) {
+	query := `
+		SELECT DISTINCT min_quantity::float8
+		FROM pricing_rules
+		WHERE is_active = true
+			AND rule_type = 'QUANTITY_BREAK'
+			AND min_quantity > 1
+			AND (product_id IS NULL OR product_id = $1)
+			AND (customer_id IS NULL OR customer_id = $2)
+			AND job_id IS NULL
+			AND (starts_at IS NULL OR starts_at <= NOW())
+			AND (expires_at IS NULL OR expires_at > NOW())
+		ORDER BY 1 ASC
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list break quantities: %w", err)
+	}
+	defer rows.Close()
+
+	quantities := make([]float64, 0)
+	for rows.Next() {
+		var q float64
+		if err := rows.Scan(&q); err != nil {
+			return nil, fmt.Errorf("failed to scan break quantity: %w", err)
+		}
+		quantities = append(quantities, q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("break quantity rows error: %w", err)
+	}
+	return quantities, nil
 }
 
 func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) error {

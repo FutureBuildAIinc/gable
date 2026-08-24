@@ -431,6 +431,48 @@ func main() {
 	}
 	fmt.Printf("Seed: %d Products (stocked across 3 branches)\n", len(products))
 
+	// Link the products just inserted to the category tree (migration 049).
+	//
+	// This CANNOT live in a migration. Migrations run before the seed — the
+	// deploy job is `./migrate` then `./seed` — so a backfill migration finds
+	// an empty products table and updates zero rows. Migration 085 does exactly
+	// that: it is correct for an install that already had products, and a no-op
+	// on every fresh one, which is every new install. Without this step the
+	// portal category tree (GET /api/portal/v1/catalog/categories) reports
+	// product_count = 0 on every node and browsing by category returns nothing.
+	//
+	// Same rule 049 and 085 use: case-insensitive name match, then the `general`
+	// fallback so no product is left unbrowsable. Deliberately does not invent
+	// nodes for categories with no match — a seed must not decide a dealer's
+	// taxonomy.
+	linked, err := db.Exec(`
+		UPDATE products p
+		   SET category_id = pc.id
+		  FROM product_categories pc
+		 WHERE p.category_id IS NULL
+		   AND p.category IS NOT NULL
+		   AND LOWER(TRIM(p.category)) = LOWER(pc.name)
+		   AND pc.is_active = true`)
+	if err != nil {
+		log.Printf("Seed: linking products to the category tree: %v", err)
+	}
+	fallback, err := db.Exec(`
+		UPDATE products
+		   SET category_id = (SELECT id FROM product_categories WHERE slug = 'general')
+		 WHERE category_id IS NULL
+		   AND EXISTS (SELECT 1 FROM product_categories WHERE slug = 'general')`)
+	if err != nil {
+		log.Printf("Seed: category fallback: %v", err)
+	}
+	nMatched, nFallback := int64(0), int64(0)
+	if linked != nil {
+		nMatched, _ = linked.RowsAffected()
+	}
+	if fallback != nil {
+		nFallback, _ = fallback.RowsAffected()
+	}
+	fmt.Printf("Seed: Category tree — %d products matched by name, %d to `general`\n", nMatched, nFallback)
+
 	// PIM digital twin (migration 080's nullable L/W/H/stackable columns). AI_LM
 	// cannot build a load plan without it — see cmd/seed/dispatch_day.go for why
 	// some SKUs are deliberately left NULL rather than zeroed.

@@ -47,6 +47,9 @@ func (r *stubProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uui
 func (r *stubProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry) error {
 	return nil
 }
+func (r *stubProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int) error {
+	return nil
+}
 
 type stubPIMRepo struct {
 	createMediaErr error

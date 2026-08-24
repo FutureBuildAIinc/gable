@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/quote"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -29,6 +30,14 @@ type Service struct {
 	inventorySvc *inventory.Service
 	orderSvc     *order.Service
 	productSvc   *product.Service
+
+	// quoteSvc owns the quote LIFECYCLE. The portal never writes a state
+	// transition itself — accept and decline go through
+	// quote.Service.UpdateState so quote.validateStateTransition stays the
+	// single authority on what may follow what. Optional: nil disables the
+	// portal's quote decision endpoints rather than letting them bypass the
+	// state machine.
+	quoteSvc *quote.Service
 }
 
 // NewService creates a new portal service.
@@ -53,6 +62,14 @@ func NewService(
 		orderSvc:     orderSvc,
 		productSvc:   productSvc,
 	}
+}
+
+// WithQuoteService wires the ERP quote lifecycle. Kept as a separate setter
+// rather than a ninth constructor argument so existing callers — including the
+// token-only construction the tests use — keep compiling unchanged.
+func (s *Service) WithQuoteService(quoteSvc *quote.Service) *Service {
+	s.quoteSvc = quoteSvc
+	return s
 }
 
 // PortalClaims holds JWT claims for portal auth.

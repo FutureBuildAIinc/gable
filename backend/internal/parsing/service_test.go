@@ -55,6 +55,9 @@ func (m *mockProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string
 func (m *mockProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry) error {
 	return nil
 }
+func (m *mockProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int) error {
+	return nil
+}
 
 func (m *mockProductRepo) ListProductsPaginated(_ context.Context, limit, offset int) ([]product.Product, int, error) {
 	// Simple pagination over in-memory products

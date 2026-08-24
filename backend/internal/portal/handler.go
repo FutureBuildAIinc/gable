@@ -4,9 +4,12 @@
 package portal
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -29,7 +32,15 @@ func NewHandler(svc *Service) *Handler {
 // portalWriteError logs the internal error and returns a safe, generic JSON error to the client.
 // It delegates to httputil.RespondError which sends a generic message based on status code,
 // preventing internal details from leaking to clients.
+//
+// The one exception is a recognised 409 refusal, which carries a hand-written
+// customer-safe `reason` (see writeRefusal in errors.go). A consumer building
+// a stage machine needs to tell a contractor why the dealer said no, and
+// "Conflict" is not something anyone can act on.
 func portalWriteError(w http.ResponseWriter, r *http.Request, msg string, err error, status int) {
+	if writeRefusal(w, r, err, status) {
+		return
+	}
 	httputil.RespondError(w, r, msg, status, err)
 }
 
@@ -57,14 +68,29 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) h
 	mux.Handle("GET /api/portal/v1/orders", authMw(http.HandlerFunc(h.HandleListOrders)))
 	mux.Handle("GET /api/portal/v1/orders/{id}", authMw(http.HandlerFunc(h.HandleGetOrder)))
 	mux.Handle("POST /api/portal/v1/orders/reorder", authMw(http.HandlerFunc(h.HandleReorder)))
+	mux.Handle("POST /api/portal/v1/orders/{id}/cancel", authMw(http.HandlerFunc(h.HandleCancelOrder)))
+	mux.Handle("PUT /api/portal/v1/orders/{id}/project", authMw(http.HandlerFunc(h.HandleSetOrderProject)))
 	mux.Handle("GET /api/portal/v1/invoices", authMw(http.HandlerFunc(h.HandleListInvoices)))
 	mux.Handle("GET /api/portal/v1/invoices/{id}", authMw(http.HandlerFunc(h.HandleGetInvoice)))
 	mux.Handle("GET /api/portal/v1/deliveries", authMw(http.HandlerFunc(h.HandleListDeliveries)))
 	mux.Handle("GET /api/portal/v1/deliveries/{id}", authMw(http.HandlerFunc(h.HandleGetDelivery)))
+	mux.Handle("POST /api/portal/v1/deliveries/{id}/reschedule", authMw(http.HandlerFunc(h.HandleRequestReschedule)))
+	mux.Handle("GET /api/portal/v1/deliveries/{id}/reschedule", authMw(http.HandlerFunc(h.HandleGetReschedule)))
 
 	// Catalog endpoints (Sprint 27)
 	mux.Handle("GET /api/portal/v1/catalog", authMw(http.HandlerFunc(h.HandleListCatalog)))
+	// Registered before the {id} pattern for readability only — Go 1.22's mux
+	// resolves by specificity, so the literal segment wins regardless of order.
+	mux.Handle("GET /api/portal/v1/catalog/categories", authMw(http.HandlerFunc(h.HandleListCategories)))
 	mux.Handle("GET /api/portal/v1/catalog/{id}", authMw(http.HandlerFunc(h.HandleGetCatalogProduct)))
+	mux.Handle("GET /api/portal/v1/catalog/{id}/volume-breaks", authMw(http.HandlerFunc(h.HandleVolumeBreaks)))
+
+	// Quote endpoints — a portal user sends a scope, the dealer prices it.
+	mux.Handle("GET /api/portal/v1/quotes", authMw(http.HandlerFunc(h.HandleListQuotes)))
+	mux.Handle("POST /api/portal/v1/quotes", authMw(http.HandlerFunc(h.HandleCreateQuote)))
+	mux.Handle("GET /api/portal/v1/quotes/{id}", authMw(http.HandlerFunc(h.HandleGetQuote)))
+	mux.Handle("POST /api/portal/v1/quotes/{id}/accept", authMw(http.HandlerFunc(h.HandleAcceptQuote)))
+	mux.Handle("POST /api/portal/v1/quotes/{id}/decline", authMw(http.HandlerFunc(h.HandleDeclineQuote)))
 
 	// Cart endpoints (Sprint 27)
 	mux.Handle("GET /api/portal/v1/cart", authMw(http.HandlerFunc(h.HandleGetCart)))
@@ -155,14 +181,89 @@ func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleListOrders returns order history for the customer.
+//
+// Two optional query parameters, both additive — a caller that sends neither
+// gets exactly the response it always got:
+//
+//	?project_id=<uuid>     only orders on that project (verified as the
+//	                       caller's own; someone else's project is a 404)
+//	?since=<RFC3339>       only orders whose updated_at is strictly newer
+//
+// And two response headers that make a 30-second poll cheap:
+//
+//	ETag                   send it back as If-None-Match to get a 304
+//	X-Portal-Latest-Change the cursor to send as ?since= next time
+//
+// The `since` cursor is updated_at rather than created_at deliberately. The
+// consumer's own bug report says an ERP status change it rounds to the same
+// display state (CONFIRMED -> ON_HOLD) was invisible; updated_at moves on
+// every order.UpdateStatus write, so that change is in the feed.
 func (h *Handler) HandleListOrders(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
-	orders, err := h.svc.ListOrders(r.Context(), customerID)
+
+	var filter OrderListFilter
+	if raw := r.URL.Query().Get("project_id"); raw != "" {
+		projectID, err := uuid.Parse(raw)
+		if err != nil {
+			httputil.RespondError(w, r, "Invalid project_id", http.StatusBadRequest, err)
+			return
+		}
+		filter.ProjectID = &projectID
+	}
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		since, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			httputil.RespondError(w, r, "Invalid since: expected an RFC3339 timestamp", http.StatusBadRequest, err)
+			return
+		}
+		filter.Since = &since
+	}
+
+	result, err := h.svc.ListOrdersFiltered(r.Context(), customerID, filter)
 	if err != nil {
-		portalWriteError(w, r, "Failed to load orders", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load orders", err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
-	portalWriteJSON(w, orders)
+
+	w.Header().Set("ETag", result.ETag)
+	// A change feed must not be served from a stale shared cache, and the
+	// response is per-customer. private + must-revalidate lets a browser keep
+	// the body for the conditional request while forbidding a proxy from
+	// handing it to anyone else.
+	w.Header().Set("Cache-Control", "private, no-cache, must-revalidate")
+	if result.LatestUpdatedAt != nil {
+		w.Header().Set("X-Portal-Latest-Change", result.LatestUpdatedAt.UTC().Format(time.RFC3339Nano))
+	}
+
+	if etagMatches(r.Header.Get("If-None-Match"), result.ETag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	portalWriteJSON(w, result.Orders)
+}
+
+// etagMatches implements the If-None-Match comparison for the order feed.
+//
+// Only what this endpoint actually needs: the `*` wildcard, a comma-separated
+// list, and the weak-comparison rule (RFC 9110 §13.1.2 — If-None-Match uses
+// weak comparison, so a `W/` prefix on either side is ignored). Whitespace
+// around list members is stripped because real clients send ", " separators.
+func etagMatches(ifNoneMatch, etag string) bool {
+	if ifNoneMatch == "" {
+		return false
+	}
+	strip := func(s string) string {
+		return strings.TrimPrefix(strings.TrimSpace(s), "W/")
+	}
+	want := strip(etag)
+	for _, candidate := range strings.Split(ifNoneMatch, ",") {
+		c := strip(candidate)
+		if c == "*" || c == want {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleGetOrder returns a single order for the customer.
@@ -262,6 +363,222 @@ func (h *Handler) HandleGetDelivery(w http.ResponseWriter, r *http.Request) {
 	portalWriteJSON(w, del)
 }
 
+// HandleCancelOrder cancels an order on behalf of the customer.
+//
+// 404 for someone else's order (never 403 — that would confirm the id exists),
+// 409 for a refusal the state machine or the dispatch board owns, 200 with the
+// previous status on success so a consumer can show what it changed from.
+func (h *Handler) HandleCancelOrder(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+	customerID := getPortalCustomerID(r)
+
+	orderID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid order ID", http.StatusBadRequest, err)
+		return
+	}
+
+	var req CancelOrderRequest
+	// An empty body is a valid cancellation; a reason is optional.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	resp, err := h.svc.CancelOrder(r.Context(), orderID, customerID, req.Reason)
+	if err != nil {
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
+		return
+	}
+	portalWriteJSON(w, resp)
+}
+
+// HandleSetOrderProject attaches or detaches an order's project.
+func (h *Handler) HandleSetOrderProject(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+	customerID := getPortalCustomerID(r)
+
+	orderID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid order ID", http.StatusBadRequest, err)
+		return
+	}
+
+	var req SetOrderProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
+		return
+	}
+
+	updated, err := h.svc.SetOrderProject(r.Context(), orderID, customerID, req.ProjectID)
+	if err != nil {
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
+		return
+	}
+	portalWriteJSON(w, updated)
+}
+
+// --- Category tree and volume breaks ------------------------------------
+
+// HandleListCategories returns the browsable category hierarchy.
+func (h *Handler) HandleListCategories(w http.ResponseWriter, r *http.Request) {
+	tree, err := h.svc.ListCategoryTree(r.Context())
+	if err != nil {
+		portalWriteError(w, r, "Failed to load categories", err, http.StatusInternalServerError)
+		return
+	}
+	portalWriteJSON(w, tree)
+}
+
+// HandleVolumeBreaks returns this customer's quantity ladder for a product.
+func (h *Handler) HandleVolumeBreaks(w http.ResponseWriter, r *http.Request) {
+	customerID := getPortalCustomerID(r)
+	productID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid product ID", http.StatusBadRequest, err)
+		return
+	}
+
+	breaks, err := h.svc.VolumeBreaksForProduct(r.Context(), customerID, productID)
+	if err != nil {
+		portalWriteError(w, r, "Product not found", err, http.StatusNotFound)
+		return
+	}
+	portalWriteJSON(w, breaks)
+}
+
+// --- Quotes -------------------------------------------------------------
+
+// HandleListQuotes returns the customer's quotes.
+func (h *Handler) HandleListQuotes(w http.ResponseWriter, r *http.Request) {
+	customerID := getPortalCustomerID(r)
+	quotes, err := h.svc.ListQuotes(r.Context(), customerID)
+	if err != nil {
+		portalWriteError(w, r, "Failed to load quotes", err, http.StatusInternalServerError)
+		return
+	}
+	portalWriteJSON(w, quotes)
+}
+
+// HandleGetQuote returns one quote, scoped to the customer.
+func (h *Handler) HandleGetQuote(w http.ResponseWriter, r *http.Request) {
+	customerID := getPortalCustomerID(r)
+	quoteID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid quote ID", http.StatusBadRequest, err)
+		return
+	}
+
+	q, err := h.svc.GetQuote(r.Context(), quoteID, customerID)
+	if err != nil {
+		portalWriteError(w, r, "Quote not found", err, statusForPortalError(err, http.StatusNotFound))
+		return
+	}
+	portalWriteJSON(w, q)
+}
+
+// HandleCreateQuote records a scope for the dealer to price.
+//
+// Validation failures are 400, not 500: "a line with no product_id needs a
+// description" is the client's problem to fix and the message says which line.
+func (h *Handler) HandleCreateQuote(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+	customerID := getPortalCustomerID(r)
+
+	var req CreateQuoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
+		return
+	}
+
+	q, err := h.svc.CreateQuoteRequest(r.Context(), customerID, req)
+	if err != nil {
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusBadRequest))
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	portalWriteJSON(w, q)
+}
+
+// HandleAcceptQuote accepts a priced quote.
+func (h *Handler) HandleAcceptQuote(w http.ResponseWriter, r *http.Request) {
+	h.decideQuote(w, r, h.svc.AcceptQuote)
+}
+
+// HandleDeclineQuote declines a priced quote.
+func (h *Handler) HandleDeclineQuote(w http.ResponseWriter, r *http.Request) {
+	h.decideQuote(w, r, h.svc.DeclineQuote)
+}
+
+func (h *Handler) decideQuote(w http.ResponseWriter, r *http.Request, decide func(context.Context, uuid.UUID, uuid.UUID) (*PortalQuoteDTO, error)) {
+	customerID := getPortalCustomerID(r)
+	quoteID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid quote ID", http.StatusBadRequest, err)
+		return
+	}
+
+	q, err := decide(r.Context(), quoteID, customerID)
+	if err != nil {
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
+		return
+	}
+	portalWriteJSON(w, q)
+}
+
+// --- Delivery reschedule ------------------------------------------------
+
+// HandleRequestReschedule records a customer's ask for a different delivery
+// day.
+//
+// 202 Accepted, not 200 or 201: the ask is recorded, the schedule is NOT
+// changed, and the dispatcher decides. A 200 here would read as "done".
+func (h *Handler) HandleRequestReschedule(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+	customerID := getPortalCustomerID(r)
+
+	deliveryID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid delivery ID", http.StatusBadRequest, err)
+		return
+	}
+
+	var req RescheduleDeliveryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
+		return
+	}
+
+	dto, err := h.svc.RequestDeliveryReschedule(r.Context(), deliveryID, customerID, getPortalUserID(r), req)
+	if err != nil {
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+	portalWriteJSON(w, dto)
+}
+
+// HandleGetReschedule returns the newest reschedule request for a delivery, or
+// 204 when the customer has never filed one.
+func (h *Handler) HandleGetReschedule(w http.ResponseWriter, r *http.Request) {
+	customerID := getPortalCustomerID(r)
+	deliveryID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid delivery ID", http.StatusBadRequest, err)
+		return
+	}
+
+	dto, err := h.svc.GetDeliveryReschedule(r.Context(), deliveryID, customerID)
+	if err != nil {
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
+		return
+	}
+	if dto == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	portalWriteJSON(w, dto)
+}
+
 // getPortalCustomerID extracts the customer UUID from the request context.
 // The middleware guarantees this is present on protected routes.
 func getPortalCustomerID(r *http.Request) uuid.UUID {
@@ -270,6 +587,19 @@ func getPortalCustomerID(r *http.Request) uuid.UUID {
 		return uuid.Nil
 	}
 	return claims.CustomerID
+}
+
+// getPortalUserID extracts the acting customer-user UUID from the request
+// context, or nil when the claims carry none. It is recorded on a reschedule
+// request so the dealer can see which of a contractor's people asked, without
+// the portal having to trust a user id from the request body.
+func getPortalUserID(r *http.Request) *uuid.UUID {
+	claims, ok := r.Context().Value(middleware.PortalClaimsKey).(*middleware.PortalClaims)
+	if !ok || claims == nil || claims.CustomerUserID == uuid.Nil {
+		return nil
+	}
+	id := claims.CustomerUserID
+	return &id
 }
 
 // getPortalUserRole extracts the user role from the request context.
@@ -297,15 +627,16 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 func (h *Handler) HandleListCatalog(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
 	filter := CatalogFilter{
-		Query:    r.URL.Query().Get("q"),
-		Category: r.URL.Query().Get("category"),
-		Species:  r.URL.Query().Get("species"),
-		Grade:    r.URL.Query().Get("grade"),
+		Query:      r.URL.Query().Get("q"),
+		Category:   r.URL.Query().Get("category"),
+		CategoryID: r.URL.Query().Get("category_id"),
+		Species:    r.URL.Query().Get("species"),
+		Grade:      r.URL.Query().Get("grade"),
 	}
 
 	products, err := h.svc.ListCatalog(r.Context(), customerID, filter)
 	if err != nil {
-		portalWriteError(w, r, "Failed to load catalog", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load catalog", err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
 	portalWriteJSON(w, products)

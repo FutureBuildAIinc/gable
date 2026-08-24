@@ -5,6 +5,7 @@ package order
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -242,6 +243,98 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 				"customer_id":  o.CustomerID,
 				"total_amount": o.TotalAmount,
 				"line_count":   len(o.Lines),
+			},
+		})
+	}
+
+	return nil
+}
+
+// ErrOrderAlreadyCancelled is returned when a cancel is attempted on an order
+// that is already CANCELLED. It is a distinct error so callers can render it as
+// a 409 rather than a 500 — cancelling twice is a client mistake, not a server
+// fault, and it must not be allowed to look like a fresh cancellation.
+var ErrOrderAlreadyCancelled = errors.New("order is already cancelled")
+
+// ErrOrderNotCancellable is returned when the order's current status forbids
+// cancellation — today that means FULFILLED, which has already shipped stock,
+// issued an invoice and posted to AR/GL. Reversing that is a credit memo, not
+// a cancel, and pretending otherwise would leave the ledger and the yard
+// disagreeing with the order.
+var ErrOrderNotCancellable = errors.New("order cannot be cancelled in its current status")
+
+// CancelOrder moves an order to CANCELLED, releasing any stock that
+// ConfirmOrder allocated.
+//
+// The state machine this respects is the one ConfirmOrder and FulfillOrder
+// already enforce:
+//
+//	DRAFT     -> CANCELLED   nothing allocated, nothing invoiced
+//	ON_HOLD   -> CANCELLED   ConfirmOrder sets ON_HOLD *before* allocating
+//	                         (credit-limit branch returns early), so there is
+//	                         no allocation to release
+//	CONFIRMED -> CANCELLED   stock is allocated; release it in the same tx as
+//	                         the status write, or a cancel that half-failed
+//	                         would strand allocated inventory nobody can sell
+//	FULFILLED -> refused     ErrOrderNotCancellable
+//	CANCELLED -> refused     ErrOrderAlreadyCancelled (not idempotent on
+//	                         purpose: a second "cancelled" 200 tells a caller
+//	                         it just did something it did not do)
+func (s *Service) CancelOrder(ctx context.Context, id uuid.UUID, reason string) error {
+	o, err := s.repo.GetOrder(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	switch o.Status {
+	case StatusCancelled:
+		return ErrOrderAlreadyCancelled
+	case StatusDraft, StatusOnHold, StatusConfirmed:
+		// cancellable
+	default:
+		return fmt.Errorf("%w: %s", ErrOrderNotCancellable, o.Status)
+	}
+
+	// Only a CONFIRMED order holds an allocation. Releasing on DRAFT/ON_HOLD
+	// would credit stock that was never taken.
+	releaseStock := o.Status == StatusConfirmed && s.inventorySvc != nil
+
+	txFn := func(txCtx context.Context) error {
+		if releaseStock {
+			for _, line := range o.Lines {
+				if err := s.inventorySvc.Release(txCtx, line.ProductID, line.Quantity); err != nil {
+					return fmt.Errorf("failed to release stock for product %s: %w", line.ProductID, err)
+				}
+			}
+		}
+		if err := s.repo.UpdateStatus(txCtx, id, StatusCancelled); err != nil {
+			return fmt.Errorf("failed to update order status: %w", err)
+		}
+		return nil
+	}
+
+	if s.db != nil {
+		if err := s.db.RunInTx(ctx, txFn); err != nil {
+			return err
+		}
+	} else {
+		// Fallback for tests without DB handle
+		if err := txFn(ctx); err != nil {
+			return err
+		}
+	}
+
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "order.cancelled",
+			EntityType: "order",
+			EntityID:   id,
+			Changes: map[string]interface{}{
+				"customer_id":     o.CustomerID,
+				"previous_status": string(o.Status),
+				"total_amount":    o.TotalAmount,
+				"stock_released":  releaseStock,
+				"reason":          reason,
 			},
 		})
 	}

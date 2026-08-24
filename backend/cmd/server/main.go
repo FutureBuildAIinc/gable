@@ -622,6 +622,10 @@ func main() {
 
 	portalRepo := portal.NewRepository(db)
 	portalSvc := portal.NewService(portalRepo, portalJWTSecret, logger, pricingSvc, customerSvc, inventorySvc, orderSvc, productSvc)
+	// Reuse the module-level quoteSvc so a portal accept/decline runs the same
+	// state machine — and the same auto-PO and price-protection side effects —
+	// as a counter salesperson closing the quote from the ERP.
+	portalSvc.WithQuoteService(quoteSvc)
 	portalHandler := portal.NewHandler(portalSvc)
 
 	// Portal auth middleware

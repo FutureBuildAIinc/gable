@@ -34,6 +34,24 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// lineProductID renders a QuoteLine's product reference for a parameterised
+// INSERT, turning uuid.Nil into a SQL NULL.
+//
+// QuoteLine.ProductID is a plain uuid.UUID, not a pointer, so a special-order
+// line — a thing the dealer does not stock, which quote_lines has always
+// allowed via a nullable product_id — round-trips out of GetQuote as
+// uuid.Nil. Writing that back verbatim inserts the all-zeros UUID and trips
+// quote_lines_product_id_fkey, so the quote desk got a 500 the moment it tried
+// to price a quote containing a special-order line. Mapping Nil back to NULL
+// closes the round-trip without changing the model's type (which the ERP
+// frontend also binds to).
+func lineProductID(l *QuoteLine) any {
+	if l.ProductID == uuid.Nil {
+		return nil
+	}
+	return l.ProductID
+}
+
 func (r *PostgresRepository) CreateQuote(ctx context.Context, q *Quote) error {
 	if q.ID == uuid.Nil {
 		q.ID = uuid.New()
@@ -84,8 +102,9 @@ func (r *PostgresRepository) CreateQuote(ctx context.Context, q *Quote) error {
 		// Insert Lines
 		queryLine := `
 			INSERT INTO quote_lines (
-				id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				id, quote_id, product_id, sku, description, customer_note,
+				quantity, uom, unit_price, line_total, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		`
 
 		for i := range q.Lines {
@@ -97,7 +116,7 @@ func (r *PostgresRepository) CreateQuote(ctx context.Context, q *Quote) error {
 			line.CreatedAt = now
 
 			_, err = exec.Exec(txCtx, queryLine,
-				line.ID, line.QuoteID, line.ProductID, line.SKU, line.Description,
+				line.ID, line.QuoteID, lineProductID(line), line.SKU, line.Description, line.CustomerNote,
 				line.Quantity, line.UOM, line.UnitPrice, line.LineTotal, line.CreatedAt,
 			)
 			if err != nil {
@@ -142,7 +161,8 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 
 	// Get Lines (join products for average_unit_cost)
 	queryLines := `
-		SELECT ql.id, ql.quote_id, ql.product_id, ql.sku, ql.description, ql.quantity, ql.uom,
+		SELECT ql.id, ql.quote_id, ql.product_id, ql.sku, ql.description,
+		       COALESCE(ql.customer_note, ''), ql.quantity, ql.uom,
 		       ql.unit_price, COALESCE(p.average_unit_cost, 0), ql.line_total, ql.created_at
 		FROM quote_lines ql
 		LEFT JOIN products p ON p.id = ql.product_id
@@ -158,7 +178,7 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 	for rows.Next() {
 		var l QuoteLine
 		if err := rows.Scan(
-			&l.ID, &l.QuoteID, &l.ProductID, &l.SKU, &l.Description,
+			&l.ID, &l.QuoteID, &l.ProductID, &l.SKU, &l.Description, &l.CustomerNote,
 			&l.Quantity, &l.UOM, &l.UnitPrice, &l.UnitCost, &l.LineTotal, &l.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan quote line: %w", err)
@@ -210,6 +230,35 @@ func (r *PostgresRepository) UpdateQuoteWithLines(ctx context.Context, q *Quote)
 			return fmt.Errorf("failed to update quote header: %w", err)
 		}
 
+		// Snapshot the customer notes BEFORE the delete.
+		//
+		// This method replaces every line, which is how the quote desk edits a
+		// quote. A portal-originated line carries the contractor's own words in
+		// customer_note (migration 084), and an ERP client that does not know
+		// about that column would otherwise wipe it simply by pricing the
+		// quote — the request would arrive, get priced, and come back with the
+		// "what I actually need" text gone. Any line whose id survives the edit
+		// keeps its note unless the caller explicitly supplies a new one.
+		priorNotes := make(map[uuid.UUID]string)
+		noteRows, err := exec.Query(txCtx,
+			`SELECT id, COALESCE(customer_note, '') FROM quote_lines WHERE quote_id = $1`, q.ID)
+		if err != nil {
+			return fmt.Errorf("failed to read existing quote line notes: %w", err)
+		}
+		for noteRows.Next() {
+			var id uuid.UUID
+			var note string
+			if err := noteRows.Scan(&id, &note); err != nil {
+				noteRows.Close()
+				return fmt.Errorf("failed to scan quote line note: %w", err)
+			}
+			priorNotes[id] = note
+		}
+		noteRows.Close()
+		if err := noteRows.Err(); err != nil {
+			return fmt.Errorf("quote line note rows error: %w", err)
+		}
+
 		// Delete old lines
 		_, err = exec.Exec(txCtx, "DELETE FROM quote_lines WHERE quote_id = $1", q.ID)
 		if err != nil {
@@ -218,8 +267,9 @@ func (r *PostgresRepository) UpdateQuoteWithLines(ctx context.Context, q *Quote)
 
 		// Insert new lines
 		lineQuery := `
-			INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			INSERT INTO quote_lines (id, quote_id, product_id, sku, description, customer_note,
+				quantity, uom, unit_price, line_total, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		`
 		now := time.Now()
 		for i := range q.Lines {
@@ -231,8 +281,11 @@ func (r *PostgresRepository) UpdateQuoteWithLines(ctx context.Context, q *Quote)
 			if line.CreatedAt.IsZero() {
 				line.CreatedAt = now
 			}
+			if line.CustomerNote == "" {
+				line.CustomerNote = priorNotes[line.ID]
+			}
 			_, err = exec.Exec(txCtx, lineQuery,
-				line.ID, line.QuoteID, line.ProductID, line.SKU, line.Description,
+				line.ID, line.QuoteID, lineProductID(line), line.SKU, line.Description, line.CustomerNote,
 				line.Quantity, line.UOM, line.UnitPrice, line.LineTotal, line.CreatedAt,
 			)
 			if err != nil {

@@ -1,0 +1,22 @@
+-- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+-- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+-- Rollback for 085_link_products_to_category_tree.sql.
+--
+-- Lives in migrations/down/ so cmd/migrate's `migrations/*.sql` glob cannot
+-- pick it up and apply it as a forward migration. Apply by hand.
+--
+-- There is NO clean rollback for 085 and this file does not pretend otherwise.
+-- 085 fills in category_id where it was NULL; by the time you want to undo it,
+-- there is no way to tell a link 085 wrote from one a dealer set deliberately
+-- afterwards, so unlinking everything would silently discard real
+-- merchandising work.
+--
+-- The statement below is therefore left commented out. Uncomment it ONLY on a
+-- database where you know no manual categorisation has happened since 085 ran
+-- — a freshly seeded demo, for instance.
+--
+--   UPDATE products SET category_id = NULL;
+--
+-- Nothing else in 085 needs undoing: it creates no object and alters no
+-- schema.

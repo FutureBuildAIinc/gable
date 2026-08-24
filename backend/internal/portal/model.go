@@ -71,12 +71,56 @@ type PortalDashboardDTO struct {
 
 // PortalOrderDTO is a customer-facing order summary.
 // TODO: align with int64 cents — TotalAmount is float64 dollars
+//
+// ProjectID, ProjectName and UpdatedAt were added by migration 084's capability
+// pass. They are ADDITIVE: every pre-existing field keeps its name, type and
+// meaning, so a consumer that has never heard of a project keeps working.
 type PortalOrderDTO struct {
 	ID          uuid.UUID       `json:"id"`
 	Status      string          `json:"status"`
 	TotalAmount float64         `json:"total_amount"`
 	CreatedAt   time.Time       `json:"created_at"`
 	Lines       []PortalLineDTO `json:"lines"`
+
+	// ProjectID is the job this order belongs to, or null when it was placed
+	// without one. This is the join a project-shaped consumer groups an order
+	// history by; without it a contractor's pre-portal ERP orders have nowhere
+	// to land on a board.
+	ProjectID   *uuid.UUID `json:"project_id"`
+	ProjectName *string    `json:"project_name"`
+
+	// UpdatedAt is the change-feed cursor. GET /orders?since=<UpdatedAt>
+	// returns only what has moved since, and it advances on every ERP status
+	// write (order.UpdateStatus sets updated_at = NOW()).
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// OrderListFilter narrows GET /api/portal/v1/orders. Both fields are optional;
+// the customer scope is never optional and is applied separately from the
+// session claims.
+type OrderListFilter struct {
+	ProjectID *uuid.UUID
+	Since     *time.Time
+}
+
+// SetOrderProjectRequest is the payload for PUT /orders/{id}/project.
+// A null ProjectID detaches the order from its project.
+type SetOrderProjectRequest struct {
+	ProjectID *uuid.UUID `json:"project_id"`
+}
+
+// CancelOrderRequest is the payload for POST /orders/{id}/cancel. The reason is
+// optional and is recorded on the dealer's audit trail, not shown as policy.
+type CancelOrderRequest struct {
+	Reason string `json:"reason"`
+}
+
+// CancelOrderResponse confirms a cancellation.
+type CancelOrderResponse struct {
+	OrderID        uuid.UUID `json:"order_id"`
+	Status         string    `json:"status"`
+	PreviousStatus string    `json:"previous_status"`
+	Message        string    `json:"message"`
 }
 
 // PortalLineDTO is a customer-facing order/invoice line item.
@@ -142,11 +186,44 @@ type ReorderResponse struct {
 // --- Catalog DTOs ---
 
 // CatalogFilter holds query parameters for catalog browsing.
+//
+// Category is the legacy flat display string and keeps working unchanged.
+// CategoryID is the tree filter: it matches the category AND every descendant
+// of it, via the ltree path on product_categories (migration 049).
 type CatalogFilter struct {
-	Query    string `json:"query"`
-	Category string `json:"category"`
-	Species  string `json:"species"`
-	Grade    string `json:"grade"`
+	Query      string `json:"query"`
+	Category   string `json:"category"`
+	CategoryID string `json:"category_id"`
+	Species    string `json:"species"`
+	Grade      string `json:"grade"`
+}
+
+// CategoryNodeDTO is one node of the browsable category tree.
+//
+// Path is the raw ltree path ("lumber.framing"). Children is nil-free: a leaf
+// serialises as [] rather than null so a consumer can recurse without a
+// null check.
+type CategoryNodeDTO struct {
+	ID           uuid.UUID         `json:"id"`
+	Name         string            `json:"name"`
+	Slug         string            `json:"slug"`
+	Path         string            `json:"path"`
+	Depth        int               `json:"depth"`
+	SortOrder    int               `json:"sort_order"`
+	ProductCount int               `json:"product_count"`
+	Children     []CategoryNodeDTO `json:"children"`
+}
+
+// VolumeBreakDTO is one rung of a product's "buy N and save" ladder.
+//
+// TODO: align with int64 cents — UnitPrice and SavesPerUnit are float64
+// dollars, matching the rest of the portal's wire format.
+type VolumeBreakDTO struct {
+	MinQuantity  float64 `json:"min_quantity"`
+	UnitPrice    float64 `json:"unit_price"`
+	PriceSource  string  `json:"price_source"`
+	Details      string  `json:"details"`
+	SavesPerUnit float64 `json:"saves_per_unit"`
 }
 
 // CatalogProductDTO is a portal-facing product with customer-specific pricing and availability.
@@ -164,6 +241,20 @@ type CatalogProductDTO struct {
 	PriceSource   string    `json:"price_source"`
 	Available     float64   `json:"available"`
 	InStock       bool      `json:"in_stock"`
+
+	// LeadTimeDays is the dealer's published lead time. NULL/null means the
+	// dealer has not published one — it is NOT zero and NOT a default. A
+	// consumer's lead-time-vs-delivery-date warning must stay silent on null
+	// rather than compute against a guess, because a crew gets scheduled
+	// around that number.
+	LeadTimeDays *int `json:"lead_time_days"`
+
+	// Category tree coordinates (migration 049's product_categories). Category
+	// above stays the flat display string it has always been; these are the
+	// structured view, and are null/empty for a product with no category link.
+	CategoryID   *uuid.UUID `json:"category_id"`
+	CategorySlug string     `json:"category_slug"`
+	CategoryPath string     `json:"category_path"`
 }
 
 // CatalogDetailDTO is an extended product detail view for the portal.
@@ -172,6 +263,11 @@ type CatalogDetailDTO struct {
 	WeightLbs float64 `json:"weight_lbs"`
 	UPC       string  `json:"upc"`
 	Vendor    string  `json:"vendor"`
+
+	// VolumeBreaks is the quantity ladder for THIS customer, projected from
+	// the same pricing waterfall that will price the line. Empty when no
+	// break actually beats this customer's single-unit price.
+	VolumeBreaks []VolumeBreakDTO `json:"volume_breaks"`
 }
 
 // --- Cart DTOs ---
@@ -211,11 +307,15 @@ type UpdateCartItemRequest struct {
 }
 
 // CheckoutRequest is the payload for placing an order from the cart.
+//
+// ProjectID is optional and additive; when supplied it must name a project
+// owned by the calling customer, or checkout is refused.
 type CheckoutRequest struct {
-	DeliveryMethod  string `json:"delivery_method"` // DELIVERY or PICKUP
-	DeliveryAddress string `json:"delivery_address"`
-	PaymentMethod   string `json:"payment_method"` // ACCOUNT or CARD
-	Notes           string `json:"notes"`
+	DeliveryMethod  string     `json:"delivery_method"` // DELIVERY or PICKUP
+	DeliveryAddress string     `json:"delivery_address"`
+	PaymentMethod   string     `json:"payment_method"` // ACCOUNT or CARD
+	Notes           string     `json:"notes"`
+	ProjectID       *uuid.UUID `json:"project_id"`
 }
 
 // CheckoutResponse confirms a placed order.

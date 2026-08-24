@@ -623,6 +623,22 @@ func TestRegisterRoutes_OnlyThreeRoutesArePublic(t *testing.T) {
 		{http.MethodGet, "/api/portal/v1/deliveries/" + id},
 		{http.MethodGet, "/api/portal/v1/catalog"},
 		{http.MethodGet, "/api/portal/v1/catalog/" + id},
+		// Capabilities added on top of migration 084. Every one of them reads
+		// or writes customer-scoped data, so every one of them must be behind
+		// the auth middleware — including the category tree, which is not
+		// customer-scoped but must not be a way to enumerate a dealer's
+		// merchandising from outside.
+		{http.MethodPost, "/api/portal/v1/orders/" + id + "/cancel"},
+		{http.MethodPut, "/api/portal/v1/orders/" + id + "/project"},
+		{http.MethodPost, "/api/portal/v1/deliveries/" + id + "/reschedule"},
+		{http.MethodGet, "/api/portal/v1/deliveries/" + id + "/reschedule"},
+		{http.MethodGet, "/api/portal/v1/catalog/categories"},
+		{http.MethodGet, "/api/portal/v1/catalog/" + id + "/volume-breaks"},
+		{http.MethodGet, "/api/portal/v1/quotes"},
+		{http.MethodPost, "/api/portal/v1/quotes"},
+		{http.MethodGet, "/api/portal/v1/quotes/" + id},
+		{http.MethodPost, "/api/portal/v1/quotes/" + id + "/accept"},
+		{http.MethodPost, "/api/portal/v1/quotes/" + id + "/decline"},
 		{http.MethodGet, "/api/portal/v1/cart"},
 		{http.MethodPost, "/api/portal/v1/cart/items"},
 		{http.MethodPut, "/api/portal/v1/cart/items/" + id},

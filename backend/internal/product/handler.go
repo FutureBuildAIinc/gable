@@ -39,6 +39,40 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/products/{id}", guard(h.HandleGetProduct))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/margins", guard(h.HandleUpdateMarginRules))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/dimensions", guard(h.HandleUpdateDimensions))
+	mux.HandleFunc("PATCH /api/v1/products/{id}/lead-time", guard(h.HandleUpdateLeadTime))
+}
+
+// LeadTimeRequest is the body of PATCH /products/{id}/lead-time.
+//
+// LeadTimeDays is a pointer so `{"lead_time_days": null}` clears the value
+// back to "unpublished" and is distinguishable from `{"lead_time_days": 0}`,
+// which is a dealer asserting same-day availability.
+type LeadTimeRequest struct {
+	LeadTimeDays *int `json:"lead_time_days"`
+}
+
+// HandleUpdateLeadTime handles PATCH /products/{id}/lead-time — the dealer-side
+// write for the lead time the portal catalog publishes (migration 084).
+func (h *Handler) HandleUpdateLeadTime(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
+		return
+	}
+
+	var req LeadTimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.UpdateLeadTime(r.Context(), id, req.LeadTimeDays); err != nil {
+		httputil.RespondError(w, r, "failed to update lead time", http.StatusBadRequest, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(req)
 }
 
 // HandleGetProduct handles GET /products/{id}
