@@ -1,7 +1,16 @@
 OpenLBM Commons License, Version 1.0
 ====================================
 
-  Draft pending counsel.
+  Effective. This is a published, in-force version of the OpenLBM Standard.
+
+  Version-pinned. Material licensed under this version stays governed by this
+  text. A later revision of the Standard does not retroactively change terms
+  already accepted, and no licensee is migrated automatically — adopting a new
+  version means changing the SPDX identifiers in your own tree. Changes to
+  these terms as applied to the Gable commons, and to the size thresholds, are
+  subject to the Community Advisory Panel's veto (CHARTER.md §4).
+
+  Canonical text: https://github.com/FutureBuildAIinc/openlbm
 
   An original license authored for the OpenLBM Standard. It borrows *concepts*
   (not text) from the GNU AGPL (network reciprocity), Apache-2.0 (patent

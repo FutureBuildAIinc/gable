@@ -3,7 +3,16 @@ OpenLBM Documentation License 1.0
 SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 Applies to: documentation, specs, guides, and this Standard's prose.
 
-  Draft pending counsel.
+  Effective. This is a published, in-force version of the OpenLBM Standard.
+
+  Version-pinned. Material licensed under this version stays governed by this
+  text. A later revision of the Standard does not retroactively change terms
+  already accepted, and no licensee is migrated automatically — adopting a new
+  version means changing the SPDX identifiers in your own tree. Changes to
+  these terms as applied to the Gable commons, and to the size thresholds, are
+  subject to the Community Advisory Panel's veto (CHARTER.md §4).
+
+  Canonical text: https://github.com/FutureBuildAIinc/openlbm
 
   Incorporates the OpenLBM Definitions Core v1.0 by reference (You, Control,
   Location, Community Member, Large Operator, Production Use, Modification,

@@ -1,7 +1,16 @@
 OpenLBM Community Source License 1.0.0
 =======================================
 
-  Draft pending counsel.
+  Effective. This is a published, in-force version of the OpenLBM Standard.
+
+  Version-pinned. Material licensed under this version stays governed by this
+  text. A later revision of the Standard does not retroactively change terms
+  already accepted, and no licensee is migrated automatically — adopting a new
+  version means changing the SPDX identifiers in your own tree. Changes to
+  these terms as applied to the Gable commons, and to the size thresholds, are
+  subject to the Community Advisory Panel's veto (CHARTER.md §4).
+
+  Canonical text: https://github.com/FutureBuildAIinc/openlbm
 
   This is an original, source-available license in the lineage of the
   Business Source License 1.1 (it retains an Additional Use Grant, which the

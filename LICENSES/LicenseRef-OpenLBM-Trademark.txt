@@ -4,7 +4,14 @@ SPDX-License-Identifier: LicenseRef-OpenLBM-Trademark
 Applies to: the marks "Gable", "GableLBM", "AI_LM", "OpenLBM" + logos.
 NOT a code license — a brand-use policy. Marks held by the Gable Steward.
 
-  Draft pending counsel.
+  Effective. This is a published, in-force version of the OpenLBM Standard.
+
+  Version-pinned. Use permitted under this version stays governed by this text.
+  A later revision does not retroactively narrow a use already permitted.
+  Changes to this policy are subject to the Community Advisory Panel's veto
+  (CHARTER.md §4).
+
+  Canonical text: https://github.com/FutureBuildAIinc/openlbm
 
 1. RESERVATION. The marks are owned by the Gable Steward and licensed to
    FutureBuild for commercial use. No other rights are granted by any code
