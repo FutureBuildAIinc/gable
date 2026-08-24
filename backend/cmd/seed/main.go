@@ -1151,18 +1151,31 @@ func main() {
 	portalUsers := []struct {
 		Customer, Email, Name, Role string
 	}{
-		{"Kelbrook Construction", "demo@kelbrook.ca", "Sam Kelbrook", "admin"},
-		{"Okanagan Homes Ltd", "okhomes@gable.com", "Olivia Homes", "admin"},
-		{"Mission Hill Custom", "missionhill@gable.com", "Marc Mission", "member"},
+		// Roles MUST be one of "Admin", "Buyer", "View-Only" — the vocabulary
+		// internal/portal enforces in InviteUser and UpdateUserRole, and pinned
+		// by service_test.go, which asserts lowercase "admin" is REJECTED.
+		//
+		// This previously seeded "admin"/"member". Neither is valid, so
+		// requireAdmin (handler.go:287, comparing against "Admin") could never
+		// pass for a seeded user: the whole team-management surface —
+		// GET /users, GET/POST /invites, PUT /users/{id}/role and /status —
+		// returned 403 to every demo login, and the role-update endpoint would
+		// have refused to set the role back to anything it recognised.
+		{"Kelbrook Construction", "demo@kelbrook.ca", "Sam Kelbrook", "Admin"},
+		{"Okanagan Homes Ltd", "okhomes@gable.com", "Olivia Homes", "Admin"},
+		{"Mission Hill Custom", "missionhill@gable.com", "Marc Mission", "Buyer"},
 	}
 	for _, pu := range portalUsers {
 		cid, ok := customerIDs[pu.Customer]
 		if !ok {
 			continue
 		}
+		// Re-assert the role on conflict: a database seeded before this fix
+		// still holds the invalid lowercase value, and only updating the
+		// password would leave it there forever.
 		db.Exec(`INSERT INTO customer_users (customer_id, email, password_hash, name, role)
 			VALUES ($1,$2,$3,$4,$5)
-			ON CONFLICT (email) DO UPDATE SET password_hash=$3`, cid, pu.Email, string(pwHash), pu.Name, pu.Role)
+			ON CONFLICT (email) DO UPDATE SET password_hash=$3, role=$5`, cid, pu.Email, string(pwHash), pu.Name, pu.Role)
 	}
 	fmt.Println("Seed: Portal Users (demo@kelbrook.ca / okhomes@gable.com / missionhill@gable.com, password: 'password')")
 

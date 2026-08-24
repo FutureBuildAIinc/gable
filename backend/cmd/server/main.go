@@ -647,6 +647,14 @@ func main() {
 					CustomerID: demoCustomerID,
 					Email:      "demo@kelbrook.ca",
 					Name:       "Sam Kelbrook",
+					// Role is load-bearing and was previously left empty, so
+					// getPortalUserRole returned "" and requireAdmin refused
+					// every request: GET /users, GET/POST /invites and the
+					// role/status endpoints all returned 403 in dev mode, which
+					// is the only mode the demo runs in. Team management looked
+					// broken rather than bypassed. "Admin" matches the
+					// vocabulary internal/portal enforces.
+					Role: "Admin",
 				}
 				ctx := context.WithValue(r.Context(), middleware.PortalClaimsKey, claims)
 				next.ServeHTTP(w, r.WithContext(ctx))
