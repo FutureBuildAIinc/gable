@@ -167,27 +167,27 @@ func TestVolumeBreaks_LadderIsMonotonic(t *testing.T) {
 	}
 }
 
-// KNOWN BUG — the deepest applicable quantity break does not win.
+// CORRECTNESS: the deepest applicable quantity break wins a tie.
 //
-// CalculatePriceWithQty returns on the FIRST rule GetMatchingRules yields, and
-// the ordering is `priority DESC, rule_type ASC` (repository.go). Two
-// QUANTITY_BREAK rules on the same product at the same priority therefore tie,
-// and the tie is broken by whatever order Postgres happens to return — so a
-// customer buying 100 can be charged the 20+ price. It is first-match, not
-// best-price, and nothing in the ordering ranks a rule by how specific its
+// CalculatePriceWithQty used to return on the FIRST rule GetMatchingRules
+// yields, and the ordering is `priority DESC, rule_type ASC` (repository.go).
+// Two QUANTITY_BREAK rules on the same product at the same priority therefore
+// tied, and the tie was broken by whatever order Postgres happened to return —
+// so a customer buying 100 could be charged the 20+ price. It was first-match,
+// not best-price, and nothing in the ordering ranked a rule by how specific its
 // quantity band is.
 //
-// Observed live: two rules created on CORN2006 at priority 10 (20+ at 8% off,
-// 100+ at 12% off) produced $21.39 at BOTH qty 20 and qty 100 — the 12% rule
-// was unreachable.
+// Observed live before the fix: two rules created on CORN2006 at priority 10
+// (20+ at 8% off, 100+ at 12% off) produced $21.39 at BOTH qty 20 and qty 100 —
+// the 12% rule was unreachable.
 //
-// VolumeBreaks does the right thing in the face of this: it drops the 100+
-// rung rather than advertising a price the engine will not honour, which is
-// why the ladder tests above pass. This test pins the behaviour the ENGINE
-// should have.
+// selectRule now breaks that tie, and only that tie: the leading candidate
+// fixes the (priority, rule_type) band and the best rule inside the band wins.
+//
+// VolumeBreaks did the right thing in the face of the bug: it dropped the 100+
+// rung rather than advertising a price the engine would not honour, which is
+// why the ladder tests above passed either way. This test pins the ENGINE.
 func TestCalculatePriceWithQty_DeepestBreakShouldWin(t *testing.T) {
-	t.Skip("KNOWN BUG: pricing.CalculatePriceWithQty returns the first rule from GetMatchingRules (ORDER BY priority DESC, rule_type ASC) instead of the best-priced applicable one, so two QUANTITY_BREAK rules at the same priority tie and the deeper break is unreachable")
-
 	prod := uuid.New()
 	repo := &MockRepository{
 		contracts: map[string]CustomerContract{},
@@ -206,23 +206,127 @@ func TestCalculatePriceWithQty_DeepestBreakShouldWin(t *testing.T) {
 	if got.FinalPrice != 8.80 {
 		t.Errorf("at qty 100 the price is %v, want 8.80 (the 12%% break); the 8%% break at $9.20 means the deeper rung was skipped", got.FinalPrice)
 	}
+	if got.Details != "100+" {
+		t.Errorf("Details = %q, want %q — the winning rule should be named in the quote", got.Details, "100+")
+	}
+
+	// The shallow buyer is unaffected: at qty 20 the 100+ rung does not apply
+	// at all, so the 8% rule is the only candidate.
+	got20, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 20, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty(qty 20): %v", err)
+	}
+	if got20.FinalPrice != 9.20 {
+		t.Errorf("at qty 20 the price is %v, want 9.20 (the 8%% break)", got20.FinalPrice)
+	}
 }
 
-// KNOWN BUG — pricing_rules.category is a dead scope column.
+// CORRECTNESS: priority is an override lever and the tie-break must not become
+// a back door around it. A dealer who forces a shallow rule to the top of the
+// stack gets that rule, even though a cheaper break is sitting right there.
+func TestCalculatePriceWithQty_PriorityStillOverridesADeeperBreak(t *testing.T) {
+	prod := uuid.New()
+	repo := &MockRepository{
+		contracts: map[string]CustomerContract{},
+		rules: []PricingRule{
+			breakRule("20+ forced", prod, 20, 8, 99),    // dealer override
+			breakRule("100+ deeper", prod, 100, 12, 10), // deeper AND cheaper, but outranked
+		},
+	}
+	svc := NewService(repo)
+
+	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 100, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty: %v", err)
+	}
+	if got.FinalPrice != 9.20 {
+		t.Errorf("FinalPrice = %v, want 9.20: priority 99 forces the 8%% rule, so picking the cheaper 12%% rule would delete the override mechanism", got.FinalPrice)
+	}
+	if got.Details != "20+ forced" {
+		t.Errorf("Details = %q, want %q", got.Details, "20+ forced")
+	}
+}
+
+// CORRECTNESS: a tie between rule TYPES is still resolved by the documented
+// waterfall order (job override, then promotional, then quantity break), not by
+// price. The tie-break only reaches inside one (priority, rule_type) band.
+func TestCalculatePriceWithQty_PromoOutranksABreakAtTheSamePriority(t *testing.T) {
+	prod := uuid.New()
+	promo := PricingRule{
+		ID:          uuid.New(),
+		Name:        "Fall Promo",
+		RuleType:    RuleTypePromotional,
+		ProductID:   &prod,
+		DiscountPct: ptr(5.0),
+		IsActive:    true,
+		Priority:    10,
+	}
+	repo := &MockRepository{
+		contracts: map[string]CustomerContract{},
+		rules:     []PricingRule{promo, breakRule("100+", prod, 100, 12, 10)},
+	}
+	svc := NewService(repo)
+
+	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 100, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty: %v", err)
+	}
+	if got.Source != SourcePromotional || got.FinalPrice != 9.50 {
+		t.Errorf("got %v at %v, want PROMOTIONAL at 9.50: rule_type ASC puts PROMOTIONAL ahead of QUANTITY_BREAK in the same priority band", got.Source, got.FinalPrice)
+	}
+}
+
+// CORRECTNESS: a misconfigured ladder — a deeper rung priced ABOVE the
+// shallower rung beside it at the same priority — must not charge the larger
+// buyer more than the smaller one. The qty-100 customer could get 15% by
+// splitting the order into five qty-20 lines, so honouring 15% costs the
+// dealer nothing they were not already going to lose, and it keeps the engine
+// consistent with the ladder VolumeBreaks advertises.
+func TestCalculatePriceWithQty_MisconfiguredLadderNeverPunishesTheBiggerBuyer(t *testing.T) {
+	prod := uuid.New()
+	repo := &MockRepository{
+		contracts: map[string]CustomerContract{},
+		rules: []PricingRule{
+			breakRule("20+", prod, 20, 15, 10),
+			breakRule("100+ (typo: shallower discount)", prod, 100, 5, 10),
+		},
+	}
+	svc := NewService(repo)
+	cust := &customer.Customer{ID: uuid.New()}
+
+	at20, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 20, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty(20): %v", err)
+	}
+	at100, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 100, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty(100): %v", err)
+	}
+	if at100.FinalPrice > at20.FinalPrice {
+		t.Errorf("qty 100 costs %v/unit but qty 20 costs %v/unit — buying more must never cost more per unit", at100.FinalPrice, at20.FinalPrice)
+	}
+	if at100.FinalPrice != 8.50 {
+		t.Errorf("at qty 100 the price is %v, want 8.50 (the 15%% rung the customer already qualifies for)", at100.FinalPrice)
+	}
+}
+
+// CORRECTNESS: pricing_rules.category is a real scope column.
 //
-// CreateRule writes it and GetMatchingRules selects it back into
-// PricingRule.Category, but it appears in NO WHERE clause anywhere in this
-// package. A rule the dealer scoped to "Roofing" therefore prices every
+// CreateRule wrote it and GetMatchingRules selected it back into
+// PricingRule.Category, but it appeared in NO WHERE clause anywhere in this
+// package. A rule the dealer scoped to "Roofing" therefore priced every
 // product in the catalog.
 //
-// This is live in the seeded database: cmd/seed/main.go creates
+// This was live in the seeded database: cmd/seed/main.go creates
 // "Spring Roofing Promo" (category "Roofing") and "Lumber Qty Break 100+"
-// (category "Lumber") with product_id NULL, and both match a cornice flashing
-// SKU. Fixing it changes prices on the ERP side, so it is reported rather than
-// patched here.
+// (category "Lumber") with product_id NULL, and both matched a cornice flashing
+// SKU.
+//
+// The scope match now lives in repository.go's categoryScopePredicate, which
+// MockRepository mirrors in Go (see ruleCategoryMatches). The Postgres half —
+// the ltree ancestor walk and the flat-string arm — is exercised against a real
+// database in repository_category_scope_test.go.
 func TestGetMatchingRules_ShouldHonourCategoryScope(t *testing.T) {
-	t.Skip("KNOWN BUG: pricing_rules.category is written by CreateRule and read back by GetMatchingRules but never appears in a WHERE clause, so a category-scoped rule applies to every product")
-
 	prod := uuid.New()
 	roofingOnly := PricingRule{
 		ID:          uuid.New(),
@@ -242,5 +346,78 @@ func TestGetMatchingRules_ShouldHonourCategoryScope(t *testing.T) {
 	}
 	if got.Source == SourcePromotional {
 		t.Errorf("a Roofing-scoped promo priced a non-roofing product: %+v", got)
+	}
+}
+
+// CORRECTNESS: the flip side — a category-scoped rule DOES reach a product in
+// that category, including through an ancestor. Scope that only ever says "no"
+// is not scope, it is an outage.
+func TestGetMatchingRules_CategoryScopeReachesItsOwnCategory(t *testing.T) {
+	roofProd, lumberProd := uuid.New(), uuid.New()
+	roofingPromo := PricingRule{
+		ID:          uuid.New(),
+		Name:        "Spring Roofing Promo",
+		RuleType:    RuleTypePromotional,
+		Category:    "Roofing",
+		DiscountPct: ptr(5.0),
+		IsActive:    true,
+	}
+	repo := &MockRepository{
+		contracts: map[string]CustomerContract{},
+		rules:     []PricingRule{roofingPromo},
+		productCategories: map[uuid.UUID][]string{
+			// A roofing SKU: own node plus its slug.
+			roofProd: {"Roofing", "roofing"},
+			// A framing SKU: own node, its slug, and its ANCESTOR — which is
+			// what `pc.path <@ anc.path` resolves in SQL. 'Roofing' is not in
+			// this list, so the promo must not reach it.
+			lumberProd: {"Framing Lumber", "framing_lumber", "Lumber", "lumber"},
+		},
+	}
+	svc := NewService(repo)
+	cust := &customer.Customer{ID: uuid.New()}
+
+	onRoofing, err := svc.CalculatePriceWithQty(context.Background(), cust, roofProd, 10.00, 1, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty(roofing): %v", err)
+	}
+	if onRoofing.Source != SourcePromotional || onRoofing.FinalPrice != 9.50 {
+		t.Errorf("roofing product priced %v from %v, want 9.50 from PROMOTIONAL", onRoofing.FinalPrice, onRoofing.Source)
+	}
+
+	onLumber, err := svc.CalculatePriceWithQty(context.Background(), cust, lumberProd, 10.00, 1, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty(lumber): %v", err)
+	}
+	if onLumber.Source == SourcePromotional {
+		t.Errorf("the Roofing promo reached a framing SKU: %+v", onLumber)
+	}
+}
+
+// CORRECTNESS: a rule scoped to a PARENT category covers its descendants. This
+// is the ltree arm of the predicate, expressed through the ancestor strings the
+// mock carries: a "Lumber" rule has to price a product filed under
+// 'lumber.framing' without the dealer restating it per leaf.
+func TestGetMatchingRules_ParentCategoryRuleCoversDescendants(t *testing.T) {
+	framingProd := uuid.New()
+	lumberBreak := breakRule("Lumber Qty Break 100+", uuid.New(), 100, 10, 0)
+	lumberBreak.ProductID = nil // catalog-wide within the category
+	lumberBreak.Category = "Lumber"
+
+	repo := &MockRepository{
+		contracts: map[string]CustomerContract{},
+		rules:     []PricingRule{lumberBreak},
+		productCategories: map[uuid.UUID][]string{
+			framingProd: {"Framing Lumber", "framing_lumber", "Lumber", "lumber"},
+		},
+	}
+	svc := NewService(repo)
+
+	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, framingProd, 10.00, 100, nil)
+	if err != nil {
+		t.Fatalf("CalculatePriceWithQty: %v", err)
+	}
+	if got.Source != SourceQuantityBreak || got.FinalPrice != 9.00 {
+		t.Errorf("got %v at %v, want QUANTITY_BREAK at 9.00: a rule on the parent category must reach a product in a child category", got.Source, got.FinalPrice)
 	}
 }

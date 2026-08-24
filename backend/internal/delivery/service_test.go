@@ -27,6 +27,13 @@ type MockRepository struct {
 	branchOrigin *BranchOrigin
 	orderAddrs   map[uuid.UUID]string
 
+	// Configurable inputs for the single-delivery and assign paths.
+	delivery *Delivery
+	vehicle  *Vehicle
+
+	// createdDelivery captures what AssignOrderToRoute handed the repository.
+	createdDelivery *Delivery
+
 	// Captured writes for assertions.
 	reorderedIDs   []uuid.UUID
 	etas           map[uuid.UUID]time.Time
@@ -38,7 +45,7 @@ type MockRepository struct {
 func (m *MockRepository) CreateVehicle(ctx context.Context, v *Vehicle) error { return nil }
 func (m *MockRepository) ListVehicles(ctx context.Context) ([]Vehicle, error) { return nil, nil }
 func (m *MockRepository) GetVehicle(ctx context.Context, id uuid.UUID) (*Vehicle, error) {
-	return nil, nil
+	return m.vehicle, nil
 }
 func (m *MockRepository) UpdateVehicle(ctx context.Context, id uuid.UUID, v *Vehicle) error {
 	return nil
@@ -58,6 +65,11 @@ func (m *MockRepository) DeleteDriver(ctx context.Context, id uuid.UUID) error {
 
 func (m *MockRepository) CreateRoute(ctx context.Context, r *Route) error { return nil }
 func (m *MockRepository) GetRoute(ctx context.Context, id uuid.UUID) (*Route, error) {
+	for i := range m.routes {
+		if m.routes[i].ID == id {
+			return &m.routes[i], nil
+		}
+	}
 	return nil, nil
 }
 func (m *MockRepository) ListRoutes(ctx context.Context, date *time.Time, driverID *uuid.UUID) ([]Route, error) {
@@ -78,9 +90,12 @@ func (m *MockRepository) UpdateRouteStatus(ctx context.Context, id uuid.UUID, st
 	return nil
 }
 
-func (m *MockRepository) CreateDelivery(ctx context.Context, d *Delivery) error { return nil }
+func (m *MockRepository) CreateDelivery(ctx context.Context, d *Delivery) error {
+	m.createdDelivery = d
+	return nil
+}
 func (m *MockRepository) GetDelivery(ctx context.Context, id uuid.UUID) (*Delivery, error) {
-	return nil, nil
+	return m.delivery, nil
 }
 func (m *MockRepository) ListDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) ([]Delivery, error) {
 	return m.deliveries, nil
@@ -516,5 +531,108 @@ func TestRouteOptimizationResultJSONContract(t *testing.T) {
 		if !strings.Contains(got, key) {
 			t.Errorf("RouteOptimizationResult JSON missing %s; got %s", key, got)
 		}
+	}
+}
+
+// TestGetDelivery_UnroutedStopSerialisesAsNull pins the wire shape of an
+// unrouted stop.
+//
+// deliveries.route_id is nullable (migration 009) and cmd/seed/dispatch_day.go
+// writes exactly that state on purpose: a geocoded stop that is not on a route
+// yet, which is what AI_LM's optimizer consumes and resolves. Delivery.RouteID
+// was a plain uuid.UUID, so pgx scanned NULL to the zero value and
+// GET /api/v1/delivery/deliveries/{id} answered
+// "route_id":"00000000-0000-0000-0000-000000000000".
+//
+// That is not a cosmetic wart. A client cannot distinguish "not routed yet"
+// from a real route id without special-casing a magic constant, and the
+// all-zero uuid is a value the column's foreign key to delivery_routes could
+// never hold — the API was inventing a route that does not exist.
+func TestGetDelivery_UnroutedStopSerialisesAsNull(t *testing.T) {
+	repo := &MockRepository{delivery: &Delivery{
+		ID:           uuid.New(),
+		RouteID:      nil, // the unrouted stop
+		OrderID:      uuid.New(),
+		StopSequence: 1,
+		Status:       DeliveryStatusPending,
+	}}
+	svc := NewService(repo)
+	mux := http.NewServeMux()
+	NewHandler(svc).RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v1/delivery/deliveries/"+repo.delivery.ID.String(), nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"route_id":null`) {
+		t.Errorf(`body has no "route_id":null; got %s`, body)
+	}
+	if strings.Contains(body, "00000000-0000-0000-0000-000000000000") {
+		t.Errorf("an unrouted stop reported the zero uuid as its route: %s", body)
+	}
+}
+
+// TestGetDelivery_RoutedStopKeepsItsRouteID is the other half: making the field
+// nullable must not turn a real route id into null.
+func TestGetDelivery_RoutedStopKeepsItsRouteID(t *testing.T) {
+	routeID := uuid.New()
+	repo := &MockRepository{delivery: &Delivery{
+		ID:           uuid.New(),
+		RouteID:      &routeID,
+		OrderID:      uuid.New(),
+		StopSequence: 2,
+		Status:       DeliveryStatusPending,
+	}}
+	svc := NewService(repo)
+	mux := http.NewServeMux()
+	NewHandler(svc).RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v1/delivery/deliveries/"+repo.delivery.ID.String(), nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got Delivery
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v (body %s)", err, rec.Body.String())
+	}
+	if got.RouteID == nil || *got.RouteID != routeID {
+		t.Errorf("RouteID = %v, want %v", got.RouteID, routeID)
+	}
+}
+
+// TestAssignOrderToRoute_SetsTheRoute closes the loop: assigning an order to a
+// route has to produce a delivery that names it. A pointer field makes "forgot
+// to set it" indistinguishable from "not routed" unless something checks.
+func TestAssignOrderToRoute_SetsTheRoute(t *testing.T) {
+	routeID, vehicleID := uuid.New(), uuid.New()
+	repo := &MockRepository{
+		routes:  []Route{{ID: routeID, VehicleID: vehicleID, Status: RouteStatusDraft}},
+		vehicle: &Vehicle{ID: vehicleID},
+	}
+	svc := NewService(repo)
+
+	d, warning, err := svc.AssignOrderToRoute(context.Background(), AssignOrderRequest{
+		RouteID:      routeID,
+		OrderID:      uuid.New(),
+		StopSequence: 1,
+	})
+	if err != nil {
+		t.Fatalf("AssignOrderToRoute: %v", err)
+	}
+	if warning != nil {
+		t.Errorf("unexpected capacity warning: %+v", warning)
+	}
+	if d.RouteID == nil || *d.RouteID != routeID {
+		t.Fatalf("returned delivery RouteID = %v, want %v", d.RouteID, routeID)
+	}
+	if repo.createdDelivery == nil || repo.createdDelivery.RouteID == nil || *repo.createdDelivery.RouteID != routeID {
+		t.Errorf("the row handed to the repository does not carry the route: %+v", repo.createdDelivery)
 	}
 }

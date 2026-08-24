@@ -49,12 +49,17 @@ type CustomerContract struct {
 }
 
 type PricingRule struct {
-	ID             uuid.UUID  `json:"id"`
-	Name           string     `json:"name"`
-	RuleType       RuleType   `json:"rule_type"`
-	ProductID      *uuid.UUID `json:"product_id,omitempty"`
-	CustomerID     *uuid.UUID `json:"customer_id,omitempty"`
-	JobID          *uuid.UUID `json:"job_id,omitempty"`
+	ID         uuid.UUID  `json:"id"`
+	Name       string     `json:"name"`
+	RuleType   RuleType   `json:"rule_type"`
+	ProductID  *uuid.UUID `json:"product_id,omitempty"`
+	CustomerID *uuid.UUID `json:"customer_id,omitempty"`
+	JobID      *uuid.UUID `json:"job_id,omitempty"`
+	// Category scopes the rule to a product category. Empty means unscoped:
+	// the rule applies to every product. The column is nullable and the
+	// repository COALESCEs NULL to "", so NULL and "" are the same thing here.
+	// See categoryScopePredicate in repository.go for how a non-empty value is
+	// matched (flat products.category string, or the ltree node/ancestor).
 	Category       string     `json:"category,omitempty"`
 	FixedPrice     *float64   `json:"fixed_price,omitempty"`
 	DiscountPct    *float64   `json:"discount_pct,omitempty"`

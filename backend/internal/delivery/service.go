@@ -344,7 +344,7 @@ func (s *Service) AssignOrderToRoute(ctx context.Context, req AssignOrderRequest
 	}
 
 	d := &Delivery{
-		RouteID:              req.RouteID,
+		RouteID:              &req.RouteID,
 		OrderID:              req.OrderID,
 		StopSequence:         req.StopSequence,
 		Status:               DeliveryStatusPending,

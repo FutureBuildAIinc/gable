@@ -67,38 +67,15 @@ func (s *Service) CalculatePriceWithQty(ctx context.Context, cust *customer.Cust
 		rules = nil
 	}
 
-	for _, rule := range rules {
-		finalPrice := basePrice
+	if winner, finalPrice, details, ok := selectRule(rules, basePrice); ok {
 		source := SourceRetail
-		details := rule.Name
-
-		switch rule.RuleType {
+		switch winner.RuleType {
 		case RuleTypeJobOverride:
 			source = SourceJobOverride
 		case RuleTypePromotional:
 			source = SourcePromotional
 		case RuleTypeQuantityBreak:
 			source = SourceQuantityBreak
-		}
-
-		// Apply the rule's pricing adjustment
-		if rule.FixedPrice != nil {
-			finalPrice = *rule.FixedPrice
-		} else if rule.DiscountPct != nil {
-			finalPrice = basePrice * (1 - *rule.DiscountPct/100)
-		} else if rule.MarkupPct != nil {
-			finalPrice = basePrice * (1 + *rule.MarkupPct/100)
-		} else {
-			continue // No pricing action defined
-		}
-
-		// Margin floor protection
-		if rule.MarginFloorPct != nil && basePrice > 0 {
-			minPrice := basePrice * (1 - *rule.MarginFloorPct/100)
-			if finalPrice < minPrice {
-				finalPrice = minPrice
-				details = fmt.Sprintf("%s (margin floor applied)", details)
-			}
 		}
 
 		discountPct := 0.0
@@ -199,6 +176,112 @@ func (s *Service) CalculatePriceWithQty(ctx context.Context, cust *customer.Cust
 		Source:        SourceRetail,
 		Details:       "Base Retail Price",
 	}, nil
+}
+
+// applyRule computes the price `rule` produces for basePrice, including margin
+// floor protection, and the human-readable detail string that goes with it.
+//
+// ok is false when the rule names no pricing action at all (no fixed price, no
+// discount, no markup). Such a rule is inert: the waterfall skips it and looks
+// at the next candidate, which is what the original inline loop did with its
+// `continue`.
+func applyRule(rule PricingRule, basePrice float64) (finalPrice float64, details string, ok bool) {
+	details = rule.Name
+
+	switch {
+	case rule.FixedPrice != nil:
+		finalPrice = *rule.FixedPrice
+	case rule.DiscountPct != nil:
+		finalPrice = basePrice * (1 - *rule.DiscountPct/100)
+	case rule.MarkupPct != nil:
+		finalPrice = basePrice * (1 + *rule.MarkupPct/100)
+	default:
+		return 0, "", false
+	}
+
+	// Margin floor protection.
+	if rule.MarginFloorPct != nil && basePrice > 0 {
+		minPrice := basePrice * (1 - *rule.MarginFloorPct/100)
+		if finalPrice < minPrice {
+			finalPrice = minPrice
+			details = fmt.Sprintf("%s (margin floor applied)", details)
+		}
+	}
+
+	return finalPrice, details, true
+}
+
+// selectRule picks which of the candidate rules GetMatchingRules returned
+// actually prices the line, and returns the price and details it produces.
+//
+// The candidates arrive ordered `priority DESC, rule_type ASC`, and BOTH keys
+// carry meaning that has to survive:
+//
+//   - priority is the dealer's override lever. A rule at priority 50 is meant
+//     to beat everything below it, full stop, even when something cheaper
+//     exists. Ranking globally by price would silently delete that lever.
+//   - rule_type ASC happens to sort JOB_OVERRIDE < PROMOTIONAL <
+//     QUANTITY_BREAK, which is exactly steps 2, 3 and 4 of the documented
+//     waterfall. Within one priority band the earlier step wins.
+//
+// What the ordering does NOT rank is two rules that agree on both keys, and
+// that is the whole bug: two QUANTITY_BREAK rules on the same product at the
+// same priority tie, the tie is broken by whatever order Postgres returns the
+// rows in, and taking the first one means a contractor buying 100 can be
+// charged the 20+ price. The deeper rung is unreachable, not merely unlikely.
+//
+// So the tie — and ONLY the tie — is broken here. The leading candidate fixes
+// the (priority, rule_type) band; if that band is QUANTITY_BREAK, every other
+// candidate in the same band is considered and the best one wins. Everything
+// outside the band is left alone, so priority still overrides and job/promo
+// rules still outrank breaks.
+//
+// "Best" inside the band is the price the customer pays, lowest first, with a
+// deeper rung breaking a price tie. The intent of a quantity break is that
+// buying more costs less per unit, so on any coherently configured ladder the
+// deepest applicable rung IS the cheapest and the two readings agree. They only
+// diverge on a ladder someone has misconfigured — a 100+ rung priced above the
+// 20+ rung sitting next to it — and there we deliberately refuse to charge the
+// larger buyer more than the smaller one. Handing the qty-100 order to the
+// shallower-but-cheaper rung is the same price the customer would get by
+// splitting the order in five, so honouring it costs the dealer nothing that
+// the dealer was not already going to lose, and it keeps the ladder
+// VolumeBreaks advertises consistent with the engine that bills it.
+func selectRule(rules []PricingRule, basePrice float64) (PricingRule, float64, string, bool) {
+	lead := -1
+	var bestPrice float64
+	var bestDetails string
+	for i, r := range rules {
+		price, details, ok := applyRule(r, basePrice)
+		if !ok {
+			continue // inert rule — no pricing action defined
+		}
+		lead, bestPrice, bestDetails = i, price, details
+		break
+	}
+	if lead < 0 {
+		return PricingRule{}, 0, "", false
+	}
+
+	best := rules[lead]
+	if best.RuleType != RuleTypeQuantityBreak {
+		return best, bestPrice, bestDetails, true
+	}
+
+	for _, r := range rules[lead+1:] {
+		if r.RuleType != RuleTypeQuantityBreak || r.Priority != best.Priority {
+			continue // different band — priority and the waterfall order decide
+		}
+		price, details, ok := applyRule(r, basePrice)
+		if !ok {
+			continue
+		}
+		if price < bestPrice || (price == bestPrice && r.MinQuantity > best.MinQuantity) {
+			best, bestPrice, bestDetails = r, price, details
+		}
+	}
+
+	return best, bestPrice, bestDetails, true
 }
 
 func (s *Service) CreateRule(ctx context.Context, rule *PricingRule) error {

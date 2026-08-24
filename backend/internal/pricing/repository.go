@@ -72,9 +72,69 @@ func (r *PostgresRepository) CreateContract(ctx context.Context, c *CustomerCont
 	return nil
 }
 
+// categoryScopePredicate is the SQL that makes pricing_rules.category an actual
+// scope instead of a decorative label. It takes the product id as $1 and is
+// shared verbatim by GetMatchingRules and ListBreakQuantities so the two can
+// never drift — ListBreakQuantities' contract is that its candidates are
+// exactly the rules the waterfall could reach.
+//
+// A rule with no category is unscoped and matches everything, as before. A rule
+// WITH a category matches on either of two readings, and it needs both:
+//
+//   - the flat products.category display string, matched case- and
+//     whitespace-insensitively. This is the taxonomy the catalog actually
+//     shows, and three of the demo catalog's categories ('Cornice', 'Millwork',
+//     'Sheet Goods') still have no node in the tree — migration 085 explains
+//     why a migration must not invent them. Dropping this arm would silently
+//     switch off the seeded "Sheet Goods Qty Break 50+" rule.
+//
+//   - the tree: the name or slug of the product's own product_categories node
+//     OR OF ANY ANCESTOR of it, via `pc.path <@ anc.path`. This is what ltree
+//     is for and it is the reading that scales: a rule the dealer writes
+//     against 'Lumber' has to reach a product filed under 'lumber.framing'
+//     without the dealer restating the rule once per leaf.
+//
+// The two arms are OR'd rather than one replacing the other because
+// pricing_rules.category is a STRING and products now carry BOTH a string and a
+// tree link. Matching only the tree would break rules written against
+// un-noded categories; matching only the string would make a parent-category
+// rule useless, which is the whole reason the tree exists. Either arm hitting
+// is enough, and a rule whose category matches nothing at all reaches nothing —
+// scope fails closed, so a typo costs a discount rather than giving one away
+// catalog-wide.
+const categoryScopePredicate = `(
+			pricing_rules.category IS NULL
+			OR TRIM(pricing_rules.category) = ''
+			OR EXISTS (
+				SELECT 1
+				FROM products p
+				LEFT JOIN product_categories pc ON pc.id = p.category_id
+				WHERE p.id = $1
+				  AND (
+					LOWER(TRIM(p.category)) = LOWER(TRIM(pricing_rules.category))
+					OR EXISTS (
+						SELECT 1
+						FROM product_categories anc
+						WHERE pc.path <@ anc.path
+						  AND (
+							LOWER(anc.name) = LOWER(TRIM(pricing_rules.category))
+							OR LOWER(anc.slug) = LOWER(TRIM(pricing_rules.category))
+						  )
+					)
+				  )
+			)
+		)`
+
 func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity float64) ([]PricingRule, error) {
+	// COALESCE on category: the column is nullable but PricingRule.Category is
+	// a plain string, and pgx refuses to scan NULL into one. Without this, a
+	// single rule row with a NULL category makes the whole query fail — and
+	// CalculatePriceWithQty swallows that error and falls through to tier
+	// pricing, so ONE such row silently switches off every pricing rule in the
+	// system for every product. NULL and '' both mean "not category-scoped",
+	// which is what the model already treats "" as.
 	query := `
-		SELECT id, name, rule_type, product_id, customer_id, job_id, category,
+		SELECT id, name, rule_type, product_id, customer_id, job_id, COALESCE(category, ''),
 			fixed_price, discount_pct, markup_pct, min_quantity, max_quantity,
 			margin_floor_pct, starts_at, expires_at, is_active, priority, created_at, updated_at
 		FROM pricing_rules
@@ -86,6 +146,7 @@ func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uui
 			AND (max_quantity IS NULL OR max_quantity >= $4)
 			AND (starts_at IS NULL OR starts_at <= NOW())
 			AND (expires_at IS NULL OR expires_at > NOW())
+			AND ` + categoryScopePredicate + `
 		ORDER BY priority DESC, rule_type ASC
 	`
 
@@ -114,8 +175,9 @@ func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uui
 // QUANTITY_BREAK rule could apply to this (product, customer) pair.
 //
 // The scope predicate is deliberately identical to GetMatchingRules' —
-// same product/customer NULL-or-equal matching, same active/date window — so
-// the candidates this returns are exactly the rules the waterfall could reach.
+// same product/customer NULL-or-equal matching, same category scope (it shares
+// categoryScopePredicate literally), same active/date window — so the
+// candidates this returns are exactly the rules the waterfall could reach.
 // The two differences are intentional:
 //
 //   - No quantity band. That is the point: we are asking "where does the band
@@ -139,6 +201,7 @@ func (r *PostgresRepository) ListBreakQuantities(ctx context.Context, productID 
 			AND job_id IS NULL
 			AND (starts_at IS NULL OR starts_at <= NOW())
 			AND (expires_at IS NULL OR expires_at > NOW())
+			AND ` + categoryScopePredicate + `
 		ORDER BY 1 ASC
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID, customerID)
@@ -188,8 +251,11 @@ func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) 
 }
 
 func (r *PostgresRepository) ListRules(ctx context.Context) ([]PricingRule, error) {
+	// COALESCE on category for the same reason GetMatchingRules does it: the
+	// column is nullable, PricingRule.Category is not, and a NULL row would
+	// fail the scan and blank the whole rules screen.
 	query := `
-		SELECT id, name, rule_type, product_id, customer_id, job_id, category,
+		SELECT id, name, rule_type, product_id, customer_id, job_id, COALESCE(category, ''),
 			fixed_price, discount_pct, markup_pct, min_quantity, max_quantity,
 			margin_floor_pct, starts_at, expires_at, is_active, priority, created_at, updated_at
 		FROM pricing_rules

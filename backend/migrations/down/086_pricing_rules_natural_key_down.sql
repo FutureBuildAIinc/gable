@@ -1,0 +1,27 @@
+-- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+-- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+-- Rollback for 086_pricing_rules_natural_key.sql.
+--
+-- Lives in migrations/down/ so cmd/migrate's `migrations/*.sql` glob cannot
+-- pick it up and apply it as a forward migration. Apply by hand.
+--
+-- Dropping the constraint is clean and safe: it creates no data, and removing
+-- it can never fail on existing rows. Run this if a dealer turns out to hold
+-- two rules that legitimately agree on all seven key columns and 086 is
+-- blocking their insert — then reopen the key's column list rather than
+-- leaving the table unconstrained.
+--
+--   ALTER TABLE pricing_rules DROP CONSTRAINT IF EXISTS pricing_rules_scope_key;
+--
+-- The statement is left commented out for the same reason 085's is: the rest
+-- of 086 has NO rollback. Step 1 deleted duplicate rows, and once a duplicate
+-- is gone there is nothing to restore it from — the surviving row carries the
+-- same name, scope and pricing, so no information was lost, but the deleted
+-- ids are not recoverable. Undoing 086 therefore means "stop enforcing the
+-- key", not "put the table back as it was". Uncomment deliberately.
+--
+-- Note also that cmd/seed/main.go's pricing-rules upsert names this constraint
+-- (`ON CONFLICT ON CONSTRAINT pricing_rules_scope_key`). Dropping it makes the
+-- seeder fail loudly on the next run rather than silently accumulating
+-- duplicates again, which is the intended failure mode.

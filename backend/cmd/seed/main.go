@@ -1000,31 +1000,40 @@ func main() {
 	// =========================================================================
 	// 13. PRICING RULES
 	// =========================================================================
-	type pricingRule struct {
-		Name, RuleType, Category string
-		DiscPct                  *float64
-		MinQty                   float64
-		MarginFloor              *float64
+	// PERCENTS, not fractions. pricing_rules.discount_pct and
+	// margin_floor_pct are consumed by internal/pricing/service.go as
+	// percentages — `basePrice * (1 - *rule.DiscountPct/100)` — and the column
+	// names say so. This block used to write 0.10 for "10% off", which the
+	// engine read as a tenth of one percent: a $23.25 board came back at
+	// $23.24. The engine and the column name agree, so the seeder was the end
+	// that was wrong.
+	//
+	// The margin floors have to move with the discounts or they invert the
+	// fix. margin_floor_pct is the deepest discount a rule may reach, so at
+	// 0.20 it caps every discount at 0.2% — with discount_pct corrected to 10
+	// and the floor left at 0.20, the floor would clamp a 10% break back to
+	// 0.2% and the bug would survive in a new disguise. 20 means "never
+	// discount more than 20% off base", which is what these rules intend and
+	// which none of them reach.
+	// (See demoPricingRules, below main.)
+	//
+	// A real upsert. This used to say `ON CONFLICT DO NOTHING` against a table
+	// with no unique constraint, so there was nothing for a conflict to be ON
+	// and every re-seed inserted a fresh copy of all six rules. Migration 086
+	// adds pricing_rules_scope_key and collapses the copies already there;
+	// naming the constraint here is what turns the clause into the upsert it
+	// always looked like. DO UPDATE rather than DO NOTHING so re-seeding
+	// repairs a demo database whose rules still carry the old fractional
+	// discounts.
+	for _, r := range demoPricingRules {
+		if _, err := db.Exec(pricingRuleUpsertSQL,
+			r.Name, r.RuleType, r.Category, r.DiscPct, r.MinQty, r.MarginFloor); err != nil {
+			// Loud, not silent: these rows are prices. A seeder that quietly
+			// skips a pricing rule leaves a demo showing the wrong number.
+			log.Printf("seed: pricing rule %q failed: %v", r.Name, err)
+		}
 	}
-	disc10 := 0.10
-	disc15 := 0.15
-	disc5 := 0.05
-	margin20 := 0.20
-	margin15 := 0.15
-	rules := []pricingRule{
-		{"Lumber Qty Break 100+", "QUANTITY_BREAK", "Lumber", &disc10, 100, &margin20},
-		{"Lumber Qty Break 500+", "QUANTITY_BREAK", "Lumber", &disc15, 500, &margin15},
-		{"Sheet Goods Qty Break 50+", "QUANTITY_BREAK", "Sheet Goods", &disc5, 50, &margin20},
-		{"Hardware Bulk 200+", "QUANTITY_BREAK", "Hardware", &disc10, 200, nil},
-		{"Spring Roofing Promo", "PROMOTIONAL", "Roofing", &disc5, 0, nil},
-		{"Insulation Bundle Deal", "PROMOTIONAL", "Insulation", &disc10, 10, nil},
-	}
-	for _, r := range rules {
-		db.Exec(`INSERT INTO pricing_rules (name, rule_type, category, discount_pct, min_quantity, margin_floor_pct, is_active, starts_at, expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6,true, NOW()-interval '30 days', NOW()+interval '90 days')
-			ON CONFLICT DO NOTHING`, r.Name, r.RuleType, r.Category, r.DiscPct, r.MinQty, r.MarginFloor)
-	}
-	fmt.Printf("Seed: %d Pricing Rules\n", len(rules))
+	fmt.Printf("Seed: %d Pricing Rules\n", len(demoPricingRules))
 
 	// =========================================================================
 	// 14. GL JOURNAL ENTRIES (placeholder)
@@ -1248,4 +1257,64 @@ func main() {
 	fmt.Println("==================================================")
 	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE LUMBER & SUPPLY (KELOWNA, BC)  ")
 	fmt.Println("==================================================")
+}
+
+// pricingRuleUpsertSQL writes one demo pricing rule, replacing the row that is
+// already there rather than adding a second copy of it.
+//
+// It is a package-level constant so main_test.go can run the real statement
+// against a real database. The behaviour worth testing is not "does an INSERT
+// insert" but "does running the seeder twice leave one rule or two", and that
+// question has an answer only if the test and the seeder execute the same SQL.
+//
+// ON CONFLICT ON CONSTRAINT names migration 086's pricing_rules_scope_key. The
+// previous `ON CONFLICT DO NOTHING` named nothing, and pricing_rules had no
+// unique constraint for it to find, so every re-seed inserted a fresh copy of
+// all six rules. Naming the constraint is what makes the clause do what it has
+// always claimed to do.
+//
+// DO UPDATE rather than DO NOTHING: a demo database seeded before the
+// discount_pct units were fixed still holds 0.10 where it means 10, and
+// re-seeding should repair it instead of politely leaving it wrong.
+const pricingRuleUpsertSQL = `
+	INSERT INTO pricing_rules (name, rule_type, category, discount_pct, min_quantity, margin_floor_pct, is_active, starts_at, expires_at)
+	VALUES ($1,$2,$3,$4,$5,$6,true, NOW()-interval '30 days', NOW()+interval '90 days')
+	ON CONFLICT ON CONSTRAINT pricing_rules_scope_key DO UPDATE SET
+		discount_pct     = EXCLUDED.discount_pct,
+		margin_floor_pct = EXCLUDED.margin_floor_pct,
+		is_active        = EXCLUDED.is_active,
+		starts_at        = EXCLUDED.starts_at,
+		expires_at       = EXCLUDED.expires_at,
+		updated_at       = NOW()`
+
+// pricingRule is one row of the demo pricing_rules table.
+//
+// DiscPct and MarginFloor are PERCENTAGES — 10 means ten percent — because
+// that is how internal/pricing/service.go reads the columns they land in and
+// what the `_pct` in the column names says. Writing 0.10 here means a tenth of
+// one percent, and main_test.go puts every row through the real pricing engine
+// to keep it that way.
+type pricingRule struct {
+	Name, RuleType, Category string
+	DiscPct                  *float64
+	MinQty                   float64
+	MarginFloor              *float64
+}
+
+func pct(v float64) *float64 { return &v }
+
+// demoPricingRules is the seeded rule set, lifted to package scope so
+// main_test.go can price it without running the seeder.
+//
+// Every rule here is category-scoped with product_id NULL, which only became
+// meaningful when internal/pricing/repository.go started honouring
+// pricing_rules.category: before that, "Spring Roofing Promo" discounted
+// cornice flashing, drywall and deck screws too.
+var demoPricingRules = []pricingRule{
+	{"Lumber Qty Break 100+", "QUANTITY_BREAK", "Lumber", pct(10), 100, pct(20)},
+	{"Lumber Qty Break 500+", "QUANTITY_BREAK", "Lumber", pct(15), 500, pct(15)},
+	{"Sheet Goods Qty Break 50+", "QUANTITY_BREAK", "Sheet Goods", pct(5), 50, pct(20)},
+	{"Hardware Bulk 200+", "QUANTITY_BREAK", "Hardware", pct(10), 200, nil},
+	{"Spring Roofing Promo", "PROMOTIONAL", "Roofing", pct(5), 0, nil},
+	{"Insulation Bundle Deal", "PROMOTIONAL", "Insulation", pct(10), 10, nil},
 }

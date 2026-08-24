@@ -104,8 +104,18 @@ type Route struct {
 }
 
 type Delivery struct {
-	ID           uuid.UUID      `json:"id" db:"id"`
-	RouteID      uuid.UUID      `json:"route_id" db:"route_id"`
+	ID uuid.UUID `json:"id" db:"id"`
+
+	// RouteID is a POINTER because deliveries.route_id is nullable (migration
+	// 009) and the NULL means something: "this stop exists and is geocoded but
+	// is not on a route yet". That is the state cmd/seed/dispatch_day.go
+	// deliberately writes, and the state AI_LM's optimizer exists to resolve.
+	//
+	// As a plain uuid.UUID it scanned to the zero value and serialised as
+	// "route_id":"00000000-0000-0000-0000-000000000000", which a client cannot
+	// tell from a real route id — and the all-zero uuid is a value the column's
+	// foreign key could never actually hold. Unrouted now serialises as null.
+	RouteID      *uuid.UUID     `json:"route_id" db:"route_id"`
 	OrderID      uuid.UUID      `json:"order_id" db:"order_id"`
 	StopSequence int            `json:"stop_sequence" db:"stop_sequence"`
 	Status       DeliveryStatus `json:"status" db:"status"`

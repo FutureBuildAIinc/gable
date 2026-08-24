@@ -6,6 +6,7 @@ package pricing
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -20,6 +21,37 @@ type MockRepository struct {
 	// without a database. An empty slice keeps the pre-existing behaviour
 	// (no rules match, fall through to tier/retail) unchanged.
 	rules []PricingRule
+
+	// productCategories is the in-memory stand-in for the category scope
+	// resolution repository.go does in SQL (categoryScopePredicate): for a
+	// given product it lists every category string that should match a rule's
+	// `category` column — the product's own flat category, its tree node's
+	// name and slug, and the name and slug of every ANCESTOR of that node,
+	// which is the `pc.path <@ anc.path` arm.
+	//
+	// A product absent from this map has no resolvable category, so no
+	// category-scoped rule reaches it. That is the same fail-closed answer
+	// Postgres gives for a product with category_id NULL and a NULL flat
+	// category, and it is the safe direction: an unscopable product loses a
+	// discount rather than being handed one meant for a different aisle.
+	productCategories map[uuid.UUID][]string
+}
+
+// ruleCategoryMatches mirrors categoryScopePredicate in Go. A rule with no
+// category is unscoped; otherwise it matches when its category equals one of
+// the product's scope strings, compared the way the SQL compares them
+// (case-insensitively, trimmed).
+func ruleCategoryMatches(ruleCategory string, productScopes []string) bool {
+	want := strings.ToLower(strings.TrimSpace(ruleCategory))
+	if want == "" {
+		return true
+	}
+	for _, s := range productScopes {
+		if strings.ToLower(strings.TrimSpace(s)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *MockRepository) GetContract(ctx context.Context, customerID, productID uuid.UUID) (*CustomerContract, error) {
@@ -52,6 +84,9 @@ func (m *MockRepository) GetMatchingRules(ctx context.Context, productID uuid.UU
 		if r.MaxQuantity != nil && *r.MaxQuantity < quantity {
 			continue
 		}
+		if !ruleCategoryMatches(r.Category, m.productCategories[productID]) {
+			continue
+		}
 		out = append(out, r)
 	}
 	// Same ordering the SQL applies: priority DESC, then rule_type ASC.
@@ -75,6 +110,9 @@ func (m *MockRepository) ListBreakQuantities(ctx context.Context, productID uuid
 			continue
 		}
 		if r.CustomerID != nil && (customerID == nil || *r.CustomerID != *customerID) {
+			continue
+		}
+		if !ruleCategoryMatches(r.Category, m.productCategories[productID]) {
 			continue
 		}
 		if seen[r.MinQuantity] {
