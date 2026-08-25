@@ -5,12 +5,20 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
+
+// ErrNothingAllocated is returned by Release when the product has no allocated
+// stock to give back. It is a sentinel because a caller unwinding a workflow —
+// cancelling an order, for instance — must be able to tell "there was nothing
+// to release" apart from a real inventory failure. The first is a bookkeeping
+// mismatch it should survive; the second is not.
+var ErrNothingAllocated = errors.New("inventory: no allocated stock")
 
 type Service struct {
 	repo Repository
@@ -221,7 +229,7 @@ func (s *Service) Release(ctx context.Context, productID uuid.UUID, quantity flo
 	}
 
 	if best == nil || best.Allocated <= 0 {
-		return fmt.Errorf("no allocated stock found for product %s", productID)
+		return fmt.Errorf("%w: product %s", ErrNothingAllocated, productID)
 	}
 
 	return s.repo.DeallocateStock(ctx, best.ID, quantity)

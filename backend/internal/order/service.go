@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -302,7 +303,25 @@ func (s *Service) CancelOrder(ctx context.Context, id uuid.UUID, reason string) 
 	txFn := func(txCtx context.Context) error {
 		if releaseStock {
 			for _, line := range o.Lines {
-				if err := s.inventorySvc.Release(txCtx, line.ProductID, line.Quantity); err != nil {
+				err := s.inventorySvc.Release(txCtx, line.ProductID, line.Quantity)
+				switch {
+				case err == nil:
+					// released
+				case errors.Is(err, inventory.ErrNothingAllocated):
+					// Nothing to give back. A CONFIRMED order is *supposed* to
+					// hold an allocation, but one can be absent legitimately —
+					// stock adjusted out from under it, an order confirmed
+					// before allocation existed, or a seeded fixture. Failing
+					// the cancellation here would mean a customer cannot cancel
+					// because of a bookkeeping mismatch they did not cause, and
+					// would leave the order stuck CONFIRMED forever.
+					//
+					// This is deliberately narrow: only the "nothing allocated"
+					// sentinel is tolerated. A real inventory failure still
+					// aborts the transaction and the cancellation.
+					slog.Warn("cancel: no allocation to release",
+						"order_id", id, "product_id", line.ProductID, "quantity", line.Quantity)
+				default:
 					return fmt.Errorf("failed to release stock for product %s: %w", line.ProductID, err)
 				}
 			}
