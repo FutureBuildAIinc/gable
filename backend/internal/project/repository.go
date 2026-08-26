@@ -12,18 +12,29 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Repository defines data access for projects.
-type Repository struct {
+// Repository defines data access for projects. It is declared here, next to
+// the only implementation, so Service can be exercised against a fake store
+// instead of requiring Postgres. *PostgresRepository satisfies it as-is.
+type Repository interface {
+	CreateProject(ctx context.Context, p Project) error
+	GetProject(ctx context.Context, id, customerID uuid.UUID) (*Project, error)
+	ListProjects(ctx context.Context, customerID uuid.UUID) ([]Project, error)
+	UpdateProject(ctx context.Context, p Project) error
+	GetProjectEntities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error)
+}
+
+// PostgresRepository implements Repository against Postgres.
+type PostgresRepository struct {
 	db *database.DB
 }
 
 // NewRepository creates a new project repository.
-func NewRepository(db *database.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *database.DB) *PostgresRepository {
+	return &PostgresRepository{db: db}
 }
 
 // CreateProject creates a new project in the database.
-func (r *Repository) CreateProject(ctx context.Context, p Project) error {
+func (r *PostgresRepository) CreateProject(ctx context.Context, p Project) error {
 	query := `
 		INSERT INTO projects (id, customer_id, name, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -36,7 +47,7 @@ func (r *Repository) CreateProject(ctx context.Context, p Project) error {
 }
 
 // GetProject fetches a single project by ID and CustomerID.
-func (r *Repository) GetProject(ctx context.Context, id, customerID uuid.UUID) (*Project, error) {
+func (r *PostgresRepository) GetProject(ctx context.Context, id, customerID uuid.UUID) (*Project, error) {
 	query := `
 		SELECT id, customer_id, name, status, created_at, updated_at
 		FROM projects
@@ -56,7 +67,7 @@ func (r *Repository) GetProject(ctx context.Context, id, customerID uuid.UUID) (
 }
 
 // ListProjects returns all projects for a customer.
-func (r *Repository) ListProjects(ctx context.Context, customerID uuid.UUID) ([]Project, error) {
+func (r *PostgresRepository) ListProjects(ctx context.Context, customerID uuid.UUID) ([]Project, error) {
 	query := `
 		SELECT id, customer_id, name, status, created_at, updated_at
 		FROM projects
@@ -81,7 +92,7 @@ func (r *Repository) ListProjects(ctx context.Context, customerID uuid.UUID) ([]
 }
 
 // UpdateProject modifies an existing project.
-func (r *Repository) UpdateProject(ctx context.Context, p Project) error {
+func (r *PostgresRepository) UpdateProject(ctx context.Context, p Project) error {
 	query := `
 		UPDATE projects
 		SET name = $1, status = $2, updated_at = NOW()
@@ -98,7 +109,7 @@ func (r *Repository) UpdateProject(ctx context.Context, p Project) error {
 }
 
 // GetProjectEntities fetches associated orders, deliveries, and invoices.
-func (r *Repository) GetProjectEntities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error) {
+func (r *PostgresRepository) GetProjectEntities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error) {
 	orders := make([]ProjectItem, 0)
 	deliveries := make([]ProjectItem, 0)
 	invoices := make([]ProjectItem, 0)

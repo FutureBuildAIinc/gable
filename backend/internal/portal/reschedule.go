@@ -214,7 +214,7 @@ type deliveryRescheduleState struct {
 // GetDeliveryRescheduleState loads a delivery scoped to the calling customer.
 // The customer link runs deliveries -> orders -> customer_id, the same join
 // ListDeliveriesByCustomer already uses.
-func (r *Repository) GetDeliveryRescheduleState(ctx context.Context, deliveryID, customerID uuid.UUID) (*deliveryRescheduleState, error) {
+func (r *PostgresRepository) GetDeliveryRescheduleState(ctx context.Context, deliveryID, customerID uuid.UUID) (*deliveryRescheduleState, error) {
 	var st deliveryRescheduleState
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT d.id, d.order_id, COALESCE(d.status, 'PENDING'), rt.status, rt.scheduled_date
@@ -239,7 +239,7 @@ func (r *Repository) GetDeliveryRescheduleState(ctx context.Context, deliveryID,
 // the insert share a transaction, and the partial unique index
 // idx_pdrr_one_open_per_delivery is what makes the invariant hold even if two
 // requests race.
-func (r *Repository) CreateRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID, userID *uuid.UUID, requestedDate time.Time, reason string) (uuid.UUID, error) {
+func (r *PostgresRepository) CreateRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID, userID *uuid.UUID, requestedDate time.Time, reason string) (uuid.UUID, error) {
 	id := uuid.New()
 
 	err := r.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -300,7 +300,7 @@ func scanReschedule(row pgx.Row) (*DeliveryRescheduleDTO, error) {
 }
 
 // GetRescheduleRequest reads one request, scoped to the customer that filed it.
-func (r *Repository) GetRescheduleRequest(ctx context.Context, id, customerID uuid.UUID) (*DeliveryRescheduleDTO, error) {
+func (r *PostgresRepository) GetRescheduleRequest(ctx context.Context, id, customerID uuid.UUID) (*DeliveryRescheduleDTO, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
 		rescheduleSelect+` WHERE rr.id = $1 AND rr.customer_id = $2`, id, customerID)
 	dto, err := scanReschedule(row)
@@ -315,7 +315,7 @@ func (r *Repository) GetRescheduleRequest(ctx context.Context, id, customerID uu
 
 // GetLatestRescheduleRequest returns the newest request for a delivery, or
 // (nil, nil) when the customer has never filed one.
-func (r *Repository) GetLatestRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID) (*DeliveryRescheduleDTO, error) {
+func (r *PostgresRepository) GetLatestRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID) (*DeliveryRescheduleDTO, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
 		rescheduleSelect+` WHERE rr.delivery_id = $1 AND rr.customer_id = $2
 		 ORDER BY rr.created_at DESC LIMIT 1`, deliveryID, customerID)

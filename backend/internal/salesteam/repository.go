@@ -12,15 +12,25 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type Repository struct {
+// Repository is the slice of sales-team persistence the handler needs. It is
+// declared here, next to the only implementation, so the HTTP layer can be
+// exercised against a fake roster instead of requiring Postgres.
+// *PostgresRepository satisfies it as-is.
+type Repository interface {
+	List(ctx context.Context) ([]SalesPerson, error)
+	Get(ctx context.Context, id uuid.UUID) (*SalesPerson, error)
+}
+
+// PostgresRepository implements Repository against Postgres.
+type PostgresRepository struct {
 	db *database.DB
 }
 
-func NewRepository(db *database.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *database.DB) *PostgresRepository {
+	return &PostgresRepository{db: db}
 }
 
-func (r *Repository) List(ctx context.Context) ([]SalesPerson, error) {
+func (r *PostgresRepository) List(ctx context.Context) ([]SalesPerson, error) {
 	query := `SELECT id, name, email, phone, role, is_active, created_at, updated_at
 		FROM sales_team WHERE is_active = true ORDER BY name`
 
@@ -41,7 +51,7 @@ func (r *Repository) List(ctx context.Context) ([]SalesPerson, error) {
 	return people, nil
 }
 
-func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*SalesPerson, error) {
+func (r *PostgresRepository) Get(ctx context.Context, id uuid.UUID) (*SalesPerson, error) {
 	query := `SELECT id, name, email, phone, role, is_active, created_at, updated_at
 		FROM sales_team WHERE id = $1`
 

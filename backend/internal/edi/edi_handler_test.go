@@ -14,9 +14,11 @@ import (
 )
 
 // The EDI admin API manages trading-partner credentials (ISA/GS identifiers,
-// transport config) and ingests supplier catalogs. EDIHandler holds a concrete
-// *EDIRepository, so only the paths that return before persistence are
-// reachable here — see TestEDIRepository_IsNotUnitTestable at the end.
+// transport config) and ingests supplier catalogs. EDIHandler takes the
+// EDIRepository interface declared in edi_repository.go, so this file covers
+// routing, request-shape rejection and the pure mapping helpers, while
+// edi_handler_repo_test.go drives the full CRUD and ingest paths against a fake
+// store and edi_repository_pg_test.go covers the SQL.
 //
 // Tests are CORRECTNESS unless labelled CHARACTERIZATION.
 
@@ -184,11 +186,11 @@ func TestTradingPartnerJSON_FieldNames(t *testing.T) {
 // MinOrderQty and PackQty must survive the mapping on both the CSV and the X12
 // source; the X12 branch used to drop them.
 //
-// The persistence path needs Postgres, so the mapping itself is exercised
-// through toCatalogEntries, the pure function the handler now delegates to.
-// The parser half of the evidence is asserted in
-// TestParseCSVCatalog_HeaderDrivenMapping, which shows SKU and VendorSKU are
-// distinct values by the time the handler sees them.
+// This exercises the mapping in isolation, through toCatalogEntries — the pure
+// function the handler delegates to. The same rule is asserted end to end,
+// through the HTTP handler and into persistence, by
+// TestImportCatalog_X12PersistsAgainstThePathPartner in
+// edi_handler_repo_test.go.
 func TestToCatalogEntries_FilesThePartnerSKUAsTheVendorSKU(t *testing.T) {
 	got := toCatalogEntries([]SupplierCatalogEntry{{
 		VendorName:  "ACME",
@@ -254,16 +256,4 @@ func TestImportCatalog_X12AndCSVMapIdentically(t *testing.T) {
 	if fromX12[0].MinOrderQty != 1 || fromX12[0].PackQty != 1 {
 		t.Errorf("MinOrderQty=%v PackQty=%v, want the parser defaults of 1", fromX12[0].MinOrderQty, fromX12[0].PackQty)
 	}
-}
-
-// TestEDIRepository_IsNotUnitTestable documents a testability gap rather than
-// behaviour.
-//
-// EDIHandler takes a concrete *EDIRepository holding a *database.DB, so the
-// partner CRUD defaults applied in CreatePartner (EDIVersion 004010, transport
-// SFTP, the default 832/846/850 document set) and the whole catalog persistence
-// path require Postgres. Those defaults are the ones a fresh partner is created
-// with, so they are worth covering once the seam exists.
-func TestEDIRepository_IsNotUnitTestable(t *testing.T) {
-	t.Skip("TESTABILITY GAP: edi/edi_handler.go:16-20 holds a concrete *EDIRepository, so CreatePartner's defaults and every catalog write need Postgres")
 }

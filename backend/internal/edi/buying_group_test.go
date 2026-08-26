@@ -4,6 +4,7 @@
 package edi
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"math"
@@ -196,6 +197,48 @@ func TestParse832Catalog_DegenerateInput(t *testing.T) {
 			}
 			if len(entries) != 0 {
 				t.Fatalf("parsed %d entries from %q, want 0", len(entries), tc.doc)
+			}
+		})
+	}
+}
+
+// CORRECTNESS: ValidateX12 answers the question the lenient parser above
+// cannot — "is this an X12 document at all?" — and it answers it structurally,
+// not by counting what came out. The two cases that must stay apart are the
+// last entry in each table: an envelope with no catalog items is X12 (and
+// Parse832Catalog rightly returns zero entries and no error for it, above),
+// while a CSV posted to the X12 endpoint is not a document this parser can
+// read and has to be refused rather than reported as importing nothing.
+func TestValidateX12_RecognisesSegmentedDocumentsOnly(t *testing.T) {
+	x12 := map[string]string{
+		"a catalog": "N1*SU*ACME~LIN*1*VP*AL-2X4~CTP*RS*RES*4.75*1*EA~",
+		"envelope segments only": "ISA*00*00*ZZ*GABLELBM~GS*SC*GABLELBM*ACME*20260101~" +
+			"ST*832*0001~SE*3*0001~GE*1*1~IEA*1*000000001~",
+		"a bare segment with no elements": "SE~",
+		"newline-terminated segments":     "ISA*00*00\nGS*SC*GABLELBM\n",
+		"leading blank segments":          "~~N1*SU*ACME~",
+	}
+	for name, doc := range x12 {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateX12(doc); err != nil {
+				t.Errorf("ValidateX12(%q) = %v, want nil", doc, err)
+			}
+		})
+	}
+
+	notX12 := map[string]string{
+		"empty":              "",
+		"separators only":    "~~~~",
+		"whitespace":         "  ~ \t ~",
+		"prose":              "this is not an EDI document at all",
+		"a CSV":              "vendor_sku,sku,unit_price\nAL-2X4,2X4-8,4.75\n",
+		"a lower-case token": "lin*1*VP*AL-2X4~",
+		"an over-long id":    "SEGMENT*1~",
+	}
+	for name, doc := range notX12 {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateX12(doc); !errors.Is(err, ErrNotX12) {
+				t.Errorf("ValidateX12(%q) = %v, want ErrNotX12", doc, err)
 			}
 		})
 	}

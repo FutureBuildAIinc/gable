@@ -5,17 +5,32 @@ package crm
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
-type Handler struct {
-	repo *Repository
+// statusForRepoError maps a repository failure onto an HTTP status.
+//
+// ErrNotFound means the caller named a row that is not there, which is a client
+// error and a 404 — the same answer HandleGetActivity gives for the same
+// condition. Anything else falls through to the caller's default, so an
+// unexpected failure stays a 500 rather than being flattened into a 4xx that
+// tells the client a retry is pointless.
+func statusForRepoError(err error, fallback int) int {
+	if errors.Is(err, ErrNotFound) {
+		return http.StatusNotFound
+	}
+	return fallback
 }
 
-func NewHandler(repo *Repository) *Handler {
+type Handler struct {
+	repo Repository
+}
+
+func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
 }
 
@@ -47,6 +62,14 @@ func (h *Handler) HandleListActivities(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httputil.RespondError(w, r, "Failed to fetch activities", http.StatusInternalServerError, err)
 		return
+	}
+	// A customer with no logged activity gets [], not null. The repository
+	// returns a nil slice for an empty result set and encoding/json renders
+	// that as `null`, which is a different value from an empty list: this
+	// endpoint is declared Promise<Activity[]> on the client, and every other
+	// list endpoint in this backend guarantees an array.
+	if activities == nil {
+		activities = []Activity{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -118,7 +141,8 @@ func (h *Handler) HandleUpdateActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Update(r.Context(), &a); err != nil {
-		httputil.RespondError(w, r, "failed to update activity", http.StatusInternalServerError, err)
+		httputil.RespondError(w, r, "failed to update activity",
+			statusForRepoError(err, http.StatusInternalServerError), err)
 		return
 	}
 
@@ -134,7 +158,8 @@ func (h *Handler) HandleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Delete(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to delete activity", http.StatusInternalServerError, err)
+		httputil.RespondError(w, r, "failed to delete activity",
+			statusForRepoError(err, http.StatusInternalServerError), err)
 		return
 	}
 

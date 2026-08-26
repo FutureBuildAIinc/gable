@@ -13,11 +13,11 @@ import (
 
 // Service encapsulates project business logic.
 type Service struct {
-	repo *Repository
+	repo Repository
 }
 
 // NewService creates a new project service.
-func NewService(repo *Repository) *Service {
+func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
@@ -75,7 +75,16 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, customerID uuid.
 		return nil, err
 	}
 
+	// The same invariant CreateProject enforces above. `{"name":""}` is a
+	// non-nil pointer to the empty string, so without this check it applies
+	// straight through and leaves the project nameless — a rule that only held
+	// for the first second of a project's life. The portal's job picker lists
+	// projects by name, and a blank row cannot be selected or told apart from
+	// its neighbours.
 	if req.Name != nil {
+		if *req.Name == "" {
+			return nil, fmt.Errorf("project name is required")
+		}
 		proj.Name = *req.Name
 	}
 	if req.Status != nil {

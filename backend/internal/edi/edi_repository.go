@@ -5,12 +5,18 @@ package edi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
+
+// ErrPartnerNotFound reports that a write named a trading partner that is not
+// there. It is a sentinel rather than a bare fmt.Errorf so EDIHandler can turn
+// it into a 404 with errors.Is instead of matching on a message.
+var ErrPartnerNotFound = errors.New("trading partner not found")
 
 // TradingPartner represents a vendor-agnostic EDI trading partner configuration.
 type TradingPartner struct {
@@ -48,19 +54,35 @@ type CatalogEntry struct {
 	SyncedAt          time.Time  `json:"synced_at"`
 }
 
-// EDIRepository manages EDI trading partners and catalog entries.
-type EDIRepository struct {
+// EDIRepository is the slice of EDI persistence EDIHandler needs. It is
+// declared here, next to the only implementation, so the admin handler can be
+// exercised against a fake store instead of requiring Postgres.
+// *PostgresEDIRepository satisfies it as-is.
+type EDIRepository interface {
+	CreatePartner(ctx context.Context, p *TradingPartner) error
+	GetPartner(ctx context.Context, id uuid.UUID) (*TradingPartner, error)
+	ListPartners(ctx context.Context) ([]TradingPartner, error)
+	UpdatePartner(ctx context.Context, p *TradingPartner) error
+	DeletePartner(ctx context.Context, id uuid.UUID) error
+
+	SaveCatalogEntries(ctx context.Context, partnerID uuid.UUID, entries []CatalogEntry) (int, error)
+	ListCatalogEntries(ctx context.Context, partnerID uuid.UUID, limit int) ([]CatalogEntry, error)
+	GetCatalogEntryCount(ctx context.Context, partnerID uuid.UUID) (int, error)
+}
+
+// PostgresEDIRepository manages EDI trading partners and catalog entries.
+type PostgresEDIRepository struct {
 	db *database.DB
 }
 
 // NewEDIRepository creates a new EDI repository.
-func NewEDIRepository(db *database.DB) *EDIRepository {
-	return &EDIRepository{db: db}
+func NewEDIRepository(db *database.DB) *PostgresEDIRepository {
+	return &PostgresEDIRepository{db: db}
 }
 
 // --- Trading Partner CRUD ---
 
-func (r *EDIRepository) CreatePartner(ctx context.Context, p *TradingPartner) error {
+func (r *PostgresEDIRepository) CreatePartner(ctx context.Context, p *TradingPartner) error {
 	if p.ID == uuid.Nil {
 		p.ID = uuid.New()
 	}
@@ -80,7 +102,7 @@ func (r *EDIRepository) CreatePartner(ctx context.Context, p *TradingPartner) er
 	return err
 }
 
-func (r *EDIRepository) GetPartner(ctx context.Context, id uuid.UUID) (*TradingPartner, error) {
+func (r *PostgresEDIRepository) GetPartner(ctx context.Context, id uuid.UUID) (*TradingPartner, error) {
 	var p TradingPartner
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT id, name, isa_sender_id, isa_sender_qualifier, isa_receiver_id, isa_receiver_qualifier,
@@ -98,7 +120,7 @@ func (r *EDIRepository) GetPartner(ctx context.Context, id uuid.UUID) (*TradingP
 	return &p, nil
 }
 
-func (r *EDIRepository) ListPartners(ctx context.Context) ([]TradingPartner, error) {
+func (r *PostgresEDIRepository) ListPartners(ctx context.Context) ([]TradingPartner, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx,
 		`SELECT id, name, isa_sender_id, isa_sender_qualifier, isa_receiver_id, isa_receiver_qualifier,
 			gs_sender_id, gs_receiver_id, edi_version, transport_type, transport_config::text,
@@ -125,9 +147,18 @@ func (r *EDIRepository) ListPartners(ctx context.Context) ([]TradingPartner, err
 	return partners, nil
 }
 
-func (r *EDIRepository) UpdatePartner(ctx context.Context, p *TradingPartner) error {
+// UpdatePartner writes a full replacement of the partner named by p.ID.
+//
+// A statement that matches no row is reported as ErrPartnerNotFound, not as
+// success. Without the check, a PUT to any UUID answers 200 and echoes the
+// submitted body, so an operator editing a partner that was deleted in another
+// tab is told the save worked and walks away with credentials that were never
+// stored. Every sibling module checks the same thing: crm's Update
+// (activity.go), project's UpdateProject (repository.go) and portal's
+// SetOrderProject (orders.go).
+func (r *PostgresEDIRepository) UpdatePartner(ctx context.Context, p *TradingPartner) error {
 	p.UpdatedAt = time.Now()
-	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`UPDATE edi_trading_partners SET
 			name=$2, isa_sender_id=$3, isa_sender_qualifier=$4,
 			isa_receiver_id=$5, isa_receiver_qualifier=$6,
@@ -141,13 +172,19 @@ func (r *EDIRepository) UpdatePartner(ctx context.Context, p *TradingPartner) er
 		p.TransportType, p.TransportConfig,
 		p.SupportedDocuments, p.IsActive, p.Notes, p.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update trading partner: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrPartnerNotFound
+	}
+	return nil
 }
 
 // DeletePartner permanently removes a trading partner.
 // TODO(P3): Convert to soft delete (SET deleted_at = NOW()) once a migration adds
 // a deleted_at column to edi_trading_partners and list/get queries filter on it.
-func (r *EDIRepository) DeletePartner(ctx context.Context, id uuid.UUID) error {
+func (r *PostgresEDIRepository) DeletePartner(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`DELETE FROM edi_trading_partners WHERE id = $1`, id,
 	)
@@ -156,7 +193,7 @@ func (r *EDIRepository) DeletePartner(ctx context.Context, id uuid.UUID) error {
 
 // --- Catalog Entries ---
 
-func (r *EDIRepository) SaveCatalogEntries(ctx context.Context, partnerID uuid.UUID, entries []CatalogEntry) (int, error) {
+func (r *PostgresEDIRepository) SaveCatalogEntries(ctx context.Context, partnerID uuid.UUID, entries []CatalogEntry) (int, error) {
 	count := 0
 	for _, e := range entries {
 		_, err := r.db.GetExecutor(ctx).Exec(ctx,
@@ -183,7 +220,7 @@ func (r *EDIRepository) SaveCatalogEntries(ctx context.Context, partnerID uuid.U
 	return count, nil
 }
 
-func (r *EDIRepository) ListCatalogEntries(ctx context.Context, partnerID uuid.UUID, limit int) ([]CatalogEntry, error) {
+func (r *PostgresEDIRepository) ListCatalogEntries(ctx context.Context, partnerID uuid.UUID, limit int) ([]CatalogEntry, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -213,7 +250,7 @@ func (r *EDIRepository) ListCatalogEntries(ctx context.Context, partnerID uuid.U
 	return entries, nil
 }
 
-func (r *EDIRepository) GetCatalogEntryCount(ctx context.Context, partnerID uuid.UUID) (int, error) {
+func (r *PostgresEDIRepository) GetCatalogEntryCount(ctx context.Context, partnerID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT COUNT(*) FROM edi_catalog_entries WHERE partner_id = $1`, partnerID,

@@ -22,7 +22,7 @@ import (
 
 // Service encapsulates portal business logic.
 type Service struct {
-	repo         *Repository
+	repo         Repository
 	jwtSecret    []byte
 	logger       *slog.Logger
 	pricingSvc   *pricing.Service
@@ -43,7 +43,7 @@ type Service struct {
 // NewService creates a new portal service.
 // jwtSecret must be provided and non-empty; callers should fail startup if not configured.
 func NewService(
-	repo *Repository,
+	repo Repository,
 	jwtSecret string,
 	logger *slog.Logger,
 	pricingSvc *pricing.Service,

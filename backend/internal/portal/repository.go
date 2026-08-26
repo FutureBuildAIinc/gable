@@ -14,17 +14,80 @@ import (
 )
 
 // Repository defines data access for the portal module.
-type Repository struct {
+//
+// It is declared here, next to the only implementation, so Service — whose
+// per-customer scoping is the portal's tenant boundary — can be exercised
+// against a fake store instead of requiring Postgres. Every method that takes a
+// customerID is scoped by it in SQL; the DB-backed proof of that lives in
+// tenancy_pg_test.go, and the service-level rules that sit above it are unit
+// tested against fakes. *PostgresRepository satisfies this interface as-is.
+type Repository interface {
+	// Auth and config
+	GetCustomerUserByEmail(ctx context.Context, email string) (*CustomerUser, error)
+	GetPortalConfig(ctx context.Context) (*PortalConfig, error)
+
+	// Dashboard, orders, invoices, deliveries
+	GetCustomerARSummary(ctx context.Context, customerID uuid.UUID) (balance, creditLimit, pastDue float64, err error)
+	ListOrdersByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalOrderDTO, error)
+	ListOrdersByCustomerFiltered(ctx context.Context, customerID uuid.UUID, filter OrderListFilter) ([]PortalOrderDTO, error)
+	GetOrderByIDAndCustomer(ctx context.Context, orderID, customerID uuid.UUID) (*PortalOrderDTO, error)
+	GetOrderStatusForCustomer(ctx context.Context, orderID, customerID uuid.UUID) (string, error)
+	OrderDeliveryInMotion(ctx context.Context, orderID uuid.UUID) (bool, string, error)
+	ListInvoicesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalInvoiceDTO, error)
+	GetInvoiceByIDAndCustomer(ctx context.Context, invoiceID, customerID uuid.UUID) (*PortalInvoiceDTO, error)
+	ListDeliveriesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalDeliveryDTO, error)
+	GetDeliveryByIDAndCustomer(ctx context.Context, deliveryID, customerID uuid.UUID) (*PortalDeliveryDTO, error)
+	CreateReorder(ctx context.Context, customerID, sourceOrderID uuid.UUID) (uuid.UUID, error)
+
+	// Projects
+	ProjectBelongsToCustomer(ctx context.Context, projectID, customerID uuid.UUID) (bool, error)
+	SetOrderProject(ctx context.Context, orderID, customerID uuid.UUID, projectID *uuid.UUID) error
+
+	// Catalog
+	ListCatalogProducts(ctx context.Context, filter CatalogFilter) ([]catalogRow, error)
+	GetCatalogProduct(ctx context.Context, productID uuid.UUID) (*catalogRow, error)
+	ListProductCategories(ctx context.Context) ([]categoryRow, error)
+
+	// Cart
+	GetCartByCustomer(ctx context.Context, customerID uuid.UUID) (*CartDTO, error)
+	CreateCart(ctx context.Context, customerID uuid.UUID) (uuid.UUID, error)
+	AddCartItem(ctx context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64) error
+	UpdateCartItemQty(ctx context.Context, itemID uuid.UUID, quantity float64, customerID uuid.UUID) error
+	RemoveCartItem(ctx context.Context, itemID uuid.UUID, customerID uuid.UUID) error
+	ClearCart(ctx context.Context, cartID uuid.UUID) error
+
+	// Users and invites
+	ListCustomerUsers(ctx context.Context, customerID uuid.UUID) ([]CustomerUser, error)
+	UpdateUserRole(ctx context.Context, userID, customerID uuid.UUID, role string) error
+	UpdateUserStatus(ctx context.Context, userID, customerID uuid.UUID, status string) error
+	CreatePortalInvite(ctx context.Context, invite PortalInvite) error
+	ListPortalInvites(ctx context.Context, customerID uuid.UUID) ([]PortalInvite, error)
+
+	// Quotes
+	LookupQuoteLineProduct(ctx context.Context, productID uuid.UUID) (sku, description, uom string, err error)
+	CreatePortalQuote(ctx context.Context, customerID uuid.UUID, hdr portalQuoteInsert, lines []portalQuoteLineInsert) (uuid.UUID, error)
+	ListPortalQuotes(ctx context.Context, customerID uuid.UUID) ([]PortalQuoteDTO, error)
+	GetPortalQuote(ctx context.Context, quoteID, customerID uuid.UUID) (*PortalQuoteDTO, error)
+
+	// Delivery reschedule
+	GetDeliveryRescheduleState(ctx context.Context, deliveryID, customerID uuid.UUID) (*deliveryRescheduleState, error)
+	CreateRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID, userID *uuid.UUID, requestedDate time.Time, reason string) (uuid.UUID, error)
+	GetRescheduleRequest(ctx context.Context, id, customerID uuid.UUID) (*DeliveryRescheduleDTO, error)
+	GetLatestRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID) (*DeliveryRescheduleDTO, error)
+}
+
+// PostgresRepository implements Repository against Postgres.
+type PostgresRepository struct {
 	db *database.DB
 }
 
 // NewRepository creates a new portal repository.
-func NewRepository(db *database.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *database.DB) *PostgresRepository {
+	return &PostgresRepository{db: db}
 }
 
 // GetCustomerUserByEmail fetches a customer user by email for login.
-func (r *Repository) GetCustomerUserByEmail(ctx context.Context, email string) (*CustomerUser, error) {
+func (r *PostgresRepository) GetCustomerUserByEmail(ctx context.Context, email string) (*CustomerUser, error) {
 	query := `
 		SELECT id, customer_id, email, password_hash, name, role, status, created_at, updated_at
 		FROM customer_users
@@ -45,7 +108,7 @@ func (r *Repository) GetCustomerUserByEmail(ctx context.Context, email string) (
 }
 
 // GetPortalConfig fetches the first (singleton) portal config row.
-func (r *Repository) GetPortalConfig(ctx context.Context) (*PortalConfig, error) {
+func (r *PostgresRepository) GetPortalConfig(ctx context.Context) (*PortalConfig, error) {
 	query := `
 		SELECT id, dealer_name, logo_url, primary_color, support_email, support_phone, created_at, updated_at
 		FROM portal_config
@@ -78,7 +141,7 @@ func (r *Repository) GetPortalConfig(ctx context.Context) (*PortalConfig, error)
 // (already live-computed) reported real numbers — making the portal dashboard
 // contradict itself. Credit limit still comes from customers since it is a
 // policy value, not an accumulated balance.
-func (r *Repository) GetCustomerARSummary(ctx context.Context, customerID uuid.UUID) (balance, creditLimit, pastDue float64, err error) {
+func (r *PostgresRepository) GetCustomerARSummary(ctx context.Context, customerID uuid.UUID) (balance, creditLimit, pastDue float64, err error) {
 	// Credit limit (policy value) from customers table.
 	creditQuery := `SELECT COALESCE(credit_limit, 0)::float8 FROM customers WHERE id = $1`
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, creditQuery, customerID).Scan(&creditLimit)
@@ -123,12 +186,12 @@ func (r *Repository) GetCustomerARSummary(ctx context.Context, customerID uuid.U
 // is exactly one order-list query in the package: the project association and
 // the change-feed cursor cannot be present on one read and missing from the
 // other.
-func (r *Repository) ListOrdersByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalOrderDTO, error) {
+func (r *PostgresRepository) ListOrdersByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalOrderDTO, error) {
 	return r.ListOrdersByCustomerFiltered(ctx, customerID, OrderListFilter{})
 }
 
 // getOrderLines fetches line items for an order.
-func (r *Repository) getOrderLines(ctx context.Context, orderID uuid.UUID) ([]PortalLineDTO, error) {
+func (r *PostgresRepository) getOrderLines(ctx context.Context, orderID uuid.UUID) ([]PortalLineDTO, error) {
 	query := `
 		SELECT ol.product_id, COALESCE(p.sku, ''), COALESCE(p.description, ''), ol.quantity, ol.price_each
 		FROM order_lines ol
@@ -156,7 +219,7 @@ func (r *Repository) getOrderLines(ctx context.Context, orderID uuid.UUID) ([]Po
 }
 
 // GetOrderByIDAndCustomer fetches a single order scoped to a customer.
-func (r *Repository) GetOrderByIDAndCustomer(ctx context.Context, orderID, customerID uuid.UUID) (*PortalOrderDTO, error) {
+func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderID, customerID uuid.UUID) (*PortalOrderDTO, error) {
 	query := `
 		SELECT o.id, o.status, o.total_amount::float8, o.created_at, o.updated_at,
 		       o.project_id, p.name
@@ -185,7 +248,7 @@ func (r *Repository) GetOrderByIDAndCustomer(ctx context.Context, orderID, custo
 }
 
 // ListInvoicesByCustomer fetches invoices for a customer.
-func (r *Repository) ListInvoicesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalInvoiceDTO, error) {
+func (r *PostgresRepository) ListInvoicesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalInvoiceDTO, error) {
 	query := `
 		SELECT id, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at
 		FROM invoices
@@ -220,7 +283,7 @@ func (r *Repository) ListInvoicesByCustomer(ctx context.Context, customerID uuid
 }
 
 // GetInvoiceByIDAndCustomer fetches a single invoice scoped to a customer.
-func (r *Repository) GetInvoiceByIDAndCustomer(ctx context.Context, invoiceID, customerID uuid.UUID) (*PortalInvoiceDTO, error) {
+func (r *PostgresRepository) GetInvoiceByIDAndCustomer(ctx context.Context, invoiceID, customerID uuid.UUID) (*PortalInvoiceDTO, error) {
 	query := `
 		SELECT id, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at
 		FROM invoices
@@ -268,7 +331,7 @@ func (r *Repository) GetInvoiceByIDAndCustomer(ctx context.Context, invoiceID, c
 }
 
 // ListDeliveriesByCustomer fetches deliveries with POD info, driver, and vehicle for a customer.
-func (r *Repository) ListDeliveriesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalDeliveryDTO, error) {
+func (r *PostgresRepository) ListDeliveriesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalDeliveryDTO, error) {
 	query := `
 		SELECT d.id, d.order_id, d.status, d.pod_proof_url, d.pod_signed_by, d.pod_timestamp,
 		       d.created_at, o.id::text,
@@ -319,7 +382,7 @@ func (r *Repository) ListDeliveriesByCustomer(ctx context.Context, customerID uu
 }
 
 // GetDeliveryByIDAndCustomer fetches a single delivery scoped to a customer.
-func (r *Repository) GetDeliveryByIDAndCustomer(ctx context.Context, deliveryID, customerID uuid.UUID) (*PortalDeliveryDTO, error) {
+func (r *PostgresRepository) GetDeliveryByIDAndCustomer(ctx context.Context, deliveryID, customerID uuid.UUID) (*PortalDeliveryDTO, error) {
 	query := `
 		SELECT d.id, d.order_id, d.status, d.pod_proof_url, d.pod_signed_by, d.pod_timestamp,
 		       d.created_at, o.id::text,
@@ -359,7 +422,7 @@ func (r *Repository) GetDeliveryByIDAndCustomer(ctx context.Context, deliveryID,
 
 // CreateReorder duplicates order lines from a historical order into a new DRAFT order.
 // Uses RunInTx to ensure atomicity — partial failures roll back cleanly.
-func (r *Repository) CreateReorder(ctx context.Context, customerID, sourceOrderID uuid.UUID) (uuid.UUID, error) {
+func (r *PostgresRepository) CreateReorder(ctx context.Context, customerID, sourceOrderID uuid.UUID) (uuid.UUID, error) {
 	// Verify source order belongs to customer (outside tx — read-only check)
 	var count int
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT COUNT(*) FROM orders WHERE id = $1 AND customer_id = $2`, sourceOrderID, customerID).Scan(&count)
@@ -431,7 +494,7 @@ func (r *Repository) CreateReorder(ctx context.Context, customerID, sourceOrderI
 // The CategoryID filter matches the category AND EVERY DESCENDANT, using the
 // ltree containment operator against the node's path. Clicking "Lumber" has to
 // return framing lumber and sheathing, or the tree is decoration.
-func (r *Repository) ListCatalogProducts(ctx context.Context, filter CatalogFilter) ([]catalogRow, error) {
+func (r *PostgresRepository) ListCatalogProducts(ctx context.Context, filter CatalogFilter) ([]catalogRow, error) {
 	query := `
 		SELECT p.id, p.sku, p.description,
 		       COALESCE(p.category, ''), COALESCE(p.species, ''), COALESCE(p.grade, ''),
@@ -509,7 +572,7 @@ func (r *Repository) ListCatalogProducts(ctx context.Context, filter CatalogFilt
 }
 
 // GetCatalogProduct fetches a single product detail for the catalog.
-func (r *Repository) GetCatalogProduct(ctx context.Context, productID uuid.UUID) (*catalogRow, error) {
+func (r *PostgresRepository) GetCatalogProduct(ctx context.Context, productID uuid.UUID) (*catalogRow, error) {
 	query := `
 		SELECT p.id, p.sku, p.description,
 		       COALESCE(p.category, ''), COALESCE(p.species, ''), COALESCE(p.grade, ''),
@@ -537,7 +600,7 @@ func (r *Repository) GetCatalogProduct(ctx context.Context, productID uuid.UUID)
 // --- Cart Repository Methods ---
 
 // GetCartByCustomer fetches a customer's cart with all items.
-func (r *Repository) GetCartByCustomer(ctx context.Context, customerID uuid.UUID) (*CartDTO, error) {
+func (r *PostgresRepository) GetCartByCustomer(ctx context.Context, customerID uuid.UUID) (*CartDTO, error) {
 	var cartID uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT id FROM portal_carts WHERE customer_id = $1`, customerID,
@@ -587,7 +650,7 @@ func (r *Repository) GetCartByCustomer(ctx context.Context, customerID uuid.UUID
 }
 
 // CreateCart creates a new empty cart for a customer.
-func (r *Repository) CreateCart(ctx context.Context, customerID uuid.UUID) (uuid.UUID, error) {
+func (r *PostgresRepository) CreateCart(ctx context.Context, customerID uuid.UUID) (uuid.UUID, error) {
 	var cartID uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`INSERT INTO portal_carts (customer_id) VALUES ($1)
@@ -602,7 +665,7 @@ func (r *Repository) CreateCart(ctx context.Context, customerID uuid.UUID) (uuid
 }
 
 // AddCartItem adds or updates a product in the cart.
-func (r *Repository) AddCartItem(ctx context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64) error {
+func (r *PostgresRepository) AddCartItem(ctx context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		INSERT INTO portal_cart_items (cart_id, product_id, quantity, unit_price)
 		VALUES ($1, $2, $3, $4)
@@ -617,7 +680,7 @@ func (r *Repository) AddCartItem(ctx context.Context, cartID, productID uuid.UUI
 }
 
 // UpdateCartItemQty updates the quantity of a specific cart item, scoped to the customer's cart.
-func (r *Repository) UpdateCartItemQty(ctx context.Context, itemID uuid.UUID, quantity float64, customerID uuid.UUID) error {
+func (r *PostgresRepository) UpdateCartItemQty(ctx context.Context, itemID uuid.UUID, quantity float64, customerID uuid.UUID) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`UPDATE portal_cart_items SET quantity = $1, updated_at = NOW() WHERE id = $2 AND cart_id IN (SELECT id FROM portal_carts WHERE customer_id = $3)`,
 		quantity, itemID, customerID,
@@ -632,7 +695,7 @@ func (r *Repository) UpdateCartItemQty(ctx context.Context, itemID uuid.UUID, qu
 }
 
 // RemoveCartItem deletes a specific cart item, scoped to the customer's cart.
-func (r *Repository) RemoveCartItem(ctx context.Context, itemID uuid.UUID, customerID uuid.UUID) error {
+func (r *PostgresRepository) RemoveCartItem(ctx context.Context, itemID uuid.UUID, customerID uuid.UUID) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`DELETE FROM portal_cart_items WHERE id = $1 AND cart_id IN (SELECT id FROM portal_carts WHERE customer_id = $2)`,
 		itemID, customerID,
@@ -647,7 +710,7 @@ func (r *Repository) RemoveCartItem(ctx context.Context, itemID uuid.UUID, custo
 }
 
 // ClearCart removes all items from a cart.
-func (r *Repository) ClearCart(ctx context.Context, cartID uuid.UUID) error {
+func (r *PostgresRepository) ClearCart(ctx context.Context, cartID uuid.UUID) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`DELETE FROM portal_cart_items WHERE cart_id = $1`, cartID,
 	)
@@ -660,7 +723,7 @@ func (r *Repository) ClearCart(ctx context.Context, cartID uuid.UUID) error {
 // --- Portal User Management Methods ---
 
 // ListCustomerUsers fetches all portal users for a customer.
-func (r *Repository) ListCustomerUsers(ctx context.Context, customerID uuid.UUID) ([]CustomerUser, error) {
+func (r *PostgresRepository) ListCustomerUsers(ctx context.Context, customerID uuid.UUID) ([]CustomerUser, error) {
 	query := `
 		SELECT id, customer_id, email, name, role, status, created_at, updated_at
 		FROM customer_users
@@ -685,7 +748,7 @@ func (r *Repository) ListCustomerUsers(ctx context.Context, customerID uuid.UUID
 }
 
 // UpdateUserRole updates an existing user's role.
-func (r *Repository) UpdateUserRole(ctx context.Context, userID, customerID uuid.UUID, role string) error {
+func (r *PostgresRepository) UpdateUserRole(ctx context.Context, userID, customerID uuid.UUID, role string) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `UPDATE customer_users SET role = $1, updated_at = NOW() WHERE id = $2 AND customer_id = $3`, role, userID, customerID)
 	if err != nil {
 		return fmt.Errorf("failed to update user role: %w", err)
@@ -694,7 +757,7 @@ func (r *Repository) UpdateUserRole(ctx context.Context, userID, customerID uuid
 }
 
 // UpdateUserStatus changes the user's status.
-func (r *Repository) UpdateUserStatus(ctx context.Context, userID, customerID uuid.UUID, status string) error {
+func (r *PostgresRepository) UpdateUserStatus(ctx context.Context, userID, customerID uuid.UUID, status string) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `UPDATE customer_users SET status = $1, updated_at = NOW() WHERE id = $2 AND customer_id = $3`, status, userID, customerID)
 	if err != nil {
 		return fmt.Errorf("failed to update user status: %w", err)
@@ -703,7 +766,7 @@ func (r *Repository) UpdateUserStatus(ctx context.Context, userID, customerID uu
 }
 
 // CreatePortalInvite stores a new invite token.
-func (r *Repository) CreatePortalInvite(ctx context.Context, invite PortalInvite) error {
+func (r *PostgresRepository) CreatePortalInvite(ctx context.Context, invite PortalInvite) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		INSERT INTO portal_invites (id, customer_id, email, role, token, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -715,7 +778,7 @@ func (r *Repository) CreatePortalInvite(ctx context.Context, invite PortalInvite
 }
 
 // ListPortalInvites fetches active invites for a customer.
-func (r *Repository) ListPortalInvites(ctx context.Context, customerID uuid.UUID) ([]PortalInvite, error) {
+func (r *PostgresRepository) ListPortalInvites(ctx context.Context, customerID uuid.UUID) ([]PortalInvite, error) {
 	query := `
 		SELECT id, customer_id, email, role, token, expires_at, created_at
 		FROM portal_invites

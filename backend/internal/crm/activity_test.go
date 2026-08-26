@@ -18,8 +18,10 @@ import (
 // customer. The type is a closed vocabulary that the UI filters and groups on,
 // so an unrecognised value would create an activity nothing displays.
 //
-// crm.Handler holds a concrete *Repository, so only the paths that fail before
-// touching it are reachable here — see TestCRMRepository_IsNotUnitTestable.
+// crm.Handler takes the Repository interface declared in activity.go, so this
+// file covers the vocabulary, the wire format and the request-shape rejections
+// that return before any query; repository_test.go drives the CRUD routes
+// against a fake store, and repository_pg_test.go covers the SQL.
 //
 // Tests are CORRECTNESS unless labelled CHARACTERIZATION.
 
@@ -268,19 +270,4 @@ func TestCreateActivity_BodyCustomerIDIsOverwritten(t *testing.T) {
 	if a.CustomerID != pathCustomer {
 		t.Fatal("the path customer did not win")
 	}
-}
-
-// TestCRMRepository_IsNotUnitTestable documents a testability gap rather than
-// behaviour.
-//
-// crm.NewRepository returns a concrete *Repository holding a *database.DB and
-// crm.NewHandler takes that concrete type, so Create, Get, ListByCustomer,
-// Update and Delete — including the default-ActivityDate-to-now rule in
-// Create (activity.go:62-64) and the "not found" mapping on zero rows affected
-// — all require Postgres.
-//
-// The fix is to introduce a Repository interface, as the customer, vendor and
-// location modules already have.
-func TestCRMRepository_IsNotUnitTestable(t *testing.T) {
-	t.Skip("TESTABILITY GAP: crm/activity.go:49 and crm/handler.go:13 use a concrete *Repository, so the persistence rules (default activity date, not-found mapping) need Postgres")
 }

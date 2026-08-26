@@ -5,6 +5,7 @@ package crm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// ErrNotFound reports that a read or write named an activity that is not there.
+//
+// It is a sentinel rather than a bare fmt.Errorf so the handler can tell "the
+// caller named a row that does not exist" (404) apart from "the database
+// failed" (500) with errors.Is, instead of matching on a message. Both
+// conditions used to arrive at the handler as the same anonymous error, which
+// is why a PUT or DELETE to a missing activity answered INTERNAL_ERROR while
+// the GET of the same id answered 404.
+var ErrNotFound = errors.New("activity not found")
 
 type ActivityType string
 
@@ -46,15 +57,28 @@ type Activity struct {
 
 // Repository
 
-type Repository struct {
+// Repository is the slice of activity persistence the handler needs. It is
+// declared here, next to the only implementation, so the HTTP layer can be
+// exercised against a fake store instead of requiring Postgres.
+// *PostgresRepository satisfies it as-is.
+type Repository interface {
+	Create(ctx context.Context, a *Activity) error
+	Get(ctx context.Context, id uuid.UUID) (*Activity, error)
+	ListByCustomer(ctx context.Context, customerID uuid.UUID) ([]Activity, error)
+	Update(ctx context.Context, a *Activity) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+// PostgresRepository implements Repository against Postgres.
+type PostgresRepository struct {
 	db *database.DB
 }
 
-func NewRepository(db *database.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *database.DB) *PostgresRepository {
+	return &PostgresRepository{db: db}
 }
 
-func (r *Repository) Create(ctx context.Context, a *Activity) error {
+func (r *PostgresRepository) Create(ctx context.Context, a *Activity) error {
 	if a.ID == uuid.Nil {
 		a.ID = uuid.New()
 	}
@@ -78,7 +102,7 @@ func (r *Repository) Create(ctx context.Context, a *Activity) error {
 	return nil
 }
 
-func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*Activity, error) {
+func (r *PostgresRepository) Get(ctx context.Context, id uuid.UUID) (*Activity, error) {
 	query := `
 		SELECT id, customer_id, contact_id, activity_type, description, logged_by, activity_date, created_at, updated_at
 		FROM crm_activities WHERE id = $1
@@ -88,15 +112,15 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*Activity, error) {
 		&a.ID, &a.CustomerID, &a.ContactID, &a.ActivityType, &a.Description, &a.LoggedBy, &a.ActivityDate, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("activity not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get activity: %w", err)
 	}
 	return &a, nil
 }
 
-func (r *Repository) ListByCustomer(ctx context.Context, customerID uuid.UUID) ([]Activity, error) {
+func (r *PostgresRepository) ListByCustomer(ctx context.Context, customerID uuid.UUID) ([]Activity, error) {
 	query := `
 		SELECT id, customer_id, contact_id, activity_type, description, logged_by, activity_date, created_at, updated_at
 		FROM crm_activities
@@ -122,7 +146,7 @@ func (r *Repository) ListByCustomer(ctx context.Context, customerID uuid.UUID) (
 	return activities, nil
 }
 
-func (r *Repository) Update(ctx context.Context, a *Activity) error {
+func (r *PostgresRepository) Update(ctx context.Context, a *Activity) error {
 	a.UpdatedAt = time.Now()
 	query := `
 		UPDATE crm_activities
@@ -136,18 +160,18 @@ func (r *Repository) Update(ctx context.Context, a *Activity) error {
 		return fmt.Errorf("failed to update activity: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("activity not found")
+		return ErrNotFound
 	}
 	return nil
 }
 
-func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
+func (r *PostgresRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM crm_activities WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete activity: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("activity not found")
+		return ErrNotFound
 	}
 	return nil
 }

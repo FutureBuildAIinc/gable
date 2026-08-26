@@ -344,7 +344,7 @@ type portalQuoteLineInsert struct {
 // LookupQuoteLineProduct reads the dealer's own SKU, description and primary
 // UOM for a product, so a quote line snapshots dealer data rather than
 // whatever the caller typed.
-func (r *Repository) LookupQuoteLineProduct(ctx context.Context, productID uuid.UUID) (sku, description, uom string, err error) {
+func (r *PostgresRepository) LookupQuoteLineProduct(ctx context.Context, productID uuid.UUID) (sku, description, uom string, err error) {
 	query := `SELECT sku, description, uom_primary::text FROM products WHERE id = $1`
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, query, productID).Scan(&sku, &description, &uom)
 	if err != nil {
@@ -368,7 +368,7 @@ func (r *Repository) LookupQuoteLineProduct(ctx context.Context, productID uuid.
 // branch_id falls back to system_settings.default_branch_id the same way
 // quote.PostgresRepository.CreateQuote does; a portal session carries no branch
 // context, and the column is NOT NULL since migration 063.
-func (r *Repository) CreatePortalQuote(ctx context.Context, customerID uuid.UUID, hdr portalQuoteInsert, lines []portalQuoteLineInsert) (uuid.UUID, error) {
+func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID uuid.UUID, hdr portalQuoteInsert, lines []portalQuoteLineInsert) (uuid.UUID, error) {
 	quoteID := uuid.New()
 
 	err := r.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -445,7 +445,7 @@ func scanPortalQuote(row pgx.Row) (*PortalQuoteDTO, error) {
 }
 
 // ListPortalQuotes returns the calling customer's quotes, newest first.
-func (r *Repository) ListPortalQuotes(ctx context.Context, customerID uuid.UUID) ([]PortalQuoteDTO, error) {
+func (r *PostgresRepository) ListPortalQuotes(ctx context.Context, customerID uuid.UUID) ([]PortalQuoteDTO, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx,
 		portalQuoteSelect+` WHERE q.customer_id = $1 ORDER BY q.created_at DESC LIMIT 100`,
 		customerID)
@@ -480,7 +480,7 @@ func (r *Repository) ListPortalQuotes(ctx context.Context, customerID uuid.UUID)
 // predicate is in the WHERE clause, not a post-fetch comparison, so a quote
 // belonging to another customer is indistinguishable from one that does not
 // exist.
-func (r *Repository) GetPortalQuote(ctx context.Context, quoteID, customerID uuid.UUID) (*PortalQuoteDTO, error) {
+func (r *PostgresRepository) GetPortalQuote(ctx context.Context, quoteID, customerID uuid.UUID) (*PortalQuoteDTO, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
 		portalQuoteSelect+` WHERE q.id = $1 AND q.customer_id = $2`,
 		quoteID, customerID)
@@ -501,7 +501,7 @@ func (r *Repository) GetPortalQuote(ctx context.Context, quoteID, customerID uui
 	return q, nil
 }
 
-func (r *Repository) getPortalQuoteLines(ctx context.Context, quoteID uuid.UUID) ([]PortalQuoteLineDTO, error) {
+func (r *PostgresRepository) getPortalQuoteLines(ctx context.Context, quoteID uuid.UUID) ([]PortalQuoteLineDTO, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT ql.id, ql.product_id, COALESCE(ql.sku, ''), COALESCE(ql.description, ''),
 		       COALESCE(ql.customer_note, ''), ql.quantity::float8, ql.uom::text,

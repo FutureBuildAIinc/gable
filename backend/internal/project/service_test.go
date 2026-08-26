@@ -19,9 +19,9 @@ import (
 // read is scoped to the authenticated customer, and a project's dashboard rolls
 // up that job's orders, deliveries and invoices.
 //
-// project.Service holds a concrete *Repository, so only the paths that fail
-// before touching it can be unit-tested here — see
-// TestProjectRepositoryPaths_AreNotUnitTestable at the end of this file.
+// project.Service takes the Repository interface declared in repository.go, so
+// this file covers the HTTP layer and the validation that returns before any
+// query; service_repo_test.go drives the service against a fake store.
 //
 // Tests are CORRECTNESS unless labelled CHARACTERIZATION.
 
@@ -291,18 +291,12 @@ func TestProjectDashboardJSON_AlwaysCarriesItsCollections(t *testing.T) {
 	}
 }
 
-// TestProjectRepositoryPaths_AreNotUnitTestable documents a testability gap
-// rather than behaviour.
-//
-// project.NewService takes a *Repository — a concrete struct holding a
-// *database.DB — so ListProjects, GetProjectDashboard and the load-modify-save
-// half of UpdateProject (including its Active/Completed status whitelist and
-// its customer scoping) all require Postgres. The customer scoping lives in the
-// repository's WHERE clause, which is the part most worth testing.
-//
-// The fix is the same one-line change every other module in this package tree
-// has already made: accept a Repository interface. That is production code and
-// out of scope for this test pass.
-func TestProjectRepositoryPaths_AreNotUnitTestable(t *testing.T) {
-	t.Skip("TESTABILITY GAP: project/service.go:15-17 holds a concrete *Repository, so ListProjects, GetProjectDashboard and UpdateProject's status whitelist need Postgres")
+// CORRECTNESS: the seam is a consumer-defined interface and the Postgres
+// implementation satisfies it. If someone re-couples NewService to the concrete
+// type, this stops compiling and service_repo_test.go goes with it.
+func TestProjectSeam_ServiceTakesAnInterface(t *testing.T) {
+	var _ Repository = (*PostgresRepository)(nil)
+	if NewService(newFakeProjects()) == nil {
+		t.Fatal("NewService returned nil for a fake repository")
+	}
 }

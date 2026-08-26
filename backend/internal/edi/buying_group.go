@@ -5,14 +5,59 @@ package edi
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"log/slog"
 )
+
+// ErrNotX12 reports that an upload is not an X12 interchange at all.
+//
+// It is deliberately NOT the same answer as "this is X12 and it contained no
+// catalog items". An 832 that carries only envelope segments parses to zero
+// entries and that is an honest, successful "nothing to import". A CSV posted
+// without ?format=csv, a PDF, or an empty body are files this parser cannot
+// read at all, and reporting those as a successful import of nothing tells an
+// operator the upload worked when the partner's catalog was left untouched.
+var ErrNotX12 = errors.New("not an X12 document: no recognisable segment identifier")
+
+// x12SegmentID matches an X12 segment identifier: two or three upper-case
+// alphanumerics beginning with a letter (X12.6 §3.3). Every segment a real
+// interchange can open with matches it — ISA, GS, ST, N1, LIN, PID, CTP, DTM,
+// SE, GE, IEA — while a CSV header row, a line of prose or the first bytes of a
+// PDF do not.
+var x12SegmentID = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,2}$`)
+
+// ValidateX12 reports whether data can be read as an X12 interchange at all,
+// returning ErrNotX12 when it cannot.
+//
+// This is a recognition check, not a validation of the transaction set: it asks
+// only whether the bytes are segmented the way X12 segments are, which is the
+// question the parsers cannot answer for themselves. Parse832Catalog and
+// Parse846Inquiry are deliberately lenient — they skip every segment they do
+// not recognise, because a supplier's 832 routinely carries segments we have no
+// use for — so they cannot tell an unfamiliar document from an unfamiliar
+// segment. Callers that accept an upload from a human run this first.
+func ValidateX12(data string) error {
+	for _, seg := range strings.Split(data, "~") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		// The segment ID is everything before the first element separator; a
+		// segment with no elements at all (a bare "SE") is still a segment.
+		id, _, _ := strings.Cut(seg, "*")
+		if x12SegmentID.MatchString(id) {
+			return nil
+		}
+	}
+	return ErrNotX12
+}
 
 // BuyingGroupService handles EDI 832 (Price/Sales Catalog) and 846 (Inventory Inquiry)
 // document processing for buying group integrations.

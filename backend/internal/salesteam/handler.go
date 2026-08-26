@@ -12,10 +12,10 @@ import (
 )
 
 type Handler struct {
-	repo *Repository
+	repo Repository
 }
 
-func NewHandler(repo *Repository) *Handler {
+func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
 }
 
@@ -38,6 +38,14 @@ func (h *Handler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httputil.RespondError(w, r, "Failed to fetch sales team", http.StatusInternalServerError, err)
 		return
+	}
+	// An empty roster is [], not null. repository.go returns a nil slice when
+	// no rep is active and encoding/json renders that as `null`; the client
+	// declares this endpoint Promise<SalesPerson[]> and assigns the result
+	// straight into a field it later calls .length and .map on, so null is a
+	// TypeError in the browser rather than an empty dropdown.
+	if people == nil {
+		people = []SalesPerson{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(people)

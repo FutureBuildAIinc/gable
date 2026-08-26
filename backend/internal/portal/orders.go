@@ -24,7 +24,7 @@ import (
 // It is a separate query rather than a join condition because the caller needs
 // to tell "no such project" apart from "no orders on it" — and because the
 // answer must be "not found" for another customer's project, not "forbidden".
-func (r *Repository) ProjectBelongsToCustomer(ctx context.Context, projectID, customerID uuid.UUID) (bool, error) {
+func (r *PostgresRepository) ProjectBelongsToCustomer(ctx context.Context, projectID, customerID uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND customer_id = $2)`,
@@ -63,7 +63,7 @@ func (s *Service) SetOrderProject(ctx context.Context, orderID, customerID uuid.
 }
 
 // SetOrderProject writes orders.project_id, scoped to the customer.
-func (r *Repository) SetOrderProject(ctx context.Context, orderID, customerID uuid.UUID, projectID *uuid.UUID) error {
+func (r *PostgresRepository) SetOrderProject(ctx context.Context, orderID, customerID uuid.UUID, projectID *uuid.UUID) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`UPDATE orders SET project_id = $1, updated_at = NOW() WHERE id = $2 AND customer_id = $3`,
 		projectID, orderID, customerID)
@@ -130,7 +130,7 @@ func (s *Service) CancelOrder(ctx context.Context, orderID, customerID uuid.UUID
 }
 
 // GetOrderStatusForCustomer reads an order's status scoped to a customer.
-func (r *Repository) GetOrderStatusForCustomer(ctx context.Context, orderID, customerID uuid.UUID) (string, error) {
+func (r *PostgresRepository) GetOrderStatusForCustomer(ctx context.Context, orderID, customerID uuid.UUID) (string, error) {
 	var status string
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT status FROM orders WHERE id = $1 AND customer_id = $2`,
@@ -151,7 +151,7 @@ func (r *Repository) GetOrderStatusForCustomer(ctx context.Context, orderID, cus
 // The route-status line is the same one AI_LM's ReplaceDeliveryRoute draws:
 // past DRAFT/SCHEDULED, the load is real and nobody should be able to make it
 // disappear from a browser.
-func (r *Repository) OrderDeliveryInMotion(ctx context.Context, orderID uuid.UUID) (bool, string, error) {
+func (r *PostgresRepository) OrderDeliveryInMotion(ctx context.Context, orderID uuid.UUID) (bool, string, error) {
 	var deliveryStatus, routeStatus *string
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT d.status, rt.status
@@ -183,6 +183,11 @@ func (r *Repository) OrderDeliveryInMotion(ctx context.Context, orderID uuid.UUI
 
 // --- Change feed (capability 8) -----------------------------------------
 
+// orderPageSize caps one page of the order list. It is the same cap for the
+// display list and for the change feed, but the two truncate differently — see
+// ListOrdersByCustomerFiltered.
+const orderPageSize = 50
+
 // OrderListResult is a page of orders plus the two cache primitives that let a
 // consumer stop re-transferring an unchanged list every 30 seconds.
 type OrderListResult struct {
@@ -196,6 +201,18 @@ type OrderListResult struct {
 	// LatestUpdatedAt is the cursor to send back as ?since= next time. It is
 	// the newest updated_at IN THIS RESULT, so a caller that polls with it
 	// gets strictly newer rows.
+	//
+	// For a `since` page it is a true watermark: the query orders by
+	// updated_at and completes the trailing tie group, so every row with
+	// updated_at <= this value (and > the previous cursor) is in this result.
+	// Advancing to it therefore cannot skip anything.
+	//
+	// For a page fetched WITHOUT `since` — the bootstrap / display list, which
+	// is ordered and truncated by created_at — it is only the newest change in
+	// the page. A customer with more than orderPageSize orders has rows outside
+	// it, so a consumer that wants the no-loss guarantee bootstraps with an
+	// explicit `?since=` (an epoch timestamp is fine) rather than promoting the
+	// display list's cursor.
 	LatestUpdatedAt *time.Time
 }
 
@@ -210,7 +227,10 @@ type OrderListResult struct {
 // the portal consumer had to fix on its own side.
 //
 // The comparison is strictly greater-than, so polling with the ETag's
-// LatestUpdatedAt does not re-deliver the row that produced it.
+// LatestUpdatedAt does not re-deliver the row that produced it. That is only
+// safe because the `since` page is ordered and tie-completed by updated_at
+// (ListOrdersByCustomerFiltered): the cursor below is the newest change in the
+// page, and nothing at or below it was left behind.
 func (s *Service) ListOrdersFiltered(ctx context.Context, customerID uuid.UUID, filter OrderListFilter) (*OrderListResult, error) {
 	if filter.ProjectID != nil {
 		ok, err := s.repo.ProjectBelongsToCustomer(ctx, *filter.ProjectID, customerID)
@@ -266,7 +286,7 @@ func orderListETag(customerID uuid.UUID, filter OrderListFilter, count int, late
 // ListOrdersByCustomerFiltered is the one order-list query. The unfiltered
 // ListOrdersByCustomer delegates to it so the two can never disagree about
 // which columns an order carries or how it is scoped.
-func (r *Repository) ListOrdersByCustomerFiltered(ctx context.Context, customerID uuid.UUID, filter OrderListFilter) ([]PortalOrderDTO, error) {
+func (r *PostgresRepository) ListOrdersByCustomerFiltered(ctx context.Context, customerID uuid.UUID, filter OrderListFilter) ([]PortalOrderDTO, error) {
 	query := `
 		SELECT o.id, o.status, o.total_amount::float8, o.created_at, o.updated_at,
 		       o.project_id, p.name
@@ -288,7 +308,39 @@ func (r *Repository) ListOrdersByCustomerFiltered(ctx context.Context, customerI
 		argIdx++
 	}
 
-	query += ` ORDER BY o.created_at DESC LIMIT 50`
+	// Ordering, and what the page cap is allowed to throw away.
+	//
+	// Without a cursor this is the display list — the "My Orders" page and the
+	// dashboard's five most recent (service.go:159-168) — so it is newest job
+	// first and the cap drops the oldest.
+	//
+	// With a cursor it is the change feed, and created_at ordering is wrong
+	// there: the cursor compares updated_at, so a created_at cap cuts the page
+	// out of the MIDDLE of the range the cursor walks. An order created two
+	// years ago whose status finally moved ranks below 50 newer ones, drops out
+	// of the page, and the cursor — computed over the page it was in
+	// (ListOrdersFiltered) — advances past its updated_at. `updated_at > since`
+	// then excludes it on every subsequent poll, permanently.
+	//
+	// Ordering by updated_at ASC makes the cap truncate the TAIL of that range
+	// instead: everything cut is newer than the page's newest row, so it
+	// arrives on the next poll.
+	//
+	// WITH TIES closes the last hole. Two orders can share an updated_at to
+	// microsecond precision — a bulk UPDATE stamps every row it touches with
+	// the same transaction NOW() — and a plain LIMIT could cut between them.
+	// The cursor would be their shared timestamp and the strictly-greater-than
+	// comparison would drop the ones that did not fit. FETCH FIRST ... WITH
+	// TIES pulls in every row tied with the last, which is exactly what makes
+	// max(updated_at) over the page a watermark rather than a guess, whether
+	// the page came back full or partial. The cost is that a page can exceed
+	// the cap when a single bulk update is bigger than it; that is bounded by
+	// the size of one tie group and is the only shape that cannot lose a row.
+	if filter.Since != nil {
+		query += ` ORDER BY o.updated_at ASC FETCH FIRST ` + strconv.Itoa(orderPageSize) + ` ROWS WITH TIES`
+	} else {
+		query += ` ORDER BY o.created_at DESC LIMIT ` + strconv.Itoa(orderPageSize)
+	}
 
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {

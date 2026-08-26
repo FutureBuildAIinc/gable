@@ -56,7 +56,7 @@ type categoryRow struct {
 // LEFT JOIN + COUNT on the product id (not *) so an empty category counts 0
 // rather than 1. is_active is honoured: a category a dealer has retired must
 // not appear in a customer's browse tree.
-func (r *Repository) ListProductCategories(ctx context.Context) ([]categoryRow, error) {
+func (r *PostgresRepository) ListProductCategories(ctx context.Context) ([]categoryRow, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT pc.id, pc.parent_id, pc.name, pc.slug, pc.path::text, pc.sort_order,
 		       COUNT(p.id)
@@ -176,7 +176,7 @@ func buildCategoryTree(rows []categoryRow) []CategoryNodeDTO {
 // categoryPathForID resolves a category id to its ltree path, which is what
 // the catalog's subtree filter compares against. Returns "" when the id is
 // unknown, so a bad filter yields an empty catalog rather than an error page.
-func (r *Repository) categoryPathForID(ctx context.Context, id uuid.UUID) (string, error) {
+func (r *PostgresRepository) categoryPathForID(ctx context.Context, id uuid.UUID) (string, error) {
 	var path string
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT path::text FROM product_categories WHERE id = $1`, id).Scan(&path)

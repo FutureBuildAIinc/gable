@@ -17,9 +17,10 @@ import (
 // The sales team roster is what the customer record's salesperson assignment
 // points at, and what commission attribution keys on.
 //
-// salesteam.NewHandler takes a concrete *Repository holding a *database.DB, so
-// only the paths that return before touching it are reachable — see
-// TestSalesteamRepository_IsNotUnitTestable at the end of this file.
+// salesteam.NewHandler takes the Repository interface declared in
+// repository.go, so this file covers routing and the request-shape rejections
+// that return before any query; roster_test.go drives the handler against a
+// fake repository, and repository_pg_test.go covers the SQL.
 //
 // Tests are CORRECTNESS unless labelled CHARACTERIZATION.
 
@@ -150,17 +151,15 @@ func TestSalesPersonJSON_InactiveIsExplicit(t *testing.T) {
 	}
 }
 
-// TestSalesteamRepository_IsNotUnitTestable documents a testability gap rather
-// than behaviour.
-//
-// salesteam.NewRepository returns a concrete *Repository holding a
-// *database.DB, and salesteam.NewHandler takes that concrete type, so List and
-// Get — including the `WHERE is_active = true` filter that hides departed reps
-// from the roster and the pgx.ErrNoRows to "salesperson not found" mapping —
-// require Postgres.
-//
-// The fix is to introduce a Repository interface and have NewHandler take it,
-// as the customer, vendor and location modules already do.
-func TestSalesteamRepository_IsNotUnitTestable(t *testing.T) {
-	t.Skip("TESTABILITY GAP: salesteam/repository.go:15 and handler.go:13 use a concrete *Repository, so the active-only roster filter and the not-found mapping need Postgres")
+// CORRECTNESS: the seam is a consumer-defined interface, and the Postgres
+// implementation satisfies it. If someone re-couples NewHandler to the concrete
+// type, this stops compiling.
+func TestSalesteamSeam_IsAnInterface(t *testing.T) {
+	var _ Repository = (*PostgresRepository)(nil)
+
+	// NewHandler must accept anything that satisfies Repository, not just the
+	// Postgres one — that is what makes roster_test.go possible.
+	if NewHandler(&fakeRoster{}) == nil {
+		t.Fatal("NewHandler returned nil for a fake repository")
+	}
 }

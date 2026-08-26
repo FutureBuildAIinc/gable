@@ -5,6 +5,7 @@ package edi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -14,13 +15,13 @@ import (
 
 // EDIHandler provides admin-facing API endpoints for managing EDI trading partners.
 type EDIHandler struct {
-	repo   *EDIRepository
+	repo   EDIRepository
 	bgSvc  *BuyingGroupService
 	ediSvc *Service
 }
 
 // NewEDIHandler creates a new EDI admin handler.
-func NewEDIHandler(repo *EDIRepository, bgSvc *BuyingGroupService, ediSvc *Service) *EDIHandler {
+func NewEDIHandler(repo EDIRepository, bgSvc *BuyingGroupService, ediSvc *Service) *EDIHandler {
 	return &EDIHandler{repo: repo, bgSvc: bgSvc, ediSvc: ediSvc}
 }
 
@@ -132,7 +133,15 @@ func (h *EDIHandler) UpdatePartner(w http.ResponseWriter, r *http.Request) {
 	p.ID = id
 
 	if err := h.repo.UpdatePartner(r.Context(), &p); err != nil {
-		httputil.RespondError(w, r, "failed to update EDI partner", http.StatusInternalServerError, err)
+		// A PUT to an id that is not there is a client error, and it is the
+		// same condition GetPartner already reports as 404. Anything else is
+		// still a 500: an unrecognised failure must not be flattened into a
+		// 4xx that tells the caller not to retry.
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrPartnerNotFound) {
+			status = http.StatusNotFound
+		}
+		httputil.RespondError(w, r, "failed to update EDI partner", status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -183,6 +192,22 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = toCatalogEntries(csvItems)
 	} else {
+		// Recognise the document before parsing it. Parse832Catalog skips every
+		// segment it does not know — which is what makes it tolerant of a
+		// supplier's extra segments — so on its own it answers "zero items,
+		// no error" to a CSV uploaded without ?format=csv, to a PDF and to an
+		// empty body alike. Reported as 200 {"parsed_count":0}, that tells an
+		// operator who picked the wrong file that the import succeeded and
+		// leaves the partner's catalog silently unchanged. The CSV branch above
+		// already refuses an unreadable upload; this holds the same line.
+		//
+		// A document that IS X12 and carries no catalog items still succeeds
+		// with parsed_count 0 — "nothing to import" is a real answer, and it is
+		// a different one from "I cannot read this".
+		if err := ValidateX12(string(data)); err != nil {
+			httputil.RespondError(w, r, "X12 parse error", http.StatusUnprocessableEntity, err)
+			return
+		}
 		x12Items, parseErr := h.bgSvc.Parse832Catalog(string(data))
 		if parseErr != nil {
 			httputil.RespondError(w, r, "X12 parse error", http.StatusUnprocessableEntity, parseErr)

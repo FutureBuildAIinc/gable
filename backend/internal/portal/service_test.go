@@ -27,10 +27,11 @@ import (
 //  2. Wire format — portal DTOs carry float64 DOLLARS, and the password hash on
 //     CustomerUser must never reach a client.
 //
-// Most of the portal Service reaches for *Repository, a concrete struct holding
-// a *database.DB, so the data-access methods cannot be unit-tested without
-// Postgres; see TestPortalDataMethods_AreNotUnitTestable at the end of this
-// file. The methods below are the ones with a real seam.
+// portal.Service takes the Repository interface declared in repository.go, so
+// the data-access methods are unit-testable against a fake store; that suite
+// lives in service_repo_test.go, and the DB-backed proof that the SQL really
+// filters on customer_id lives in tenancy_pg_test.go. This file covers token
+// handling, the wire format and the HTTP layer.
 //
 // Tests are CORRECTNESS unless labelled CHARACTERIZATION.
 
@@ -696,20 +697,23 @@ func TestRegisterRoutes_LoginLimiterIsApplied(t *testing.T) {
 	}
 }
 
-// TestPortalDataMethods_AreNotUnitTestable documents a testability gap rather
-// than behaviour.
+// TestLogin_RejectsAnUnknownEmailWithoutSayingSo is the one Login path that is
+// worth pinning here rather than in service_repo_test.go: the error text.
 //
-// portal.Service holds `repo *Repository` — a concrete struct wrapping a
-// *database.DB — so Login, GetDashboard, ListOrders, GetOrder, ListInvoices,
-// GetInvoice, ListDeliveries, GetDelivery, CreateReorder, GetCart, AddToCart,
-// UpdateCartItem, RemoveCartItem, Checkout, ListCatalog and GetCatalogProduct
-// all require Postgres. The customer-scoping in the SQL (`AND customer_id = $2`
-// on the per-id reads) is therefore untested here, which matters because that
-// clause is the portal's tenant isolation.
-//
-// The fix is to give portal.Service a repository interface, as bankrecon,
-// matching, customer, vendor and reporting already have. That is a
-// production-code change and out of scope for this test pass.
-func TestPortalDataMethods_AreNotUnitTestable(t *testing.T) {
-	t.Skip("TESTABILITY GAP: portal/service.go:24 holds a concrete *Repository, so every data-access method (including the per-customer scoping in GetOrderByIDAndCustomer et al) needs Postgres")
+// CORRECTNESS (security): a login failure must be indistinguishable between
+// "no such user" and "wrong password", or the endpoint enumerates which
+// contractors have portal accounts.
+func TestLogin_FailuresAreIndistinguishable(t *testing.T) {
+	rig := newPortalRig(t)
+
+	_, err := rig.svc.Login(context.Background(), LoginRequest{Email: "nobody@acme.example", Password: "hunter2"})
+	if err == nil {
+		t.Fatal("an unknown user logged in")
+	}
+	if err.Error() != "invalid credentials" {
+		t.Errorf("error = %q, want the generic \"invalid credentials\"", err)
+	}
+	if strings.Contains(err.Error(), "nobody@acme.example") {
+		t.Errorf("the submitted email was reflected into the error: %q", err)
+	}
 }
