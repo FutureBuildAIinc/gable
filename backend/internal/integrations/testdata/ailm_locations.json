@@ -1,0 +1,14 @@
+[
+  {
+    "id": "77777777-7777-4777-8777-111111111111",
+    "name": "Kelowna Yard",
+    "address": "2450 Enterprise Way, Kelowna, BC V1X 7K2",
+    "latitude": 49.8879,
+    "longitude": -119.496
+  },
+  {
+    "id": "77777777-7777-4777-8777-222222222222",
+    "name": "Vernon Yard",
+    "address": "115 Kalamalka Rd, Vernon, BC V1T 6V1"
+  }
+]

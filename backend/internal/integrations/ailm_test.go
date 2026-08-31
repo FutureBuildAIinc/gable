@@ -24,12 +24,13 @@ const testKey = "test-integration-key"
 // --- fake store -------------------------------------------------------------
 
 type fakeAILMStore struct {
-	vehicles []VehicleResponse
-	drivers  []DriverResponse
-	products []ProductResponse
-	orders   []IntegrationOrderResponse
-	route    *DeliveryRouteResponse
-	staff    map[string]*staffLookup
+	vehicles  []VehicleResponse
+	drivers   []DriverResponse
+	locations []LocationResponse
+	products  []ProductResponse
+	orders    []IntegrationOrderResponse
+	route     *DeliveryRouteResponse
+	staff     map[string]*staffLookup
 
 	// err, when set, is returned by every method so the 500 paths are covered.
 	err error
@@ -48,6 +49,10 @@ func (f *fakeAILMStore) ListVehicles(context.Context) ([]VehicleResponse, error)
 
 func (f *fakeAILMStore) ListDrivers(context.Context) ([]DriverResponse, error) {
 	return f.drivers, f.err
+}
+
+func (f *fakeAILMStore) ListLocations(context.Context) ([]LocationResponse, error) {
+	return f.locations, f.err
 }
 
 func (f *fakeAILMStore) ListProducts(_ context.Context, filter productFilter) ([]ProductResponse, error) {
@@ -95,6 +100,8 @@ const (
 	vehicleUUID  = "11111111-1111-4111-8111-111111111111"
 	vehicle2UUID = "11111111-1111-4111-8111-222222222222"
 	driverUUID   = "22222222-2222-4222-8222-111111111111"
+	branchUUID   = "77777777-7777-4777-8777-111111111111"
+	branch2UUID  = "77777777-7777-4777-8777-222222222222"
 	productUUID  = "33333333-3333-4333-8333-111111111111"
 	product2UUID = "33333333-3333-4333-8333-222222222222"
 	orderUUID    = "44444444-4444-4444-8444-111111111111"
@@ -135,6 +142,27 @@ func fixtureDrivers() []DriverResponse {
 	}
 }
 
+func fixtureLocations() []LocationResponse {
+	return []LocationResponse{
+		{
+			ID:        branchUUID,
+			Name:      "Kelowna Yard",
+			Address:   "2450 Enterprise Way, Kelowna, BC V1X 7K2",
+			Latitude:  f64(49.8879),
+			Longitude: f64(-119.4960),
+		},
+		{
+			// Never geocoded — locations.latitude/longitude are backfilled
+			// lazily (migration 072). latitude/longitude MUST be absent, not
+			// 0/0: AI_LM has to be able to say "this yard has no coordinates,
+			// falling back" instead of rooting the day's routes at null island.
+			ID:      branch2UUID,
+			Name:    "Vernon Yard",
+			Address: "115 Kalamalka Rd, Vernon, BC V1T 6V1",
+		},
+	}
+}
+
 func fixtureProducts() []ProductResponse {
 	return []ProductResponse{
 		{
@@ -171,6 +199,7 @@ func fixtureOrders() []IntegrationOrderResponse {
 		{
 			ID:            orderUUID,
 			Status:        "CONFIRMED",
+			BranchID:      branchUUID,
 			CustomerName:  "Kelbrook Homes",
 			Address:       "1885 Formwork Rd, Kelowna BC",
 			Latitude:      f64(49.8801),
@@ -186,6 +215,7 @@ func fixtureOrders() []IntegrationOrderResponse {
 			// null island is in the Gulf of Guinea and would wreck the route.
 			ID:            order2UUID,
 			Status:        "CONFIRMED",
+			BranchID:      branchUUID,
 			CustomerName:  "Okanagan Builders",
 			Address:       "9000 Blueprint Pkwy, Kelowna BC",
 			ScheduledDate: "2026-08-21",
@@ -224,11 +254,12 @@ func fixtureStaff() map[string]*staffLookup {
 
 func fullFakeStore() *fakeAILMStore {
 	return &fakeAILMStore{
-		vehicles: fixtureVehicles(),
-		drivers:  fixtureDrivers(),
-		products: fixtureProducts(),
-		orders:   fixtureOrders(),
-		staff:    fixtureStaff(),
+		vehicles:  fixtureVehicles(),
+		drivers:   fixtureDrivers(),
+		locations: fixtureLocations(),
+		products:  fixtureProducts(),
+		orders:    fixtureOrders(),
+		staff:     fixtureStaff(),
 	}
 }
 
@@ -303,6 +334,7 @@ func TestAILMEndpointsRequireIntegrationKey(t *testing.T) {
 		{http.MethodGet, "/api/integration/products", ""},
 		{http.MethodGet, "/api/integration/vehicles", ""},
 		{http.MethodGet, "/api/integration/drivers", ""},
+		{http.MethodGet, "/api/integration/locations", ""},
 		{http.MethodGet, "/api/integration/orders?date=2026-08-21&status=CONFIRMED", ""},
 		{http.MethodPost, "/api/integration/delivery-routes", `{"vehicle_id":"` + vehicleUUID + `"}`},
 		{http.MethodPost, "/api/integration/validate-staff", `{"email":"dispatcher@gable.com"}`},
@@ -433,6 +465,152 @@ func TestListDriversWireShape(t *testing.T) {
 				assertBareArray(t, w.Body.Bytes())
 			}
 			assertJSON(t, w.Body.Bytes(), tc.wantJSON)
+		})
+	}
+}
+
+// --- branches ---------------------------------------------------------------
+
+func TestListLocationsWireShape(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		store    *fakeAILMStore
+		wantCode int
+		wantJSON string
+	}{
+		{
+			name:     "a geocoded yard and one that has never been geocoded",
+			store:    fullFakeStore(),
+			wantCode: http.StatusOK,
+			wantJSON: `[
+			  {"id":"` + branchUUID + `","name":"Kelowna Yard",
+			   "address":"2450 Enterprise Way, Kelowna, BC V1X 7K2",
+			   "latitude":49.8879,"longitude":-119.4960},
+			  {"id":"` + branch2UUID + `","name":"Vernon Yard",
+			   "address":"115 Kalamalka Rd, Vernon, BC V1T 6V1"}
+			]`,
+		},
+		{
+			name:     "no branches is [] not null",
+			store:    &fakeAILMStore{},
+			wantCode: http.StatusOK,
+			wantJSON: `[]`,
+		},
+		{
+			name:     "store failure is 500",
+			store:    &fakeAILMStore{err: errors.New("boom")},
+			wantCode: http.StatusInternalServerError,
+			wantJSON: `{"error":"failed to query locations"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(tc.store, testKey)
+			w := do(t, srv, http.MethodGet, "/api/integration/locations", testKey, "")
+			if w.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body %s)", w.Code, tc.wantCode, w.Body)
+			}
+			if tc.wantCode == http.StatusOK {
+				assertBareArray(t, w.Body.Bytes())
+			}
+			assertJSON(t, w.Body.Bytes(), tc.wantJSON)
+		})
+	}
+}
+
+// A branch that has never been geocoded must OMIT latitude/longitude rather
+// than send 0/0. This is the whole reason LocationResponse uses *float64: AI_LM
+// roots a route at the branch depot, and a 0,0 it cannot distinguish from a
+// real coordinate would plan the day's deliveries from the Gulf of Guinea.
+func TestBranchMissingCoordinatesAreOmitted(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(fullFakeStore(), testKey)
+	w := do(t, srv, http.MethodGet, "/api/integration/locations", testKey, "")
+
+	var raw []map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(raw) != 2 {
+		t.Fatalf("got %d branches, want 2", len(raw))
+	}
+	for _, field := range []string{"latitude", "longitude"} {
+		if v, ok := raw[1][field]; ok {
+			t.Errorf("%s = %s on a branch that was never geocoded; want the key absent "+
+				"so AI_LM sees nil and falls back, not null island", field, v)
+		}
+	}
+
+	// ...and the geocoded branch must still carry real coordinates, so the
+	// assertion above cannot be satisfied by emitting nothing at all.
+	if got := string(raw[0]["latitude"]); got != "49.8879" {
+		t.Errorf("latitude = %s on the geocoded branch, want 49.8879", got)
+	}
+	if got := string(raw[0]["longitude"]); got != "-119.496" {
+		t.Errorf("longitude = %s on the geocoded branch, want -119.496", got)
+	}
+}
+
+// composeBranchAddress builds the free-text line a geocoder is handed, so a
+// branch whose address is only partly filled in must not produce stray commas
+// or a leading/trailing separator — OpenRouteService resolves ", , BC" to
+// something unhelpful and the yard ends up in the wrong place.
+//
+// The rule must stay identical to delivery.composeBranchAddress (the two are
+// deliberate duplicates; internal/integrations must not import
+// internal/delivery), because a branch geocoded through either path has to
+// resolve to the same point.
+func TestComposeBranchAddress(t *testing.T) {
+	t.Parallel()
+
+	sp := func(v string) *string { return &v }
+
+	cases := []struct {
+		name                   string
+		addr, city, state, zip *string
+		want                   string
+	}{
+		{
+			name: "every part present",
+			addr: sp("2450 Enterprise Way"), city: sp("Kelowna"),
+			state: sp("BC"), zip: sp("V1X 7K2"),
+			want: "2450 Enterprise Way, Kelowna, BC V1X 7K2",
+		},
+		{
+			name: "no zip keeps the state alone, with no trailing space",
+			addr: sp("115 Kalamalka Rd"), city: sp("Vernon"), state: sp("BC"),
+			want: "115 Kalamalka Rd, Vernon, BC",
+		},
+		{
+			name: "no state keeps the zip alone",
+			addr: sp("115 Kalamalka Rd"), city: sp("Vernon"), zip: sp("V1T 6V1"),
+			want: "115 Kalamalka Rd, Vernon, V1T 6V1",
+		},
+		{
+			name: "missing street does not leave a leading comma",
+			city: sp("Vernon"), state: sp("BC"), zip: sp("V1T 6V1"),
+			want: "Vernon, BC V1T 6V1",
+		},
+		{
+			name: "whitespace-only parts count as absent",
+			addr: sp("  "), city: sp("Vernon"), state: sp(" "), zip: sp(""),
+			want: "Vernon",
+		},
+		{
+			name: "a branch with no address at all is the empty string",
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := composeBranchAddress(tc.addr, tc.city, tc.state, tc.zip); got != tc.want {
+				t.Errorf("composeBranchAddress = %q, want %q", got, tc.want)
+			}
 		})
 	}
 }
@@ -604,14 +782,16 @@ func TestListOrdersWireShape(t *testing.T) {
 			wantDate:   "2026-08-21",
 			wantStatus: "CONFIRMED",
 			wantJSON: `[
-			  {"id":"` + orderUUID + `","status":"CONFIRMED","customer_name":"Kelbrook Homes",
+			  {"id":"` + orderUUID + `","status":"CONFIRMED","branch_id":"` + branchUUID + `",
+			   "customer_name":"Kelbrook Homes",
 			   "address":"1885 Formwork Rd, Kelowna BC","latitude":49.8801,"longitude":-119.4436,
 			   "scheduled_date":"2026-08-21",
 			   "lines":[
 			     {"product_id":"` + productUUID + `","sku":"LUM-248-PREM","quantity":128,"weight_lbs":9.5},
 			     {"product_id":"` + product2UUID + `","sku":"HW-NAIL-16D","quantity":2,"weight_lbs":50}
 			   ]},
-			  {"id":"` + order2UUID + `","status":"CONFIRMED","customer_name":"Okanagan Builders",
+			  {"id":"` + order2UUID + `","status":"CONFIRMED","branch_id":"` + branchUUID + `",
+			   "customer_name":"Okanagan Builders",
 			   "address":"9000 Blueprint Pkwy, Kelowna BC","scheduled_date":"2026-08-21",
 			   "lines":[
 			     {"product_id":"` + productUUID + `","sku":"LUM-248-PREM","quantity":40,"weight_lbs":9.5}
@@ -681,6 +861,34 @@ func TestOrderMissingCoordinatesAreOmitted(t *testing.T) {
 	for _, field := range []string{"latitude", "longitude"} {
 		if v, ok := raw[1][field]; ok {
 			t.Errorf("%s = %s on an un-geocoded order; want the key absent so AI_LM sees nil, not null island", field, v)
+		}
+	}
+}
+
+// branch_id must be present on EVERY order, always. orders.branch_id is NOT
+// NULL (migration 062), so the field is not omitempty: if it ever arrives empty
+// or absent, that is an ERP bug and AI_LM has to be able to see it rather than
+// quietly plan the load from its fallback depot.
+func TestOrderAlwaysCarriesBranchID(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(fullFakeStore(), testKey)
+	w := do(t, srv, http.MethodGet, "/api/integration/orders", testKey, "")
+
+	var raw []map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(raw) != 2 {
+		t.Fatalf("got %d orders, want 2", len(raw))
+	}
+	for i, o := range raw {
+		v, ok := o["branch_id"]
+		if !ok {
+			t.Fatalf("order %d has no branch_id; AI_LM cannot resolve its depot", i)
+		}
+		if want := `"` + branchUUID + `"`; string(v) != want {
+			t.Errorf("order %d branch_id = %s, want %s", i, v, want)
 		}
 	}
 }

@@ -53,6 +53,38 @@
         "omitempty": false
       }
     ],
+    "Location": [
+      {
+        "json_name": "id",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "name",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "address",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": true
+      },
+      {
+        "json_name": "latitude",
+        "go_type": "float64",
+        "pointer": true,
+        "omitempty": true
+      },
+      {
+        "json_name": "longitude",
+        "go_type": "float64",
+        "pointer": true,
+        "omitempty": true
+      }
+    ],
     "Order": [
       {
         "json_name": "id",
@@ -62,6 +94,12 @@
       },
       {
         "json_name": "status",
+        "go_type": "string",
+        "pointer": false,
+        "omitempty": false
+      },
+      {
+        "json_name": "branch_id",
         "go_type": "string",
         "pointer": false,
         "omitempty": false
