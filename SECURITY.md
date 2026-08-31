@@ -82,7 +82,8 @@ Gable ships an authentication bypass for local development. When
 `AUTH_MODE=dev` is set:
 
 - The backend **skips JWT/JWKS verification entirely**. The auth middleware is
-  never constructed (`backend/cmd/server/main.go:144-145`), so requests carry no
+  never constructed (`validateAuthStartup` in `backend/cmd/server/startup.go`
+  returns `Enabled: false`), so requests carry no
   claims at all, and `RequireRole` passes through whenever claims are nil
   (`backend/pkg/middleware/auth.go`). No user is impersonated — the request is
   simply unauthenticated and every role gate opens for it. The effect is full
@@ -98,11 +99,39 @@ every visitor full administrative access.
 
 1. **Never set `AUTH_MODE=dev` on a public hostname or a production deploy.**
 2. Production must run with `AUTH_MODE` unset (or any value other than `dev`).
-   The backend is **fail-closed**: with `AUTH_MODE` ≠ `dev` it *requires*
-   `JWKS_URL` and refuses to start without it, and it requires `CORS_ORIGINS`
-   to be set.
+   The backend is **fail-closed**: with `AUTH_MODE` ≠ `dev` it refuses to start
+   unless **all** of the following are set —
+   - `JWKS_URL` — the identity provider's JWKS endpoint;
+   - `AUTH_ISSUER` — the exact `iss` every token must carry;
+   - `AUTH_AUDIENCE` — the audience this service accepts. Without it, a token
+     minted for a **different** service in the same identity provider is a
+     valid token here: it is signed by the same JWKS. This is the practical
+     attack, not a theoretical one;
+   - `CORS_ORIGINS`;
+   - `PAYMENT_VAULT_KEY` — see rule 4.
+
+   Absence of configuration must never mean absence of verification. Each of
+   these is a boot failure, not a skipped check.
 3. Set a strong `PORTAL_JWT_SECRET` in production; the dev default is used only
    under `AUTH_MODE=dev`.
+4. **Payment credentials are encrypted at rest, and that is not optional.**
+   `PAYMENT_VAULT_KEY` (32-byte hex, `openssl rand -hex 32`) seals the Run
+   Payments `api_key` and `refresh_token` in `system_settings` with
+   AES-256-GCM. Two rules, deliberately different:
+   - A **malformed** key refuses to boot in **every** mode, `AUTH_MODE=dev`
+     included. A typo must never silently downgrade a credential vault to
+     plaintext — that is worse than a hard failure, because nobody notices.
+   - An **absent** key refuses to boot unless `AUTH_MODE=dev`.
+
+   The credential store additionally refuses to write a payment secret at all
+   when no key is configured, so no code path can persist one in the clear.
+5. **JWT signing algorithms are pinned.** Verification accepts asymmetric
+   algorithms only (`RS*`, `PS*`, `ES*`, `EdDSA`). `none` and any HMAC (`HS*`)
+   are rejected — and rejected at boot if an operator lists them in
+   `AUTH_ALGORITHMS`, not merely absent from the defaults. Tokens must also
+   carry an `exp`; one minted without an expiry is refused rather than being
+   valid forever. Narrow the allowlist to your provider's actual algorithm with
+   `AUTH_ALGORITHMS=RS256`.
 
 If you find any reachable environment running `AUTH_MODE=dev`, treat it as a
 disclosable vulnerability and report it through the channels above.

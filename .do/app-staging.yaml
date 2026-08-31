@@ -57,6 +57,11 @@ services:
         value: "8080"
       # Reachable/production auth. Point JWKS_URL at your identity provider's
       # JWKS endpoint. Do NOT set AUTH_MODE=dev on a reachable host.
+      #
+      # Fail-closed: with AUTH_MODE != dev the backend REFUSES TO START unless
+      # JWKS_URL, AUTH_ISSUER, AUTH_AUDIENCE, CORS_ORIGINS and
+      # PAYMENT_VAULT_KEY are all set. Placeholders below must be replaced
+      # with real values before this app will boot.
       - key: AUTH_MODE
         value: production
       - key: EDI_OUTPUT_DIR
@@ -64,11 +69,36 @@ services:
         scope: RUN_TIME
       - key: JWKS_URL
         value: https://auth.example.com/.well-known/jwks.json
+      # The exact `iss` every token must carry. Required (AUTH_MODE != dev).
+      - key: AUTH_ISSUER
+        value: https://auth.example.com/
+      # The audience this service accepts. Required (AUTH_MODE != dev).
+      # Without it, a token minted for a DIFFERENT service in the same IdP is
+      # accepted here — it is signed by the same JWKS. Use this app's own
+      # identifier, never one shared with a sibling service.
+      - key: AUTH_AUDIENCE
+        value: gable-erp
+      # Optional: narrow the JWT signing-algorithm allowlist. Unset means the
+      # asymmetric default set (RS*/PS*/ES*/EdDSA). "HS*" and "none" are
+      # rejected at boot and cannot be enabled. Recommended: pin to your IdP's
+      # actual signing algorithm.
+      - key: AUTH_ALGORITHMS
+        value: RS256
       - key: CORS_ORIGINS
         value: https://staging.example.com
-      # PORTAL_JWT_SECRET is required in production. Set it as an encrypted
-      # secret out-of-band (doctl apps update / dashboard), never inline here:
+      # PORTAL_JWT_SECRET and PAYMENT_VAULT_KEY are required in production.
+      # Set them as encrypted secrets out-of-band (doctl apps update /
+      # dashboard), never inline here:
       #   - key: PORTAL_JWT_SECRET
+      #     scope: RUN_TIME
+      #     type: SECRET
+      #
+      # PAYMENT_VAULT_KEY seals Run Payments credentials at rest (AES-256-GCM).
+      # 32-byte hex: `openssl rand -hex 32`. The backend refuses to boot
+      # without it outside AUTH_MODE=dev, and refuses to boot on a MALFORMED
+      # key in every mode — a typo must never downgrade payment credentials to
+      # plaintext.
+      #   - key: PAYMENT_VAULT_KEY
       #     scope: RUN_TIME
       #     type: SECRET
       - key: DATABASE_URL

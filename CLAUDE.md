@@ -34,7 +34,7 @@ docs/         → Architecture, design system, and database specs
 - **Language:** Go 1.25 (`backend/go.mod`)
 - **Router:** Go 1.22+ stdlib `net/http.ServeMux` — **not** Chi. Modules expose `RegisterRoutes(mux, mw)` to attach handlers
 - **Database:** PostgreSQL 16+ via pgx v5 (`pkg/database` wraps a `*pgxpool.Pool`)
-- **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL` is required (fail-closed)
+- **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`) with the signing algorithm pinned to asymmetric-only, and `iss`/`aud`/`exp` all required. `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL`, `AUTH_ISSUER` and `AUTH_AUDIENCE` are all required (fail-closed, see `cmd/server/startup.go`)
 - **PDF:** maroto v2 | **Excel:** excelize v2 | **Cron:** robfig/cron v3 | **Metrics:** Prometheus
 - **Event bus:** `pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam used by one feature (lumber price exposure → notification emails). There is still **no broker**: no NATS client is imported anywhere in Go code, nothing was added to `go.mod`, and the orphan `nats` container stays out of `docker-compose.yml` (a `NOTE` comment marks where it was). The bus is best-effort and at-most-once — no durability, no cross-process delivery, no redelivery, events lost on restart. Durable state lives in Postgres and the nightly exposure safety-net scan is the recovery path. See the `pkg/eventbus` package doc and `docs/architecture.md` §4.2
 
@@ -107,8 +107,12 @@ go test ./internal/<module>/...    # tests for a single module
 go vet ./...                       # static analysis
 ```
 
-`AUTH_MODE=dev` is required to boot locally — it is not a default. Without it
-and without a `JWKS_URL`, the server fail-closes and exits (`cmd/server/main.go:146-148`).
+`AUTH_MODE=dev` is required to boot locally — it is not a default. Without it,
+the server fail-closes and exits unless `JWKS_URL`, `AUTH_ISSUER`,
+`AUTH_AUDIENCE`, `CORS_ORIGINS` and `PAYMENT_VAULT_KEY` are all set. The gates
+are `validateAuthStartup` / `validatePaymentVaultStartup` in
+`cmd/server/startup.go`; a **malformed** `PAYMENT_VAULT_KEY` fails even under
+`AUTH_MODE=dev`. See `backend/.env.example` for the full list.
 
 Override DB connection when Postgres is on the standard port:
 ```bash

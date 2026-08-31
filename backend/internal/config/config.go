@@ -19,6 +19,15 @@ type Config struct {
 	DatabaseURL string
 	JWKSURL     string
 	AuthIssuer  string
+	// AuthAudience is AUTH_AUDIENCE: the audience every access token must
+	// carry. Mandatory unless AUTH_MODE=dev (enforced at boot by
+	// validateAuthStartup in cmd/server/startup.go).
+	AuthAudience string
+	// AuthAlgorithms is AUTH_ALGORITHMS: an optional comma-separated
+	// allowlist narrowing the JWT signing algorithms this service accepts
+	// (e.g. "RS256"). Empty means the asymmetric default set. HMAC and
+	// "none" are rejected at boot — see middleware.ParseAlgorithms.
+	AuthAlgorithms string
 
 	// Run Payments Gateway
 	RunPaymentsAPIKey      string
@@ -96,6 +105,9 @@ func Load() (*Config, error) {
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://gable_user:gable_password@localhost:5434/gable_db?sslmode=disable"),
 		JWKSURL:     getEnv("JWKS_URL", ""),
 		AuthIssuer:  getEnv("AUTH_ISSUER", ""),
+
+		AuthAudience:   getEnv("AUTH_AUDIENCE", ""),
+		AuthAlgorithms: getEnv("AUTH_ALGORITHMS", ""),
 
 		EDIOutputDir: getEnv("EDI_OUTPUT_DIR", "edi_out"),
 

@@ -27,7 +27,10 @@ This repository ships **example** Digital Ocean App Platform specs (PaaS,
 Dockerfile-based) for self-hosting — not a live deployment. Every hostname,
 repository and database name in them is a placeholder (`your-org/gable`,
 `*.example.com`, `your-db-cluster`), and both run `AUTH_MODE=production`
-against a placeholder `JWKS_URL`. Operational notes live in `.do/README.md`.
+against placeholder `JWKS_URL` / `AUTH_ISSUER` / `AUTH_AUDIENCE` values. Those
+placeholders must be replaced before a spec will boot — the backend fail-closes
+on each of them, plus `CORS_ORIGINS` and `PAYMENT_VAULT_KEY`. Operational notes
+live in `.do/README.md`.
 
 | Spec | Tracks branch | Example domain | Logical DB |
 |---|---|---|---|
@@ -113,7 +116,7 @@ change behind `eventbus.Bus`: producers and consumers only see `Publisher`,
 - **Style:** RESTful JSON.
 - **Surfaces:** `/api/v1/*` (ERP, JWT), `/api/portal/v1/*` (B2B portal — portal-session auth; `project` also mounts here), `/api/partner/v1/*` (co-op partner API), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS).
 - **Router:** Go stdlib `http.ServeMux` with method+path patterns; per-module registration via `RegisterRoutes(mux, roleGuard…)`, converging on the gated `apps.Router` as modules convert.
-- **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`); `AUTH_MODE=dev` is a **local-development-only** pass-through that disables auth entirely (see `SECURITY.md`). Role gating via `middleware.RequireRole`.
+- **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). Verification is pinned: asymmetric algorithms only (never `HS*` or `none`), and `iss`, `aud` and `exp` are all mandatory — `AUTH_ISSUER` and `AUTH_AUDIENCE` are required at boot, so a token minted for a sibling service in the same IdP is rejected rather than accepted. `AUTH_MODE=dev` is a **local-development-only** pass-through that disables auth entirely (see `SECURITY.md`). Role gating via `middleware.RequireRole`.
 - **App gating:** converted modules' routes 404 with `{"error":"app_disabled"}` when the app is disabled in the registry.
 - **Config:** Environment variables with `godotenv` fallback.
 

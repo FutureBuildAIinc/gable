@@ -31,9 +31,12 @@ cd app && npm install && npm run dev              # SPA on :5173
 ```
 
 `AUTH_MODE=dev` is required to start the backend locally and is **not** a
-default — without it (and without a `JWKS_URL`) the server fail-closes and
-exits. It disables authentication and authorization completely, so never set
-it anywhere reachable. See [SECURITY.md](./SECURITY.md).
+default — without it the server fail-closes and exits unless `JWKS_URL`,
+`AUTH_ISSUER`, `AUTH_AUDIENCE`, `CORS_ORIGINS` and `PAYMENT_VAULT_KEY` are all
+set (see `backend/.env.example`). It disables authentication and authorization
+completely, so never set it anywhere reachable. Note that a **malformed**
+`PAYMENT_VAULT_KEY` refuses to boot even in dev. See
+[SECURITY.md](./SECURITY.md).
 
 Open <http://localhost:5173>. To wipe and rebuild the dev database:
 

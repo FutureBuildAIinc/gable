@@ -15,11 +15,19 @@ Both examples reference a single DO Managed Postgres cluster
 environments can share one cluster without stepping on each other.
 
 > **Security — auth is not optional on reachable hosts.** The example specs run
-> with `AUTH_MODE=production` and a placeholder `JWKS_URL`. The backend is
-> **fail-closed**: with `AUTH_MODE` ≠ `dev` it requires a valid `JWKS_URL` and
-> `CORS_ORIGINS` or it refuses to start. **Never** set `AUTH_MODE=dev` on any
-> reachable deployment — it disables authentication entirely and is for local
-> development only. See [`../SECURITY.md`](../SECURITY.md).
+> with `AUTH_MODE=production` and placeholder auth values. The backend is
+> **fail-closed**: with `AUTH_MODE` ≠ `dev` it refuses to start unless **all**
+> of these are set — `JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`,
+> `CORS_ORIGINS` and `PAYMENT_VAULT_KEY`. Replace every placeholder before
+> deploying, or the app will not boot.
+>
+> `AUTH_AUDIENCE` is the one most easily overlooked and the most consequential:
+> without it, a token minted for a **different** service in the same identity
+> provider is a valid token here, because it is signed by the same JWKS.
+>
+> **Never** set `AUTH_MODE=dev` on any reachable deployment — it disables
+> authentication entirely and is for local development only. See
+> [`../SECURITY.md`](../SECURITY.md).
 
 ## Architecture
 
@@ -137,12 +145,33 @@ database interrupts anything running against it.
 string (with credentials and `sslmode=require`) at runtime; the literal value is
 never committed.
 
-Any other secret a reachable deployment needs — e.g. `PORTAL_JWT_SECRET`, and
-whatever your identity provider requires alongside `JWKS_URL` — should be set as
-**encrypted env vars** via `doctl apps update` or the dashboard. **Do not** add
-secret values inline in these YAML files. `JWKS_URL` itself is typically a public
-URL and can stay in the spec, but the placeholder must be replaced with your
-provider's real endpoint.
+Any other secret a reachable deployment needs — `PORTAL_JWT_SECRET`,
+`PAYMENT_VAULT_KEY`, and whatever your identity provider requires alongside
+`JWKS_URL` — should be set as **encrypted env vars** via `doctl apps update` or
+the dashboard. **Do not** add secret values inline in these YAML files.
+
+`PAYMENT_VAULT_KEY` seals the Run Payments `api_key` and `refresh_token` at rest
+(AES-256-GCM) in `system_settings`. Generate it with `openssl rand -hex 32` and
+set it as a `SECRET`:
+
+```sh
+doctl apps update <app-id> --spec .do/app-staging.yaml
+# then set the secret values via the dashboard, or an updated spec kept locally
+```
+
+Two boot rules apply to it, and they differ deliberately:
+
+- A **malformed** key refuses to boot in **every** mode, `AUTH_MODE=dev`
+  included. A typo must never silently downgrade payment credentials to
+  plaintext.
+- An **absent** key refuses to boot unless `AUTH_MODE=dev`.
+
+Rotating this key makes previously sealed values unreadable — re-enter the Run
+Payments credentials after a rotation.
+
+`JWKS_URL`, `AUTH_ISSUER` and `AUTH_AUDIENCE` are not secrets and can stay in
+the spec, but the placeholders must be replaced with your provider's real
+values.
 
 ## Local-only files (ignored by git)
 

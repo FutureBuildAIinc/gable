@@ -5,6 +5,7 @@ package payment
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -37,16 +38,18 @@ const keyStoreTTL = 30 * time.Second
 
 // NewKeyStore creates a KeyStore. envFallback carries the RUN_PAYMENTS_*
 // environment values (may be empty).
-func NewKeyStore(db *database.DB, envFallback GatewayConfig) *KeyStore {
-	return &KeyStore{db: db, env: envFallback, vault: &Vault{}, logger: slog.Default()}
-}
-
-// WithVault attaches the sealing vault and returns the store for chaining.
-func (k *KeyStore) WithVault(v *Vault) *KeyStore {
-	if v != nil {
-		k.vault = v
+//
+// vault is a REQUIRED parameter, not an option: this store is the only writer
+// of the run_payments_* credentials, and a nil/absent vault means it writes
+// them to the database in plaintext. Making it a parameter means the compiler
+// checks every construction site; an optional .WithVault() only meant the
+// caller was trusted to remember. A nil vault is treated as absent, and
+// SetSecret refuses to write in that state (see SetSecret).
+func NewKeyStore(db *database.DB, envFallback GatewayConfig, vault *Vault) *KeyStore {
+	if vault == nil {
+		vault = &Vault{}
 	}
-	return k
+	return &KeyStore{db: db, env: envFallback, vault: vault, logger: slog.Default()}
 }
 
 // WithLogger attaches a logger for vault/open diagnostics.
@@ -127,6 +130,15 @@ func (k *KeyStore) Configured() bool {
 // SetSecret seals and upserts a secret setting (api_key / refresh_token),
 // then busts the cache. Use this to store credentials encrypted at rest.
 func (k *KeyStore) SetSecret(ctx context.Context, key, plaintext string) error {
+	// Fail closed, and check this FIRST so the invariant holds regardless of
+	// whether a database is attached. Vault.Seal is a silent passthrough when
+	// no key is configured, so without this guard an absent vault would write
+	// a live payment credential to system_settings as plaintext and report
+	// success. Refusing the write is the safer failure: the caller logs it,
+	// and the credential stays only in memory.
+	if !k.vault.Present() {
+		return fmt.Errorf("refusing to write payment secret %q: no PAYMENT_VAULT_KEY configured, so it would be stored in plaintext", key)
+	}
 	if k.db == nil {
 		return nil
 	}
@@ -158,7 +170,11 @@ func (k *KeyStore) PersistRotatedKey(apiKey, refreshToken string) error {
 		return err
 	}
 	if refreshToken != "" {
-		_ = k.SetSecret(ctx, "run_payments_refresh_token", refreshToken)
+		// Surface this error too: a silently dropped refresh-token write is
+		// how a rotation half-persists and the next restart uses a stale token.
+		if err := k.SetSecret(ctx, "run_payments_refresh_token", refreshToken); err != nil {
+			return err
+		}
 	}
 	return nil
 }

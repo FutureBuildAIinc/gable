@@ -98,6 +98,36 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Auth configuration (fail-closed). Validated here, before the DB pool is
+	// opened, so a deployment missing AUTH_ISSUER / AUTH_AUDIENCE dies at boot
+	// instead of coming up and quietly accepting tokens it should reject.
+	// Only the JWKS network fetch is deferred to the wiring step below.
+	authCfg, err := validateAuthStartup(cfg)
+	if err != nil {
+		logger.Error("Auth configuration error", "error", err)
+		os.Exit(1)
+	}
+
+	// Payment credential vault (fail-closed). Validated here, before the DB
+	// pool is opened: a credential-vault misconfiguration should stop the
+	// process before it can reach the database it would write plaintext to.
+	// A malformed key is fatal in every mode, dev included.
+	paymentVault, vaultWarning, verr := validatePaymentVaultStartup(cfg)
+	if verr != nil {
+		logger.Error("Payment vault configuration error", "error", verr)
+		os.Exit(1)
+	}
+	if vaultWarning != "" {
+		logger.Warn(vaultWarning)
+	} else {
+		logger.Info("payment credential vault active (AES-256-GCM at rest)")
+	}
+
+	// rootCtx bounds background goroutines started during wiring (e.g. the
+	// JWKS refresh loop) to the process lifetime.
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
 	logger.Info("Starting server...", "port", cfg.Port, "auth_mode", cfg.AuthMode, "log_level", cfg.LogLevel)
 
 	// 3. Database Connection
@@ -127,13 +157,22 @@ func main() {
 	logger.Info("Audit logger initialized")
 
 	// 4. Initialize Auth Middleware
-	// Fail-closed: JWKS_URL is required unless AUTH_MODE=dev is explicitly set.
+	// Fail-closed: JWKS_URL, AUTH_ISSUER and AUTH_AUDIENCE are all required
+	// unless AUTH_MODE=dev is explicitly set. See validateAuthStartup.
+	// authCfg was validated at boot (fail-closed) above, before the DB pool
+	// opened. Only the JWKS fetch — which needs the network — happens here.
 	var authMw *middleware.AuthMiddleware
-	if cfg.JWKSURL != "" {
-		logger.Info("Initializing Auth Middleware", "jwks_url", cfg.JWKSURL)
-		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
-			JWKSURL:     cfg.JWKSURL,
-			Issuer:      cfg.AuthIssuer,
+	if authCfg.Enabled {
+		logger.Info("Initializing Auth Middleware",
+			"jwks_url", authCfg.JWKSURL,
+			"issuer", authCfg.Issuer,
+			"audience", authCfg.Audience,
+			"algorithms", strings.Join(authCfg.Algorithms, ","))
+		am, err := middleware.NewAuthMiddleware(rootCtx, middleware.AuthConfig{
+			JWKSURL:     authCfg.JWKSURL,
+			Issuer:      authCfg.Issuer,
+			Audience:    authCfg.Audience,
+			Algorithms:  authCfg.Algorithms,
 			PublicPaths: []string{"/health", "/healthz/live", "/healthz/ready", "/metrics", "/api/portal/v1/login", "/api/portal/v1/config", "/api/portal/v1/", "/api/integration/", "/api/v1/a2a/"},
 		}, logger)
 		if err != nil {
@@ -141,11 +180,8 @@ func main() {
 			os.Exit(1)
 		}
 		authMw = am
-	} else if strings.EqualFold(cfg.AuthMode, "dev") {
-		logger.Warn("AUTH_MODE=dev: authentication disabled (development only)")
 	} else {
-		logger.Error("JWKS_URL not set and AUTH_MODE != dev; set JWKS_URL for production or AUTH_MODE=dev for development")
-		os.Exit(1)
+		logger.Warn("AUTH_MODE=dev: authentication disabled (development only)")
 	}
 
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per
@@ -399,25 +435,14 @@ func main() {
 	// time, DB-first (system_settings run_payments_* keys, settable in Tech
 	// Admin) with RUN_PAYMENTS_* env fallback. Card processing lights up the
 	// moment a key exists, no restart needed.
-	// Credential vault: seals Run api_key/refresh_token at rest (AES-256-GCM).
-	// A malformed key is logged and the store falls back to plaintext with a
-	// prominent warning rather than bricking boot.
-	paymentVault, verr := payment.NewVault(cfg.PaymentVaultKey)
-	if verr != nil {
-		logger.Error("PAYMENT_VAULT_KEY invalid — payment credentials will NOT be encrypted at rest", "error", verr)
-		paymentVault = &payment.Vault{}
-	} else if paymentVault.Present() {
-		logger.Info("payment credential vault active (AES-256-GCM at rest)")
-	} else {
-		logger.Warn("PAYMENT_VAULT_KEY not set — Run Payments credentials stored plaintext; set a 32-byte hex key to encrypt at rest")
-	}
+	// paymentVault was built and validated at boot (fail-closed) above.
 	paymentKeys := payment.NewKeyStore(db, payment.GatewayConfig{
 		APIKey:      cfg.RunPaymentsAPIKey,
 		PublicKey:   cfg.RunPaymentsPublicKey,
 		MID:         cfg.RunPaymentsMID,
 		BaseURL:     cfg.RunPaymentsBaseURL,
 		Environment: cfg.RunPaymentsEnvironment,
-	}).WithVault(paymentVault).WithLogger(logger)
+	}, paymentVault).WithLogger(logger)
 	rpGateway := payment.NewRunPaymentsGatewayDynamic(paymentKeys.Resolve, logger).
 		OnKeyRotated(func(apiKey, refreshToken string) {
 			// The Run api_key is an expiring JWT — persist the refreshed one.

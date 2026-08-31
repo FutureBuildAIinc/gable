@@ -17,14 +17,24 @@ import (
 )
 
 type AuthConfig struct {
-	JWKSURL     string
-	Issuer      string
+	JWKSURL string
+	// Issuer is the exact `iss` every token must carry. Required.
+	Issuer string
+	// Audience is the value that must appear in every token's `aud`. Required.
+	// Without it a token minted for a *sibling* service in the same IdP would
+	// verify here, since it is signed by the same JWKS.
+	Audience string
+	// Algorithms is the signing-algorithm allowlist. Required; build it with
+	// ParseAlgorithms so symmetric/none entries are rejected.
+	Algorithms  []string
 	PublicPaths []string
 }
 
 type AuthMiddleware struct {
 	jwks        keyfunc.Keyfunc
+	parser      *jwt.Parser
 	issuer      string
+	audience    string
 	publicPaths []string
 	logger      *slog.Logger
 }
@@ -46,22 +56,68 @@ type contextKey string
 
 const UserContextKey contextKey = "user"
 
-// NewAuthMiddleware initializes the JWKS fetcher and returns the middleware
+// NewAuthMiddleware initializes the JWKS fetcher and returns the middleware.
+//
+// It refuses to build a weakened verifier: issuer, audience and an
+// asymmetric-only algorithm allowlist are all mandatory. main.go gates these
+// at boot too; the duplication is deliberate, because a security boundary
+// should not be constructible in a state that verifies less than it claims to.
 func NewAuthMiddleware(ctx context.Context, cfg AuthConfig, logger *slog.Logger) (*AuthMiddleware, error) {
+	if cfg.Issuer == "" {
+		return nil, fmt.Errorf("auth middleware: Issuer is required (AUTH_ISSUER)")
+	}
+	if cfg.Audience == "" {
+		return nil, fmt.Errorf("auth middleware: Audience is required (AUTH_AUDIENCE)")
+	}
+	if len(cfg.Algorithms) == 0 {
+		return nil, fmt.Errorf("auth middleware: Algorithms is required (build it with ParseAlgorithms)")
+	}
+	for _, alg := range cfg.Algorithms {
+		upper := strings.ToUpper(alg)
+		if upper == "NONE" || strings.HasPrefix(upper, "HS") {
+			return nil, fmt.Errorf("auth middleware: refusing algorithm %q — JWKS verification never accepts HMAC or none", alg)
+		}
+	}
+
 	// Create the JWKS from the URL.
 	// This will fetch the keys immediately and cache them.
 	// It handles refresh automatically based on Cache-Control headers or errors.
-	k, err := keyfunc.NewDefault([]string{cfg.JWKSURL})
+	// NewDefaultCtx (not NewDefault) ties the background refresh goroutine to
+	// the caller's context instead of context.Background().
+	k, err := keyfunc.NewDefaultCtx(ctx, []string{cfg.JWKSURL})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JWKS from URL %s: %w", cfg.JWKSURL, err)
 	}
 
 	return &AuthMiddleware{
 		jwks:        k,
+		parser:      newTokenParser(cfg.Issuer, cfg.Audience, cfg.Algorithms),
 		issuer:      cfg.Issuer,
+		audience:    cfg.Audience,
 		publicPaths: cfg.PublicPaths,
 		logger:      logger,
 	}, nil
+}
+
+// newTokenParser builds the strict parser used for every access token.
+//
+// Every constraint here is load-bearing:
+//   - WithValidMethods pins the signing algorithm, closing algorithm
+//     confusion (and cross-algorithm substitution within one key type, e.g.
+//     an RS256 key being accepted for PS256).
+//   - WithIssuer / WithAudience are enforced unconditionally — the jwt
+//     validator treats both as *required*, so a token missing `aud` entirely
+//     is rejected rather than passing an empty comparison.
+//   - WithExpirationRequired closes the token-minted-without-exp hole: by
+//     default `exp` is only checked when present, so a token without one
+//     would never expire.
+func newTokenParser(issuer, audience string, algorithms []string) *jwt.Parser {
+	return jwt.NewParser(
+		jwt.WithValidMethods(algorithms),
+		jwt.WithIssuer(issuer),
+		jwt.WithAudience(audience),
+		jwt.WithExpirationRequired(),
+	)
 }
 
 // Handler is the actual middleware function
@@ -98,15 +154,26 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		}
 		tokenString := parts[1]
 
-		// 2. Parse and Validate Token
-		token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, m.jwks.Keyfunc)
+		// 2. Parse and Validate Token. m.parser pins the algorithm and
+		// enforces iss/aud/exp; see newTokenParser.
+		token, err := m.parser.ParseWithClaims(tokenString, &UserClaims{}, m.jwks.Keyfunc)
 		if err != nil {
-			m.logger.Warn("Token validation failed", "error", err, "path", r.URL.Path)
+			// Log what we expected alongside the failure: the overwhelmingly
+			// common cause of a 401 here is an AUTH_ISSUER/AUTH_AUDIENCE
+			// mismatch with the IdP, and without these an operator is guessing.
+			m.logger.Warn("Token validation failed",
+				"error", err,
+				"path", r.URL.Path,
+				"expected_issuer", m.issuer,
+				"expected_audience", m.audience)
 			httputil.RespondError(w, r, "Unauthorized: Invalid token", http.StatusUnauthorized, nil)
 			return
 		}
 
-		// 3. Verify Claims (Issuer)
+		// 3. Verify the token parsed clean. Issuer, audience, algorithm and
+		// expiry were all enforced by m.parser above — do not re-add a
+		// conditional issuer check here; "verify only if configured" is how
+		// the check silently disappears when config is missing.
 		if !token.Valid {
 			m.logger.Warn("Token is invalid", "path", r.URL.Path)
 			httputil.RespondError(w, r, "Unauthorized: Invalid token", http.StatusUnauthorized, nil)
@@ -117,14 +184,6 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		if !ok {
 			m.logger.Error("Failed to cast claims", "path", r.URL.Path)
 			httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, nil)
-			return
-		}
-
-		// Optional: Verify Issuer strictly if configured
-		// Note: keyfunc handles signature, but we check business logic claims here
-		if m.issuer != "" && claims.Issuer != m.issuer {
-			m.logger.Warn("Token issuer mismatch", "expected", m.issuer, "got", claims.Issuer)
-			httputil.RespondError(w, r, "Unauthorized: Invalid issuer", http.StatusUnauthorized, nil)
 			return
 		}
 
