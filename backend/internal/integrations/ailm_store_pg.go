@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -82,6 +83,80 @@ func (s *pgAILMStore) ListDrivers(ctx context.Context) ([]DriverResponse, error)
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// ListLocations returns the dealer's active branches with their lazily
+// backfilled coordinates.
+//
+// A branch is a locations row with type='BRANCH' AND parent_id IS NULL (see
+// migration 057's chk_branch_is_root); the parent_id predicate is redundant
+// under that constraint but stated anyway so the query still means "top-level
+// yard" if the constraint is ever relaxed.
+//
+// latitude/longitude are deliberately NOT COALESCEd. They are nullable by
+// design (migration 072 backfills them the first time a route is optimized from
+// that branch), and a COALESCE(...,0) would hand AI_LM a yard at 0,0 — null
+// island, in the Gulf of Guinea — which it has no way to tell apart from a real
+// coordinate. Nil instead makes "never geocoded" explicit, and AI_LM falls back
+// to its configured depot and says so on the plan.
+func (s *pgAILMStore) ListLocations(ctx context.Context) ([]LocationResponse, error) {
+	const q = `
+		SELECT l.id::text, COALESCE(NULLIF(l.name, ''), l.code),
+		       l.latitude, l.longitude,
+		       l.address, l.city, l.state, l.zip
+		FROM locations l
+		WHERE l.type = 'BRANCH' AND l.parent_id IS NULL AND l.active = TRUE
+		ORDER BY COALESCE(NULLIF(l.name, ''), l.code), l.id`
+
+	rows, err := s.db.GetExecutor(ctx).Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query locations: %w", err)
+	}
+	defer rows.Close()
+
+	out := []LocationResponse{}
+	for rows.Next() {
+		var (
+			loc                    LocationResponse
+			addr, city, state, zip *string
+		)
+		if err := rows.Scan(&loc.ID, &loc.Name, &loc.Latitude, &loc.Longitude,
+			&addr, &city, &state, &zip); err != nil {
+			return nil, fmt.Errorf("scan location: %w", err)
+		}
+		loc.Address = composeBranchAddress(addr, city, state, zip)
+		out = append(out, loc)
+	}
+	return out, rows.Err()
+}
+
+// composeBranchAddress joins a branch's structured address parts into the single
+// free-text line a geocoder wants, e.g. "2450 Enterprise Way, Kelowna, BC V1X 7K2".
+//
+// Duplicated from internal/delivery deliberately: internal/integrations must not
+// import internal/delivery (the integration surface is a leaf that has to stay
+// httptest-able without the delivery module's dependencies). The rule it encodes
+// — skip empty parts, glue state and zip with a space — must match
+// delivery.composeBranchAddress, because a branch geocoded through either path
+// has to resolve to the same point.
+func composeBranchAddress(addr, city, state, zip *string) string {
+	deref := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return strings.TrimSpace(*p)
+	}
+	parts := []string{}
+	if a := deref(addr); a != "" {
+		parts = append(parts, a)
+	}
+	if c := deref(city); c != "" {
+		parts = append(parts, c)
+	}
+	if sz := strings.TrimSpace(deref(state) + " " + deref(zip)); sz != "" {
+		parts = append(parts, sz)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ListProducts returns the catalog slice described by f, with per-unit weight
@@ -164,12 +239,17 @@ func resolveGeometrySource(p ProductResponse) string {
 // moment AI_LM writes a route back, because a second deliveries row appears for
 // the same order and every line would be emitted twice.
 //
+// branch_id is selected as a plain (NOT NULL) column: every order has shipped
+// from a yard since migration 062, and AI_LM roots its route at that yard's
+// coordinates rather than at one global depot.
+//
 // The date filter matches COALESCE(scheduled_delivery_date, created_at::date)
 // so orders predating migration 080 (which have no scheduled date) still
 // resolve by their creation date instead of vanishing from the board.
 func (s *pgAILMStore) ListOrders(ctx context.Context, date, status string) ([]IntegrationOrderResponse, error) {
 	q := `
-		SELECT o.id::text, o.status, COALESCE(c.name, ''), COALESCE(c.address, ''),
+		SELECT o.id::text, o.status, o.branch_id::text,
+		       COALESCE(c.name, ''), COALESCE(c.address, ''),
 		       COALESCE(to_char(COALESCE(o.scheduled_delivery_date, o.created_at::date), 'YYYY-MM-DD'), ''),
 		       d.latitude, d.longitude,
 		       ol.product_id::text, p.sku, ol.quantity, COALESCE(p.weight_lbs, 0)
@@ -210,12 +290,12 @@ func (s *pgAILMStore) ListOrders(ctx context.Context, date, status string) ([]In
 	order := []string{}
 	for rows.Next() {
 		var (
-			id, status, custName, custAddr, schedDate string
-			lat, lng                                  *float64
-			productID, sku                            string
-			qty, weight                               float64
+			id, status, branchID, custName, custAddr, schedDate string
+			lat, lng                                            *float64
+			productID, sku                                      string
+			qty, weight                                         float64
 		)
-		if err := rows.Scan(&id, &status, &custName, &custAddr, &schedDate,
+		if err := rows.Scan(&id, &status, &branchID, &custName, &custAddr, &schedDate,
 			&lat, &lng, &productID, &sku, &qty, &weight); err != nil {
 			return nil, fmt.Errorf("scan order row: %w", err)
 		}
@@ -225,6 +305,7 @@ func (s *pgAILMStore) ListOrders(ctx context.Context, date, status string) ([]In
 			o = &IntegrationOrderResponse{
 				ID:            id,
 				Status:        status,
+				BranchID:      branchID,
 				CustomerName:  custName,
 				Address:       custAddr,
 				Latitude:      lat,

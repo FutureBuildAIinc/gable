@@ -2,6 +2,7 @@
   {
     "id": "44444444-4444-4444-8444-111111111111",
     "status": "CONFIRMED",
+    "branch_id": "77777777-7777-4777-8777-111111111111",
     "customer_name": "Kelbrook Homes",
     "address": "1885 Formwork Rd, Kelowna BC",
     "latitude": 49.8801,
@@ -24,6 +25,7 @@
   {
     "id": "44444444-4444-4444-8444-222222222222",
     "status": "CONFIRMED",
+    "branch_id": "77777777-7777-4777-8777-111111111111",
     "customer_name": "Okanagan Builders",
     "address": "9000 Blueprint Pkwy, Kelowna BC",
     "lines": [

@@ -58,6 +58,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// ailm.go for the wire contract these satisfy.
 	mux.HandleFunc("GET /api/integration/vehicles", h.authMiddleware(h.ListVehicles))
 	mux.HandleFunc("GET /api/integration/drivers", h.authMiddleware(h.ListDrivers))
+	mux.HandleFunc("GET /api/integration/locations", h.authMiddleware(h.ListLocations))
 	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
 	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
 	mux.HandleFunc("POST /api/integration/validate-staff", h.authMiddleware(h.ValidateStaff))

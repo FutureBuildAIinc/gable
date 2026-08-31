@@ -7,7 +7,7 @@ package integrations
 //
 // THE PROBLEM
 // GableLBM and AI_LM (github.com/gablelbm/gable-ai-lm) are two independently
-// released repositories joined by six HTTP endpoints. Until this file existed
+// released repositories joined by seven HTTP endpoints. Until this file existed
 // the contract between them was prose plus struct tags: nothing mechanical
 // stopped someone renaming a JSON field, collapsing a nullable pointer to a
 // zero value, or wrapping a bare array in an envelope. Every such change
@@ -75,6 +75,16 @@ const aiLMClientSource = "gable-ai-lm/backend/internal/gable/client.go"
 // Copy these verbatim from aiLMClientSource. Do NOT "fix" them to match a
 // GableLBM change — that inverts the direction of the contract. Field order,
 // Go types, pointer-ness and struct tags all matter.
+//
+// EXCEPTION, and the only kind there should ever be: a field or type added as
+// half of a coordinated cross-repo change lands here at the same time as it
+// lands in AI_LM's client.go, since neither repo can merge a seam that only one
+// side knows about. aiLMLocation and aiLMOrder.BranchID are that case (the
+// branch-depot work: AI_LM roots a route at the yard an order ships from
+// instead of at one global DEPOT_LAT/DEPOT_LNG). They are written here as the
+// AGREED shape and AI_LM's gable.Location / gable.Order must match them field
+// for field, tag for tag, in the same order. If they ever diverge, this file is
+// not the thing to edit — re-sync from aiLMClientSource.
 
 type aiLMVehicle struct {
 	ID                string `json:"id"`
@@ -91,6 +101,21 @@ type aiLMDriver struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Status string `json:"status"`
+}
+
+// aiLMLocation mirrors gable.Location — one of the dealer's branches, which
+// AI_LM matches against Order.BranchID to root a plan at the yard the load
+// actually leaves from instead of at one globally configured depot.
+//
+// Latitude/Longitude are pointers: locations.latitude/longitude are backfilled
+// lazily, and nil ("this yard has never been geocoded") must not collapse into
+// 0,0. That collapse is precisely what this contract suite exists to catch.
+type aiLMLocation struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Address   string   `json:"address,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
 }
 
 type aiLMProduct struct {
@@ -117,6 +142,7 @@ type aiLMOrderLine struct {
 type aiLMOrder struct {
 	ID           string          `json:"id"`
 	Status       string          `json:"status"`
+	BranchID     string          `json:"branch_id"`
 	CustomerName string          `json:"customer_name,omitempty"`
 	Address      string          `json:"address,omitempty"`
 	Latitude     *float64        `json:"latitude,omitempty"`
@@ -201,6 +227,7 @@ func TestAILMClientContractUnchanged(t *testing.T) {
 		"types": map[string][]contractField{
 			"Vehicle":         describeType(reflect.TypeOf(aiLMVehicle{})),
 			"Driver":          describeType(reflect.TypeOf(aiLMDriver{})),
+			"Location":        describeType(reflect.TypeOf(aiLMLocation{})),
 			"Product":         describeType(reflect.TypeOf(aiLMProduct{})),
 			"OrderLine":       describeType(reflect.TypeOf(aiLMOrderLine{})),
 			"Order":           describeType(reflect.TypeOf(aiLMOrder{})),
@@ -246,6 +273,16 @@ func TestAILMResponseContract(t *testing.T) {
 			golden: "ailm_drivers.json",
 			decode: func(t *testing.T, body []byte) any {
 				var v []aiLMDriver
+				mustDecode(t, body, &v)
+				return v
+			},
+		},
+		{
+			name:   "locations",
+			target: "/api/integration/locations",
+			golden: "ailm_locations.json",
+			decode: func(t *testing.T, body []byte) any {
+				var v []aiLMLocation
 				mustDecode(t, body, &v)
 				return v
 			},
@@ -423,6 +460,7 @@ func TestAILMEndpointInventory(t *testing.T) {
 		{http.MethodGet, "/api/integration/products"},
 		{http.MethodGet, "/api/integration/vehicles"},
 		{http.MethodGet, "/api/integration/drivers"},
+		{http.MethodGet, "/api/integration/locations"},
 		{http.MethodGet, "/api/integration/orders"},
 		{http.MethodPost, "/api/integration/delivery-routes"},
 		{http.MethodPost, "/api/integration/validate-staff"},

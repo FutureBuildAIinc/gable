@@ -7,10 +7,18 @@ package integrations
 //
 // AI_LM (github.com/gablelbm/gable-ai-lm) is a standalone sidecar service. It
 // authenticates its operators against this ERP, pulls its source-of-truth data
-// (fleet, drivers, a calendar date's confirmed orders, and the product catalog
-// with per-unit weight + PIM geometry), runs a 3D packing/routing solver, and
-// writes approved delivery routes — including the packing manifest that powers
-// the yard "Pack Trucks" instructions — back onto the dispatch board.
+// (fleet, drivers, the dealer's branches, a calendar date's confirmed orders,
+// and the product catalog with per-unit weight + PIM geometry), runs a 3D
+// packing/routing solver, and writes approved delivery routes — including the
+// packing manifest that powers the yard "Pack Trucks" instructions — back onto
+// the dispatch board.
+//
+// The branch surface exists because a dealer with more than one yard ships from
+// several yards on the same day. Every order carries the branch it ships from
+// (orders.branch_id, NOT NULL since migration 062) and every branch carries its
+// geocoded coordinates (locations.latitude/longitude, migration 072), so AI_LM
+// can root a route at the yard the load actually leaves from instead of at one
+// globally configured depot.
 //
 // Every endpoint here is gated by the X-Integration-Key header (see
 // Handler.authMiddleware) and every list endpoint returns a BARE JSON ARRAY,
@@ -72,6 +80,27 @@ type DriverResponse struct {
 	Status string `json:"status"` // ACTIVE / INACTIVE / ON_LEAVE
 }
 
+// LocationResponse is one of the dealer's branches — a yard AI_LM may root a
+// route at. Mirrors gable.Location.
+//
+// Latitude and Longitude are POINTERS because locations.latitude/longitude are
+// lazily backfilled (migration 072): a branch nobody has geocoded yet is NULL,
+// and NULL must stay distinguishable from a real 0.0. Null island is in the
+// Gulf of Guinea, so a COALESCE(...,0) here would silently root a whole day's
+// routes off the coast of Africa instead of telling AI_LM "I don't know where
+// this yard is, fall back".
+//
+// Address is the composed "street, city, state zip" free-text form, i.e. what
+// you would hand a geocoder — the same composition delivery.GetBranchOrigin
+// uses, so a branch geocoded by either path resolves to the same place.
+type LocationResponse struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Address   string   `json:"address,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`  // nil = never geocoded
+	Longitude *float64 `json:"longitude,omitempty"` // nil = never geocoded
+}
+
 // ProductResponse is a catalog product with its per-unit weight and the PIM's
 // canonical parametric geometry. Mirrors gable.Product.
 //
@@ -111,9 +140,17 @@ type IntegrationOrderLine struct {
 // for it has been geocoded, its destination coordinates. Mirrors gable.Order.
 // ScheduledDate is an ERP-side extra (AI_LM ignores it) that echoes back which
 // date the row matched, which makes a wrong ?date= filter obvious.
+//
+// BranchID is the yard this order ships from. It is deliberately NOT omitempty:
+// orders.branch_id is NOT NULL (migration 062), so an empty string on the wire
+// is a bug in this ERP, and AI_LM must be able to SEE that bug rather than
+// receive a payload in which "no branch" and "field dropped" look identical.
+// AI_LM cross-references it against GET /api/integration/locations to pick the
+// depot a plan is rooted at.
 type IntegrationOrderResponse struct {
 	ID            string                 `json:"id"`
 	Status        string                 `json:"status"`
+	BranchID      string                 `json:"branch_id"` // orders.branch_id; never empty
 	CustomerName  string                 `json:"customer_name,omitempty"`
 	Address       string                 `json:"address,omitempty"`
 	Latitude      *float64               `json:"latitude,omitempty"`  // nil = not geocoded
@@ -211,6 +248,7 @@ type staffLookup struct {
 type ailmStore interface {
 	ListVehicles(ctx context.Context) ([]VehicleResponse, error)
 	ListDrivers(ctx context.Context) ([]DriverResponse, error)
+	ListLocations(ctx context.Context) ([]LocationResponse, error)
 	ListProducts(ctx context.Context, f productFilter) ([]ProductResponse, error)
 	ListOrders(ctx context.Context, date, status string) ([]IntegrationOrderResponse, error)
 	ReplaceDeliveryRoute(ctx context.Context, req DeliveryRouteRequest) (*DeliveryRouteResponse, error)
@@ -243,6 +281,26 @@ func (h *Handler) ListDrivers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, nonNil(drivers))
+}
+
+// --- branches ---------------------------------------------------------------
+
+// ListLocations returns the dealer's active branches as a bare JSON array.
+//
+//	GET /api/integration/locations
+//
+// AI_LM joins this to orders.branch_id to root a plan at the yard the load
+// actually leaves from. A branch with null coordinates is returned anyway —
+// AI_LM needs to know the branch EXISTS in order to report "this yard has never
+// been geocoded" rather than silently planning from somewhere else.
+func (h *Handler) ListLocations(w http.ResponseWriter, r *http.Request) {
+	locations, err := h.ailm.ListLocations(r.Context())
+	if err != nil {
+		slog.Error("integration: list locations", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to query locations")
+		return
+	}
+	writeJSON(w, http.StatusOK, nonNil(locations))
 }
 
 // --- orders -----------------------------------------------------------------
