@@ -150,9 +150,10 @@ Any other secret a reachable deployment needs — `PORTAL_JWT_SECRET`,
 `JWKS_URL` — should be set as **encrypted env vars** via `doctl apps update` or
 the dashboard. **Do not** add secret values inline in these YAML files.
 
-`PAYMENT_VAULT_KEY` seals the Run Payments `api_key` and `refresh_token` at rest
-(AES-256-GCM) in `system_settings`. Generate it with `openssl rand -hex 32` and
-set it as a `SECRET`:
+`PAYMENT_VAULT_KEY` seals every admin-settable credential at rest (AES-256-GCM)
+in `system_settings` — the Run Payments `api_key` and `refresh_token`, the
+OpenRouter `api_key`, and the OpenRouteService `api_key`. Generate it with
+`openssl rand -hex 32` and set it as a `SECRET`:
 
 ```sh
 doctl apps update <app-id> --spec .do/app-staging.yaml

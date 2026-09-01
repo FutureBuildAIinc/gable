@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gablelbm/gable/pkg/httputil"
 
@@ -193,8 +194,35 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
-// RequireRole returns middleware that restricts access to users with one of the allowed roles.
-// In dev mode (no auth configured, claims == nil), requests pass through.
+// devAuthBypass records that this PROCESS was started with authentication
+// disabled (AUTH_MODE=dev). It exists so RequireRole can tell "this deployment
+// has no authentication at all" apart from "this request arrived without any"
+// — previously indistinguishable, because both look like nil claims, and the
+// guard took the permissive reading.
+//
+// Default false: a process that never declares a bypass fails closed. Set once,
+// at boot, from the same flag that decides whether the JWT middleware is
+// installed. Atomic because tests flip it while the race detector watches.
+var devAuthBypass atomic.Bool
+
+// SetDevAuthBypass declares that authentication is disabled process-wide.
+// cmd/server calls it exactly once, in the AUTH_MODE=dev branch. Nothing else
+// should: the point of the flag is that the bypass is DECLARED rather than
+// inferred from missing claims.
+func SetDevAuthBypass(on bool) { devAuthBypass.Store(on) }
+
+// RequireRole returns middleware that restricts access to users with one of
+// the allowed roles.
+//
+// Fail-closed on nil claims. It used to pass them through as "dev mode", which
+// meant any route reachable without authentication was also reachable without
+// a role. No route was actually exposed — every role-guarded route sat behind
+// the JWT middleware, and the three prefixes that middleware skips
+// (/api/portal/v1/, /api/integration/, /api/v1/a2a/) each carry their own
+// compensating auth. But a future route registered under one of those prefixes
+// and guarded only by RequireRole would have been silently unauthenticated,
+// and it would have looked guarded. The dev bypass is now explicit; see
+// SetDevAuthBypass.
 func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(allowedRoles))
 	for _, r := range allowedRoles {
@@ -205,8 +233,13 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := ClaimsFromContext(r.Context())
 			if claims == nil {
-				// Dev mode: no auth configured, pass through
-				next.ServeHTTP(w, r)
+				if devAuthBypass.Load() {
+					// AUTH_MODE=dev, declared at boot: no authentication in
+					// this process, so there is nothing to check a role against.
+					next.ServeHTTP(w, r)
+					return
+				}
+				httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
 				return
 			}
 

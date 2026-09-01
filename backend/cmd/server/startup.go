@@ -91,7 +91,12 @@ func validatePaymentVaultStartup(cfg *config.Config) (*payment.Vault, string, er
 
 	if !vault.Present() {
 		if devMode(cfg) {
-			return vault, "PAYMENT_VAULT_KEY not set — AUTH_MODE=dev: Run Payments credentials WILL be stored in plaintext. Never do this outside development.", nil
+			// Do not say "credentials will be stored in plaintext" — they will
+			// not. Every credential store refuses the write outright without a
+			// vault key, so what an operator actually sees is a failed save in
+			// Tech Admin. Naming the real symptom is the difference between a
+			// two-minute fix and an afternoon.
+			return vault, "PAYMENT_VAULT_KEY not set — AUTH_MODE=dev: saving any credential (Run Payments, OpenRouter, OpenRouteService) will FAIL rather than be stored in plaintext. Set PAYMENT_VAULT_KEY (openssl rand -hex 32) to enable credential storage.", nil
 		}
 		return nil, "", fmt.Errorf("PAYMENT_VAULT_KEY not set and AUTH_MODE != dev; set PAYMENT_VAULT_KEY (32-byte hex, e.g. `openssl rand -hex 32`) for production or AUTH_MODE=dev for development")
 	}

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -55,6 +56,9 @@ func signHS256(t *testing.T, secret string, claims PortalClaims) string {
 	return s
 }
 
+// validClaims mints the claim set Login now produces. exp, iss AND aud are all
+// present because the verifier requires all three; drop any one of them and
+// ParseToken refuses the token (see TestParseToken_RequiresExpIssuerAudience).
 func validClaims(customerID, userID uuid.UUID) PortalClaims {
 	now := time.Now()
 	return PortalClaims{
@@ -62,7 +66,8 @@ func validClaims(customerID, userID uuid.UUID) PortalClaims {
 			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
-			Issuer:    "gable-portal",
+			Issuer:    middleware.PortalTokenIssuer,
+			Audience:  jwt.ClaimStrings{middleware.PortalTokenAudience},
 		},
 		CustomerID:     customerID,
 		CustomerUserID: userID,

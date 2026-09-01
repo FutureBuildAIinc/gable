@@ -16,7 +16,9 @@ Gable (Go module `github.com/gablelbm/gable`) is an open-source ERP platform pur
 
 **This repository does not deploy anything and points at no live environment.** `.do/app-demo.yaml` and `.do/app-staging.yaml` are *example* Digital Ocean App Platform specs for self-hosters: every hostname, repo and database name in them is a placeholder (`your-org/gable`, `*.example.com`, `your-db-cluster`), and both set `AUTH_MODE=production` with a placeholder `JWKS_URL`. Operational notes are in `.do/README.md`.
 
-`AUTH_MODE=dev` is a **local-development-only** bypass. When set, the auth middleware is never constructed, so claims are nil and `RequireRole` passes through (`backend/pkg/middleware/auth.go`) — every anonymous caller gets full admin/owner reach. No user is impersonated; there is no privileged demo login to remove. Never set it on a reachable host. See `SECURITY.md`.
+`AUTH_MODE=dev` is a **local-development-only** bypass. When set, the auth middleware is never constructed and `main.go` calls `middleware.SetDevAuthBypass(true)`, which is what makes `RequireRole` pass through — every anonymous caller gets full admin/owner reach. No user is impersonated; there is no privileged demo login to remove. Never set it on a reachable host. See `SECURITY.md`.
+
+The bypass must be **declared**, not inferred. `RequireRole` fails closed on nil claims by default (`backend/pkg/middleware/auth.go`): it used to read "no claims" as "dev mode", which meant any route reachable without authentication was also reachable without a role. Nothing was exposed — every role-guarded route sits behind the JWT middleware, and the prefixes that middleware skips (`/api/portal/v1/`, `/api/integration/`, `/api/v1/a2a/`) carry their own auth — but a future route added under one of those prefixes would have been silently unauthenticated while looking guarded.
 
 ## Repo Structure
 ```
@@ -66,7 +68,7 @@ docs/         → Architecture, design system, and database specs
 
 ### Backend Code
 - Config: env vars with `godotenv` fallback (see `backend/internal/config/config.go`). Default DB URL points to **port 5434** (the docker-compose mapping), not the standard 5432
-- AI keys resolved dynamically via `ai.KeyStore` (DB-first via `system_settings`, env fallback, 30s TTL cache). Admins can set keys at runtime in Tech Admin > AI Settings
+- AI keys resolved dynamically via `ai.KeyStore` (DB-first via `system_settings`, env fallback, 30s TTL cache). Admins can set keys at runtime in Tech Admin > AI Settings. **Credential-valued settings are sealed at rest** — build them with `ai.NewSecretKeyStore(pool, key, envDefault, vault)`, passing the same `*secretvault.Vault` the payment store uses (`PAYMENT_VAULT_KEY`, AES-256-GCM). Plain `ai.NewKeyStore` is for non-secrets (base URLs, model slugs); hand it a credential-shaped key and it refuses the write rather than storing plaintext
 - Server entry point: `backend/cmd/server/main.go` — long initializer that wires every module's repo→service→handler→routes
 - Role middleware: `middleware.RequireRole("admin", "owner", "sales", …)` is applied per-module at registration
 - Audit logging: financial operations should use `pkg/audit.Logger`

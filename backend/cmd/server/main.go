@@ -120,7 +120,7 @@ func main() {
 	if vaultWarning != "" {
 		logger.Warn(vaultWarning)
 	} else {
-		logger.Info("payment credential vault active (AES-256-GCM at rest)")
+		logger.Info("credential vault active (AES-256-GCM at rest) — seals Run Payments, OpenRouter and OpenRouteService keys in system_settings")
 	}
 
 	// rootCtx bounds background goroutines started during wiring (e.g. the
@@ -182,6 +182,11 @@ func main() {
 		authMw = am
 	} else {
 		logger.Warn("AUTH_MODE=dev: authentication disabled (development only)")
+		// Declare the bypass instead of letting RequireRole infer it from the
+		// absence of claims. RequireRole fails closed by default now, so this
+		// call is what keeps the dev demo usable — and it is the only place in
+		// the tree that turns the guard off.
+		middleware.SetDevAuthBypass(true)
 	}
 
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per
@@ -215,7 +220,12 @@ func main() {
 	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
 	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
 	// product image generation. Base URL and per-task model slugs are admin-overridable.
-	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey)
+	//
+	// openrouter_api_key is a live billable credential an admin can set at
+	// runtime, and it lands in the same system_settings table as the payment
+	// credentials — so it is sealed by the same vault. openrouter_base_url is
+	// configuration, not a secret, and stays plaintext.
+	aiKeyStore := ai.NewSecretKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey, paymentVault).WithLogger(logger)
 	aiBaseURLStore := ai.NewKeyStore(db.Pool, "openrouter_base_url", cfg.OpenRouterBaseURL)
 	aiClient := ai.NewClientWithKeyStore(aiKeyStore).
 		WithBaseURLStore(aiBaseURLStore).
@@ -531,7 +541,9 @@ func main() {
 	// enable real routing at runtime via Tech Admin > Routing without a restart.
 	// Until a key is set, optimization falls back to a deterministic mock and
 	// delivery addresses are mock-geocoded, so the demo map still populates.
-	orsKeyStore := ai.NewKeyStore(db.Pool, "openrouteservice_api_key", cfg.ORSAPIKey)
+	// Sealed at rest by the same vault as the payment and OpenRouter keys —
+	// an ORS key is billable too.
+	orsKeyStore := ai.NewSecretKeyStore(db.Pool, "openrouteservice_api_key", cfg.ORSAPIKey, paymentVault).WithLogger(logger)
 	orsClient := delivery.NewORSClientWithKeyStore(orsKeyStore.Get, cfg.ORSBaseURL, cfg.ORSProfile, logger)
 	deliverySvc.WithRouting(orsClient, logger)
 	if orsKeyStore.IsConfigured(context.Background()) {

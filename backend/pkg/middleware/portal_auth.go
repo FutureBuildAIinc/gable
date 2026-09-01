@@ -29,9 +29,41 @@ type PortalClaims struct {
 	Role           string    `json:"role"`
 }
 
+// PortalTokenIssuer and PortalTokenAudience are the iss/aud every portal token
+// must carry. They live here, next to the verifier, and internal/portal imports
+// them for minting — one definition, so the two sides cannot drift.
+const (
+	PortalTokenIssuer   = "gable-portal"
+	PortalTokenAudience = "gable-portal-api"
+)
+
+// NewPortalTokenParser builds the strict parser used for every portal token,
+// by the middleware and by portal.Service.ParseToken alike.
+//
+// Every constraint is load-bearing:
+//   - WithValidMethods pins HS256. The portal secret is symmetric
+//     (PORTAL_JWT_SECRET), so HMAC is CORRECT here — this is not a JWKS
+//     boundary and must not be "upgraded" to an asymmetric allowlist. Pinning
+//     the exact algorithm still closes cross-HMAC substitution.
+//   - WithExpirationRequired closes the hole this replaced: jwt/v5 only checks
+//     `exp` when it is PRESENT, so a token minted without one never expires.
+//     A leaked portal token was immortal.
+//   - WithIssuer / WithAudience are enforced unconditionally; the validator
+//     treats both as required, so a token missing `aud` entirely is rejected
+//     rather than passing an empty comparison.
+func NewPortalTokenParser() *jwt.Parser {
+	return jwt.NewParser(
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer(PortalTokenIssuer),
+		jwt.WithAudience(PortalTokenAudience),
+		jwt.WithExpirationRequired(),
+	)
+}
+
 // PortalAuthMiddleware validates portal JWTs and injects customer context.
 type PortalAuthMiddleware struct {
 	jwtSecret []byte
+	parser    *jwt.Parser
 	logger    *slog.Logger
 }
 
@@ -39,6 +71,7 @@ type PortalAuthMiddleware struct {
 func NewPortalAuthMiddleware(jwtSecret []byte, logger *slog.Logger) *PortalAuthMiddleware {
 	return &PortalAuthMiddleware{
 		jwtSecret: jwtSecret,
+		parser:    NewPortalTokenParser(),
 		logger:    logger,
 	}
 }
@@ -65,9 +98,15 @@ func (m *PortalAuthMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. Parse and validate JWT (jwt/v5 validates exp claim by default —
-		//    expired tokens are rejected automatically with ErrTokenExpired)
-		token, err := jwt.ParseWithClaims(rawToken, &PortalClaims{}, func(t *jwt.Token) (interface{}, error) {
+		// 2. Parse and validate JWT. m.parser pins HS256 and enforces
+		//    iss/aud/exp — see NewPortalTokenParser.
+		//
+		//    The comment that used to sit here claimed "jwt/v5 validates exp by
+		//    default — expired tokens are rejected automatically". That is true
+		//    only if `exp` is PRESENT. A token minted without one sailed
+		//    through, forever, from any issuer. The comment is why nobody
+		//    looked; do not restore it.
+		token, err := m.parser.ParseWithClaims(rawToken, &PortalClaims{}, func(t *jwt.Token) (interface{}, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}

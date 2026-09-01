@@ -114,10 +114,15 @@ every visitor full administrative access.
    these is a boot failure, not a skipped check.
 3. Set a strong `PORTAL_JWT_SECRET` in production; the dev default is used only
    under `AUTH_MODE=dev`.
-4. **Payment credentials are encrypted at rest, and that is not optional.**
-   `PAYMENT_VAULT_KEY` (32-byte hex, `openssl rand -hex 32`) seals the Run
-   Payments `api_key` and `refresh_token` in `system_settings` with
-   AES-256-GCM. Two rules, deliberately different:
+4. **Credentials are encrypted at rest, and that is not optional.**
+   `PAYMENT_VAULT_KEY` (32-byte hex, `openssl rand -hex 32`) seals **every**
+   admin-settable credential in `system_settings` with AES-256-GCM: the Run
+   Payments `api_key` and `refresh_token`, the OpenRouter `api_key`, and the
+   OpenRouteService `api_key`. The variable keeps its original name for
+   continuity with deployed environments, but its scope is every credential
+   class, not just processor keys — one table, one vault, no exceptions. A
+   store with no key configured **refuses the write** rather than falling back
+   to plaintext. Two further rules, deliberately different:
    - A **malformed** key refuses to boot in **every** mode, `AUTH_MODE=dev`
      included. A typo must never silently downgrade a credential vault to
      plaintext — that is worse than a hard failure, because nobody notices.

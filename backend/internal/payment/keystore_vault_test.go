@@ -5,8 +5,11 @@ package payment
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func mustVault(t *testing.T, keyHex string) *Vault {
@@ -46,14 +49,112 @@ func TestKeyStore_SetSecretRefusesWithoutVault(t *testing.T) {
 	}
 }
 
-// PersistRotatedKey is the only production caller of SetSecret, reached from
-// the Run gateway's api_key refresh. It must inherit the refusal.
-func TestKeyStore_PersistRotatedKeyRefusesWithoutVault(t *testing.T) {
-	k := NewKeyStore(nil, GatewayConfig{}, &Vault{})
-	// db == nil short-circuits PersistRotatedKey, so give it a store that
-	// believes it has a database by exercising SetSecret directly as well.
+// scriptedExecer stands in for the pool so a test can make one write succeed
+// and the next fail. That is the only way to reach PersistRotatedKey's
+// refresh-token branch: with a real pool both writes succeed, and with a nil
+// pool the function short-circuits before either.
+type scriptedExecer struct {
+	failOn map[string]error
+	calls  []string
+}
+
+func (e *scriptedExecer) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	key, _ := args[0].(string)
+	e.calls = append(e.calls, key)
+	if err, ok := e.failOn[key]; ok {
+		return pgconn.CommandTag{}, err
+	}
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+func keyStoreWithExecer(t *testing.T, e *scriptedExecer) *KeyStore {
+	t.Helper()
+	k := NewKeyStore(nil, GatewayConfig{}, mustVault(t, testVaultKey))
+	k.exec = e
+	return k
+}
+
+// PersistRotatedKey must surface a FAILED refresh-token write.
+//
+// This is the case the previous version of this test conceded it could not
+// reach: it noted that db == nil short-circuits, then swallowed the result in
+// a t.Logf. Reverting the production code to `_ = k.SetSecret(...)` passed the
+// entire suite. It does not now.
+//
+// Why it matters: the Run api_key is a short-lived JWT. If the rotation writes
+// the new api_key but silently drops the new refresh token, the pair on disk
+// is inconsistent — the next restart loads a stale refresh token, the refresh
+// fails, and card processing stops. The caller in cmd/server logs this error;
+// swallowing it here made the log line unreachable.
+func TestKeyStore_PersistRotatedKeyPropagatesRefreshTokenFailure(t *testing.T) {
+	boom := errors.New("write failed: connection reset")
+	e := &scriptedExecer{failOn: map[string]error{"run_payments_refresh_token": boom}}
+	k := keyStoreWithExecer(t, e)
+
+	err := k.PersistRotatedKey("rotated-api-key", "rotated-refresh-token")
+	if err == nil {
+		t.Fatal("PersistRotatedKey reported success while the refresh-token write failed; " +
+			"the rotation half-persisted and nothing told the caller")
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("error %v does not wrap the underlying write failure", err)
+	}
+	// Both writes must have been attempted, in order — otherwise this could
+	// pass for the wrong reason (e.g. the api_key write failing instead).
+	want := []string{"run_payments_api_key", "run_payments_refresh_token"}
+	if len(e.calls) != len(want) || e.calls[0] != want[0] || e.calls[1] != want[1] {
+		t.Fatalf("writes attempted = %v, want %v", e.calls, want)
+	}
+}
+
+// The api_key write's failure must propagate too, and must stop the rotation
+// before the refresh token is written — a refresh token paired with an
+// unpersisted api_key is the same inconsistency in mirror image.
+func TestKeyStore_PersistRotatedKeyPropagatesAPIKeyFailure(t *testing.T) {
+	boom := errors.New("write failed: deadlock detected")
+	e := &scriptedExecer{failOn: map[string]error{"run_payments_api_key": boom}}
+	k := keyStoreWithExecer(t, e)
+
+	err := k.PersistRotatedKey("rotated-api-key", "rotated-refresh-token")
+	if err == nil {
+		t.Fatal("PersistRotatedKey reported success while the api_key write failed")
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("error %v does not wrap the underlying write failure", err)
+	}
+	if len(e.calls) != 1 || e.calls[0] != "run_payments_api_key" {
+		t.Fatalf("writes attempted = %v, want the refresh token to be skipped after the api_key failed", e.calls)
+	}
+}
+
+// The happy path: both writes succeed and both values land sealed, not
+// plaintext. Without this, the two failure tests above would pass equally well
+// if PersistRotatedKey always returned an error.
+func TestKeyStore_PersistRotatedKeySealsBothValues(t *testing.T) {
+	e := &scriptedExecer{}
+	k := keyStoreWithExecer(t, e)
+
 	if err := k.PersistRotatedKey("rotated-api-key", "rotated-refresh-token"); err != nil {
-		t.Logf("PersistRotatedKey with no DB returned: %v", err)
+		t.Fatalf("PersistRotatedKey: %v", err)
+	}
+	if len(e.calls) != 2 {
+		t.Fatalf("writes attempted = %v, want both api_key and refresh_token", e.calls)
+	}
+}
+
+// PersistRotatedKey is the only production caller of SetSecret, reached from
+// the Run gateway's api_key refresh. It must inherit the vault refusal — and,
+// critically, must not reach the database at all.
+func TestKeyStore_PersistRotatedKeyRefusesWithoutVault(t *testing.T) {
+	e := &scriptedExecer{}
+	k := NewKeyStore(nil, GatewayConfig{}, &Vault{})
+	k.exec = e
+
+	if err := k.PersistRotatedKey("rotated-api-key", "rotated-refresh-token"); err == nil {
+		t.Fatal("PersistRotatedKey wrote a rotated credential with no vault key configured")
+	}
+	if len(e.calls) != 0 {
+		t.Fatalf("a refused rotation still issued writes: %v", e.calls)
 	}
 	if err := k.SetSecret(context.Background(), "run_payments_refresh_token", "rotated-refresh-token"); err == nil {
 		t.Fatal("refresh-token write was permitted with no vault key")

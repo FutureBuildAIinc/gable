@@ -11,7 +11,17 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// settingsExecer is the single statement KeyStore issues against
+// system_settings. It is an interface, and a field, purely so a test can make
+// the SECOND write fail while the first succeeds — which is the only way to
+// cover PersistRotatedKey's refresh-token error propagation without a
+// database. *pgxpool.Pool satisfies it; production always uses that.
+type settingsExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 // KeyStore resolves Run Payments credentials DB-first (system_settings keys
 // run_payments_api_key / run_payments_public_key / run_payments_mid /
@@ -25,7 +35,8 @@ import (
 // data migration. Non-secret values (public_key, mid, base_url) stay plaintext.
 type KeyStore struct {
 	db     *database.DB
-	env    GatewayConfig // fallback values from environment configuration
+	exec   settingsExecer // == db.Pool in production; nil when db is nil
+	env    GatewayConfig  // fallback values from environment configuration
 	vault  *Vault
 	logger *slog.Logger
 
@@ -49,7 +60,11 @@ func NewKeyStore(db *database.DB, envFallback GatewayConfig, vault *Vault) *KeyS
 	if vault == nil {
 		vault = &Vault{}
 	}
-	return &KeyStore{db: db, env: envFallback, vault: vault, logger: slog.Default()}
+	ks := &KeyStore{db: db, env: envFallback, vault: vault, logger: slog.Default()}
+	if db != nil {
+		ks.exec = db.Pool
+	}
+	return ks
 }
 
 // WithLogger attaches a logger for vault/open diagnostics.
@@ -139,14 +154,14 @@ func (k *KeyStore) SetSecret(ctx context.Context, key, plaintext string) error {
 	if !k.vault.Present() {
 		return fmt.Errorf("refusing to write payment secret %q: no PAYMENT_VAULT_KEY configured, so it would be stored in plaintext", key)
 	}
-	if k.db == nil {
+	if k.exec == nil {
 		return nil
 	}
 	sealed, err := k.vault.Seal(plaintext)
 	if err != nil {
 		return err
 	}
-	if _, err := k.db.Pool.Exec(ctx,
+	if _, err := k.exec.Exec(ctx,
 		`INSERT INTO system_settings (key, value) VALUES ($1, $2)
 		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, sealed); err != nil {
 		return err
@@ -161,7 +176,7 @@ func (k *KeyStore) SetSecret(ctx context.Context, key, plaintext string) error {
 // token) back to system_settings so the rotation survives restarts, then
 // busts the cache. Best-effort: a failure is logged by the caller.
 func (k *KeyStore) PersistRotatedKey(apiKey, refreshToken string) error {
-	if k.db == nil || apiKey == "" {
+	if k.exec == nil || apiKey == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

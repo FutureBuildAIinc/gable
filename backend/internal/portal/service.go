@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -103,14 +104,17 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResult, er
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	// Generate JWT
+	// Generate JWT. Issuer AND audience are both set because the verifier now
+	// requires both; a token minted without them is refused. See
+	// middleware.NewPortalTokenParser.
 	now := time.Now()
 	claims := PortalClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   user.ID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
-			Issuer:    "gable-portal",
+			Issuer:    middleware.PortalTokenIssuer,
+			Audience:  jwt.ClaimStrings{middleware.PortalTokenAudience},
 		},
 		CustomerID:     user.CustomerID,
 		CustomerUserID: user.ID,
@@ -220,9 +224,14 @@ func (s *Service) CreateReorder(ctx context.Context, customerID uuid.UUID, req R
 	}, nil
 }
 
-// ParseToken parses and validates a portal JWT. Used by middleware.
+// ParseToken parses and validates a portal JWT.
+//
+// It uses the same strict parser as PortalAuthMiddleware — pinned HS256, and
+// required exp/iss/aud. This is a second verification site for the same token
+// class; when it verified less than the middleware did, it was a second door
+// with a weaker lock.
 func (s *Service) ParseToken(tokenStr string) (*PortalClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &PortalClaims{}, func(t *jwt.Token) (interface{}, error) {
+	token, err := middleware.NewPortalTokenParser().ParseWithClaims(tokenStr, &PortalClaims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
