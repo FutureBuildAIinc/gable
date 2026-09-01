@@ -74,6 +74,14 @@ func unavailable(t *testing.T, err error) {
 // The returned handle is closed automatically via t.Cleanup.
 func RequireDB(t *testing.T) *database.DB {
 	t.Helper()
+	return requireDBWithSearchPath(t, "")
+}
+
+// requireDBWithSearchPath is RequireDB with an optional search_path applied to
+// every connection in the pool. searchPath == "" means "leave it at the server
+// default", i.e. exactly the behaviour RequireDB has always had.
+func requireDBWithSearchPath(t *testing.T, searchPath string) *database.DB {
+	t.Helper()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -96,6 +104,11 @@ func RequireDB(t *testing.T) *database.DB {
 	poolCfg.MaxConnIdleTime = pc.MaxConnIdleTime
 	poolCfg.HealthCheckPeriod = pc.HealthCheckPeriod
 	poolCfg.ConnConfig.ConnectTimeout = probeTimeout()
+	if searchPath != "" {
+		// Applied in the startup packet, so EVERY connection the pool hands
+		// out carries it — including ones opened later to grow the pool.
+		poolCfg.ConnConfig.RuntimeParams["search_path"] = searchPath
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout())
 	defer cancel()

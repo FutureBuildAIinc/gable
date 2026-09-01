@@ -28,7 +28,11 @@ const settingsCanary = "sk-or-v1-LIVE-BILLABLE-CANARY-8f3a1c2b4d5e6f7089abcdef"
 // of the four keys we happen to know about — if a fifth writer appears and
 // stores a credential in the clear, this fails.
 func TestNoCredentialClassIsStoredInPlaintext(t *testing.T) {
-	db := testutil.RequireDB(t)
+	// A sandboxed system_settings: this test scans the WHOLE table for the
+	// canary, and internal/ai deliberately writes the same canary in plaintext
+	// (to prove legacy rows still read) from a concurrent test process. Sharing
+	// the table made this test fail on any freshly-migrated database.
+	db := testutil.SettingsSandbox(t)
 	ctx := context.Background()
 
 	vault, err := payment.NewVault(validVaultKey)
@@ -43,9 +47,6 @@ func TestNoCredentialClassIsStoredInPlaintext(t *testing.T) {
 		routingKey     = "openrouteservice_api_key"
 	)
 	sealedKeys := []string{paymentAPIKey, paymentRefresh, openRouterKey, routingKey}
-	for _, k := range sealedKeys {
-		testutil.SnapshotSetting(t, db, k)
-	}
 
 	// Payment class — the one that already had a vault.
 	pk := payment.NewKeyStore(db, payment.GatewayConfig{}, vault)

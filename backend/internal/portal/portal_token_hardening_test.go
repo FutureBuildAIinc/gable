@@ -244,3 +244,110 @@ func splitJWT(t *testing.T, tok string) []string {
 	}
 	return parts
 }
+
+// signWith mints a token with an explicit HMAC signing method, so a test can
+// present HS384/HS512 where HS256 is expected.
+func signWith(t *testing.T, method *jwt.SigningMethodHMAC, secret string, claims PortalClaims) string {
+	t.Helper()
+	tok, err := jwt.NewWithClaims(method, claims).SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign %s: %v", method.Alg(), err)
+	}
+	return tok
+}
+
+// TestPortalAuth_PinsHS256 covers what TestPortalAuth_RejectsAlgorithmSubstitution
+// cannot.
+//
+// That test's RS256 and alg=none cases are refused by the keyfunc's
+// `t.Method.(*jwt.SigningMethodHMAC)` assertion, so they stay refused with
+// WithValidMethods deleted — dropping the HS256 pin from NewPortalTokenParser
+// left the entire suite green. HS384 and HS512 ARE SigningMethodHMAC, so the
+// pin is the only thing that refuses them.
+//
+// d1c9c20 pinned WithValidMethods for the staff JWKS path (see
+// pkg/middleware/algorithms_test.go). This is the portal path's equivalent: one
+// declared algorithm, verified as declared, on the transport that actually
+// carries the secret.
+func TestPortalAuth_PinsHS256(t *testing.T) {
+	srv, svc, customerID := newHardeningHarness(t)
+	now := time.Now()
+
+	claims := PortalClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   uuid.New().String(),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+			Issuer:    middleware.PortalTokenIssuer,
+			Audience:  jwt.ClaimStrings{middleware.PortalTokenAudience},
+		},
+		CustomerID:     customerID,
+		CustomerUserID: uuid.New(),
+		Email:          "mallory@example.invalid",
+		Role:           "Admin",
+	}
+
+	for _, method := range []*jwt.SigningMethodHMAC{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		t.Run(method.Alg(), func(t *testing.T) {
+			// Signed with the CORRECT secret and every claim in order. Only the
+			// algorithm differs from what the portal declares.
+			token := signWith(t, method, hardeningSecret, claims)
+
+			if got := fetchOrders(t, srv, token); got != http.StatusUnauthorized {
+				t.Errorf("GET /orders with an %s token returned %d, want 401 — the parser must pin HS256", method.Alg(), got)
+			}
+			if _, err := svc.ParseToken(token); err == nil {
+				t.Errorf("ParseToken accepted an %s token", method.Alg())
+			}
+		})
+	}
+
+	// Positive control: the same claims under HS256 are accepted, so the four
+	// rejections above are the algorithm pin and not a broken harness.
+	if got := fetchOrders(t, srv, signWith(t, jwt.SigningMethodHS256, hardeningSecret, claims)); got != http.StatusOK {
+		t.Fatalf("positive control: an HS256 token with the same claims returned %d, want 200", got)
+	}
+}
+
+// A token can be perfectly signed, unexpired, correctly issued and correctly
+// addressed, and still name no customer. The middleware's
+// `claims.CustomerID == uuid.Nil` check is what stops that request; deleting it
+// survived the whole suite.
+//
+// A nil customer_id is not harmless: every portal handler scopes its query by
+// the customer in the claims, so admitting a zero UUID sends a tenancy filter
+// of all-zeroes into the data layer instead of refusing the request at the
+// door. Fail closed at the boundary.
+func TestPortalAuth_RefusesTokenWithNoCustomerID(t *testing.T) {
+	srv, _, customerID := newHardeningHarness(t)
+	now := time.Now()
+
+	base := PortalClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   uuid.New().String(),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+			Issuer:    middleware.PortalTokenIssuer,
+			Audience:  jwt.ClaimStrings{middleware.PortalTokenAudience},
+		},
+		CustomerUserID: uuid.New(),
+		Email:          "nobody@example.invalid",
+		Role:           "Admin",
+	}
+
+	// customer_id absent from the JSON entirely, and explicitly the zero UUID:
+	// both decode to uuid.Nil, and both must be refused.
+	nilClaims := base
+	nilClaims.CustomerID = uuid.Nil
+	if got := fetchOrders(t, srv, signHS256(t, hardeningSecret, nilClaims)); got != http.StatusUnauthorized {
+		t.Errorf("GET /orders with a nil customer_id returned %d, want 401", got)
+	}
+
+	// Positive control: the identical token with a real customer_id is admitted,
+	// so the rejection above is the claim check and not something else.
+	ok := base
+	ok.CustomerID = customerID
+	if got := fetchOrders(t, srv, signHS256(t, hardeningSecret, ok)); got != http.StatusOK {
+		t.Fatalf("positive control: the same token with a real customer_id returned %d, want 200", got)
+	}
+}

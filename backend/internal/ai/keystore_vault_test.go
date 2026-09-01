@@ -36,14 +36,12 @@ func mustVault(t *testing.T, keyHex string) *secretvault.Vault {
 // keys were written in the clear until this change — the payment vault was
 // bolted onto the clone and never onto the original.
 func TestAIKeyStore_SealsCredentialsAtRest(t *testing.T) {
-	db := testutil.RequireDB(t)
+	db := testutil.SettingsSandbox(t)
 	ctx := context.Background()
 	vault := mustVault(t, testVaultKey)
 
 	for _, key := range []string{"openrouter_api_key", "openrouteservice_api_key"} {
 		t.Run(key, func(t *testing.T) {
-			testutil.SnapshotSetting(t, db, key)
-
 			ks := ai.NewSecretKeyStore(db.Pool, key, "", vault)
 			if err := ks.Set(ctx, aiCanary); err != nil {
 				t.Fatalf("Set: %v", err)
@@ -76,11 +74,9 @@ func TestAIKeyStore_SealsCredentialsAtRest(t *testing.T) {
 // is the claim that makes seal-on-next-write safe to deploy without a data
 // migration, and it is proved by execution rather than trusted.
 func TestAIKeyStore_LegacyPlaintextRowStillReadable(t *testing.T) {
-	db := testutil.RequireDB(t)
+	db := testutil.SettingsSandbox(t)
 	ctx := context.Background()
 	const key = "openrouter_api_key"
-
-	testutil.SnapshotSetting(t, db, key)
 
 	// Write the row exactly as the OLD code did: raw, unsealed.
 	if _, err := db.Pool.Exec(ctx,
@@ -111,11 +107,9 @@ func TestAIKeyStore_LegacyPlaintextRowStillReadable(t *testing.T) {
 // than being handed on as if it were a plaintext API key, and rather than
 // quietly falling back to a different credential than the operator configured.
 func TestAIKeyStore_WrongVaultKeyFailsClosed(t *testing.T) {
-	db := testutil.RequireDB(t)
+	db := testutil.SettingsSandbox(t)
 	ctx := context.Background()
 	const key = "openrouter_api_key"
-
-	testutil.SnapshotSetting(t, db, key)
 
 	if err := ai.NewSecretKeyStore(db.Pool, key, "", mustVault(t, testVaultKey)).Set(ctx, aiCanary); err != nil {
 		t.Fatalf("Set: %v", err)
@@ -166,7 +160,7 @@ func TestAIKeyStore_RefusesToWriteWithoutVaultKey(t *testing.T) {
 // with no vault — would break them outright. This is the other half of the
 // classification: it must not over-reach.
 func TestAIKeyStore_NonSecretSettingsStayPlaintext(t *testing.T) {
-	db := testutil.RequireDB(t)
+	db := testutil.SettingsSandbox(t)
 	ctx := context.Background()
 
 	for key, value := range map[string]string{
@@ -174,8 +168,6 @@ func TestAIKeyStore_NonSecretSettingsStayPlaintext(t *testing.T) {
 		"ai.model.text":       "anthropic/claude-sonnet-4",
 	} {
 		t.Run(key, func(t *testing.T) {
-			testutil.SnapshotSetting(t, db, key)
-
 			ks := ai.NewKeyStore(db.Pool, key, "")
 			if err := ks.Set(ctx, value); err != nil {
 				t.Fatalf("Set(%s): %v — a non-secret setting must not need a vault key", key, err)
@@ -191,5 +183,36 @@ func TestAIKeyStore_NonSecretSettingsStayPlaintext(t *testing.T) {
 				t.Fatalf("Get() = %q, want %q", got, value)
 			}
 		})
+	}
+}
+
+// Set writes the SEALED value to the database and caches the PLAINTEXT. The
+// two must not be swapped: caching the sealed value made the store serve
+// `enc:v1:AAAA…` as the OpenRouter bearer token for the whole 30s TTL, to every
+// caller, and the suite stayed green — the existing tests all read back through
+// a FRESH store, which goes to the database and never touches the cache.
+//
+// The row is deleted out from under the store before the read, so the value
+// Get() returns can ONLY have come from the cache. Without that, a store that
+// cached nothing would still pass by falling through to the database.
+func TestAIKeyStore_SetCachesPlaintextNotCiphertext(t *testing.T) {
+	db := testutil.SettingsSandbox(t)
+	ctx := context.Background()
+	const key = "openrouter_api_key"
+
+	ks := ai.NewSecretKeyStore(db.Pool, key, "", mustVault(t, testVaultKey))
+	if err := ks.Set(ctx, aiCanary); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, "DELETE FROM system_settings WHERE key=$1", key); err != nil {
+		t.Fatalf("delete row: %v", err)
+	}
+
+	got := ks.Get(ctx)
+	if secretvault.IsSealed(got) {
+		t.Fatalf("Set cached the SEALED value: Get() = %q — every AI call for the next 30s would send ciphertext as the bearer credential", got)
+	}
+	if got != aiCanary {
+		t.Fatalf("Get() = %q, want the plaintext canary from the cache", got)
 	}
 }

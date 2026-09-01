@@ -201,10 +201,51 @@ func TestValidatePaymentVaultStartup_AbsentKey(t *testing.T) {
 		if warning == "" {
 			t.Fatal("dev mode with no vault key must warn loudly; silence is how this reaches production")
 		}
-		if !strings.Contains(strings.ToLower(warning), "plaintext") {
-			t.Fatalf("warning %q must say plaintext outright", warning)
-		}
+		assertDevVaultWarningSaysSavesFail(t, warning)
 	})
+}
+
+// assertDevVaultWarningSaysSavesFail pins the MEANING of the dev warning, not
+// merely a keyword in it.
+//
+// The previous assertion was `strings.Contains(lower(warning), "plaintext")`.
+// The message this commit replaced —
+//
+//	"PAYMENT_VAULT_KEY not set — AUTH_MODE=dev: Run Payments credentials WILL
+//	 be stored in plaintext. Never do this outside development."
+//
+// — also contains "plaintext", so restoring it verbatim passed. That message is
+// FALSE: with no vault key every credential store refuses the write, so nothing
+// is stored at all. The commit argued that a wrong message is why nobody looked
+// at this code, and then left the corrected message unpinned by anything.
+//
+// What an operator must be told is the symptom they will actually see: saving a
+// credential in Tech Admin FAILS. That is the difference between a two-minute
+// fix and an afternoon, and it is what is asserted here.
+func assertDevVaultWarningSaysSavesFail(t *testing.T, warning string) {
+	t.Helper()
+	lower := strings.ToLower(warning)
+
+	if !strings.Contains(lower, "plaintext") {
+		t.Errorf("warning %q must say plaintext outright", warning)
+	}
+	if !strings.Contains(lower, "fail") {
+		t.Errorf("warning %q must say that saving a credential FAILS — that is the symptom the operator sees", warning)
+	}
+	// The exact claim of the false message, and of any paraphrase of it.
+	for _, lie := range []string{
+		"will be stored in plaintext",
+		"are stored in plaintext",
+		"credentials will be stored",
+	} {
+		if strings.Contains(lower, lie) {
+			t.Errorf("warning %q claims credentials get stored in plaintext; they do not — every store refuses the write", warning)
+		}
+	}
+	// And it must point at the knob, by name.
+	if !strings.Contains(warning, "PAYMENT_VAULT_KEY") {
+		t.Errorf("warning %q must name PAYMENT_VAULT_KEY so the operator knows what to set", warning)
+	}
 }
 
 func TestValidatePaymentVaultStartup_ValidKey(t *testing.T) {

@@ -112,7 +112,7 @@ func main() {
 	// pool is opened: a credential-vault misconfiguration should stop the
 	// process before it can reach the database it would write plaintext to.
 	// A malformed key is fatal in every mode, dev included.
-	paymentVault, vaultWarning, verr := validatePaymentVaultStartup(cfg)
+	credVault, vaultWarning, verr := validatePaymentVaultStartup(cfg)
 	if verr != nil {
 		logger.Error("Payment vault configuration error", "error", verr)
 		os.Exit(1)
@@ -161,6 +161,13 @@ func main() {
 	// unless AUTH_MODE=dev is explicitly set. See validateAuthStartup.
 	// authCfg was validated at boot (fail-closed) above, before the DB pool
 	// opened. Only the JWKS fetch — which needs the network — happens here.
+	//
+	// Declare the RequireRole bypass from the SAME flag that decides whether
+	// the JWT middleware is mounted, so the two can never disagree. See
+	// configureAuthBypass — it is the only thing in the tree that turns the
+	// guard off, and it is DECLARED rather than inferred from missing claims.
+	authBypassed := configureAuthBypass(authCfg.Enabled)
+
 	var authMw *middleware.AuthMiddleware
 	if authCfg.Enabled {
 		logger.Info("Initializing Auth Middleware",
@@ -181,12 +188,8 @@ func main() {
 		}
 		authMw = am
 	} else {
-		logger.Warn("AUTH_MODE=dev: authentication disabled (development only)")
-		// Declare the bypass instead of letting RequireRole infer it from the
-		// absence of claims. RequireRole fails closed by default now, so this
-		// call is what keeps the dev demo usable — and it is the only place in
-		// the tree that turns the guard off.
-		middleware.SetDevAuthBypass(true)
+		logger.Warn("AUTH_MODE=dev: authentication disabled (development only)",
+			"require_role_bypass", authBypassed)
 	}
 
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per
@@ -225,7 +228,7 @@ func main() {
 	// runtime, and it lands in the same system_settings table as the payment
 	// credentials — so it is sealed by the same vault. openrouter_base_url is
 	// configuration, not a secret, and stays plaintext.
-	aiKeyStore := ai.NewSecretKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey, paymentVault).WithLogger(logger)
+	aiKeyStore := credVault.SettingStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey, logger)
 	aiBaseURLStore := ai.NewKeyStore(db.Pool, "openrouter_base_url", cfg.OpenRouterBaseURL)
 	aiClient := ai.NewClientWithKeyStore(aiKeyStore).
 		WithBaseURLStore(aiBaseURLStore).
@@ -445,14 +448,15 @@ func main() {
 	// time, DB-first (system_settings run_payments_* keys, settable in Tech
 	// Admin) with RUN_PAYMENTS_* env fallback. Card processing lights up the
 	// moment a key exists, no restart needed.
-	// paymentVault was built and validated at boot (fail-closed) above.
-	paymentKeys := payment.NewKeyStore(db, payment.GatewayConfig{
+	// credVault was built and validated at boot (fail-closed) above, and is the
+	// only constructor for credential stores — see credentialVault.
+	paymentKeys := credVault.PaymentKeyStore(db, payment.GatewayConfig{
 		APIKey:      cfg.RunPaymentsAPIKey,
 		PublicKey:   cfg.RunPaymentsPublicKey,
 		MID:         cfg.RunPaymentsMID,
 		BaseURL:     cfg.RunPaymentsBaseURL,
 		Environment: cfg.RunPaymentsEnvironment,
-	}, paymentVault).WithLogger(logger)
+	}, logger)
 	rpGateway := payment.NewRunPaymentsGatewayDynamic(paymentKeys.Resolve, logger).
 		OnKeyRotated(func(apiKey, refreshToken string) {
 			// The Run api_key is an expiring JWT — persist the refreshed one.
@@ -543,7 +547,7 @@ func main() {
 	// delivery addresses are mock-geocoded, so the demo map still populates.
 	// Sealed at rest by the same vault as the payment and OpenRouter keys —
 	// an ORS key is billable too.
-	orsKeyStore := ai.NewSecretKeyStore(db.Pool, "openrouteservice_api_key", cfg.ORSAPIKey, paymentVault).WithLogger(logger)
+	orsKeyStore := credVault.SettingStore(db.Pool, "openrouteservice_api_key", cfg.ORSAPIKey, logger)
 	orsClient := delivery.NewORSClientWithKeyStore(orsKeyStore.Get, cfg.ORSBaseURL, cfg.ORSProfile, logger)
 	deliverySvc.WithRouting(orsClient, logger)
 	if orsKeyStore.IsConfigured(context.Background()) {

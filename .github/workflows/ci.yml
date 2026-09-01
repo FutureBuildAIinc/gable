@@ -58,6 +58,12 @@ jobs:
 
     env:
       DATABASE_URL: postgres://gable_user:gable_password@localhost:5432/gable_test?sslmode=disable
+      # This job stands Postgres up, so the DB-backed tests must RUN, not skip.
+      # testutil.RequireDB skips when Postgres is unreachable — correct for a
+      # fresh clone, wrong here: a broken `postgres` service would silently
+      # degrade the whole integration suite to a no-op and the job would still
+      # be green. With this set, an unreachable database is a failure.
+      GABLE_TEST_REQUIRE_DB: "1"
 
     steps:
       - uses: actions/checkout@v4
