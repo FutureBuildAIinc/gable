@@ -21,7 +21,25 @@ RUN npm run build
 # Run stage
 FROM nginx:1.27-alpine
 
-ENV BACKEND_URL=http://localhost:8080
+# Where nginx proxies /api/* (see app/nginx.conf.template). Origin only, NO
+# trailing slash.
+#
+# This default deliberately names a SERVICE, not this container. It used to be
+# http://localhost:8080, which was inert while BACKEND_URL only fed the CSP
+# header — but this container listens on 8080, so once /api/ proxies to
+# BACKEND_URL that default would make nginx proxy to itself for anyone running
+# the image without setting it. `backend` matches the component name in
+# .do/app-*.yaml and the conventional compose service name, so a stack that
+# names its API service `backend` needs no configuration at all.
+ENV BACKEND_URL=http://backend:8080
+
+# Makes the stock entrypoint's 15-local-resolvers.envsh export
+# NGINX_LOCAL_RESOLVERS from /etc/resolv.conf before the config template is
+# rendered. nginx.conf.template needs it to resolve the API upstream per
+# request instead of pinning one address at startup; without this the
+# ${NGINX_LOCAL_RESOLVERS} placeholder survives envsubst and nginx exits at
+# boot with an unparseable resolver directive.
+ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 
 RUN apk --no-cache add curl
 

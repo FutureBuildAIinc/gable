@@ -11,8 +11,71 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' ${BACKEND_URL}; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(self)" always;
+
+    # ---------------------------------------------------------------------
+    # API reverse proxy
+    # ---------------------------------------------------------------------
+    # Every service in app/src/services reads `import.meta.env.VITE_API_URL || ''`,
+    # so a build with VITE_API_URL unset (the recommended, same-origin default —
+    # see app/.env.example) issues RELATIVE /api/v1/* requests. Proxying them here
+    # is what lets this image stand alone in a compose/sandbox stack instead of
+    # depending on an external ingress to join it to the backend.
+    #
+    # On DigitalOcean App Platform this block is inert: .do/app-*.yaml route
+    # /api at the ingress straight to the `backend` component, so those requests
+    # never reach nginx. It is the local/compose/Kubernetes path that needs it.
+    #
+    # BACKEND_URL must be an origin with NO trailing slash (e.g. http://backend:8080);
+    # $request_uri already carries the leading slash, the /api prefix and the query.
+
+    # Resolve the upstream at REQUEST time, not once at startup.
+    #
+    # A literal `proxy_pass http://backend:8080` makes nginx resolve the name once
+    # during startup and pin that address for the worker's life. Two regressions
+    # follow: the frontend refuses to boot if the backend's DNS name does not
+    # resolve yet (a boot-order coupling this image did not previously have), and
+    # it keeps talking to a dead IP after the backend is redeployed onto a new one
+    # — routine in both Compose and Kubernetes. A resolver plus a variable in
+    # proxy_pass forces per-request resolution and removes both.
+    #
+    # ${NGINX_LOCAL_RESOLVERS} is exported by the stock nginx image's
+    # /docker-entrypoint.d/15-local-resolvers.envsh, which is sourced before the
+    # envsubst step and reads the real nameservers out of /etc/resolv.conf —
+    # 127.0.0.11 under Docker, kube-dns under Kubernetes. That is why the
+    # Dockerfile sets NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1: hardcoding 127.0.0.11
+    # here would work under Docker and break everywhere else.
+    #
+    # The trade-off is a DNS lookup on the cold path (cached for `valid=10s`) and
+    # the loss of startup validation of BACKEND_URL: a bad value now surfaces as a
+    # logged 502 on /api instead of a refusal to start. That is the right side to
+    # err on — the SPA still serves, and the failure is scoped to the API.
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+    resolver_timeout 5s;
+
+    # ^~ so the static-asset regex location below cannot steal API paths that
+    # happen to end in an asset extension (it would 404 them off the disk and
+    # stamp them immutable for 30 days).
+    location ^~ /api/ {
+        # Loop guard. This container listens on 8080, so a BACKEND_URL pointing at
+        # its own listener (http://localhost:8080) makes nginx proxy to itself
+        # until it exhausts workers — a hang with no useful log. Tag outbound
+        # proxy requests and refuse one that comes back in.
+        if ($http_x_gable_proxy_loop) {
+            return 508 "backend url points at this frontend\n";
+        }
+        proxy_set_header X-Gable-Proxy-Loop 1;
+
+        set $gable_backend "${BACKEND_URL}";
+        proxy_pass $gable_backend$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
     # SPA fallback — send all non-file requests to index.html
     location / {
@@ -29,7 +92,7 @@ server {
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' ${BACKEND_URL}; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always;
         add_header Permissions-Policy "camera=(), microphone=(), geolocation=(self)" always;
     }
 
