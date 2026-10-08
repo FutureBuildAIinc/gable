@@ -37,6 +37,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -176,11 +177,19 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall := newBranchWall(db) // reads the settings just written
 
 	mux := http.NewServeMux()
+	invSvc := inventory.NewService(inventory.NewRepository(db))
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)), location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
-	wall.inventory(mux, inventory.NewService(inventory.NewRepository(db)))
+	wall.inventory(mux, invSvc)
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
-	wall.purchaseOrders(mux, purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil))
+	// The recommendation service is wired as serve wires it (serve.go), so
+	// the recommendations route answers from the real stock and velocity
+	// reads instead of 503: the route is behind the branch middleware and
+	// both reads must scope to the same branches.
+	poRecSvc := purchase_order.NewRecommendationService(purchase_order.NewRepository(db), invSvc,
+		product.NewService(product.NewRepository(db)), vendor.NewService(vendor.NewRepository(db))).
+		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
+	wall.purchaseOrders(mux, purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), poRecSvc))
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
 	docSvc := document.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
@@ -772,6 +781,113 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		}
 		if got := strings.Contains(string(body), f.yardB.String()); got != c.wantB {
 			t.Errorf("inventory list, %s: branch B's row present = %v, want %v", c.name, got, c.wantB)
+		}
+	}
+}
+
+// poRecSummary is the part of the recommendations response the test reads.
+type poRecSummary struct {
+	Items []struct {
+		ProductID     string  `json:"product_id"`
+		CurrentStock  float64 `json:"current_stock"`
+		AvgDailySales float64 `json:"avg_daily_sales"`
+	} `json:"items"`
+}
+
+// The purchase order recommendations route runs behind the branch middleware,
+// so its stock read and its sales velocity read must scope to the SAME branch
+// set: a bound purchasing user held to branch A is recommended from branch
+// A's stock and branch A's sales, never its branches' stock against every
+// branch's demand; a bound user with no grants sees no stock and no sales,
+// so the product carries no recommendation at all; an administrator without
+// a header reads every branch's stock and demand, as before.
+func TestBranchWall_PORecommendationScoping(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	ctx := context.Background()
+
+	for _, r := range []struct {
+		yard uuid.UUID
+		qty  int
+	}{{f.yardA, 5}, {f.yardB, 50}} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, $4)`,
+			f.productID, r.yard, "wl-rec-"+r.yard.String()[:8], r.qty); err != nil {
+			t.Fatalf("seed inventory: %v", err)
+		}
+	}
+	// Demand in the 90 day lookback: 90 units sold at branch A (1 a day),
+	// 900 at branch B (10 a day). The fixture's cleanup deletes this
+	// product's inventory rows; the order rows clean up after the fixture's,
+	// because order_lines restricts on the product.
+	orderA, orderB := uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN ($1, $2)`, orderA, orderB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id IN ($1, $2)`, orderA, orderB)
+	})
+	for _, o := range []struct {
+		id     uuid.UUID
+		branch uuid.UUID
+		qty    int
+	}{{orderA, f.branchA, 90}, {orderB, f.branchB, 900}} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency)
+			 VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`,
+			o.id, f.docCust, o.branch); err != nil {
+			t.Fatalf("seed order: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, description)
+			 VALUES ($1, $2, $3, $4, 'PCS', 'PCS', 1, 1, 1, $4, 'wall')`,
+			uuid.New(), o.id, f.productID, o.qty); err != nil {
+			t.Fatalf("seed order line: %v", err)
+		}
+	}
+
+	itemFor := func(t *testing.T, body []byte, productID string) (found bool, stock, sales float64) {
+		t.Helper()
+		var sum poRecSummary
+		if err := json.Unmarshal(body, &sum); err != nil {
+			t.Fatalf("recommendations body: %v\n%s", err, body)
+		}
+		for _, it := range sum.Items {
+			if it.ProductID == productID {
+				return true, it.CurrentStock, it.AvgDailySales
+			}
+		}
+		return false, 0, 0
+	}
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantStock               float64
+		wantSales               float64
+		wantSalesAsserted       bool
+	}{
+		// The fixture product carries no sales history outside the seeded
+		// orders, so a caller that sees neither stock nor real sales falls
+		// back to the synthetic velocity proxy; only the stock number is
+		// asserted there.
+		{"purchasing, header A", "purchasing", "u-a", A, 5, 1, true},
+		{"purchasing, no header", "purchasing", "u-a", "", 5, 1, true},
+		{"purchasing u-none, no header", "purchasing", "u-none", "", 0, 0, false},
+		{"admin, no header", "admin", "boss", "", 55, 11, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/purchase-orders/recommendations", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("recommendations, %s: %d, want 200", c.name, status)
+			continue
+		}
+		found, stock, sales := itemFor(t, body, f.productID.String())
+		if !found {
+			t.Errorf("recommendations, %s: product absent from the recommendations", c.name)
+			continue
+		}
+		if stock != c.wantStock {
+			t.Errorf("recommendations, %s: current_stock = %v, want %v", c.name, stock, c.wantStock)
+		}
+		if c.wantSalesAsserted && sales != c.wantSales {
+			t.Errorf("recommendations, %s: avg_daily_sales = %v, want %v", c.name, sales, c.wantSales)
 		}
 	}
 }
