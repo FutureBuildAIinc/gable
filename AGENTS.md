@@ -28,9 +28,9 @@ manifest.yaml     → what the app is: shape version, tenancy, runtimes, fronten
 core/             → Go module: one binary (cmd/core: serve | worker | migrate | seed), internal/, pkg/, migrations/
 core/api/         → the contract: openapi.yaml (assembled), fragments/, ROUTES.txt (route census), tools/
 web/apps/desk/    → Lit 3 frontend, the whole current SPA (Vite + TypeScript + Tailwind)
-web/apps/front-door/ → the micro app selector (arrives with R1-8, marked planned in the manifest until it lands)
+web/apps/front-door/ → the micro app selector (R1-8)
 web/packages/     → shared web packages (api-client is generated from the contract)
-tauri/            → Rust Tauri 2 shell (R1-9, planned; the directory does not exist yet)
+tauri/gable-desk/ → Rust Tauri 2 desktop shell around the front door (R1-9)
 docs/adr/         → architecture decision records (index in docs/adr/README.md)
 docs/refactor/    → the v1 refactor's contract, goldens and census notes
 scripts/          → repository checks (check-shape.sh)
@@ -150,6 +150,18 @@ make logs
 make ps
 make pg-shell        # psql into the gable_postgres container
 ```
+
+## The Tauri shell (`tauri/gable-desk`)
+
+A Tauri 2 window around the front door. It needs Rust 1.90 or newer and, on Linux, the WebKitGTK 4.1 development packages (the "Tauri shell" job in `.github/workflows/ci.yml` lists them). A local build writes several GB under `tauri/gable-desk/target`, so check free disk first.
+```bash
+cd web && npm ci && npm run build --workspace @gable/front-door   # the shell embeds web/apps/front-door/dist
+cargo install tauri-cli --version 2.12.1 --locked                  # once
+cd ../tauri/gable-desk && cargo tauri build --debug --bundles deb  # binary at target/debug/gable-desk
+cargo test --locked                                                # the deep link and URL rules
+scripts/smoke.sh                                                   # under xvfb: loads the door, logs it, exits 0
+```
+Set `GABLE_DESK_URL` (an http or https URL of a running Gable) to load that instead of the bundled door. A `gable://quotes/<id>` link opens `/quotes/<id>` in the window; only plain path segments are accepted. The window holds no native permission (`capabilities/default.json` is empty). Run the binary from `cargo tauri build`, not a bare `cargo build`: only the former embeds the bundle.
 
 ## The contract and the goldens (read before touching an HTTP route)
 
