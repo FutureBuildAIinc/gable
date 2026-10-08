@@ -77,7 +77,7 @@ services:
         type: SECRET
 
   - name: frontend
-    dockerfile_path: web/apps/desk/Dockerfile
+    dockerfile_path: web/Dockerfile
     source_dir: /
     github:
       repo: your-org/gable
@@ -99,9 +99,6 @@ services:
       - key: VITE_DEMO_MODE
         value: "true"
         scope: BUILD_TIME
-      - key: BACKEND_URL
-        value: ${backend.PRIVATE_URL}
-        scope: RUN_TIME
     routes:
       - path: /
 

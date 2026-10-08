@@ -61,3 +61,7 @@ Thumbs.db
 # Python bytecode (reuse_gate.py in .github/scripts)
 __pycache__/
 *.pyc
+
+# Playwright
+web/test-results/
+web/playwright-report/

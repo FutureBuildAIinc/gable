@@ -173,7 +173,7 @@ describe('gable-app — page element resolution', () => {
     const el = await mountAt('/nope/not/here')
     expect(text(el)).toContain('404')
     expect(text(el)).toContain('Page not found')
-    expect(q<HTMLAnchorElement>(el, 'a').getAttribute('href')).toBe('/')
+    expect(q<HTMLAnchorElement>(el, 'a').getAttribute('href')).toBe('/home')
   })
 
   it('depends on being mounted before router.init() to reach that 404', async () => {
