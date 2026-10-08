@@ -7,7 +7,7 @@ import type { CreateActivityRequest, Contact, ActivityType } from '../../types/c
 import { crmApi } from '../../services/crmApi';
 import { ToastService } from '../../lib/toast-service';
 
-const ACTIVITY_TYPES: ActivityType[] = ['CALL', 'MEETING', 'EMAIL', 'NOTE'];
+const ACTIVITY_TYPES: ActivityType[] = ['call', 'meeting', 'email', 'note'];
 
 @customElement('gable-log-activity-modal')
 export class GableLogActivityModal extends LitElement {
@@ -17,7 +17,7 @@ export class GableLogActivityModal extends LitElement {
   @property({ type: Array }) contacts: Contact[] = [];
 
   @state() private _loading = false;
-  @state() private _activityType: ActivityType = 'CALL';
+  @state() private _activityType: ActivityType = 'call';
   @state() private _description = '';
   @state() private _activityDate = new Date().toISOString().slice(0, 16);
   @state() private _contactId = '';
@@ -69,7 +69,7 @@ export class GableLogActivityModal extends LitElement {
                       : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
                     }"
                   >
-                    ${type}
+                    ${type.charAt(0).toUpperCase() + type.slice(1)}
                   </button>
                 `)}
               </div>

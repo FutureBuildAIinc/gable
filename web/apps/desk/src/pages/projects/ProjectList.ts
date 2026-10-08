@@ -30,8 +30,8 @@ export class ProjectList extends LitElement {
         this.loading = true;
         this.error = '';
         try {
-            const data = await ProjectService.listProjects();
-            this.projects = data;
+            const page = await ProjectService.listProjects({ limit: 50 });
+            this.projects = page.items;
         } catch (err) {
             this.error = err instanceof Error ? err.message : 'Failed to load projects';
         } finally {
@@ -166,7 +166,7 @@ export class ProjectList extends LitElement {
                                             <div class="text-sm text-zinc-500 mt-1 flex items-center gap-2">
                                                 <span>Created ${format(new Date(project.created_at), 'MMM d, yyyy')}</span>
                                                 <span>&middot;</span>
-                                                <span class="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded border ${project.status === 'Active'
+                                                <span class="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded border ${project.status === 'active'
                                                     ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                                                     : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'
                                                 }">
