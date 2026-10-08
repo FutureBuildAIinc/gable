@@ -252,12 +252,27 @@ func parseLimitParam(s string) (int, bool) {
 	return n, true
 }
 
+// keyTimeFormat is RFC 3339 UTC with exactly six fraction digits: the
+// column's full microsecond precision in a fixed-width form, so the same
+// instant always formats to the same bytes.
+const keyTimeFormat = "2006-01-02T15:04:05.000000Z07:00"
+
+// FormatKeyTime renders a timestamp column value as the key part form
+// MintCursor carries: UTC, the Z, and the microseconds. Formatting a
+// cutoff without the fraction (plain RFC 3339 does: 03:04:05.123456
+// becomes 03:04:05) mints a cursor earlier than its own last row, which
+// repeats rows on an ascending (created_at, id) ordering and skips them on
+// a descending one; this formatter keeps them.
+func FormatKeyTime(t time.Time) string {
+	return t.UTC().Format(keyTimeFormat)
+}
+
 // ParseKeyTime parses one decoded key part as the wire form of a timestamp
 // column: RFC 3339 in UTC with the Z (the form section 12 fixes for every
-// timestamp, and the form an ordering column's values are formatted into
-// MintCursor with). A part that does not hold one is a 400 on cursor, so a
-// well formed cursor carrying a bad timestamp is refused at the boundary
-// instead of becoming a cast error at the database.
+// timestamp, and the form FormatKeyTime writes into MintCursor). A part
+// that does not hold one is a 400 on cursor, so a well formed cursor
+// carrying a bad timestamp is refused at the boundary instead of becoming
+// a cast error at the database.
 func ParseKeyTime(part string) (time.Time, error) {
 	if len(part) == 0 || part[len(part)-1] != 'Z' {
 		return time.Time{}, cursorBadRequest("cursor keyset part is not an RFC 3339 UTC timestamp")

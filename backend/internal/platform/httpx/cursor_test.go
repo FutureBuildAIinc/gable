@@ -387,6 +387,57 @@ func TestParseKeyTime(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0001 §2): a timestamp key part is minted through the package's
+// own formatter, in UTC and at the column's full microsecond precision: a
+// cutoff formatted without the fraction would fall earlier than the row it
+// came from, repeating rows (ascending) or skipping them (descending) on a
+// (created_at, id) ordering. The form is fixed width, six fraction digits,
+// so the same instant always formats to the same bytes.
+func TestFormatKeyTime(t *testing.T) {
+	micro := time.Date(2026, 1, 2, 3, 4, 5, 123456000, time.UTC)
+	if got := FormatKeyTime(micro); got != "2026-01-02T03:04:05.123456Z" {
+		t.Errorf("FormatKeyTime = %q, want the microsecond digits", got)
+	}
+	// A whole second keeps the fixed width; so does a value with no
+	// fraction at all.
+	if got := FormatKeyTime(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)); got != "2026-01-02T03:04:05.000000Z" {
+		t.Errorf("FormatKeyTime = %q, want the fixed six fraction digits", got)
+	}
+	// A non UTC location is converted, not spelled with its offset.
+	edt := time.FixedZone("EDT", -4*60*60)
+	if got := FormatKeyTime(time.Date(2026, 1, 1, 23, 4, 5, 123456000, edt)); got != "2026-01-02T03:04:05.123456Z" {
+		t.Errorf("FormatKeyTime = %q, want UTC with the Z", got)
+	}
+}
+
+// RULE: the formatter and the parser are inverses. A microsecond timestamp
+// minted into a cursor and decoded back is the same instant, and a minted
+// cursor carrying it decodes, because the formatted part is a plain key
+// part.
+func TestFormatKeyTimeRoundTrip(t *testing.T) {
+	micro := time.Date(2026, 1, 2, 3, 4, 5, 654321000, time.UTC)
+	part := FormatKeyTime(micro)
+	back, err := ParseKeyTime(part)
+	if err != nil {
+		t.Fatalf("ParseKeyTime(%q): %v", part, err)
+	}
+	if !back.Equal(micro) {
+		t.Errorf("round trip: %v became %v", micro, back)
+	}
+
+	raw, err := MintCursor(testScope, part, "3f9c2b1e")
+	if err != nil {
+		t.Fatalf("MintCursor with a microsecond part: %v", err)
+	}
+	key, err := DecodeCursor(raw, testScope)
+	if err != nil {
+		t.Fatalf("DecodeCursor: %v", err)
+	}
+	if len(key) != 2 || key[0] != part {
+		t.Fatalf("key = %v, want the microsecond part back", key)
+	}
+}
+
 // RULE: a UUID key part is the canonical lowercase hyphenated form the
 // database stores; anything else is a 400 on cursor.
 func TestParseKeyUUID(t *testing.T) {
