@@ -526,7 +526,8 @@ func TestIdempotency_ScopeParity(t *testing.T) {
 	var calls int32
 	mw := Idempotency(db)
 
-	// Only POST and PUT participate: a keyed GET is a pass-through.
+	// Only the mutating methods (POST, PUT, PATCH) participate: a keyed GET is
+	// a pass-through.
 	getReq := newPrincipalRequest(t, http.MethodGet, "/api/v1/quotes", "", subject)
 	getReq.Header.Set(IdempotencyHeader, key)
 	if w := serve(t, mw, countingHandler(&calls, http.StatusOK, `[]`), getReq); w.Code != http.StatusOK {
@@ -562,6 +563,37 @@ func TestIdempotency_ScopeParity(t *testing.T) {
 	}
 	if seenBody != `{"payload":"exact"}` {
 		t.Fatalf("handler saw body %q, want the original body", seenBody)
+	}
+}
+
+// PATCH participates like POST and PUT: a keyed PATCH is claimed and a retry
+// with the same key replays the stored response. PATCH routes mutate state
+// just as much, and an unclaimed PATCH is exactly the double write this
+// middleware exists to prevent.
+func TestIdempotency_PatchParticipates(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+
+	var calls int32
+	mw := Idempotency(db)
+	h := countingHandler(&calls, http.StatusOK, `{"patched":true}`)
+
+	r1 := newPrincipalRequest(t, http.MethodPatch, "/api/v1/quotes/42", `{"a":2}`, subject)
+	r1.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, r1); w.Code != http.StatusOK {
+		t.Fatalf("first PATCH: status = %d, want 200", w.Code)
+	}
+	r2 := newPrincipalRequest(t, http.MethodPatch, "/api/v1/quotes/42", `{"a":2}`, subject)
+	r2.Header.Set(IdempotencyHeader, key)
+	w := serve(t, mw, h, r2)
+	if w.Code != http.StatusOK || w.Header().Get(IdempotencyReplayedHeader) != "true" {
+		t.Fatalf("PATCH retry: status = %d replayed = %q, want the stored 200 replayed", w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1 (the PATCH is claimed and its response replayed)", calls)
 	}
 }
 
@@ -1227,13 +1259,15 @@ func TestIdempotency_GlobalSkipsPortalAndIntegrationPrefixes(t *testing.T) {
 }
 
 // A tenantless integration caller has no identity to scope a claim to: under
-// AUTH_MODE=dev it joins the fixed dev principal; outside dev its keyed
-// requests pass through uncached.
+// AUTH_MODE=dev it gets its own dev:integration principal, never the global
+// layer's dev namespace (the two would otherwise share one claim table);
+// outside dev its keyed requests pass through uncached.
 func TestIdempotency_IntegrationTenantlessCallers(t *testing.T) {
 	db := testutil.RequireDB(t)
 
 	t.Setenv("AUTH_MODE", "dev")
 	key := newKey()
+	deleteKeyRows(t, db, "dev:integration", key)
 	deleteKeyRows(t, db, "dev", key)
 	var calls int32
 	mw := IdempotencyForIntegrationAuth(db)
@@ -1247,7 +1281,35 @@ func TestIdempotency_IntegrationTenantlessCallers(t *testing.T) {
 		}
 	}
 	if calls != 1 {
-		t.Fatalf("dev tenantless requests: handler calls = %d, want 1 (the fixed dev principal replays)", calls)
+		t.Fatalf("dev tenantless requests: handler calls = %d, want 1 (the fixed dev:integration principal replays)", calls)
+	}
+
+	// The claim sits under dev:integration, its own principal, and the global
+	// layer's dev namespace is untouched: the same key claimed there is a
+	// different claim that runs its own request rather than replaying the
+	// integration answer.
+	var inIntegration, inGlobalDev int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM idempotency_keys WHERE principal = 'dev:integration' AND key = $1`, key).Scan(&inIntegration); err != nil {
+		t.Fatalf("count dev:integration rows: %v", err)
+	}
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM idempotency_keys WHERE principal = 'dev' AND key = $1`, key).Scan(&inGlobalDev); err != nil {
+		t.Fatalf("count global dev rows: %v", err)
+	}
+	if inIntegration != 1 || inGlobalDev != 0 {
+		t.Fatalf("rows under dev:integration = %d, under dev = %d, want 1 and 0 (separate namespaces)", inIntegration, inGlobalDev)
+	}
+	callsBeforeGlobal := calls
+	gr := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, "")
+	gr.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, Idempotency(db), h, gr); w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) == "true" {
+		t.Fatalf("global dev request with the same key: status = %d replayed = %q, want its own 201",
+			w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+	if calls != callsBeforeGlobal+1 {
+		t.Fatalf("handler calls after the global dev request = %d, want %d (the dev namespaces do not share claims)",
+			calls, callsBeforeGlobal+1)
 	}
 
 	t.Setenv("AUTH_MODE", "")
@@ -1373,7 +1435,8 @@ func TestIdempotency_BodyReadErrorClassification(t *testing.T) {
 		t.Fatalf("non-size read error: code = %v, want bad_request", code)
 	}
 
-	// The size limit itself stays a 413 (MaxBytesReader's error).
+	// The size limit itself stays a 413 (MaxBytesReader's error), with the
+	// wire contract's code payload_too_large.
 	sizeReq := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", "", subject)
 	sizeReq.Body = io.NopCloser(bytes.NewReader(make([]byte, 64)))
 	sizeReq.ContentLength = 64
@@ -1382,6 +1445,13 @@ func TestIdempotency_BodyReadErrorClassification(t *testing.T) {
 	MaxRequestSize(16)(mw(h)).ServeHTTP(sizeW, sizeReq)
 	if sizeW.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("size-limit read error: status = %d, want 413", sizeW.Code)
+	}
+	var sizeEnv map[string]any
+	if err := json.Unmarshal(sizeW.Body.Bytes(), &sizeEnv); err != nil {
+		t.Fatalf("size-limit read error: body %q is not the envelope: %v", sizeW.Body.String(), err)
+	}
+	if code := sizeEnv["error"].(map[string]any)["code"]; code != "payload_too_large" {
+		t.Fatalf("size-limit read error: code = %v, want payload_too_large", code)
 	}
 	if calls != 0 {
 		t.Fatalf("handler calls = %d, want 0", calls)
