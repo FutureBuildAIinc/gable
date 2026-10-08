@@ -6,17 +6,42 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
+import { CreditMemoService } from '../../services/CreditMemoService.ts';
+import { OrderService } from '../../services/OrderService.ts';
 import { paymentService } from '../../services/paymentService.ts';
-import { ReportingService } from '../../services/ReportingService.ts';
-import type { Invoice } from '../../types/invoice.ts';
+import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
+import { type Invoice, formatInvoiceStatus, getInvoiceStatusColor } from '../../types/invoice.ts';
+import {
+    type CreditMemoSummary,
+    creditMemoLabel,
+    formatCreditMemoStatus,
+    formatReasonCode,
+    getCreditMemoStatusColor,
+} from '../../types/creditMemo.ts';
 import type { Payment, CreatePaymentRequest } from '../../types/payment.ts';
-import { Download, CreditCard, Mail, RotateCcw } from 'lucide';
-import { formatCents } from '../../lib/utils.ts';
+import { Download, CreditCard, Mail, RotateCcw, Ban } from 'lucide';
+import { formatCents, formatDay } from '../../lib/utils.ts';
+import { creditTextClass } from '../../lib/credit-display.ts';
+import { chipClass, overdueBadge } from '../../components/invoices/chips.ts';
+import { renderSalesLines } from '../../components/invoices/lines-table.ts';
 
 // Side-effect imports: register child custom elements
 import '../../components/invoices/PaymentModal.ts';
+import '../../components/invoices/SalesDialog.ts';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+
+/** Plain words for the blockers a void can be refused with. */
+export function voidBlockerHint(err: unknown): string {
+    if (!(err instanceof ApiError)) return apiErrorMessage(err, 'Failed to void invoice');
+    if (err.hasBlocker('has_applications')) {
+        return `${err.message}\nA payment is recorded against this invoice, or an applied credit memo names it. Reverse those first.`;
+    }
+    if (err.hasBlocker('has_credit_memos')) {
+        return `${err.message}\nA credit memo is written against this invoice. Void its credit memos first.`;
+    }
+    return err.displayMessage;
+}
 
 @customElement('gable-invoice-detail')
 export class GableInvoiceDetail extends LitElement {
@@ -25,34 +50,47 @@ export class GableInvoiceDetail extends LitElement {
     @property({ attribute: 'route-id' }) routeId = '';
 
     @state() private invoice: Invoice | null = null;
+    @state() private orderNumber: string | null = null;
     @state() private payments: Payment[] = [];
+    @state() private creditMemos: CreditMemoSummary[] = [];
     @state() private loading = true;
     @state() private error = false;
     @state() private isPaymentModalOpen = false;
-    @state() private creditMemoReason = '';
-    @state() private creditMemoAmount = '';
-    @state() private showCreditMemo = false;
+    @state() private voidOpen = false;
+    @state() private voidBusy = false;
+    @state() private voidError = '';
 
     connectedCallback() {
         super.connectedCallback();
-        if (this.routeId) {
-            this.loadInvoice(this.routeId);
-            this.loadPayments(this.routeId);
-        }
+        if (this.routeId) this.loadAll(this.routeId);
     }
 
     updated(changed: Map<string, unknown>) {
         if (changed.has('routeId') && changed.get('routeId') !== undefined && this.routeId) {
             this.loading = true;
-            this.loadInvoice(this.routeId);
-            this.loadPayments(this.routeId);
+            this.loadAll(this.routeId);
         }
+    }
+
+    private loadAll(id: string) {
+        this.loadInvoice(id);
+        this.loadPayments(id);
+        this.loadCreditMemos(id);
     }
 
     private async loadInvoice(id: string) {
         try {
             const data = await InvoiceService.getInvoice(id);
             this.invoice = data;
+            this.error = false;
+            this.orderNumber = null;
+            if (data.order_id) {
+                try {
+                    this.orderNumber = (await OrderService.getOrder(data.order_id)).number;
+                } catch {
+                    // the order number is a convenience: the link still works by id
+                }
+            }
         } catch (err) {
             console.error(err);
             this.error = true;
@@ -64,52 +102,23 @@ export class GableInvoiceDetail extends LitElement {
 
     private async loadPayments(id: string) {
         try {
-            const data = await paymentService.getHistory(id);
-            this.payments = data;
+            this.payments = await paymentService.getHistory(id);
         } catch (error) {
             console.error('Failed to load payments', error);
         }
     }
 
+    private async loadCreditMemos(id: string) {
+        try {
+            this.creditMemos = (await CreditMemoService.listCreditMemos({ invoiceId: id, limit: 100 })).items;
+        } catch (error) {
+            console.error('Failed to load credit memos', error);
+        }
+    }
+
     private async handlePayment(input: CreatePaymentRequest) {
         await paymentService.createPayment(input);
-        if (this.routeId) {
-            await this.loadInvoice(this.routeId);
-            await this.loadPayments(this.routeId);
-        }
-    }
-
-    private getStatusClass(status: string): string {
-        if (status === 'UNPAID') return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
-        if (status === 'PARTIAL') return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
-        if (status === 'PAID') return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
-        return '';
-    }
-
-    private handleCreditMemoAmountInput(e: Event) {
-        this.creditMemoAmount = (e.target as HTMLInputElement).value;
-    }
-
-    private handleCreditMemoReasonInput(e: Event) {
-        this.creditMemoReason = (e.target as HTMLInputElement).value;
-    }
-
-    private async handleApplyCredit() {
-        if (!this.invoice) return;
-        if (!this.creditMemoAmount || !this.creditMemoReason) {
-            ToastService.show('Enter amount and reason', 'error');
-            return;
-        }
-        try {
-            await ReportingService.createCreditMemo(this.invoice.id, Number(this.creditMemoAmount), this.creditMemoReason);
-            ToastService.show('Credit memo applied', 'success');
-            this.showCreditMemo = false;
-            this.creditMemoAmount = '';
-            this.creditMemoReason = '';
-            if (this.routeId) this.loadInvoice(this.routeId);
-        } catch {
-            ToastService.show('Failed to create credit memo', 'error');
-        }
+        if (this.routeId) this.loadAll(this.routeId);
     }
 
     private async handleEmailInvoice() {
@@ -117,8 +126,35 @@ export class GableInvoiceDetail extends LitElement {
         try {
             await InvoiceService.emailInvoice(this.invoice.id);
             ToastService.show('Invoice emailed successfully', 'success');
-        } catch {
-            ToastService.show('Failed to email invoice', 'error');
+        } catch (err) {
+            ToastService.show(apiErrorMessage(err, 'Failed to email invoice'), 'error');
+        }
+    }
+
+    private openVoid() {
+        this.voidError = '';
+        this.voidOpen = true;
+    }
+
+    private async confirmVoid(reason: string) {
+        if (!this.invoice) return;
+        this.voidBusy = true;
+        this.voidError = '';
+        try {
+            this.invoice = await InvoiceService.voidInvoice(this.invoice.id, this.invoice.revision, reason);
+            this.voidOpen = false;
+            ToastService.show('Invoice voided', 'success');
+        } catch (err) {
+            if (err instanceof ApiError && err.isStaleRevision) {
+                // someone changed the invoice since it was loaded: show the current one
+                this.voidOpen = false;
+                ToastService.show('The invoice changed while you were looking at it. It has been reloaded.', 'error');
+                if (this.routeId) this.loadAll(this.routeId);
+            } else {
+                this.voidError = voidBlockerHint(err);
+            }
+        } finally {
+            this.voidBusy = false;
         }
     }
 
@@ -126,208 +162,220 @@ export class GableInvoiceDetail extends LitElement {
         if (this.loading) return html`<div class="text-white">Loading invoice...</div>`;
         if (this.error || !this.invoice) return html`<div class="text-white">Failed to load invoice.</div>`;
 
-        const invoice = this.invoice;
+        const inv = this.invoice;
+        const isVoid = inv.status === 'void';
+        const canPay = inv.status === 'unpaid' || inv.status === 'partial';
+        const canVoid = inv.status === 'unpaid';
         const totalPaid = this.payments.reduce((sum, p) => sum + p.amount, 0);
-        const amountDue = invoice.total_amount - totalPaid;
 
         return html`
-            <div class="space-y-8 max-w-4xl mx-auto pb-20">
-                <div class="flex items-center justify-between pb-6 border-b border-white/10">
-                    <div>
-                        <h1 class="text-3xl font-bold font-mono text-white">Invoice #${invoice.id.slice(0, 8)}</h1>
-                        <p class="text-muted-foreground mt-1">Order Ref: <span class="font-mono text-zinc-400">${invoice.order_id.slice(0, 8)}</span></p>
+            <div class="space-y-6 max-w-6xl mx-auto pb-20">
+                <!-- Header -->
+                <div class="flex items-start justify-between gap-4 flex-wrap pb-6 border-b border-white/10">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-3 mb-2 flex-wrap">
+                            <h1 class="text-3xl font-bold font-mono text-white">${inv.number}</h1>
+                            <span class=${chipClass(getInvoiceStatusColor(inv.status))}>${formatInvoiceStatus(inv.status)}</span>
+                            ${overdueBadge(inv.is_overdue)}
+                        </div>
+                        <p class="text-muted-foreground text-sm">
+                            Invoice date ${formatDay(inv.invoice_date)}
+                            · ${inv.currency}
+                            · ${inv.origin === 'pos' ? 'Counter sale' : inv.delivery_type === 'pickup' ? 'Pickup' : 'Delivery'}
+                            ${inv.picked_up_by ? html` · picked up by ${inv.picked_up_by}` : nothing}
+                        </p>
                     </div>
-                    <div class="flex gap-3">
-                        <button
-                            @click=${() => this.handleEmailInvoice()}
-                            class="bg-white/10 text-white hover:bg-white/20 px-4 py-2 rounded flex items-center gap-2 transition-colors border border-white/10"
-                        >
-                            ${icon(Mail, 18)} Email
-                        </button>
-                        <button
-                            @click=${() => window.open(`${API_URL}/api/v1/documents/print/invoice/${invoice.id}`, '_blank')}
-                            class="bg-white/10 text-white hover:bg-white/20 px-4 py-2 rounded flex items-center gap-2 transition-colors border border-white/10"
-                        >
-                            ${icon(Download, 18)} Download
-                        </button>
-
-                        ${invoice.status !== 'PAID' ? html`
+                    ${!isVoid ? html`
+                        <div class="flex gap-3 flex-wrap">
                             <button
-                                @click=${() => { this.isPaymentModalOpen = true; }}
-                                class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded flex items-center gap-2 transition-colors font-medium shadow-lg shadow-emerald-900/20"
+                                @click=${() => window.open(`${API_URL}/api/v1/documents/print/invoice/${inv.id}`, '_blank')}
+                                class="bg-white/10 text-white hover:bg-white/20 px-4 py-2 rounded flex items-center gap-2 transition-colors border border-white/10 whitespace-nowrap"
                             >
-                                ${icon(CreditCard, 18)} Pay
+                                ${icon(Download, 18)} Print PDF
                             </button>
-                        ` : nothing}
-                        <button
-                            @click=${() => { this.showCreditMemo = !this.showCreditMemo; }}
-                            class="bg-white/10 text-white hover:bg-white/20 px-4 py-2 rounded flex items-center gap-2 transition-colors border border-white/10"
-                        >
-                            ${icon(RotateCcw, 18)} Credit Memo
-                        </button>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div class="bg-zinc-900 p-6 rounded-lg border border-zinc-800">
-                        <h3 class="text-zinc-500 uppercase text-xs font-bold mb-4">Bill To</h3>
-                        <div class="text-zinc-300">
-                            <p class="text-white font-medium text-lg mb-1">${invoice.customer_name || 'Customer'}</p>
-                            <p class="font-mono text-zinc-400 text-xs">Acct: ${invoice.customer_id.slice(0, 8)}</p>
-                        </div>
-                    </div>
-                    <div class="bg-zinc-900 p-6 rounded-lg border border-zinc-800 text-right">
-                        <h3 class="text-zinc-500 uppercase text-xs font-bold mb-4">Invoice Details</h3>
-                        <div class="space-y-2">
-                            <div class="flex justify-between">
-                                <span class="text-zinc-400">Issue Date</span>
-                                <span class="text-zinc-200">${new Date(invoice.created_at).toLocaleDateString()}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-zinc-400">Terms</span>
-                                <span class="text-zinc-200 font-mono">${invoice.payment_terms || 'NET30'}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-zinc-400">Due Date</span>
-                                <span class="text-zinc-200">${invoice.due_date ? new Date(invoice.due_date).toLocaleDateString() : 'Net 30'}</span>
-                            </div>
-                            <div class="flex justify-between items-center mt-4 pt-4 border-t border-zinc-800">
-                                <span class="text-zinc-400">Status</span>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${this.getStatusClass(invoice.status)}">
-                                    ${invoice.status}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-                    <div class="px-6 py-4 border-b border-zinc-800">
-                        <h3 class="text-zinc-100 font-bold">Line Items</h3>
-                    </div>
-                    <table class="w-full text-left text-sm" aria-label="Invoice line items">
-                        <thead class="bg-zinc-950 text-zinc-400 uppercase text-xs">
-                            <tr>
-                                <th class="px-6 py-4">Item</th>
-                                <th class="px-6 py-4 text-right">Qty</th>
-                                <th class="px-6 py-4 text-right">Rate</th>
-                                <th class="px-6 py-4 text-right">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-zinc-800">
-                            ${invoice.lines?.map(line => html`
-                                <tr>
-                                    <td class="px-6 py-4 text-white font-medium">
-                                        <div class="font-mono text-sm">${line.product_sku || line.product_id.slice(0, 8)}</div>
-                                        ${line.product_name ? html`<div class="text-xs text-zinc-400">${line.product_name}</div>` : nothing}
-                                    </td>
-                                    <td class="px-6 py-4 text-right text-zinc-300 font-mono">${line.quantity}</td>
-                                    <td class="px-6 py-4 text-right text-zinc-300 font-mono">${formatCents(line.price_each)}</td>
-                                    <td class="px-6 py-4 text-right text-white font-mono font-bold">${formatCents(line.quantity * line.price_each)}</td>
-                                </tr>
-                            `)}
-                        </tbody>
-                        <tfoot class="bg-zinc-950">
-                            ${invoice.subtotal > 0 && invoice.subtotal !== invoice.total_amount ? html`
-                                <tr>
-                                    <td colspan="3" class="px-6 py-2 text-right text-zinc-400">Subtotal</td>
-                                    <td class="px-6 py-2 text-right text-zinc-300 font-mono">${formatCents(invoice.subtotal)}</td>
-                                </tr>
-                                <tr>
-                                    <td colspan="3" class="px-6 py-2 text-right text-zinc-400">Tax (${(invoice.tax_rate * 100).toFixed(2)}%)</td>
-                                    <td class="px-6 py-2 text-right text-zinc-300 font-mono">${formatCents(invoice.tax_amount)}</td>
-                                </tr>
+                            <button
+                                @click=${() => this.handleEmailInvoice()}
+                                class="bg-white/10 text-white hover:bg-white/20 px-4 py-2 rounded flex items-center gap-2 transition-colors border border-white/10 whitespace-nowrap"
+                            >
+                                ${icon(Mail, 18)} Email
+                            </button>
+                            ${canPay ? html`
+                                <button
+                                    @click=${() => { this.isPaymentModalOpen = true; }}
+                                    class="bg-gable-green text-black font-bold px-4 py-2 rounded flex items-center gap-2 hover:bg-gable-green/90 transition-colors whitespace-nowrap"
+                                >
+                                    ${icon(CreditCard, 18)} Pay
+                                </button>
                             ` : nothing}
-                            <tr>
-                                <td colspan="3" class="px-6 py-4 text-right text-zinc-400 font-bold uppercase">Total Due</td>
-                                <td class="px-6 py-4 text-right text-emerald-500 font-bold font-mono text-xl">${formatCents(invoice.total_amount)}</td>
-                            </tr>
-                        </tfoot>
-                    </table>
+                            <a
+                                href="/credit-memos/new?invoice_id=${inv.id}"
+                                class="bg-white/10 text-white hover:bg-white/20 px-4 py-2 rounded flex items-center gap-2 transition-colors border border-white/10 whitespace-nowrap"
+                            >
+                                ${icon(RotateCcw, 18)} Create credit memo
+                            </a>
+                            ${canVoid ? html`
+                                <button
+                                    @click=${() => this.openVoid()}
+                                    class="bg-red-500/20 text-red-400 font-bold px-4 py-2 rounded flex items-center gap-2 hover:bg-red-500/30 transition-colors whitespace-nowrap"
+                                >
+                                    ${icon(Ban, 18)} Void
+                                </button>
+                            ` : nothing}
+                        </div>
+                    ` : nothing}
                 </div>
 
-                <!-- Payment History Section -->
-                ${this.payments.length > 0 ? html`
-                    <div class="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-                        <div class="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
-                            <h3 class="text-zinc-100 font-bold">Payment History</h3>
-                            <span class="text-zinc-400 text-sm">Paid: <span class="text-green-400 font-mono">${formatCents(totalPaid)}</span></span>
-                        </div>
-                        <table class="w-full text-left text-sm" aria-label="Payment history">
-                            <thead class="bg-zinc-950 text-zinc-400 uppercase text-xs">
-                                <tr>
-                                    <th class="px-6 py-4">Date</th>
-                                    <th class="px-6 py-4">Method</th>
-                                    <th class="px-6 py-4">Reference</th>
-                                    <th class="px-6 py-4 text-right">Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-zinc-800">
-                                ${this.payments.map(p => html`
-                                    <tr>
-                                        <td class="px-6 py-4 text-zinc-300">${new Date(p.created_at).toLocaleString()}</td>
-                                        <td class="px-6 py-4 text-zinc-300 font-bold">${p.method}</td>
-                                        <td class="px-6 py-4 text-zinc-400 font-mono text-xs">${p.reference || '-'}</td>
-                                        <td class="px-6 py-4 text-right text-white font-mono font-bold">${formatCents(p.amount)}</td>
-                                    </tr>
-                                `)}
-                            </tbody>
-                        </table>
-                    </div>
-                ` : nothing}
-
-                <!-- Credit Memo Form -->
-                ${this.showCreditMemo ? html`
-                    <div class="bg-zinc-900 rounded-lg border border-amber-500/20 p-6 space-y-4">
-                        <h3 class="text-zinc-100 font-bold flex items-center gap-2">
-                            ${icon(RotateCcw, 16, 'w-4 h-4 text-amber-400')}
-                            Issue Credit Memo
-                        </h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="text-xs text-zinc-500 uppercase block mb-1">Amount ($)</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    .value=${this.creditMemoAmount}
-                                    @input=${this.handleCreditMemoAmountInput}
-                                    class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-[#00FFA3] outline-none"
-                                    placeholder="0.00"
-                                />
-                            </div>
-                            <div>
-                                <label class="text-xs text-zinc-500 uppercase block mb-1">Reason</label>
-                                <input
-                                    type="text"
-                                    .value=${this.creditMemoReason}
-                                    @input=${this.handleCreditMemoReasonInput}
-                                    class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
-                                    placeholder="Damaged goods, pricing error, etc."
-                                />
-                            </div>
-                        </div>
-                        <div class="flex gap-3 justify-end">
-                            <button @click=${() => { this.showCreditMemo = false; }} class="px-4 py-2 text-zinc-400 hover:text-white">Cancel</button>
-                            <button
-                                @click=${() => this.handleApplyCredit()}
-                                class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded font-medium"
-                            >
-                                Apply Credit
-                            </button>
+                ${isVoid ? html`
+                    <div class="rounded-lg border border-red-500/50 bg-red-500/10 p-4 text-red-300" data-testid="void-banner">
+                        <div class="text-lg font-bold tracking-wide text-red-400">VOID</div>
+                        <div class="text-sm mt-1">
+                            This invoice was voided${inv.voided_at ? html` on ${new Date(inv.voided_at).toLocaleString()}` : nothing}${inv.voided_by ? html` by ${inv.voided_by}` : nothing}.
+                            ${inv.void_reason ? html`<span class="block mt-1">Reason: <span class="text-white">${inv.void_reason}</span></span>` : nothing}
                         </div>
                     </div>
                 ` : nothing}
 
-                ${invoice.id ? html`
-                    <gable-payment-modal
-                        ?is-open=${this.isPaymentModalOpen}
-                        @close=${() => { this.isPaymentModalOpen = false; }}
-                        @save=${(e: CustomEvent<CreatePaymentRequest>) => this.handlePayment(e.detail)}
-                        .invoiceId=${invoice.id}
-                        .amountDue=${amountDue > 0 ? amountDue : 0}
-                    ></gable-payment-modal>
-                ` : nothing}
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Main: lines, totals, history -->
+                    <div class="lg:col-span-2 space-y-6 min-w-0">
+                        <div class="bg-slate-steel rounded-lg border border-white/10 overflow-hidden ${isVoid ? 'opacity-70' : ''}">
+                            <div class="px-6 py-4 border-b border-white/10">
+                                <h2 class="font-semibold text-white">Line Items</h2>
+                            </div>
+                            ${renderSalesLines(inv.lines, { ariaLabel: 'Invoice line items' })}
+                            <div class="bg-white/5 px-6 py-4 space-y-2 text-sm" data-testid="invoice-totals">
+                                <div class="flex justify-between"><span class="font-bold text-white uppercase">Subtotal</span><span class="font-bold text-white font-mono">${formatCents(inv.subtotal_cents)}</span></div>
+                                <div class="flex justify-between text-zinc-400">
+                                    <span>Tax ${inv.tax_exempt ? '(exempt)' : inv.tax_rate_percent !== null ? `(${inv.tax_rate_percent}%, ${inv.tax_source.replace(/_/g, ' ')})` : `(${inv.tax_source.replace(/_/g, ' ')})`}</span>
+                                    <span class="font-mono">${formatCents(inv.tax_cents)}</span>
+                                </div>
+                                <div class="flex justify-between border-t border-white/10 pt-2"><span class="font-bold text-white uppercase">Total</span><span class="font-bold text-gable-green font-mono text-lg">${formatCents(inv.total_cents)}</span></div>
+                                <div class="flex justify-between"><span class="text-zinc-300">Open amount</span><span class="font-mono ${inv.open_cents > 0 ? 'text-amber-400' : 'text-zinc-500'}" data-testid="open-amount">${formatCents(inv.open_cents)}</span></div>
+                            </div>
+                        </div>
+
+                        <!-- Credit memos against this invoice -->
+                        <div class="bg-slate-steel rounded-lg border border-white/10 overflow-hidden">
+                            <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+                                <h2 class="font-semibold text-white">Credit memos</h2>
+                                ${!isVoid ? html`<a href="/credit-memos/new?invoice_id=${inv.id}" class="text-sm text-blue-400 hover:underline">New credit memo</a>` : nothing}
+                            </div>
+                            ${this.creditMemos.length === 0 ? html`
+                                <p class="px-6 py-4 text-sm text-zinc-500">No credit memos against this invoice.</p>
+                            ` : html`
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm" aria-label="Credit memos for this invoice">
+                                        <thead class="bg-white/5">
+                                            <tr>
+                                                <th class="p-3 text-muted-foreground font-medium">Number</th>
+                                                <th class="p-3 text-muted-foreground font-medium">Reason</th>
+                                                <th class="p-3 text-muted-foreground font-medium text-right">Total</th>
+                                                <th class="p-3 text-muted-foreground font-medium">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-white/5">
+                                            ${this.creditMemos.map(cm => html`
+                                                <tr>
+                                                    <td class="p-3 font-mono"><a href="/credit-memos/${cm.id}" class="text-blue-400 hover:underline">${creditMemoLabel(cm)}</a></td>
+                                                    <td class="p-3 text-zinc-300">${formatReasonCode(cm.reason_code)}</td>
+                                                    <td class="p-3 font-mono text-right ${creditTextClass(cm.total_cents)}">${formatCents(cm.total_cents)}</td>
+                                                    <td class="p-3"><span class=${chipClass(getCreditMemoStatusColor(cm.status))}>${formatCreditMemoStatus(cm.status)}</span></td>
+                                                </tr>
+                                            `)}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `}
+                        </div>
+
+                        ${this.payments.length > 0 ? html`
+                            <div class="bg-slate-steel rounded-lg border border-white/10 overflow-hidden">
+                                <div class="px-6 py-4 border-b border-white/10 flex justify-between items-center">
+                                    <h2 class="font-semibold text-white">Payment History</h2>
+                                    <span class="text-zinc-400 text-sm">Paid: <span class="text-green-400 font-mono">${formatCents(totalPaid)}</span></span>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm" aria-label="Payment history">
+                                        <thead class="bg-white/5">
+                                            <tr>
+                                                <th class="p-3 text-muted-foreground font-medium">Date</th>
+                                                <th class="p-3 text-muted-foreground font-medium">Method</th>
+                                                <th class="p-3 text-muted-foreground font-medium">Reference</th>
+                                                <th class="p-3 text-muted-foreground font-medium text-right">Amount</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-white/5">
+                                            ${this.payments.map(p => html`
+                                                <tr>
+                                                    <td class="p-3 text-zinc-300">${new Date(p.created_at).toLocaleString()}</td>
+                                                    <td class="p-3 text-zinc-300 font-bold">${p.method}</td>
+                                                    <td class="p-3 text-zinc-400 font-mono text-xs">${p.reference || '-'}</td>
+                                                    <td class="p-3 text-right text-white font-mono font-bold">${formatCents(p.amount)}</td>
+                                                </tr>
+                                            `)}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ` : nothing}
+                    </div>
+
+                    <!-- Sidebar -->
+                    <div class="space-y-6">
+                        <div class="bg-slate-steel rounded-lg border border-white/10 p-6">
+                            <h3 class="font-semibold text-white mb-4">Bill To</h3>
+                            <div class="space-y-2 text-sm">
+                                <p class="text-white font-medium text-base"><a href="/accounts/${inv.customer_id}" class="hover:underline">${inv.customer_name || 'Customer'}</a></p>
+                                <p class="text-muted-foreground">Account: <span class="text-white font-mono">${inv.customer_id.slice(0, 8)}</span></p>
+                                ${inv.ship_to ? html`
+                                    <p class="text-muted-foreground pt-2" data-testid="ship-to">
+                                        <span class="text-zinc-300">${inv.ship_to.name}</span><br>
+                                        ${inv.ship_to.line1}${inv.ship_to.line2 ? html`<br>${inv.ship_to.line2}` : nothing}<br>
+                                        ${inv.ship_to.city}, ${inv.ship_to.region} ${inv.ship_to.postal_code}
+                                    </p>
+                                ` : nothing}
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-steel rounded-lg border border-white/10 p-6">
+                            <h3 class="font-semibold text-white mb-4">Terms and references</h3>
+                            <dl class="space-y-2 text-sm">
+                                <div class="flex justify-between gap-4"><dt class="text-zinc-400">Due date</dt><dd class="font-mono ${inv.is_overdue ? 'text-red-400' : 'text-zinc-200'}" data-testid="due-date">${formatDay(inv.due_date)}</dd></div>
+                                ${inv.discount_percent !== null ? html`
+                                    <div class="flex justify-between gap-4"><dt class="text-zinc-400">Early payment</dt><dd class="text-zinc-200 font-mono">${inv.discount_percent}%${inv.discount_due_date ? html` by ${formatDay(inv.discount_due_date)}` : nothing}</dd></div>
+                                ` : nothing}
+                                <div class="flex justify-between gap-4"><dt class="text-zinc-400">Order</dt><dd class="font-mono">${inv.order_id ? html`<a href="/orders/${inv.order_id}" class="text-blue-400 hover:underline">${this.orderNumber ?? inv.order_id.slice(0, 8)}</a>` : html`<span class="text-zinc-500">counter sale</span>`}</dd></div>
+                                ${inv.job_id ? html`<div class="flex justify-between gap-4"><dt class="text-zinc-400">Job</dt><dd class="text-zinc-200 font-mono">${inv.job_id.slice(0, 8)}</dd></div>` : nothing}
+                                <div class="flex justify-between gap-4"><dt class="text-zinc-400">Currency</dt><dd class="text-zinc-200 font-mono">${inv.currency}</dd></div>
+                                <div class="flex justify-between gap-4"><dt class="text-zinc-400">Origin</dt><dd class="text-zinc-200">${inv.origin === 'pos' ? 'Counter' : 'Order'}</dd></div>
+                                <div class="flex justify-between gap-4"><dt class="text-zinc-400">Delivery</dt><dd class="text-zinc-200">${inv.delivery_type === 'pickup' ? 'Pickup' : 'Delivery'}</dd></div>
+                                ${inv.picked_up_by ? html`<div class="flex justify-between gap-4"><dt class="text-zinc-400">Picked up by</dt><dd class="text-zinc-200">${inv.picked_up_by}</dd></div>` : nothing}
+                                ${inv.paid_at ? html`<div class="flex justify-between gap-4"><dt class="text-zinc-400">Paid</dt><dd class="text-zinc-200">${new Date(inv.paid_at).toLocaleDateString()}</dd></div>` : nothing}
+                            </dl>
+                        </div>
+                    </div>
+                </div>
+
+                <gable-payment-modal
+                    ?is-open=${this.isPaymentModalOpen}
+                    @close=${() => { this.isPaymentModalOpen = false; }}
+                    @save=${(e: CustomEvent<CreatePaymentRequest>) => this.handlePayment(e.detail)}
+                    .invoiceId=${inv.id}
+                    .amountDue=${inv.open_cents > 0 ? inv.open_cents : 0}
+                ></gable-payment-modal>
+
+                <gable-sales-dialog
+                    ?is-open=${this.voidOpen}
+                    heading="Void invoice ${inv.number}"
+                    body="Voiding cancels this invoice and reverses its entry in the ledger. It cannot be undone, and the number stays on record as void."
+                    confirm-label="Void invoice"
+                    require-reason
+                    danger
+                    ?busy=${this.voidBusy}
+                    .error=${this.voidError}
+                    @close=${() => { this.voidOpen = false; }}
+                    @confirm=${(e: CustomEvent<{ reason: string }>) => this.confirmVoid(e.detail.reason)}
+                ></gable-sales-dialog>
             </div>
         `;
     }

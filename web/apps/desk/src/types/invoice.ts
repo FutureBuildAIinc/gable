@@ -1,50 +1,40 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-export type InvoiceStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'VOID' | 'OVERDUE';
-export type PaymentTerms = 'COD' | 'DUE_ON_RECEIPT' | 'NET30' | 'NET60' | 'NET90';
+// The invoice on the wire contract (ADR 0001; ADR 0005 section 6): every shape
+// is derived from the generated client so a contract change is a compile error.
+// A lowercase status, integer cents money, decimal string quantities, the scaled
+// unit price, and an overdue flag the server computes (OVERDUE is not a status).
+// The reporting shapes at the foot belong to the unconverted reporting module.
 
-export interface Invoice {
-    id: string;
-    order_id: string;
-    customer_id: string;
-    customer_name?: string;
-    status: InvoiceStatus;
-    subtotal: number;
-    tax_rate: number;
-    tax_amount: number;
-    total_amount: number;
-    payment_terms: PaymentTerms;
-    due_date?: string;
-    paid_at?: string;
-    created_at: string;
-    updated_at: string;
+import type { components } from '@gable/api-client';
 
-    // Relations
-    lines?: InvoiceLine[];
-}
+type Schemas = components['schemas'];
 
-export interface InvoiceLine {
-    id: string;
-    invoice_id: string;
-    product_id: string;
-    product_sku?: string;
-    product_name?: string;
-    quantity: number;
-    price_each: number;
-    created_at: string;
-}
+export type Invoice = Schemas['Invoice'];
+export type InvoiceSummary = Schemas['InvoiceSummary'];
+export type InvoiceLine = Schemas['InvoiceLine'];
+export type InvoicePage = Schemas['InvoicePage'];
+export type InvoiceStatus = Schemas['InvoiceStatus'];
+export type InvoiceTransitionRequest = Schemas['InvoiceTransitionRequest'];
 
-export interface CreditMemo {
-    id: string;
-    invoice_id?: string;
-    customer_id: string;
-    amount: number;
-    reason: string;
-    status: 'PENDING' | 'APPLIED' | 'VOID';
-    created_at: string;
-    applied_at?: string;
-}
+export const INVOICE_STATUSES: InvoiceStatus[] = ['unpaid', 'partial', 'paid', 'void', 'written_off'];
+
+export type InvoiceStatusColor = 'default' | 'info' | 'success' | 'warning' | 'error';
+
+export const getInvoiceStatusColor = (status: InvoiceStatus): InvoiceStatusColor => {
+    switch (status) {
+        case 'unpaid': return 'warning';
+        case 'partial': return 'info';
+        case 'paid': return 'success';
+        case 'void': return 'error';
+        case 'written_off': return 'default';
+        default: return 'default';
+    }
+};
+
+export const formatInvoiceStatus = (status: InvoiceStatus): string =>
+    status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 export interface ARAgingBucket {
     customer_id: string;

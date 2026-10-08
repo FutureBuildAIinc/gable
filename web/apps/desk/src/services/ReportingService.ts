@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import type { DailyTillReport, SalesSummaryReport } from '../types/reporting';
-import type { ARAgingReport, CustomerStatement, CreditMemo } from '../types/invoice';
+import type { ARAgingReport, CustomerStatement } from '../types/invoice';
 import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -43,17 +43,6 @@ export const ReportingService = {
         const url = `${API_URL}/api/v1/reports/customer-statement/${customerId}${qs ? `?${qs}` : ''}`;
         const response = await fetchWithAuth(url);
         if (!response.ok) throw new Error('Failed to fetch customer statement');
-        return response.json();
-    },
-
-    async createCreditMemo(invoiceId: string, amount: number, reason: string): Promise<CreditMemo> {
-        // `amount` is entered in dollars; the backend expects integer cents (`amount_cents`).
-        const response = await fetchWithAuth(`${API_URL}/api/v1/invoices/${invoiceId}/credit-memo`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount_cents: Math.round(amount * 100), reason }),
-        });
-        if (!response.ok) throw new Error('Failed to create credit memo');
         return response.json();
     }
 };
