@@ -181,12 +181,14 @@ func (h *Handler) BulkCalculatePrice(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		calculated, err := h.pricingSvc.CalculatePriceWithQty(r.Context(), cust, productID, prod.BasePrice, float64(item.Quantity), nil)
+		calculated, err := h.pricingSvc.CalculateScaled(r.Context(), cust, productID, prod.BasePrice, float64(item.Quantity), nil)
 		if err != nil {
 			continue
 		}
 
-		unitPriceCents := int64(calculated.FinalPrice * 100)
+		// The cents the order will bill: the exact price rounded half away
+		// from zero in integers, never truncated.
+		unitPriceCents := pricing.CentsOf(calculated.Price)
 		totalPriceCents := unitPriceCents * int64(item.Quantity)
 
 		results = append(results, PricedItemResponse{
