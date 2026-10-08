@@ -25,7 +25,7 @@ type VolumeBreak struct {
 	Details     string        `json:"details"`
 
 	// SavesPerUnit is UnitPrice's improvement over the price this customer
-	// would pay for a single unit, per unit. It is always > 0 — a rung that
+	// would pay for a single unit, per unit. It is always > 0: a rung that
 	// does not actually beat the current unit price is not returned at all
 	// (see VolumeBreaks).
 	SavesPerUnit float64 `json:"saves_per_unit"`
@@ -39,7 +39,7 @@ type VolumeBreak struct {
 //
 //   - The candidate quantities come from the same pricing_rules predicate
 //     GetMatchingRules uses, restricted to QUANTITY_BREAK rows.
-//   - The price at each candidate comes from CalculateScaled — the very
+//   - The price at each candidate comes from CalculateScaled, the very
 //     engine that will price the line when the order is placed.
 //   - A rung is only returned when its price is strictly better than the
 //     single-unit price. So a break that some higher-priority promotional or

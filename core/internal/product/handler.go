@@ -282,7 +282,7 @@ func (h *Handler) HandleUpdateDimensions(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, view)
 }
 
-// HandleUpdateLeadTime handles PATCH /products/{id}/lead-time — the dealer-side
+// HandleUpdateLeadTime handles PATCH /products/{id}/lead-time, the dealer-side
 // write for the lead time the portal catalog publishes (migration 084).
 func (h *Handler) HandleUpdateLeadTime(w http.ResponseWriter, r *http.Request) {
 	id, bad := pathID(r)

@@ -292,7 +292,7 @@ func applyRule(rule PricingRule, base *big.Rat) (finalPrice *big.Rat, details st
 // quantity break is that buying more costs less per unit, so on any
 // coherently configured ladder the deepest applicable rung IS the cheapest
 // and the two readings agree. They only diverge on a ladder someone has
-// misconfigured — a 100+ rung priced above the 20+ rung sitting next to it —
+// misconfigured (a 100+ rung priced above the 20+ rung sitting next to it)
 // and there we deliberately refuse to charge the larger buyer more than the
 // smaller one. Handing the qty-100 order to the shallower-but-cheaper rung is
 // the same price the customer would get by splitting the order in five, so
