@@ -706,6 +706,213 @@ func TestIdempotency_OversizedBodyRejected(t *testing.T) {
 	}
 }
 
+// --- the query string is part of the request ----------------------------------
+
+// A key binds to one request, and two requests that differ only in their
+// query string are different requests: routes here use query flags (dry runs,
+// force flags), so a key reused with a different query string must not replay
+// the first response. Two spellings of the SAME query, in different orders,
+// are the same request and do replay.
+func TestIdempotency_QueryStringInFingerprint(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	reorderKey := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+	deleteKeyRows(t, db, principal, reorderKey)
+
+	var calls int32
+	mw := Idempotency(db)
+	h := countingHandler(&calls, http.StatusCreated, `{"q":true}`)
+
+	first := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders?dry_run=true", `{"line":1}`, subject)
+	first.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, first); w.Code != http.StatusCreated {
+		t.Fatalf("dry_run=true: status = %d, want 201", w.Code)
+	}
+
+	// Same key, same body, different query flag: a different request.
+	second := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders?dry_run=false", `{"line":1}`, subject)
+	second.Header.Set(IdempotencyHeader, key)
+	w := serve(t, mw, h, second)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("same key different query: status = %d, want %d (the query string is part of the request)", w.Code, http.StatusUnprocessableEntity)
+	}
+	if w.Header().Get(IdempotencyReplayedHeader) == "true" {
+		t.Fatalf("same key different query: response was replayed across different query strings")
+	}
+
+	// Reordered spellings of one query are the same request: a retry replays.
+	r1 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders?flag=2&other=1", `{"line":1}`, subject)
+	r1.Header.Set(IdempotencyHeader, reorderKey)
+	if w := serve(t, mw, h, r1); w.Code != http.StatusCreated {
+		t.Fatalf("reorder first request: status = %d, want 201", w.Code)
+	}
+	r2 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders?other=1&flag=2", `{"line":1}`, subject)
+	r2.Header.Set(IdempotencyHeader, reorderKey)
+	if w := serve(t, mw, h, r2); w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) != "true" {
+		t.Fatalf("reordered query retry: status = %d replayed = %q, want 201 replayed=true", w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+}
+
+// --- error codes and the wire envelope -----------------------------------------
+
+// The 409 and 422 this layer answers with carry the wire contract's machine
+// codes (idempotency_in_progress, idempotency_key_reused) in the standard
+// error envelope with a details array and the request id in meta, so clients
+// branch on the code rather than the message text.
+func TestIdempotency_ErrorCodesAndEnvelope(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	var calls int32
+	h := blockingHandler(started, release, &calls, http.StatusCreated, `{"ok":1}`)
+	mw := Idempotency(db)
+
+	r1 := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, subject)
+	r1.Header.Set(IdempotencyHeader, key)
+	go mw(h).ServeHTTP(httptest.NewRecorder(), r1)
+	<-started
+
+	envelope := func(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var e map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
+			t.Fatalf("body %q is not the error envelope: %v", w.Body.String(), err)
+		}
+		return e
+	}
+	codeOf := func(t *testing.T, e map[string]any) string {
+		t.Helper()
+		errObj, ok := e["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("envelope has no error object: %v", e)
+		}
+		c, _ := errObj["code"].(string)
+		return c
+	}
+
+	// 409 while in progress: idempotency_in_progress, details present.
+	r2 := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, subject)
+	r2.Header.Set(IdempotencyHeader, key)
+	r2.Header.Set("X-Request-ID", "req-409")
+	conflict := serve(t, mw, h, r2)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("in progress: status = %d, want 409", conflict.Code)
+	}
+	e := envelope(t, conflict)
+	if c := codeOf(t, e); c != "idempotency_in_progress" {
+		t.Fatalf("409 code = %q, want idempotency_in_progress", c)
+	}
+	errObj := e["error"].(map[string]any)
+	details, ok := errObj["details"].([]any)
+	if !ok {
+		t.Fatalf("409 envelope has no details array: %v", errObj)
+	}
+	if len(details) != 0 {
+		t.Fatalf("409 details = %v, want an empty array", details)
+	}
+	meta, ok := e["meta"].(map[string]any)
+	if !ok || meta["request_id"] != "req-409" {
+		t.Fatalf("409 meta = %v, want request_id req-409", e["meta"])
+	}
+	close(release)
+
+	// Key reused with a different request: idempotency_key_reused.
+	r3 := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":"different"}`, subject)
+	r3.Header.Set(IdempotencyHeader, key)
+	r3.Header.Set("X-Request-ID", "req-422")
+	reused := serve(t, mw, h, r3)
+	if reused.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("key reused: status = %d, want 422", reused.Code)
+	}
+	e = envelope(t, reused)
+	if c := codeOf(t, e); c != "idempotency_key_reused" {
+		t.Fatalf("422 code = %q, want idempotency_key_reused", c)
+	}
+	errObj = e["error"].(map[string]any)
+	if _, ok := errObj["details"].([]any); !ok {
+		t.Fatalf("422 envelope has no details array: %v", errObj)
+	}
+	if meta, ok := e["meta"].(map[string]any); !ok || meta["request_id"] != "req-422" {
+		t.Fatalf("422 meta = %v, want request_id req-422", e["meta"])
+	}
+}
+
+// --- 3xx outcomes are stored, with their Location -------------------------------
+
+// A 2xx or 3xx outcome is stored and replayed; a replay carries the stored
+// Location header (a replayed 201 or 302 without it points the client at
+// nothing) along with the status, Content-Type and body. Set-Cookie is never
+// stored, so it can never be replayed.
+func TestIdempotency_RedirectAndLocationReplay(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	createdKey := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+	deleteKeyRows(t, db, principal, createdKey)
+
+	mw := Idempotency(db)
+	var redirectCalls int32
+	redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&redirectCalls, 1)
+		w.Header().Set("Location", "https://example.test/elsewhere")
+		w.WriteHeader(http.StatusFound)
+	})
+	r1 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", `{"go":1}`, subject)
+	r1.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, redirect, r1); w.Code != http.StatusFound {
+		t.Fatalf("redirect first request: status = %d, want 302", w.Code)
+	}
+	r2 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", `{"go":1}`, subject)
+	r2.Header.Set(IdempotencyHeader, key)
+	w := serve(t, mw, redirect, r2)
+	if w.Code != http.StatusFound || w.Header().Get(IdempotencyReplayedHeader) != "true" {
+		t.Fatalf("redirect retry: status = %d replayed = %q, want a stored 302 replayed", w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+	if got := w.Header().Get("Location"); got != "https://example.test/elsewhere" {
+		t.Fatalf("redirect retry: Location = %q, want the stored Location", got)
+	}
+	if redirectCalls != 1 {
+		t.Fatalf("redirect handler calls = %d, want 1 (the 302 is a stored outcome)", redirectCalls)
+	}
+
+	// A 201 carrying Location replays with it too.
+	var createdCalls int32
+	created := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&createdCalls, 1)
+		w.Header().Set("Location", "/api/v1/orders/42")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"id":42}`)
+	})
+	c1 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", `{"make":1}`, subject)
+	c1.Header.Set(IdempotencyHeader, createdKey)
+	if w := serve(t, mw, created, c1); w.Code != http.StatusCreated {
+		t.Fatalf("created first request: status = %d, want 201", w.Code)
+	}
+	c2 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", `{"make":1}`, subject)
+	c2.Header.Set(IdempotencyHeader, createdKey)
+	w = serve(t, mw, created, c2)
+	if w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) != "true" {
+		t.Fatalf("created retry: status = %d replayed = %q, want a stored 201 replayed", w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+	if got := w.Header().Get("Location"); got != "/api/v1/orders/42" {
+		t.Fatalf("created retry: Location = %q, want the stored Location", got)
+	}
+	if createdCalls != 1 {
+		t.Fatalf("created handler calls = %d, want 1", createdCalls)
+	}
+}
+
 // --- retention purge ---------------------------------------------------------
 
 func TestIdempotency_PurgeExpired(t *testing.T) {
