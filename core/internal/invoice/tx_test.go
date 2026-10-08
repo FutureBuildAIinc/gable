@@ -13,6 +13,7 @@ package invoice_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -25,7 +26,9 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -486,4 +489,66 @@ func TestPaymentAndVoidRaceLeavesNoVoidInvoiceWithAPayment(t *testing.T) {
 		}
 	}
 	t.Logf("16 races: %d voids won, %d payments won", voided, paid)
+}
+
+// RULE (ADR 0005 8.1): an entry dated into a closed fiscal period fails the act
+// with 409 and the blocker period_closed, for the fulfilment's invoice entry,
+// an invoice void's reversal and a credit memo's post. Each runs inside a
+// transaction that is rolled back, so the closed period exists for that act only
+// and no other test's postings see it.
+func TestClosedPeriodRefusesEachPosting(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	ctx := context.Background()
+	voidID, _ := f.invoice("2")
+	memoInvoice, _ := f.invoice("3")
+	memo := f.createCredit(f.creditBody(memoInvoice, returnLine(f.firstLineID(memoInvoice), "-1", false)))
+	orderID, orderRev := f.confirmedOrder(f.pickupLine("1"))
+
+	closed := func(name string, act func(ctx context.Context) error) {
+		t.Helper()
+		errRollback := fmt.Errorf("roll back")
+		err := db.RunInTx(ctx, func(ctx context.Context) error {
+			// close the period that covers today (or make one): periods may not
+			// overlap, and this transaction's closing is rolled back below
+			ct, err := db.GetExecutor(ctx).Exec(ctx, `UPDATE gl_fiscal_periods SET status = 'CLOSED' WHERE CURRENT_DATE - 3 <= end_date AND CURRENT_DATE + 3 >= start_date`)
+			if err != nil {
+				return err
+			}
+			if ct.RowsAffected() == 0 {
+				if _, err := db.GetExecutor(ctx).Exec(ctx, `INSERT INTO gl_fiscal_periods (name, start_date, end_date, status) VALUES ('c23-closed', CURRENT_DATE - 3, CURRENT_DATE + 3, 'CLOSED')`); err != nil {
+					return err
+				}
+			}
+			got := act(ctx)
+			var he *httpx.Error
+			if !errors.As(got, &he) || he.Status != http.StatusConflict || len(he.Details) != 1 || he.Details[0].Code != "period_closed" {
+				t.Errorf("%s into a closed period = %v, want 409 period_closed", name, got)
+			}
+			return errRollback
+		})
+		if !errors.Is(err, errRollback) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	closed("an invoice void", func(ctx context.Context) error {
+		_, err := f.invoices.VoidInvoice(ctx, uuid.MustParse(voidID), invoice.Precondition{Revision: ptr(rev(t, f.getInvoice(voidID)))}, invoice.Transition{Reason: "closed"})
+		return err
+	})
+	closed("a credit memo post", func(ctx context.Context) error {
+		_, err := f.invoices.TransitionCreditMemo(ctx, uuid.MustParse(str(t, memo.body, "id")), invoice.CreditOpen, invoice.Precondition{Revision: ptr(int64(1))}, invoice.Transition{})
+		return err
+	})
+	closed("a fulfilment", func(ctx context.Context) error {
+		_, err := f.orders.Fulfil(ctx, uuid.MustParse(orderID), &order.Precondition{Revision: &orderRev}, order.FulfilRequest{PickedUpBy: "X"})
+		return err
+	})
+	// nothing of the refused acts remained
+	if o := f.do("GET", "/api/v1/orders/"+orderID, nil); str(t, o.body, "status") != "confirmed" {
+		t.Errorf("the order moved: %v", o.body["status"])
+	}
+	if got := f.getInvoice(voidID); str(t, got.body, "status") != "unpaid" {
+		t.Errorf("the invoice moved: %v", got.body["status"])
+	}
 }

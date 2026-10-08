@@ -175,7 +175,7 @@ func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInv
 		SourceRefID: &invID, Currency: in.Currency, PostedBy: in.Actor, Legs: legs,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to post the invoice entry: %w", err)
+		return mapPostingError(fmt.Errorf("failed to post the invoice entry: %w", err))
 	}
 	if entry != nil {
 		if err := store.SetInvoiceGLEntry(ctx, in.ID, entry.ID); err != nil {
