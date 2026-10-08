@@ -29,3 +29,8 @@ ALTER TABLE audit_log ADD COLUMN tool TEXT;
 
 UPDATE audit_log SET actor_id = NULLIF(user_id, '') WHERE actor_id IS NULL;
 UPDATE audit_log SET actor_kind = 'anonymous' WHERE actor_id IS NULL;
+
+-- Actor lookups (R1-13's "audit row with its key id" queries, agent-activity
+-- filters) resolve by kind and id together; without this index each one
+-- scans the table.
+CREATE INDEX idx_audit_log_actor ON audit_log (actor_kind, actor_id);

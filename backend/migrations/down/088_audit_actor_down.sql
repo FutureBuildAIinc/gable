@@ -7,6 +7,7 @@
 -- pick it up and apply it as a forward migration. Apply by hand:
 --
 --   ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_actor_kind_check;
+--   ALTER TABLE audit_log DROP INDEX IF EXISTS idx_audit_log_actor;
 --   ALTER TABLE audit_log DROP COLUMN IF EXISTS actor_kind;
 --   ALTER TABLE audit_log DROP COLUMN IF EXISTS actor_id;
 --   ALTER TABLE audit_log DROP COLUMN IF EXISTS acting_as;
@@ -18,6 +19,7 @@
 -- when the attribution columns themselves are being removed from the product.
 
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_actor_kind_check;
+DROP INDEX IF EXISTS idx_audit_log_actor;
 ALTER TABLE audit_log DROP COLUMN IF EXISTS actor_kind;
 ALTER TABLE audit_log DROP COLUMN IF EXISTS actor_id;
 ALTER TABLE audit_log DROP COLUMN IF EXISTS acting_as;
