@@ -8624,7 +8624,7 @@ export interface components {
             customer_id: string;
             /**
              * Format: uuid
-             * @description Only at create, and only through the quote convert route in practice: a quote's order is created by POST /quotes/{id}/convert (ADR 0005 section 5.8).
+             * @description Never accepted: a 400 on create and on PUT. A quote's order is created by POST /quotes/{id}/convert (ADR 0005 section 5.8).
              */
             quote_id?: string;
             /** Format: uuid */
