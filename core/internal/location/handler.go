@@ -4,13 +4,17 @@
 package location
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"time"
 
-	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -120,52 +124,127 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 // ---------- location endpoints ----------
 
-// createLocationRequest is the create payload. It exists only so that "active"
-// can be told apart from "active": false: Location.Active is a plain bool whose
-// zero value is the same as an explicit false, which is why the default has to
-// be resolved here, at the JSON boundary, rather than in the service. The outer
-// *bool shadows the embedded Location.Active during decoding because
-// encoding/json prefers the shallower field of the same name.
+// createLocationRequest is the create payload: the wire fields as strings and
+// pointers, decoded strictly (an unknown field is a 400, never a silent
+// no-op), with `active` as a *bool so "not mentioned" (true) can be told
+// apart from an explicit false.
 type createLocationRequest struct {
-	Location
-	Active *bool `json:"active"`
+	ParentID            *string  `json:"parent_id"`
+	Path                string   `json:"path"`
+	Type                string   `json:"type"`
+	Code                string   `json:"code"`
+	Description         *string  `json:"description"`
+	Name                *string  `json:"name"`
+	Address             *string  `json:"address"`
+	City                *string  `json:"city"`
+	State               *string  `json:"state"`
+	Zip                 *string  `json:"zip"`
+	Phone               *string  `json:"phone"`
+	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
+	DefaultTaxRate      *float64 `json:"default_tax_rate"`
+	Timezone            *string  `json:"timezone"`
+	Active              *bool    `json:"active"`
 }
 
-// resolve returns the location to persist, defaulting active to true when the
-// caller did not mention it and honouring an explicit false when they did.
-func (req createLocationRequest) resolve() Location {
-	loc := req.Location
-	loc.Active = req.Active == nil || *req.Active
+// resolve parses the request into the row to persist: the type from its
+// lowercase wire name (forceType fills it when the route itself owns the
+// type, as the branch route does), the parent when sent, and active
+// defaulting to true when the caller did not mention it.
+func (req createLocationRequest) resolve(v *httpx.Validator, forceType LocationType) Location {
+	loc := Location{
+		Path:                req.Path,
+		Code:                req.Code,
+		Description:         req.Description,
+		Name:                req.Name,
+		Address:             req.Address,
+		City:                req.City,
+		State:               req.State,
+		Zip:                 req.Zip,
+		Phone:               req.Phone,
+		TaxJurisdictionCode: req.TaxJurisdictionCode,
+		DefaultTaxRate:      req.DefaultTaxRate,
+		Timezone:            req.Timezone,
+		Active:              req.Active == nil || *req.Active,
+	}
+	if forceType != "" {
+		loc.Type = forceType
+	} else if req.Type != "" {
+		if t, ok := ParseLocationType(req.Type); ok {
+			loc.Type = t
+		} else {
+			v.Check(false, "type", "must be one of: branch, zone, aisle, rack, shelf, bin, yard")
+		}
+	} else {
+		v.Check(false, "type", "is required")
+	}
+	v.Required("code", req.Code)
+	if req.ParentID != nil && *req.ParentID != "" {
+		if id, ok := v.UUID("parent_id", req.ParentID, true); ok {
+			loc.ParentID = &id
+		}
+	}
 	return loc
+}
+
+// locationUpdateRequest is the PUT body: the mutable slice of a location, in
+// the same wire shape as the create.
+type locationUpdateRequest struct {
+	Path                string   `json:"path"`
+	Code                string   `json:"code"`
+	Description         *string  `json:"description"`
+	Name                *string  `json:"name"`
+	Address             *string  `json:"address"`
+	City                *string  `json:"city"`
+	State               *string  `json:"state"`
+	Zip                 *string  `json:"zip"`
+	Phone               *string  `json:"phone"`
+	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
+	DefaultTaxRate      *float64 `json:"default_tax_rate"`
+	Timezone            *string  `json:"timezone"`
+	Active              bool     `json:"active"`
+	Revision            *int64   `json:"revision"`
+}
+
+func writeLocJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func (h *Handler) CreateLocation(w http.ResponseWriter, r *http.Request) {
 	var req createLocationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid input", http.StatusBadRequest, err)
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	loc := req.resolve()
+	v := &httpx.Validator{}
+	loc := req.resolve(v, "")
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	if loc.Type == LocTypeBranch && !callerMayCreateBranch(r) {
-		httputil.RespondError(w, r, "type BRANCH requires the admin or owner role", http.StatusForbidden, nil)
+		httpx.WriteError(w, r, httpx.Forbidden("creating a branch requires the admin or owner role"))
 		return
 	}
 	if loc.ParentID != nil && h.guard != nil {
 		err := h.guard.CheckPayloadLocation(r.Context(), *loc.ParentID)
 		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
-			httputil.RespondError(w, r, "parent_id is in a branch this caller may not target", http.StatusForbidden, err)
+			httpx.WriteError(w, r, httpx.Forbidden("parent_id is in a branch this caller may not target"))
 			return
 		}
 		if err != nil {
-			httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+			httpx.WriteError(w, r, err)
 			return
 		}
 	}
 	if err := h.service.CreateLocation(r.Context(), &loc); err != nil {
-		httputil.RespondError(w, r, "failed to create location", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, loc)
+	w.Header().Set("Location", "/api/v1/locations/"+loc.ID.String())
+	httpx.WriteRevisionETag(w, loc.Revision)
+	writeLocJSON(w, http.StatusCreated, loc)
 }
 
 // ListLocations serves GET /api/v1/locations. Behind the branch wall the
@@ -175,18 +254,107 @@ func (h *Handler) CreateLocation(w http.ResponseWriter, r *http.Request) {
 // header, an unbound key and the single-branch switch see every location,
 // as before. The branch switcher reads /me/branches, so it does not ride on
 // this list.
+const locationsOrdering = "locations.created_at_id_desc"
+
+func cursorError() error {
+	return httpx.BadRequest("cursor keyset is malformed",
+		httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+}
+
+// parsePage reads the shared list parameters: the strict guard on the route's
+// names, the page, and the keyset position when a cursor was sent.
+func parsePage(r *http.Request, scope string, allowed ...string) (after *time.Time, afterID *uuid.UUID, limit int, err error) {
+	names := append([]string{"cursor", "limit", "include"}, allowed...)
+	q, err := httpx.StrictQuery(r, names...)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	page, err := httpx.ParseListQuery(r, scope)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			return nil, nil, 0, cursorError()
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			return nil, nil, 0, cursorError()
+		}
+		after, afterID = &at, &id
+	}
+	wantTotal := false
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			return nil, nil, 0, httpx.BadRequest("include parameter is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"})
+		}
+		set, ierr := httpx.ParseInclude(vals[0], httpx.IncludeTotal)
+		if ierr != nil {
+			return nil, nil, 0, ierr
+		}
+		wantTotal = set.Has(httpx.IncludeTotal)
+	}
+	if wantTotal {
+		return after, afterID, page.Limit, errWantTotal{}
+	}
+	return after, afterID, page.Limit, nil
+}
+
+// errWantTotal is the marker parsePage returns when include=total was asked.
+type errWantTotal struct{}
+
+func (errWantTotal) Error() string { return "include=total" }
+
+func writePage[T any](w http.ResponseWriter, r *http.Request, items []T, more bool, scope string, lastCreatedAt func() (time.Time, uuid.UUID), total *int64, limit int) {
+	next := ""
+	if more && len(items) > 0 {
+		at, id := lastCreatedAt()
+		var err error
+		next, err = httpx.MintCursor(scope, httpx.FormatKeyTime(at), id.String())
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	opts := []httpx.ListOption{}
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, limit, opts...)
+}
+
 func (h *Handler) ListLocations(w http.ResponseWriter, r *http.Request) {
+	after, afterID, limit, perr := parsePage(r, locationsOrdering)
+	wantTotal := errors.Is(perr, errWantTotal{})
+	if perr != nil && !wantTotal {
+		httpx.WriteError(w, r, perr)
+		return
+	}
 	branches, err := h.listScope(r.Context())
 	if err != nil {
-		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	locs, err := h.service.ListLocationsIn(r.Context(), branches)
+	locs, more, err := h.service.ListLocationsPage(r.Context(), ListScope{Branches: branches}, after, afterID, limit)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list locations", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, locs)
+	var total *int64
+	if wantTotal {
+		n, err := h.service.CountLocations(r.Context(), ListScope{Branches: branches})
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		total = &n
+	}
+	writePage(w, r, locs, more, locationsOrdering, func() (time.Time, uuid.UUID) {
+		last := locs[len(locs)-1]
+		return last.CreatedAt.Time, last.ID
+	}, total, limit)
 }
 
 // listScope resolves the branch ids a caller's location list covers; nil is
@@ -221,73 +389,123 @@ func (h *Handler) listScope(ctx context.Context) ([]uuid.UUID, error) {
 }
 
 func (h *Handler) GetLocation(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
 	// The record branch rule (ADR 0007 section 2.3): a location of a branch
-	// the caller may not target is a 403, in the legacy error shape these
-	// unconverted routes carry. A location that does not exist belongs to no
-	// branch and passes; the service answers for it.
+	// the caller may not target is a 403. A location that does not exist
+	// belongs to no branch and passes; the service answers for it.
 	if h.guard != nil {
 		err := h.guard.CheckPayloadLocation(r.Context(), id)
 		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
-			httputil.RespondError(w, r, "location is in a branch this caller may not target", http.StatusForbidden, err)
+			httpx.WriteError(w, r, httpx.Forbidden("location is in a branch this caller may not target"))
 			return
 		}
 		if err != nil {
-			httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+			httpx.WriteError(w, r, err)
 			return
 		}
 	}
 	loc, err := h.service.GetLocation(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			httputil.RespondError(w, r, "not found", http.StatusNotFound, err)
+			httpx.WriteError(w, r, httpx.NotFound("no such location"))
 			return
 		}
-		httputil.RespondError(w, r, "failed to fetch location", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, loc)
+	httpx.WriteRevisionETag(w, loc.Revision)
+	writeLocJSON(w, http.StatusOK, loc)
 }
 
 func (h *Handler) UpdateLocation(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
-	var loc Location
-	if err := json.NewDecoder(r.Body).Decode(&loc); err != nil {
-		httputil.RespondError(w, r, "invalid input", http.StatusBadRequest, err)
+	var req locationUpdateRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	loc.ID = id
-	if err := h.service.UpdateLocation(r.Context(), &loc); err != nil {
+	current, err := h.service.GetLocation(r.Context(), id)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			httputil.RespondError(w, r, "not found", http.StatusNotFound, err)
+			httpx.WriteError(w, r, httpx.NotFound("no such location"))
 			return
 		}
-		httputil.RespondError(w, r, "failed to update location", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, loc)
+	if err := httpx.CheckRevision(current.Revision, r.Header.Get("If-Match"), req.Revision); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	loc := *current
+	loc.Path, loc.Code, loc.Description = req.Path, req.Code, req.Description
+	loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone = req.Name, req.Address, req.City, req.State, req.Zip, req.Phone
+	loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone, loc.Active = req.TaxJurisdictionCode, req.DefaultTaxRate, req.Timezone, req.Active
+	if loc.Code == "" {
+		loc.Code = current.Code
+	}
+	if err := h.service.UpdateLocation(r.Context(), &loc, current.Revision); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, loc.Revision)
+	writeLocJSON(w, http.StatusOK, loc)
 }
 
 func (h *Handler) DeleteLocation(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	if err := h.service.DeleteLocation(r.Context(), id); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			httputil.RespondError(w, r, "not found", http.StatusNotFound, err)
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
+		return
+	}
+	// The precondition arrives as If-Match or as a body revision; an empty
+	// body is the caller sending the header alone.
+	var bodyRevision *int64
+	if raw, rerr := io.ReadAll(r.Body); rerr == nil && len(raw) > 0 {
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		var body struct {
+			Revision *int64 `json:"revision"`
+		}
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			httpx.WriteError(w, r, err)
 			return
 		}
-		httputil.RespondError(w, r, "failed to delete location", http.StatusInternalServerError, err)
+		bodyRevision = body.Revision
+	}
+	current, err := h.service.GetLocation(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			httpx.WriteError(w, r, httpx.NotFound("no such location"))
+			return
+		}
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if err := httpx.CheckRevision(current.Revision, r.Header.Get("If-Match"), bodyRevision); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if err := h.service.DeleteLocation(r.Context(), id, current.Revision); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -295,52 +513,111 @@ func (h *Handler) DeleteLocation(w http.ResponseWriter, r *http.Request) {
 
 // ---------- branch endpoints ----------
 
+const branchesOrdering = "branches.created_at_id_desc"
+
 func (h *Handler) ListBranches(w http.ResponseWriter, r *http.Request) {
-	includeInactive := r.URL.Query().Get("include_inactive") == "true"
-	branches, err := h.service.ListBranches(r.Context(), includeInactive)
-	if err != nil {
-		httputil.RespondError(w, r, "failed to list branches", http.StatusInternalServerError, err)
+	after, afterID, limit, perr := parsePage(r, branchesOrdering, "include_inactive")
+	wantTotal := errors.Is(perr, errWantTotal{})
+	if perr != nil && !wantTotal {
+		httpx.WriteError(w, r, perr)
 		return
 	}
-	writeJSON(w, http.StatusOK, branches)
+	includeInactive := false
+	if vals := r.URL.Query()["include_inactive"]; len(vals) > 0 {
+		switch vals[0] {
+		case "true":
+			includeInactive = true
+		case "false":
+			includeInactive = false
+		default:
+			httpx.WriteError(w, r, httpx.BadRequest("include_inactive is not a boolean",
+				httpx.FieldError{Field: "include_inactive", Message: "must be true or false"}))
+			return
+		}
+		if len(vals) > 1 {
+			httpx.WriteError(w, r, httpx.BadRequest("include_inactive parameter is repeated",
+				httpx.FieldError{Field: "include_inactive", Message: "parameter is repeated"}))
+			return
+		}
+	}
+	branches, more, err := h.service.ListBranchesPage(r.Context(), includeInactive, after, afterID, limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var total *int64
+	if wantTotal {
+		n, err := h.service.CountBranches(r.Context(), includeInactive)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		total = &n
+	}
+	writePage(w, r, branches, more, branchesOrdering, func() (time.Time, uuid.UUID) {
+		last := branches[len(branches)-1]
+		return last.CreatedAt.Time, last.ID
+	}, total, limit)
 }
 
 func (h *Handler) CreateBranch(w http.ResponseWriter, r *http.Request) {
 	var req createLocationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "invalid input", http.StatusBadRequest, err)
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	loc := req.resolve()
-	loc.Type = LocTypeBranch
+	v := &httpx.Validator{}
+	loc := req.resolve(v, LocTypeBranch)
 	loc.ParentID = nil
-	if err := h.service.CreateLocation(r.Context(), &loc); err != nil {
-		httputil.RespondError(w, r, "failed to create branch", http.StatusBadRequest, err)
+	v.Required("name", deref(loc.Name))
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, loc)
+	if err := h.service.CreateLocation(r.Context(), &loc); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/branches/"+loc.ID.String())
+	httpx.WriteRevisionETag(w, loc.Revision)
+	writeLocJSON(w, http.StatusCreated, loc)
+}
+
+// deref reads a pointer string field for the legacy projections that still
+// carry plain strings.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func (h *Handler) GetBranch(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
 	loc, err := h.service.GetLocation(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			httputil.RespondError(w, r, "not found", http.StatusNotFound, err)
+			httpx.WriteError(w, r, httpx.NotFound("no such branch"))
 			return
 		}
-		httputil.RespondError(w, r, "failed to fetch branch", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 	if loc.Type != LocTypeBranch {
-		httputil.RespondError(w, r, "not a branch", http.StatusNotFound, nil)
+		httpx.WriteError(w, r, httpx.NotFound("no such branch"))
 		return
 	}
-	writeJSON(w, http.StatusOK, loc)
+	httpx.WriteRevisionETag(w, loc.Revision)
+	writeLocJSON(w, http.StatusOK, loc)
 }
 
 func (h *Handler) UpdateBranch(w http.ResponseWriter, r *http.Request) {
@@ -354,31 +631,35 @@ func (h *Handler) DeleteBranch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetBranchTree(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
 	// The record branch rule (ADR 0007 section 2.3): the path id is the
-	// branch itself, so a tree the caller may not target is a 403, in the
-	// legacy error shape these unconverted routes carry.
+	// branch itself, so a tree the caller may not target is a 403.
 	if h.guard != nil {
 		err := h.guard.CheckPayloadBranch(r.Context(), id)
 		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
-			httputil.RespondError(w, r, "branch is outside the branches this caller may target", http.StatusForbidden, err)
+			httpx.WriteError(w, r, httpx.Forbidden("branch is outside the branches this caller may target"))
 			return
 		}
 		if err != nil {
-			httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+			httpx.WriteError(w, r, err)
 			return
 		}
 	}
 	tree, err := h.service.GetBranchTree(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to fetch tree", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tree)
+	httpx.WriteList(w, tree, "", 0)
 }
 
 // ---------- user-branch endpoints ----------
@@ -387,9 +668,9 @@ func (h *Handler) ListMyBranches(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
 		// Dev mode without auth: return all active branches so the UI is usable.
-		all, err := h.service.ListBranches(r.Context(), false)
+		all, _, err := h.service.ListBranchesPage(r.Context(), false, nil, nil, 200)
 		if err != nil {
-			httputil.RespondError(w, r, "failed to list branches", http.StatusInternalServerError, err)
+			httpx.WriteError(w, r, err)
 			return
 		}
 		out := make([]BranchSummary, 0, len(all))
@@ -397,10 +678,10 @@ func (h *Handler) ListMyBranches(w http.ResponseWriter, r *http.Request) {
 			out = append(out, BranchSummary{
 				ID:       b.ID,
 				Code:     b.Code,
-				Name:     b.Name,
+				Name:     deref(b.Name),
 				Active:   b.Active,
 				IsHome:   i == 0,
-				Timezone: b.Timezone,
+				Timezone: deref(b.Timezone),
 			})
 		}
 		writeJSON(w, http.StatusOK, out)

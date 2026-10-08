@@ -7,11 +7,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// ErrStaleRevision is a write's answer when the row moved past the revision
+// the caller built on (ADR 0001 section 11).
+var ErrStaleRevision = errors.New("stale revision")
 
 // ErrNotFound is returned when a lookup by id finds no row.
 var ErrNotFound = errors.New("location not found")
@@ -21,22 +27,29 @@ var ErrNotFound = errors.New("location not found")
 // ” because the model uses non-pointer string fields (non-branch rows leave
 // branch-only metadata NULL in the DB).
 const locationColumns = `
-    id, parent_id, path, type, code, COALESCE(description, ''),
-    COALESCE(name, ''), COALESCE(address, ''), COALESCE(city, ''),
-    COALESCE(state, ''), COALESCE(zip, ''), COALESCE(phone, ''),
-    COALESCE(tax_jurisdiction_code, ''), default_tax_rate,
-    COALESCE(timezone, ''), active, branch_id,
-    created_at, updated_at
+    id, parent_id, path, type, code, description,
+    name, address, city, state, zip, phone,
+    tax_jurisdiction_code, default_tax_rate,
+    timezone, active, branch_id,
+    revision, created_at, updated_at
 `
+
+// ListScope is a location list's branch scope: nil is every branch, an
+// empty slice is no branches (a bound caller with no grants lists nothing).
+type ListScope struct {
+	Branches       []uuid.UUID
+	IncludeInactive bool
+}
 
 type Repository interface {
 	CreateLocation(ctx context.Context, loc *Location) error
 	GetLocation(ctx context.Context, id uuid.UUID) (*Location, error)
-	UpdateLocation(ctx context.Context, loc *Location) error
-	DeleteLocation(ctx context.Context, id uuid.UUID) error // soft delete: active=false
-	ListLocations(ctx context.Context) ([]Location, error)
-	ListLocationsInBranches(ctx context.Context, branches []uuid.UUID) ([]Location, error)
-	ListBranches(ctx context.Context, includeInactive bool) ([]Location, error)
+	UpdateLocation(ctx context.Context, loc *Location, revision int64) error
+	DeleteLocation(ctx context.Context, id uuid.UUID, revision int64) error // soft delete: active=false
+	ListLocationsPage(ctx context.Context, scope ListScope, after *time.Time, afterID *uuid.UUID, limit int) ([]Location, error)
+	ListBranchesPage(ctx context.Context, includeInactive bool, after *time.Time, afterID *uuid.UUID, limit int) ([]Location, error)
+	CountBranches(ctx context.Context, includeInactive bool) (int64, error)
+	CountLocations(ctx context.Context, scope ListScope) (int64, error)
 	GetBranchTree(ctx context.Context, branchID uuid.UUID) ([]Location, error)
 	IsBranch(ctx context.Context, id uuid.UUID) (bool, error)
 }
@@ -50,7 +63,8 @@ func NewRepository(db *database.DB) *PostgresRepository {
 }
 
 func scanLocation(row pgx.Row, loc *Location) error {
-	return row.Scan(
+	var created, updated time.Time
+	if err := row.Scan(
 		&loc.ID,
 		&loc.ParentID,
 		&loc.Path,
@@ -68,15 +82,18 @@ func scanLocation(row pgx.Row, loc *Location) error {
 		&loc.Timezone,
 		&loc.Active,
 		&loc.BranchID,
-		&loc.CreatedAt,
-		&loc.UpdatedAt,
-	)
+		&loc.Revision,
+		&created,
+		&updated,
+	); err != nil {
+		return err
+	}
+	loc.CreatedAt = httpx.TimestampOf(created)
+	loc.UpdatedAt = httpx.TimestampOf(updated)
+	return nil
 }
 
 func (r *PostgresRepository) CreateLocation(ctx context.Context, loc *Location) error {
-	if loc.Timezone == "" {
-		loc.Timezone = "America/New_York"
-	}
 	query := `
 		INSERT INTO locations (
 			parent_id, path, type, code, description,
@@ -89,12 +106,20 @@ func (r *PostgresRepository) CreateLocation(ctx context.Context, loc *Location) 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		loc.ParentID, loc.Path, loc.Type, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
-		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone, loc.Active,
+		loc.TaxJurisdictionCode, loc.DefaultTaxRate, tzOrDefault(loc.Timezone), loc.Active,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		return fmt.Errorf("create location: %w", err)
 	}
 	return nil
+}
+
+// tzOrDefault is the row's timezone or the dealer default when none was sent.
+func tzOrDefault(tz *string) any {
+	if tz == nil || *tz == "" {
+		return "America/New_York"
+	}
+	return *tz
 }
 
 func (r *PostgresRepository) GetLocation(ctx context.Context, id uuid.UUID) (*Location, error) {
@@ -109,78 +134,165 @@ func (r *PostgresRepository) GetLocation(ctx context.Context, id uuid.UUID) (*Lo
 	return &loc, nil
 }
 
-func (r *PostgresRepository) UpdateLocation(ctx context.Context, loc *Location) error {
+// UpdateLocation carries the revision precondition: the check and the write
+// are one database act, and zero rows means stale or gone (ADR 0001 section
+// 11).
+func (r *PostgresRepository) UpdateLocation(ctx context.Context, loc *Location, revision int64) error {
 	query := `
 		UPDATE locations SET
-			path = $2,
-			code = $3,
-			description = $4,
-			name = $5,
-			address = $6,
-			city = $7,
-			state = $8,
-			zip = $9,
-			phone = $10,
-			tax_jurisdiction_code = $11,
-			default_tax_rate = $12,
-			timezone = COALESCE(NULLIF($13,''), timezone),
-			active = $14,
+			path = $3,
+			code = $4,
+			description = $5,
+			name = $6,
+			address = $7,
+			city = $8,
+			state = $9,
+			zip = $10,
+			phone = $11,
+			tax_jurisdiction_code = $12,
+			default_tax_rate = $13,
+			timezone = COALESCE(NULLIF($14,''), timezone),
+			active = $15,
+			revision = revision + 1,
 			updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND revision = $2
 		RETURNING ` + locationColumns
 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		loc.ID, loc.Path, loc.Code, loc.Description,
+		loc.ID, revision, loc.Path, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
-		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone, loc.Active,
+		loc.TaxJurisdictionCode, loc.DefaultTaxRate, derefString(loc.Timezone), loc.Active,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
+			return r.staleOrMissing(ctx, loc.ID)
 		}
 		return fmt.Errorf("update location: %w", err)
 	}
 	return nil
 }
 
+func derefString(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
+}
+
+// staleOrMissing tells a missing row from a stale revision for the write the
+// caller just attempted.
+func (r *PostgresRepository) staleOrMissing(ctx context.Context, id uuid.UUID) error {
+	var exists bool
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM locations WHERE id = $1)`, id).Scan(&exists); err == nil && exists {
+		return ErrStaleRevision
+	}
+	return ErrNotFound
+}
+
 // DeleteLocation soft-deletes by setting active=false. Branches can be
 // archived this way; bins typically shouldn't be soft-deleted (use a hard
 // delete via DELETE FROM if needed).
-func (r *PostgresRepository) DeleteLocation(ctx context.Context, id uuid.UUID) error {
+func (r *PostgresRepository) DeleteLocation(ctx context.Context, id uuid.UUID, revision int64) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
-		`UPDATE locations SET active = FALSE, updated_at = NOW() WHERE id = $1`, id)
+		`UPDATE locations SET active = FALSE, revision = revision + 1, updated_at = NOW()
+		 WHERE id = $1 AND revision = $2`, id, revision)
 	if err != nil {
 		return fmt.Errorf("delete location: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return r.staleOrMissing(ctx, id)
 	}
 	return nil
 }
 
-func (r *PostgresRepository) ListLocations(ctx context.Context) ([]Location, error) {
-	return r.listWhere(ctx, ``)
-}
-
-// ListLocationsInBranches lists every location whose denormalized branch_id
-// is one of the given branches. For each branch that covers the branch row
-// itself and all of its descendants: a BRANCH row's branch_id is its own id
-// and every other row's is copied from its parent (migration 058).
-func (r *PostgresRepository) ListLocationsInBranches(ctx context.Context, branches []uuid.UUID) ([]Location, error) {
-	query := `SELECT ` + locationColumns + ` FROM locations WHERE branch_id = ANY($1) ORDER BY path ASC`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branches)
+// ListLocationsPage is the locations list's keyset page: `created_at DESC,
+// id DESC` inside the branch scope the caller's wall resolved (nil branches
+// is every branch, an empty slice is no branches). after is nil for the
+// first page.
+func (r *PostgresRepository) ListLocationsPage(ctx context.Context, scope ListScope, after *time.Time, afterID *uuid.UUID, limit int) ([]Location, error) {
+	query := `SELECT ` + locationColumns + ` FROM locations`
+	args := []any{}
+	conds := []string{}
+	if scope.Branches != nil {
+		conds = append(conds, fmt.Sprintf(`branch_id = ANY($%d)`, len(args)+1))
+		args = append(args, scope.Branches)
+	}
+	if after != nil {
+		conds = append(conds, fmt.Sprintf(`(created_at, id) < ($%d, $%d)`, len(args)+1, len(args)+2))
+		args = append(args, *after, *afterID)
+	}
+	if len(conds) > 0 {
+		query += ` WHERE ` + joinAnd(conds)
+	}
+	query += ` ORDER BY created_at DESC, id DESC`
+	args = append(args, limit)
+	query += fmt.Sprintf(` LIMIT $%d`, len(args))
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list locations in branches: %w", err)
+		return nil, fmt.Errorf("list locations: %w", err)
 	}
 	return scanLocations(rows)
 }
 
-func (r *PostgresRepository) ListBranches(ctx context.Context, includeInactive bool) ([]Location, error) {
-	where := `WHERE type = 'BRANCH'`
-	if !includeInactive {
-		where += ` AND active = TRUE`
+// joinAnd joins SQL conditions with AND.
+func joinAnd(conds []string) string {
+	out := ""
+	for i, c := range conds {
+		if i > 0 {
+			out += " AND "
+		}
+		out += c
 	}
-	return r.listWhere(ctx, where)
+	return out
+}
+
+// CountLocations is the include=total count under the same scope.
+func (r *PostgresRepository) CountLocations(ctx context.Context, scope ListScope) (int64, error) {
+	query := `SELECT COUNT(*) FROM locations`
+	args := []any{}
+	if scope.Branches != nil {
+		query += ` WHERE branch_id = ANY($1)`
+		args = append(args, scope.Branches)
+	}
+	var total int64
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, query, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count locations: %w", err)
+	}
+	return total, nil
+}
+
+// ListBranchesPage is the branches list's keyset page.
+func (r *PostgresRepository) ListBranchesPage(ctx context.Context, includeInactive bool, after *time.Time, afterID *uuid.UUID, limit int) ([]Location, error) {
+	query := `SELECT ` + locationColumns + ` FROM locations WHERE type = 'BRANCH'`
+	args := []any{}
+	if !includeInactive {
+		query += ` AND active = TRUE`
+	}
+	if after != nil {
+		query += fmt.Sprintf(` AND (created_at, id) < ($%d, $%d)`, len(args)+1, len(args)+2)
+		args = append(args, *after, *afterID)
+	}
+	query += ` ORDER BY created_at DESC, id DESC`
+	args = append(args, limit)
+	query += fmt.Sprintf(` LIMIT $%d`, len(args))
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list branches: %w", err)
+	}
+	return scanLocations(rows)
+}
+
+// CountBranches is the include=total count.
+func (r *PostgresRepository) CountBranches(ctx context.Context, includeInactive bool) (int64, error) {
+	query := `SELECT COUNT(*) FROM locations WHERE type = 'BRANCH'`
+	if !includeInactive {
+		query += ` AND active = TRUE`
+	}
+	var total int64
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, query).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count branches: %w", err)
+	}
+	return total, nil
 }
 
 // GetBranchTree returns the branch row plus all of its descendants ordered
@@ -208,16 +320,6 @@ func (r *PostgresRepository) IsBranch(ctx context.Context, id uuid.UUID) (bool, 
 		return false, fmt.Errorf("is branch: %w", err)
 	}
 	return t == string(LocTypeBranch), nil
-}
-
-// listWhere accepts an optional WHERE clause beginning with "WHERE" (or empty).
-func (r *PostgresRepository) listWhere(ctx context.Context, where string) ([]Location, error) {
-	query := `SELECT ` + locationColumns + ` FROM locations ` + where + ` ORDER BY path ASC`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("list locations: %w", err)
-	}
-	return scanLocations(rows)
 }
 
 func scanLocations(rows pgx.Rows) ([]Location, error) {
