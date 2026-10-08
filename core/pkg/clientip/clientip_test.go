@@ -4,9 +4,13 @@
 package clientip
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func req(remote string, xff ...string) *http.Request {
@@ -159,5 +163,70 @@ func TestXRealIPIsNeverTrusted(t *testing.T) {
 	r.Header.Set("X-Real-IP", "1.2.3.4")
 	if got := tr.Of(r); got != "10.0.0.1" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestParseRejectsShortMappedPrefixAndZones(t *testing.T) {
+	for _, bad := range []string{"::ffff:0:0/0", "::ffff:0:0/95", "fe80::1%eth0/64", "fe80::1%eth0", "10.0.0.0/8,fe80::%1/64"} {
+		if _, err := Parse(bad); err == nil {
+			t.Errorf("Parse(%q) accepted", bad)
+		}
+	}
+	if _, err := Parse("::ffff:10.0.0.0/104"); err != nil {
+		t.Fatalf("a /104 mapped prefix is a valid IPv4 /8: %v", err)
+	}
+}
+
+func TestForwardingWatchWarnsOnceForUntrustedPeer(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	tr := mustParse(t, "10.0.0.0/8")
+	now := time.Unix(1000, 0)
+	w := NewForwardingWatch(logger, tr)
+	w.now = func() time.Time { return now }
+
+	// Trusted peer, no header from an untrusted peer, and an untrusted peer
+	// without the header: silent.
+	w.Observe(req("10.0.0.1:1", "1.1.1.1"))
+	w.Observe(req("203.0.113.9:1"))
+	if buf.Len() != 0 {
+		t.Fatalf("unexpected log: %s", buf.String())
+	}
+
+	w.Observe(req("203.0.113.9:1", "9.9.9.9, 8.8.8.8", "7.7.7.7"))
+	w.Observe(req("203.0.113.10:1", "9.9.9.9"))
+	out := buf.String()
+	if n := strings.Count(out, "level=WARN"); n != 1 {
+		t.Fatalf("want one warning, got %d: %s", n, out)
+	}
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "203.0.113.9") || !strings.Contains(out, "hops=3") {
+		t.Fatalf("warning lacks level, peer or hop count: %s", out)
+	}
+	for _, leak := range []string{"9.9.9.9", "8.8.8.8", "7.7.7.7"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("warning leaks header contents %q: %s", leak, out)
+		}
+	}
+
+	// Again after the hour.
+	buf.Reset()
+	now = now.Add(time.Hour + time.Second)
+	w.Observe(req("203.0.113.10:1", "9.9.9.9"))
+	if !strings.Contains(buf.String(), "203.0.113.10") {
+		t.Fatalf("no second warning after an hour: %s", buf.String())
+	}
+}
+
+func TestLogConfigured(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	Trusted(nil).LogConfigured(logger)
+	if !strings.Contains(buf.String(), "level=INFO") || !strings.Contains(buf.String(), "empty") {
+		t.Fatalf("empty: %s", buf.String())
+	}
+	buf.Reset()
+	mustParse(t, "10.0.0.0/8,fd00::/8").LogConfigured(logger)
+	if !strings.Contains(buf.String(), "networks=2") {
+		t.Fatalf("set: %s", buf.String())
 	}
 }

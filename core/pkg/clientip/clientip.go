@@ -11,10 +11,13 @@ package clientip
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Trusted is the set of proxy networks whose forwarding headers are believed.
@@ -32,8 +35,15 @@ func Parse(s string) (Trusted, error) {
 		if part == "" {
 			continue
 		}
+		if strings.Contains(part, "%") {
+			return nil, fmt.Errorf("invalid trusted proxy %q: zone identifiers are not allowed", part)
+		}
 		if p, err := netip.ParsePrefix(part); err == nil {
-			out = append(out, netip.PrefixFrom(p.Addr().Unmap(), unmapBits(p)).Masked())
+			bits := unmapBits(p)
+			if bits < 0 {
+				return nil, fmt.Errorf("invalid trusted proxy %q: an IPv4-mapped IPv6 prefix must be at least /96", part)
+			}
+			out = append(out, netip.PrefixFrom(p.Addr().Unmap(), bits).Masked())
 			continue
 		}
 		a, err := netip.ParseAddr(part)
@@ -53,6 +63,63 @@ func unmapBits(p netip.Prefix) int {
 		return p.Bits() - 96
 	}
 	return p.Bits()
+}
+
+// LogConfigured states at INFO whether any proxy network is trusted, so an
+// operator can see at boot that the setting is empty or how many it holds.
+func (t Trusted) LogConfigured(logger *slog.Logger) {
+	if len(t) == 0 {
+		logger.Info("TRUSTED_PROXIES is empty: the TCP peer is the client and X-Forwarded-For is ignored")
+		return
+	}
+	logger.Info("TRUSTED_PROXIES set: X-Forwarded-For is read from these peers only", "networks", len(t))
+}
+
+// ForwardingWatch warns when X-Forwarded-For arrives from a peer outside the
+// trusted networks, the sign of a server behind a proxy that TRUSTED_PROXIES
+// does not name (every caller then shares the proxy's rate budget). It warns
+// on the first such request and then at most once an hour.
+type ForwardingWatch struct {
+	logger  *slog.Logger
+	trusted Trusted
+	now     func() time.Time
+
+	mu   sync.Mutex
+	last time.Time
+	warn bool
+}
+
+const forwardingWarnEvery = time.Hour
+
+func NewForwardingWatch(logger *slog.Logger, trusted Trusted) *ForwardingWatch {
+	return &ForwardingWatch{logger: logger, trusted: trusted, now: time.Now}
+}
+
+// Observe inspects r. The log names the setting and the peer and carries the
+// hop count of the header, never its contents.
+func (w *ForwardingWatch) Observe(r *http.Request) {
+	lines := r.Header.Values("X-Forwarded-For")
+	if len(lines) == 0 {
+		return
+	}
+	peer := peerOf(r.RemoteAddr)
+	if pa, ok := parseAddr(peer); ok && w.trusted.contains(pa) {
+		return
+	}
+	w.mu.Lock()
+	now := w.now()
+	if w.warn && now.Sub(w.last) < forwardingWarnEvery {
+		w.mu.Unlock()
+		return
+	}
+	w.warn, w.last = true, now
+	w.mu.Unlock()
+	hops := 0
+	for _, l := range lines {
+		hops += strings.Count(l, ",") + 1
+	}
+	w.logger.Warn("X-Forwarded-For arrived from a peer outside TRUSTED_PROXIES and is ignored; behind a proxy, set TRUSTED_PROXIES to its network or every caller shares one rate budget",
+		"setting", "TRUSTED_PROXIES", "peer", peer, "hops", hops)
 }
 
 func (t Trusted) contains(a netip.Addr) bool {
