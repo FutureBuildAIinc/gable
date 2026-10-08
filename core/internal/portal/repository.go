@@ -313,10 +313,13 @@ func (r *PostgresRepository) GetInvoiceByIDAndCustomer(ctx context.Context, invo
 
 	// Fetch invoice lines
 	lineQuery := `
-		SELECT il.product_id, COALESCE(p.sku, ''), COALESCE(p.description, ''), il.quantity, il.price_each
+		SELECT COALESCE(il.product_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       COALESCE(p.sku, il.sku, ''), COALESCE(p.description, il.description, ''),
+		       COALESCE(il.quantity, 0), COALESCE(il.price_each, 0)
 		FROM invoice_lines il
 		LEFT JOIN products p ON il.product_id = p.id
-		WHERE il.invoice_id = $1
+		WHERE il.invoice_id = $1 AND il.line_type <> 'TEXT'
+		ORDER BY il.position, il.created_at, il.id
 	`
 	lineRows, err := r.db.GetExecutor(ctx).Query(ctx, lineQuery, invoiceID)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -24,6 +25,16 @@ type Repository interface {
 	FulfillStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
 	RevertFulfillStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
 	ExecuteInTx(ctx context.Context, fn func(context.Context) error) error
+
+	// The scale 4 quantity reads and writes of ADR 0005 5.4. LockBranchInventory
+	// takes the product's rows at the branch FOR UPDATE in inventory id order
+	// (the lock order of section 11, step 6); the Qty updates carry the
+	// quantity as the scale 4 integer, the division by 10000 in SQL.
+	LockBranchInventory(ctx context.Context, productID, branchID uuid.UUID) ([]Inventory, error)
+	AllocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
+	DeallocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
+	FulfillStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
+	RestockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
 }
 
 type PostgresRepository struct {
@@ -95,16 +106,31 @@ func (r *PostgresRepository) UpdateInventory(ctx context.Context, inv *Inventory
 	return nil
 }
 
+// ListInventoryByProduct returns inventory rows for a product, scoped to the
+// caller's branches via the joined location row's branch_id (ADR 0007
+// section 2.3, the list form of the record rule): a context branch lists its
+// own rows; with no context branch a bound non-admin user lists the branches
+// granted to the user, none granted listing none; an administrator without a
+// header, an unbound key, the single-branch switch, dev mode and callers
+// with no branch context at all (portal, background jobs) list every
+// branch's.
 func (r *PostgresRepository) ListInventoryByProduct(ctx context.Context, productID uuid.UUID) ([]Inventory, error) {
 	query := `
-        SELECT i.id, i.product_id, i.location_id, 
-               COALESCE(l.path, i.location, '') as location_name, 
+        SELECT i.id, i.product_id, i.location_id,
+               COALESCE(l.path, i.location, '') as location_name,
                i.quantity, i.allocated, i.updated_at
         FROM inventory i
         LEFT JOIN locations l ON i.location_id = l.id
         WHERE i.product_id = $1
+          AND (
+            ($2::uuid IS NOT NULL AND l.branch_id = $2)
+            OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND l.branch_id IN
+                (SELECT branch_id FROM user_locations WHERE user_sub = $3))
+            OR ($2::uuid IS NULL AND $3::text IS NULL)
+          )
     `
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +253,82 @@ func (r *PostgresRepository) FulfillStock(ctx context.Context, inventoryID uuid.
 	}
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("insufficient stock for fulfillment")
+	}
+	return nil
+}
+
+// LockBranchInventory takes a product's rows at a branch FOR UPDATE, in
+// inventory id order, through the context's executor.
+func (r *PostgresRepository) LockBranchInventory(ctx context.Context, productID, branchID uuid.UUID) ([]Inventory, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT i.id, i.product_id, i.location_id, COALESCE(i.location, ''), i.quantity, i.allocated, i.updated_at
+		FROM inventory i
+		JOIN locations l ON l.id = i.location_id
+		WHERE i.product_id = $1 AND l.branch_id = $2
+		ORDER BY i.id
+		FOR UPDATE OF i`, productID, branchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock inventory: %w", err)
+	}
+	defer rows.Close()
+	var items []Inventory
+	for rows.Next() {
+		var i Inventory
+		if err := rows.Scan(&i.ID, &i.ProductID, &i.LocationID, &i.Location, &i.Quantity, &i.Allocated, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepository) AllocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE inventory SET allocated = allocated + $1::numeric / 10000, updated_at = NOW()
+		WHERE id = $2 AND (quantity - allocated) >= $1::numeric / 10000`, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to allocate stock: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrInsufficientAvailable
+	}
+	return nil
+}
+
+func (r *PostgresRepository) DeallocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE inventory SET allocated = allocated - $1::numeric / 10000, updated_at = NOW()
+		WHERE id = $2 AND allocated >= $1::numeric / 10000`, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to release stock: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrInsufficientAllocated
+	}
+	return nil
+}
+
+func (r *PostgresRepository) FulfillStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE inventory SET quantity = quantity - $1::numeric / 10000, allocated = allocated - $1::numeric / 10000, updated_at = NOW()
+		WHERE id = $2 AND quantity >= $1::numeric / 10000 AND allocated >= $1::numeric / 10000`, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to fulfill stock: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrInsufficientAllocated
+	}
+	return nil
+}
+
+func (r *PostgresRepository) RestockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE inventory SET quantity = quantity + $1::numeric / 10000, updated_at = NOW() WHERE id = $2`, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to restock: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("inventory record not found for restock")
 	}
 	return nil
 }

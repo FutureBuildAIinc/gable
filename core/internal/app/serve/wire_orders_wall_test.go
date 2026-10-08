@@ -20,7 +20,9 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -226,5 +228,80 @@ func TestOrdersWall_CreatePayloadBranchRule(t *testing.T) {
 		if c.want == http.StatusCreated && !strings.Contains(string(resp), `"branch_id":"`+c.branch+`"`) {
 			t.Errorf("%s: order not at branch %s: %s", c.name, c.branch, resp)
 		}
+	}
+}
+
+// RULE (ADR 0007 2.3): every new order write route holds the order it addresses
+// to the caller's wall, failing closed: allocate, fulfillments and the
+// fulfilment request retry refuse a branch A user for a branch B order with 403
+// naming id (no header), 404 under a header for A, and let an administrator
+// through.
+func TestOrdersWall_NewWriteRoutesFailClosed(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newOrdersWall(t, db)
+	A := w.branchA.String()
+	ctx := branchctx.WithSystem(context.Background())
+
+	mk := func(branch uuid.UUID) *order.Order {
+		pid := w.productID
+		q, _ := httpx.ParseQuantity("1")
+		o, err := w.orderSvc.Create(ctx, &order.Draft{
+			BranchID: &branch, CustomerID: w.customer, DeliveryType: order.DeliveryDelivery,
+			Lines: []salesdoc.ParsedLine{{LineType: salesdoc.LineProduct, ProductID: &pid, Quantity: q}},
+		}, "wall")
+		if err != nil {
+			t.Fatalf("create order: %v", err)
+		}
+		rev := o.Revision
+		o, err = w.orderSvc.Transition(ctx, o.ID, order.StatusConfirmed, order.Precondition{Revision: &rev}, order.TransitionBody{})
+		if err != nil {
+			t.Fatalf("confirm: %v", err)
+		}
+		return o
+	}
+	orderA, orderB := mk(w.branchA), mk(w.branchB)
+	delivery := uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO deliveries (id, order_id, stop_sequence, status) VALUES ($1, $2, 1, 'DELIVERED')`, delivery, orderB.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO order_fulfillment_requests (delivery_id, order_id) VALUES ($1, $2)`, delivery, orderB.ID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM order_fulfillment_requests WHERE delivery_id = $1`, delivery)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM deliveries WHERE id = $1`, delivery)
+	})
+
+	call := func(method, path, body, role, sub, header string) (int, []byte) {
+		return w.callBody(t, method, path, body, role, sub, header)
+	}
+	routes := []struct {
+		name, method, path, body string
+	}{
+		{"allocate", "POST", "/api/v1/orders/" + orderB.ID.String() + "/allocate", `{"revision":1}`},
+		{"fulfillments", "POST", "/api/v1/orders/" + orderB.ID.String() + "/fulfillments", `{"revision":1}`},
+		{"request retry", "POST", "/api/v1/orders/fulfillment-requests/" + delivery.String() + "/retry", ``},
+	}
+	for _, r := range routes {
+		role := "sales"
+		if r.name == "request retry" {
+			role = "finance"
+		}
+		status, body := call(r.method, r.path, r.body, role, "u-a", "")
+		if status != http.StatusForbidden || errorField(t, body) != "id" {
+			t.Errorf("%s, no header: %d %s, want 403 naming id", r.name, status, body)
+		}
+		if status, body = call(r.method, r.path, r.body, role, "u-a", A); status != http.StatusNotFound && status != http.StatusForbidden {
+			t.Errorf("%s, header A: %d %s, want 404 (or 403)", r.name, status, body)
+		}
+		adminRole := "admin"
+		if status, body = call(r.method, r.path, r.body, adminRole, "boss", ""); status == http.StatusForbidden || status == http.StatusNotFound {
+			t.Errorf("%s, admin: %d %s, want the route to run", r.name, status, body)
+		}
+	}
+	// The user's own branch passes the wall on allocate (a confirmed order with
+	// nothing on back order is a clean 200).
+	if status, body := call("POST", "/api/v1/orders/"+orderA.ID.String()+"/allocate", `{"revision":2}`, "sales", "u-a", A); status != http.StatusOK && status != http.StatusConflict {
+		t.Errorf("own branch allocate: %d %s", status, body)
 	}
 }

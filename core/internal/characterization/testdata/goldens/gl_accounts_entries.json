@@ -263,7 +263,7 @@
       "body": {
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
-        "entry_number": 8,
+        "entry_number": 9,
         "id": "<id-11>",
         "lines": [
           {
@@ -337,7 +337,7 @@
       "body": {
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
-        "entry_number": 9,
+        "entry_number": 10,
         "id": "<id-14>",
         "lines": [
           {
@@ -436,7 +436,7 @@
       "body": {
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
-        "entry_number": 8,
+        "entry_number": 9,
         "id": "<id-11>",
         "lines": [
           {
@@ -562,7 +562,7 @@
       "body": {
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
-        "entry_number": 10,
+        "entry_number": 11,
         "id": "<id-21>",
         "lines": [
           {
@@ -586,7 +586,7 @@
             "journal_entry_id": "<id-21>"
           }
         ],
-        "memo": "Reversal of #8: golden reversal",
+        "memo": "Reversal of #9: golden reversal",
         "posted_by": "system",
         "source": "REVERSAL",
         "source_ref_id": "<id-11>",
@@ -724,9 +724,9 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 10,
+          "entry_number": 11,
           "id": "<id-21>",
-          "memo": "Reversal of #8: golden reversal",
+          "memo": "Reversal of #9: golden reversal",
           "posted_by": "system",
           "source": "REVERSAL",
           "source_ref_id": "<id-11>",
@@ -738,7 +738,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 9,
+          "entry_number": 10,
           "id": "<id-14>",
           "memo": "golden void source",
           "posted_by": "",
@@ -751,7 +751,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 8,
+          "entry_number": 9,
           "id": "<id-11>",
           "memo": "golden reverse source",
           "posted_by": "system",
@@ -764,7 +764,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 7,
+          "entry_number": 8,
           "id": "<id-30>",
           "memo": "Vendor Payment <id-31>",
           "posted_by": "system",
@@ -778,7 +778,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 6,
+          "entry_number": 7,
           "id": "<id-32>",
           "memo": "Vendor Payment <id-33>",
           "posted_by": "system",
@@ -792,7 +792,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 5,
+          "entry_number": 6,
           "id": "<id-34>",
           "memo": "Customer deposit <id-35> applied to AR",
           "posted_by": "system",
@@ -806,7 +806,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 4,
+          "entry_number": 5,
           "id": "<id-36>",
           "memo": "Customer deposit <id-35> applied to AR",
           "posted_by": "system",
@@ -820,7 +820,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 3,
+          "entry_number": 4,
           "id": "<id-37>",
           "memo": "Customer deposit <id-35>",
           "posted_by": "system",
@@ -834,7 +834,7 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 2,
+          "entry_number": 3,
           "id": "<id-38>",
           "memo": "Customer deposit <id-39>",
           "posted_by": "system",
@@ -848,8 +848,22 @@
         {
           "created_at": "<ts+0d>",
           "entry_date": "<ts+0d>",
-          "entry_number": 1,
+          "entry_number": 2,
           "id": "<id-40>",
+          "memo": "Invoice <id-41>",
+          "posted_by": "system",
+          "source": "INVOICE",
+          "source_ref_id": "<id-41>",
+          "status": "POSTED",
+          "total_credit": 5242,
+          "total_debit": 5242,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 1,
+          "id": "<id-42>",
           "memo": "golden characterisation entry",
           "posted_by": "system",
           "source": "MANUAL",

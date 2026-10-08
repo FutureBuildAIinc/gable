@@ -1410,7 +1410,7 @@ export interface paths {
         put?: never;
         /**
          * Assign an order to a route
-         * @description A missing route, an order blocked by unresolved index exposure or any other failure answers 500.
+         * @description A missing route, an order blocked by unresolved index exposure or any other failure answers 500. A pickup (will-call) order is never routed (ADR 0005 5.5): 409 with the blocker pickup_order, in the platform error envelope.
          */
         post: operations["deliveryCreate"];
         delete?: never;
@@ -2855,9 +2855,89 @@ export interface paths {
         put?: never;
         /**
          * Move an order along its lifecycle
-         * @description The transition table of ADR 0005 section 5.2. draft to confirmed runs the guards (price exposure, tax rate configured, PO required, contact authority, non empty) and the credit check: over the customer's limit the order lands on_hold IN THE SAME TRANSACTION, with order.hold written, and the answer is 200 with the held order, never an error. on_hold to confirmed is the release (roles admin, owner, finance); it skips the credit check. confirmed or backordered to on_hold is a manual hold and requires hold_note. Any status to draft reopens (refused once the order has been billed, blocker has_fulfilments); any live status to cancelled requires reason. confirmed or backordered to fulfilled is the close short and requires reason; until the fulfilment route lands (C2-2b) it is refused with no_fulfilments when nothing has been billed against the order. Anything outside the table is 409 invalid_state_transition.
+         * @description The transition table of ADR 0005 section 5.2. draft to confirmed runs the guards (price exposure, tax rate configured, PO required, contact authority, non empty) and the credit check: over the customer's limit the order lands on_hold IN THE SAME TRANSACTION, with order.hold written, and the answer is 200 with the held order, never an error. on_hold to confirmed is the release (roles admin, owner, finance); it skips the credit check. confirmed or backordered to on_hold is a manual hold and requires hold_note. Any status to draft reopens (refused once the order has been billed, blocker has_fulfilments); any live status to cancelled requires reason. confirmed or backordered to fulfilled is the close short and requires reason: it releases the allocations and back orders of the unfulfilled remainder and is refused with no_fulfilments when nothing has been billed or fulfilled against the order. The confirm allocates each stocked line min(available, quantity) from the order's branch and records the rest as back ordered (the order lands backordered, order.backordered after order.confirmed); the release of a credit hold allocates an order that never was; a cancel or a reopen gives its allocation back. Anything outside the table is 409 invalid_state_transition.
          */
         post: operations["orderTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/allocate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allocate a back ordered order on demand
+         * @description The desk's retry for a back order (ADR 0005 5.4): allocates the available stock to the order's back ordered lines in the same transaction shape as the worker's serving of an allocation request, derives the status, and writes order.backorder_released when it clears the back order. It never touches the request queue; a request left behind finds nothing to allocate and the worker deletes it. The order's branch is held to the caller's wall (403 naming id). Allowed in confirmed and backordered; any other status is 409 order_not_allocatable. The revision precondition is required (If-Match or the body revision; neither is 428).
+         */
+        post: operations["orderAllocate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/fulfillments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fulfil an order, the money moment
+         * @description ADR 0005 5.6. Bills the allocated quantities in one transaction: stock moves out (an amount above a line's allocation is 409 exceeds_allocation), the invoice is built through the shared line rules (each billed extension is the difference of two cumulative totals, so the invoices of a line sum to the order line's total to the cent, an amount discount prorated), and the invoice entry is posted with its cost of goods sold: DR 1020 total and 5010 cost, CR each revenue account, 2020 tax and 1030 cost. Absent lines means every allocated quantity, every non stock product line's unbilled quantity and every charge line not yet billed; naming a non stock line is checked against quantity less fulfilled (409 exceeds_unbilled); a kit is fulfilled by naming its kit line, in whole kits; naming a component line is a 400. A pickup (will-call) order requires picked_up_by (1 to 200 characters), a delivery order must not send it. The price exposure gate and the credit are re-checked with this order counted by its unbilled remainder (409 credit_limit, no hold). Allowed in confirmed and backordered. The order's branch is held to the caller's wall (403 naming id). Answers 201 with the updated order and Location naming the invoice.
+         */
+        post: operations["orderFulfil"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/fulfillment-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the fulfilment requests of completed deliveries
+         * @description ADR 0005 5.5. A completed delivery queues one request in the transaction that writes its delivered status; the worker bills it, retries a failure and parks it after ten. parked=true lists the parked ones with their last_error; they are never retried automatically and never deleted. Roles admin, owner, finance, warehouse.
+         */
+        get: operations["orderFulfilmentRequestList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/fulfillment-requests/{delivery_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a parked fulfilment request
+         * @description Clears parked_at and attempts so the worker takes the request again. The order's branch is held to the caller's wall (403 naming id). Roles admin, owner, finance, warehouse.
+         */
+        post: operations["orderFulfilmentRequestRetry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8726,6 +8806,55 @@ export interface components {
             vendor_id?: string;
             /** Format: int64 */
             special_order_unit_cost_ten_thousandths?: number;
+        };
+        /** @description The body is optional; the revision may ride in If-Match instead. */
+        OrderAllocateRequest: {
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        OrderFulfilRequest: {
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+            /** @description Optional; absent means everything allocated, every non stock line's unbilled quantity and every unbilled charge line. */
+            lines?: components["schemas"]["OrderFulfilLine"][];
+            /** @description Required to fulfil a pickup order (who collected it); refused on a delivery order. */
+            picked_up_by?: string;
+            /**
+             * Format: uuid
+             * @description The delivery this fulfilment bills (a delivery order only).
+             */
+            delivery_id?: string;
+        };
+        OrderFulfilLine: {
+            /** Format: uuid */
+            order_line_id: string;
+            /** @description A decimal string, greater than zero, at most the line's allocation (a stocked line) or unbilled quantity (a non stock line); whole kits for a kit line. */
+            quantity: string;
+        };
+        OrderFulfilmentRequest: {
+            /** Format: uuid */
+            delivery_id: string;
+            /** Format: uuid */
+            order_id: string;
+            /** Format: int64 */
+            position: number;
+            attempts: number;
+            last_error: string | null;
+            /** Format: date-time */
+            parked_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        OrderFulfilmentRequestPage: {
+            items: components["schemas"]["OrderFulfilmentRequest"][];
+            next_cursor: string | null;
+            limit: number;
         };
         OrderTransitionRequest: {
             to: components["schemas"]["OrderStatus"];
@@ -15053,7 +15182,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -17870,6 +17999,161 @@ export interface operations {
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    orderAllocate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["OrderAllocateRequest"];
+            };
+        };
+        responses: {
+            /** @description The order after the allocation. */
+            200: {
+                headers: {
+                    /** @description The new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    orderFulfil: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderFulfilRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated order. */
+            201: {
+                headers: {
+                    /** @description The invoice created, /api/v1/invoices/{id}. */
+                    Location?: string;
+                    /** @description The new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    orderFulfilmentRequestList: {
+        parameters: {
+            query?: {
+                parked?: boolean;
+                order_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of requests, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderFulfilmentRequestPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    orderFulfilmentRequestRetry: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                delivery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The request is cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
         };
     };
     orderExposureGate: {

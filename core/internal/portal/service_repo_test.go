@@ -492,6 +492,13 @@ func (f *fakeInventoryRepo) RevertFulfillStock(context.Context, uuid.UUID, float
 func (f *fakeInventoryRepo) ExecuteInTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }
+func (f *fakeInventoryRepo) LockBranchInventory(context.Context, uuid.UUID, uuid.UUID) ([]inventory.Inventory, error) {
+	return nil, nil
+}
+func (f *fakeInventoryRepo) AllocateStockQty(context.Context, uuid.UUID, int64) error   { return nil }
+func (f *fakeInventoryRepo) DeallocateStockQty(context.Context, uuid.UUID, int64) error { return nil }
+func (f *fakeInventoryRepo) FulfillStockQty(context.Context, uuid.UUID, int64) error    { return nil }
+func (f *fakeInventoryRepo) RestockQty(context.Context, uuid.UUID, int64) error         { return nil }
 
 type fakeOrderRepo struct {
 	created   []order.Order
@@ -501,6 +508,50 @@ type fakeOrderRepo struct {
 }
 
 var _ order.Repository = (*fakeOrderRepo)(nil)
+
+func (f *fakeOrderRepo) SaveLineQuantities(context.Context, []order.OrderLine) error { return nil }
+func (f *fakeOrderRepo) QueueAllocationRequests(context.Context, uuid.UUID, []uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (f *fakeOrderRepo) ClaimAllocationRequest(context.Context) (uuid.UUID, bool, error) {
+	return uuid.Nil, false, nil
+}
+func (f *fakeOrderRepo) DeleteAllocationRequest(context.Context, uuid.UUID) error { return nil }
+func (f *fakeOrderRepo) InsertFulfillmentRequest(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+func (f *fakeOrderRepo) NextFulfillmentRequest(context.Context) (*order.FulfillmentRequest, error) {
+	return nil, nil
+}
+func (f *fakeOrderRepo) ClaimFulfillmentRequest(context.Context, uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (f *fakeOrderRepo) DeleteFulfillmentRequest(context.Context, uuid.UUID) error { return nil }
+func (f *fakeOrderRepo) RecordFulfillmentFailure(context.Context, uuid.UUID, string, int) (bool, error) {
+	return false, nil
+}
+func (f *fakeOrderRepo) ListFulfillmentRequests(context.Context, order.RequestFilter) ([]order.FulfillmentRequest, error) {
+	return nil, nil
+}
+func (f *fakeOrderRepo) RetryFulfillmentRequest(context.Context, uuid.UUID) (uuid.UUID, bool, error) {
+	return uuid.Nil, false, nil
+}
+func (f *fakeOrderRepo) DeliveryRequestOrder(context.Context, uuid.UUID) (uuid.UUID, bool, error) {
+	return uuid.Nil, false, nil
+}
+func (f *fakeOrderRepo) LockCustomerCredit(context.Context, uuid.UUID) error { return nil }
+func (f *fakeOrderRepo) UnbilledRemainderCents(context.Context, uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (f *fakeOrderRepo) BranchLocalDate(_ context.Context, _ uuid.UUID, at time.Time) (time.Time, error) {
+	return at, nil
+}
+func (f *fakeOrderRepo) DeliveryOrderID(context.Context, uuid.UUID) (uuid.UUID, bool, error) {
+	return uuid.Nil, false, nil
+}
+func (f *fakeOrderRepo) NonStockReceiptsFor(context.Context, uuid.UUID) (order.NonStockReceipts, bool, error) {
+	return order.NonStockReceipts{}, false, nil
+}
 
 func (f *fakeOrderRepo) NextNumber(context.Context) (string, error) { return "SO-000001", nil }
 func (f *fakeOrderRepo) DefaultBranchID(context.Context) (uuid.UUID, error) {

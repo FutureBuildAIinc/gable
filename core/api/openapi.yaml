@@ -3409,7 +3409,7 @@ paths:
       tags:
         - delivery
       summary: Assign an order to a route
-      description: A missing route, an order blocked by unresolved index exposure or any other failure answers 500.
+      description: 'A missing route, an order blocked by unresolved index exposure or any other failure answers 500. A pickup (will-call) order is never routed (ADR 0005 5.5): 409 with the blocker pickup_order, in the platform error envelope.'
       parameters:
         - $ref: '#/components/parameters/XBranchId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -3433,7 +3433,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/ConflictEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -6342,7 +6342,7 @@ paths:
       tags:
         - order
       summary: Move an order along its lifecycle
-      description: 'The transition table of ADR 0005 section 5.2. draft to confirmed runs the guards (price exposure, tax rate configured, PO required, contact authority, non empty) and the credit check: over the customer''s limit the order lands on_hold IN THE SAME TRANSACTION, with order.hold written, and the answer is 200 with the held order, never an error. on_hold to confirmed is the release (roles admin, owner, finance); it skips the credit check. confirmed or backordered to on_hold is a manual hold and requires hold_note. Any status to draft reopens (refused once the order has been billed, blocker has_fulfilments); any live status to cancelled requires reason. confirmed or backordered to fulfilled is the close short and requires reason; until the fulfilment route lands (C2-2b) it is refused with no_fulfilments when nothing has been billed against the order. Anything outside the table is 409 invalid_state_transition.'
+      description: 'The transition table of ADR 0005 section 5.2. draft to confirmed runs the guards (price exposure, tax rate configured, PO required, contact authority, non empty) and the credit check: over the customer''s limit the order lands on_hold IN THE SAME TRANSACTION, with order.hold written, and the answer is 200 with the held order, never an error. on_hold to confirmed is the release (roles admin, owner, finance); it skips the credit check. confirmed or backordered to on_hold is a manual hold and requires hold_note. Any status to draft reopens (refused once the order has been billed, blocker has_fulfilments); any live status to cancelled requires reason. confirmed or backordered to fulfilled is the close short and requires reason: it releases the allocations and back orders of the unfulfilled remainder and is refused with no_fulfilments when nothing has been billed or fulfilled against the order. The confirm allocates each stocked line min(available, quantity) from the order''s branch and records the rest as back ordered (the order lands backordered, order.backordered after order.confirmed); the release of a credit hold allocates an order that never was; a cancel or a reopen gives its allocation back. Anything outside the table is 409 invalid_state_transition.'
       parameters:
         - name: id
           in: path
@@ -6395,6 +6395,184 @@ paths:
           $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/{id}/allocate:
+    post:
+      operationId: orderAllocate
+      tags:
+        - order
+      summary: Allocate a back ordered order on demand
+      description: 'The desk''s retry for a back order (ADR 0005 5.4): allocates the available stock to the order''s back ordered lines in the same transaction shape as the worker''s serving of an allocation request, derives the status, and writes order.backorder_released when it clears the back order. It never touches the request queue; a request left behind finds nothing to allocate and the worker deletes it. The order''s branch is held to the caller''s wall (403 naming id). Allowed in confirmed and backordered; any other status is 409 order_not_allocatable. The revision precondition is required (If-Match or the body revision; neither is 428).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderAllocateRequest'
+      responses:
+        '200':
+          description: The order after the allocation.
+          headers:
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: "#/components/responses/WireNotFound"
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{id}/fulfillments:
+    post:
+      operationId: orderFulfil
+      tags:
+        - order
+      summary: Fulfil an order, the money moment
+      description: 'ADR 0005 5.6. Bills the allocated quantities in one transaction: stock moves out (an amount above a line''s allocation is 409 exceeds_allocation), the invoice is built through the shared line rules (each billed extension is the difference of two cumulative totals, so the invoices of a line sum to the order line''s total to the cent, an amount discount prorated), and the invoice entry is posted with its cost of goods sold: DR 1020 total and 5010 cost, CR each revenue account, 2020 tax and 1030 cost. Absent lines means every allocated quantity, every non stock product line''s unbilled quantity and every charge line not yet billed; naming a non stock line is checked against quantity less fulfilled (409 exceeds_unbilled); a kit is fulfilled by naming its kit line, in whole kits; naming a component line is a 400. A pickup (will-call) order requires picked_up_by (1 to 200 characters), a delivery order must not send it. The price exposure gate and the credit are re-checked with this order counted by its unbilled remainder (409 credit_limit, no hold). Allowed in confirmed and backordered. The order''s branch is held to the caller''s wall (403 naming id). Answers 201 with the updated order and Location naming the invoice.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderFulfilRequest'
+      responses:
+        '201':
+          description: The updated order.
+          headers:
+            Location:
+              description: The invoice created, /api/v1/invoices/{id}.
+              schema:
+                type: string
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: "#/components/responses/WireNotFound"
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/fulfillment-requests:
+    get:
+      operationId: orderFulfilmentRequestList
+      tags:
+        - order
+      summary: List the fulfilment requests of completed deliveries
+      description: 'ADR 0005 5.5. A completed delivery queues one request in the transaction that writes its delivered status; the worker bills it, retries a failure and parks it after ten. parked=true lists the parked ones with their last_error; they are never retried automatically and never deleted. Roles admin, owner, finance, warehouse.'
+      parameters:
+        - name: parked
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: order_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The page of requests, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderFulfilmentRequestPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '500':
+          $ref: '#/components/responses/InternalErrorEither'
+  /api/v1/orders/fulfillment-requests/{delivery_id}/retry:
+    post:
+      operationId: orderFulfilmentRequestRetry
+      tags:
+        - order
+      summary: Retry a parked fulfilment request
+      description: 'Clears parked_at and attempts so the worker takes the request again. The order''s branch is held to the caller''s wall (403 naming id). Roles admin, owner, finance, warehouse.'
+      parameters:
+        - name: delivery_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The request is cleared.
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: "#/components/responses/WireNotFound"
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/orders/{id}/exposure-gate:
     get:
       operationId: orderExposureGate
@@ -17622,6 +17800,97 @@ components:
         special_order_unit_cost_ten_thousandths:
           type: integer
           format: int64
+    OrderAllocateRequest:
+      type: object
+      description: The body is optional; the revision may ride in If-Match instead.
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
+    OrderFulfilRequest:
+      type: object
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
+        lines:
+          type: array
+          description: Optional; absent means everything allocated, every non stock line's unbilled quantity and every unbilled charge line.
+          items:
+            $ref: '#/components/schemas/OrderFulfilLine'
+        picked_up_by:
+          type: string
+          maxLength: 200
+          description: Required to fulfil a pickup order (who collected it); refused on a delivery order.
+        delivery_id:
+          type: string
+          format: uuid
+          description: The delivery this fulfilment bills (a delivery order only).
+    OrderFulfilLine:
+      type: object
+      required:
+        - order_line_id
+        - quantity
+      properties:
+        order_line_id:
+          type: string
+          format: uuid
+        quantity:
+          type: string
+          description: A decimal string, greater than zero, at most the line's allocation (a stocked line) or unbilled quantity (a non stock line); whole kits for a kit line.
+    OrderFulfilmentRequest:
+      type: object
+      required:
+        - delivery_id
+        - order_id
+        - position
+        - attempts
+        - last_error
+        - parked_at
+        - created_at
+      properties:
+        delivery_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          format: int64
+        attempts:
+          type: integer
+        last_error:
+          type:
+            - string
+            - 'null'
+        parked_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    OrderFulfilmentRequestPage:
+      type: object
+      required:
+        - items
+        - next_cursor
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderFulfilmentRequest'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+        limit:
+          type: integer
     OrderTransitionRequest:
       type: object
       required:

@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +24,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
@@ -48,12 +48,10 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/notification"
-	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pim"
-	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
@@ -62,7 +60,6 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
-	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
@@ -400,7 +397,6 @@ func Run() {
 	productSvc.WithVendorService(vendorSvc)
 
 	// Order Module - injected with InventoryService and InvoiceService
-	orderRepo := order.NewRepository(db)
 	poRepo := purchase_order.NewRepository(db)
 
 	// EDI Module
@@ -414,6 +410,8 @@ func Run() {
 
 	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
 	poSvc.WithAIClient(aiClient)
+	// The receive writes purchase_order.received in its transaction (ADR 0005 5.4).
+	poSvc.WithOutbox(outbox.NewWriter(db, cfg.EventsOrg))
 	velocityRepo := purchase_order.NewVelocityRepository(db)
 	poSvc.WithVelocityRepo(velocityRepo)
 	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc).
@@ -442,12 +440,21 @@ func Run() {
 	// The order module on the wire contract (ADR 0005 section 5): every write
 	// one transaction with its order.* outbox event, the payload branch rule,
 	// the pricing engine wrapped at the boundary, and the tax provider behind
-	// the rate resolver.
-	orderSvc := order.NewService(orderRepo).
-		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db).
-		WithAuditLog(auditLog).
-		WithPriceEngine(&priceEngineAdapter{pricing: pricingSvc, customers: customerSvc})
+	// the rate resolver. orderwire.New is the one constructor both roles use
+	// (serve and the worker), so the worker that bills delivery completions
+	// carries the same provider and exposure gate wiring.
+	orderSvc := orderwire.New(orderwire.Deps{
+		DB:         db,
+		Config:     cfg,
+		Logger:     logger,
+		AuditLog:   auditLog,
+		Inventory:  inventorySvc,
+		Invoices:   invoiceSvc,
+		Pricing:    pricingSvc,
+		Customers:  customerSvc,
+		Escalators: escalatorRepo,
+		QuoteLines: quoteRepo,
+	})
 	wall.orders(mux, orderSvc)
 	// The charge code master (ADR 0005 section 2.5), contract born.
 	chargecode.NewHandler(chargecode.NewService(chargecode.NewRepository(db))).
@@ -464,24 +471,15 @@ func Run() {
 	wall.documents(mux, docHandler)
 
 	// Sales Tax Module (exemptions + Avalara when configured; wired before
-	// Payment/POS because both consume the tax service).
-	taxExemptionRepo := tax.NewExemptionRepo(db)
-	var avalaraClient *tax.AvalaraClient
+	// Payment/POS because both consume the tax service). The service is built
+	// by the same helper the order wiring uses (orderwire.NewTaxService); the
+	// order service's own provider adapter carries its own instance of it.
 	if cfg.AvalaraAccountID != "" {
-		avalaraClient = tax.NewAvalaraClient(tax.AvalaraConfig{
-			AccountID:   cfg.AvalaraAccountID,
-			LicenseKey:  cfg.AvalaraLicenseKey,
-			Environment: cfg.AvalaraEnvironment,
-			CompanyCode: cfg.AvalaraCompanyCode,
-		}, logger)
 		logger.Info("Avalara AvaTax initialized", "environment", cfg.AvalaraEnvironment)
 	} else {
 		logger.Info("AVALARA_ACCOUNT_ID not set — POS/invoice tax uses the branch default rate (locations.default_tax_rate)")
 	}
-	taxSvc := tax.NewService(taxExemptionRepo, avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
-	// The configured provider path sits behind the order rate resolver
-	// (ADR 0005 section 3).
-	orderSvc.WithTaxProvider(&taxProviderAdapter{svc: taxSvc})
+	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
 	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
@@ -655,7 +653,11 @@ func Run() {
 	deliverySvc.WithNotifier(&deliveryNotifierAdapter{notifier: deliveryNotifier})
 
 	// Wire invoice service for auto-invoicing on delivery POD
-	deliverySvc.WithInvoiceService(&invoiceServiceAdapter{invoiceSvc: invoiceSvc, orderSvc: orderSvc})
+	// Delivery completion queues the order's fulfilment request in the
+	// transaction that writes the delivered status; the worker bills it (ADR
+	// 0005 5.5). A pickup order is never routed.
+	deliverySvc.WithFulfilment(orderSvc, orderSvc)
+	deliverySvc.WithTxRunner(db)
 
 	// Millwork App (converted — reference conversion #1)
 	// One app, two backend modules: millwork (option catalogs) + configurator
@@ -1148,104 +1150,11 @@ func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Hand
 	})
 }
 
-// priceEngineAdapter wraps today's pricing engine at the order boundary
-// (ADR 0005 section 1): the engine answers in dollars, and its result is
-// converted to a scale 4 price once, here, never inside the order module.
-type priceEngineAdapter struct {
-	pricing   *pricing.Service
-	customers *customer.Service
-}
-
-func (a *priceEngineAdapter) PriceFor(ctx context.Context, customerID, productID uuid.UUID, basePrice httpx.Price, quantity httpx.Quantity, jobID *uuid.UUID) (httpx.Price, error) {
-	cust, err := a.customers.GetCustomer(ctx, customerID)
-	if err != nil {
-		return 0, fmt.Errorf("price engine: customer: %w", err)
-	}
-	base := float64(basePrice) / 10000
-	cp, err := a.pricing.CalculatePriceWithQty(ctx, cust, productID, base, float64(quantity)/10000, jobID)
-	if err != nil {
-		return 0, fmt.Errorf("price engine: %w", err)
-	}
-	return httpx.Price(int64(math.Round(cp.FinalPrice * 10000))), nil
-}
-
-// taxProviderAdapter is the configured provider path behind the rate
-// resolver (ADR 0005 section 3).
-type taxProviderAdapter struct {
-	svc *tax.Service
-}
-
-func (a *taxProviderAdapter) Configured() bool { return a.svc.ProviderConfigured() }
-func (a *taxProviderAdapter) PreviewTax(ctx context.Context, req *tax.TaxPreviewRequest) (*tax.TaxResult, error) {
-	return a.svc.PreviewTax(ctx, req)
-}
-
 func derefString(s *string) string {
 	if s == nil {
 		return ""
 	}
 	return *s
-}
-
-// invoiceServiceAdapter bridges invoice.Service to delivery.InvoiceServiceInterface.
-type invoiceServiceAdapter struct {
-	invoiceSvc *invoice.Service
-	orderSvc   *order.Service
-}
-
-func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uuid.UUID) error {
-	// Double-invoice guard: if the order was already invoiced (the normal path
-	// invoices it at fulfilment), do NOT create a second invoice on delivery.
-	// AR is summed from invoices, so a duplicate would double-bill the customer.
-	if exists, err := a.invoiceSvc.ExistsInvoiceForOrder(ctx, orderID); err != nil {
-		return fmt.Errorf("check existing invoice: %w", err)
-	} else if exists {
-		return nil
-	}
-
-	ord, err := a.orderSvc.GetOrder(ctx, orderID)
-	if err != nil {
-		return fmt.Errorf("get order for invoice: %w", err)
-	}
-
-	// Build the invoice from the order's lines. The invoice module still
-	// holds whole cents per sale unit, so a line whose conversion pair is not
-	// 1 to 1 cannot be handed over without rounding its money away: the
-	// adapter refuses it (the recipe's rule for a helper feeding an
-	// unconverted neighbour) until the fulfilment route replaces this path
-	// (ADR 0005 5.5, C2-2b).
-	var lines []invoice.InvoiceLine
-	for i := range ord.Lines {
-		ol := &ord.Lines[i]
-		if ol.LineType == salesdoc.LineText || ol.LineType == salesdoc.LineCharge {
-			continue
-		}
-		if ol.UOMQty == nil || ol.PriceUOMQty == nil || *ol.UOMQty != salesdoc.One || *ol.PriceUOMQty != salesdoc.One {
-			return fmt.Errorf("order %s has a line priced per %s: the delivery invoice path cannot carry a conversion pair until the fulfilment route lands",
-				orderID, derefString(ol.PriceUOM))
-		}
-		if ol.ProductID == nil || ol.Quantity == nil || ol.UnitPrice == nil || ol.LineTotal == nil {
-			continue
-		}
-		lines = append(lines, invoice.InvoiceLine{
-			ProductID: *ol.ProductID,
-			Quantity:  float64(*ol.Quantity) / 10000,
-			PriceEach: int64(math.Round(float64(*ol.UnitPrice) / 100)),
-		})
-	}
-
-	inv := &invoice.Invoice{
-		CustomerID: ord.CustomerID,
-		OrderID:    ord.ID,
-		BranchID:   ord.BranchID, // invoice + tax rate come from the order's branch
-		Lines:      lines,
-	}
-
-	if err := a.invoiceSvc.CreateInvoice(ctx, inv); err != nil {
-		return err
-	}
-	// Book a delivery-created invoice to the GL + AR subledger too.
-	return a.invoiceSvc.PostInvoiceToLedger(ctx, inv)
 }
 
 // autoPOAdapter bridges purchase_order.Service to quote.AutoPOService.
@@ -1254,16 +1163,16 @@ type autoPOAdapter struct {
 	productSvc *product.Service
 }
 
-func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
-	// Resolve product description for the PO line
-	desc := productID.String()
-	if a.productSvc != nil {
-		p, err := a.productSvc.GetProduct(ctx, productID)
-		if err == nil && p != nil {
+func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
+	// Resolve product description for the PO line; a line with no product
+	// (the quote accept path, which carries none) takes a plain one.
+	desc := "special order"
+	if productID != nil && a.productSvc != nil {
+		if p, err := a.productSvc.GetProduct(ctx, *productID); err == nil && p != nil {
 			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)
 		}
 	}
-	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, vendorID, desc, quantity, unitCost)
+	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, productID, vendorID, desc, quantity, unitCost)
 }
 
 // pricingAuditAdapter bridges the pricing package's mirrored audit entries

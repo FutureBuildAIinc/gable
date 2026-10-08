@@ -5,11 +5,13 @@ package purchase_order
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +32,19 @@ type salesVelocityLister interface {
 	ListSalesVelocity(ctx context.Context, lookbackDays int) ([]SalesVelocity, error)
 }
 
+// EventRecorder writes a domain event into the transactional outbox, as the
+// last statement of the act's transaction (ADR 0003 section 2).
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
+
+// EventReceived is the event a purchase order receive writes (ADR 0005 5.4
+// and 12): the order module's drain subscriber queues the back ordered orders
+// that wait on the received products.
+const EventReceived = "purchase_order.received"
+
 type Service struct {
+	events       EventRecorder
 	repo         *Repository
 	db           *database.DB
 	edi          *edi.Service
@@ -42,6 +57,13 @@ type Service struct {
 
 func NewService(repo *Repository, db *database.DB, ediSvc *edi.Service, inventorySvc *inventory.Service, productSvc *product.Service, vendorSvc *vendor.Service) *Service {
 	return &Service{repo: repo, db: db, edi: ediSvc, inventorySvc: inventorySvc, productSvc: productSvc, vendorSvc: vendorSvc}
+}
+
+// WithOutbox wires the outbox the receive writes purchase_order.received to.
+// Optional: nil writes no event (unit tests).
+func (s *Service) WithOutbox(events EventRecorder) *Service {
+	s.events = events
+	return s
 }
 
 // WithVelocityRepo wires the sales-velocity reader used by both
@@ -289,42 +311,49 @@ type CreatePOLineInput struct {
 	Cost        float64
 }
 
-// CreateFromSOLine creates or updates a DRAFT PO for the vendor of the special order item
-func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
-	var po *PurchaseOrder
-	var err error
+// CreateFromSOLine creates or updates a DRAFT PO for the vendor of the special
+// order item, linking its line to the order line it serves and naming the
+// product, so the receipt puts the stock on hand and the order module's
+// release picks it up (ADR 0005 5.4). The header and the line are one
+// transaction: a line that cannot be linked leaves no empty header behind.
+func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, productID *uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
+	return s.db.RunInTx(ctx, func(ctx context.Context) error {
+		var po *PurchaseOrder
+		var err error
 
-	if vendorId != nil {
-		po, err = s.repo.GetDraftPOByVendor(ctx, vendorId)
-	}
-
-	if po == nil || err != nil {
-		newPO := &PurchaseOrder{
-			ID:       uuid.New(),
-			VendorID: vendorId,
-			Status:   StatusDraft,
-			Source:   SourceSpecialOrder,
+		if vendorId != nil {
+			po, err = s.repo.GetDraftPOByVendor(ctx, vendorId)
 		}
-		if err := s.repo.CreatePO(ctx, newPO); err != nil {
-			return fmt.Errorf("failed to create PO: %w", err)
+
+		if po == nil || err != nil {
+			newPO := &PurchaseOrder{
+				ID:       uuid.New(),
+				VendorID: vendorId,
+				Status:   StatusDraft,
+				Source:   SourceSpecialOrder,
+			}
+			if err := s.repo.CreatePO(ctx, newPO); err != nil {
+				return fmt.Errorf("failed to create PO: %w", err)
+			}
+			po = newPO
 		}
-		po = newPO
-	}
 
-	line := &PurchaseOrderLine{
-		ID:             uuid.New(),
-		POID:           po.ID,
-		Description:    description,
-		Quantity:       qty,
-		Cost:           cost,
-		LinkedSOLineID: &soLineId,
-	}
+		line := &PurchaseOrderLine{
+			ID:             uuid.New(),
+			POID:           po.ID,
+			ProductID:      productID,
+			Description:    description,
+			Quantity:       qty,
+			Cost:           cost,
+			LinkedSOLineID: &soLineId,
+		}
 
-	if err := s.repo.AddPOLine(ctx, line); err != nil {
-		return fmt.Errorf("failed to add PO line: %w", err)
-	}
+		if err := s.repo.AddPOLine(ctx, line); err != nil {
+			return fmt.Errorf("failed to add PO line: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 func (s *Service) SubmitPO(ctx context.Context, id uuid.UUID) error {
@@ -519,6 +548,30 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		}
 
 		if err := s.repo.UpdatePO(txCtx, po); err != nil {
+			return err
+		}
+
+		// The event is the last write of the receive's own work: what it
+		// received and WHERE it landed, for the order module's back order
+		// release (ADR 0005 5.4): the branch of each line's location, not the
+		// purchase order's own.
+		byBranch := map[uuid.UUID][]uuid.UUID{}
+		for _, p := range parsed {
+			if p.poLine.ProductID == nil || p.rl.QtyReceived <= 0 {
+				continue
+			}
+			branch, ok, err := s.repo.LocationBranch(txCtx, p.locationID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				// a location with no branch of its own (a hand seeded row):
+				// the purchase order's branch, as the event always was
+				branch = po.BranchID
+			}
+			byBranch[branch] = append(byBranch[branch], *p.poLine.ProductID)
+		}
+		if err := s.recordReceived(txCtx, po, byBranch); err != nil {
 			return err
 		}
 
@@ -936,4 +989,52 @@ func groupAlertsByVendor(
 		byVendor[*unknownID] = append(byVendor[*unknownID], a)
 	}
 	return byVendor, nil
+}
+
+// recordReceived writes purchase_order.received: the purchase order id, the
+// branch each received location belongs to (the branch the stock landed in,
+// which the order module's back order release queues, not necessarily the
+// purchase order's own branch) and the distinct product ids that landed
+// there. One event per branch the receipt touched; a receipt that put no
+// product on hand (no product lines) keeps one event on the purchase order's
+// branch, as before.
+func (s *Service) recordReceived(ctx context.Context, po *PurchaseOrder, byBranch map[uuid.UUID][]uuid.UUID) error {
+	if s.events == nil {
+		return nil
+	}
+	dedupe := func(products []uuid.UUID) []uuid.UUID {
+		seen := map[uuid.UUID]bool{}
+		ids := make([]uuid.UUID, 0, len(products))
+		for _, p := range products {
+			if !seen[p] {
+				seen[p] = true
+				ids = append(ids, p)
+			}
+		}
+		return ids
+	}
+	branches := make([]uuid.UUID, 0, len(byBranch))
+	for b := range byBranch {
+		branches = append(branches, b)
+	}
+	if len(branches) == 0 {
+		byBranch = map[uuid.UUID][]uuid.UUID{po.BranchID: nil}
+		branches = []uuid.UUID{po.BranchID}
+	}
+	sort.Slice(branches, func(i, j int) bool { return branches[i].String() < branches[j].String() })
+	for _, b := range branches {
+		raw, err := json.Marshal(map[string]any{
+			"purchase_order_id": po.ID, "branch_id": b, "status": po.Status, "product_ids": dedupe(byBranch[b]),
+		})
+		if err != nil {
+			return err
+		}
+		branch := b
+		if err := s.events.Write(ctx, outbox.Event{
+			Type: EventReceived, EntityType: "purchase_order", EntityID: po.ID, BranchID: &branch, Data: raw,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

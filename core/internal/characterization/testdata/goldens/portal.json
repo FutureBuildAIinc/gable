@@ -68,7 +68,7 @@
       "content_type": "application/json",
       "body": [
         {
-          "available": 385,
+          "available": 379,
           "base_price": 5.5,
           "category": "Lumber",
           "category_id": "<id-4>",

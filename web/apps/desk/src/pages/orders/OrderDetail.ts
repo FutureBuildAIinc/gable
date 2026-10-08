@@ -25,6 +25,9 @@ export class GableOrderDetail extends LitElement {
     @state() private loading = true;
     @state() private error = false;
     @state() private processing = false;
+    @state() private pickedUpBy = '';
+    @state() private fulfilOpen = false;
+    @state() private pickupError = '';
 
     connectedCallback() {
         super.connectedCallback();
@@ -97,6 +100,61 @@ export class GableOrderDetail extends LitElement {
         }
     }
 
+    /**
+     * The fulfilment is the money moment (ADR 0005 5.6): it bills everything
+     * allocated, moves the stock and posts the invoice. A will-call order names
+     * who collected it.
+     */
+    private async handleFulfil() {
+        if (!this.order) return;
+        const willCall = this.order.delivery_type === 'pickup';
+        if (willCall && !this.fulfilOpen) {
+            // a will-call order opens the pickup form under the header first
+            this.fulfilOpen = true;
+            return;
+        }
+        if (willCall && !this.pickedUpBy.trim()) {
+            // inline beside the field, so it is gone the moment the name is given
+            this.pickupError = 'Enter the name of the person collecting this order';
+            return;
+        }
+        this.pickupError = '';
+        this.processing = true;
+        try {
+            const { order, invoiceId } = await OrderService.fulfil(this.order.id, this.order.revision, {
+                pickedUpBy: willCall ? this.pickedUpBy.trim() : undefined,
+            });
+            this.order = order;
+            this.fulfilOpen = false;
+            this.pickedUpBy = '';
+            ToastService.show(invoiceId ? 'Order fulfilled and invoiced' : 'Order fulfilled', 'success');
+        } catch (error) {
+            ToastService.show('Failed to fulfil order: ' + (error instanceof Error ? error.message : error), 'error');
+        } finally {
+            this.processing = false;
+        }
+    }
+
+    private closeFulfil() {
+        this.fulfilOpen = false;
+        this.pickedUpBy = '';
+        this.pickupError = '';
+    }
+
+    /** The retry for a back order: allocates whatever stock has arrived. */
+    private async handleAllocate() {
+        if (!this.order) return;
+        this.processing = true;
+        try {
+            this.order = await OrderService.allocate(this.order.id, this.order.revision);
+            ToastService.show(this.order.status === 'backordered' ? 'Still on back order' : 'Back order released', 'success');
+        } catch (error) {
+            ToastService.show('Failed to allocate order: ' + (error instanceof Error ? error.message : error), 'error');
+        } finally {
+            this.processing = false;
+        }
+    }
+
     private async handleCancel() {
         if (!this.order) return;
         const reason = prompt('Cancel this order. Reason:');
@@ -139,7 +197,7 @@ export class GableOrderDetail extends LitElement {
             <div class="space-y-6 max-w-5xl mx-auto">
                 <!-- Header -->
                 <div class="flex items-center justify-between pb-6 border-b border-white/10">
-                    <div>
+                    <div class="min-w-0">
                         <div class="flex items-center gap-4 mb-2">
                             <h1 class="text-3xl font-bold font-mono text-white">${order.number}</h1>
                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-transparent ${this.getStatusBadgeClass(order.status)}">
@@ -153,12 +211,12 @@ export class GableOrderDetail extends LitElement {
                             ${order.tax_rate_percent !== null ? html` · tax ${order.tax_rate_percent}%` : html` · tax by provider`}
                         </p>
                     </div>
-                    <div class="flex gap-3">
+                    <div class="flex gap-3 shrink-0">
                         ${order.status === 'draft' ? html`
                             <button
                                 @click=${() => this.handleConfirm()}
                                 ?disabled=${this.processing}
-                                class="bg-gable-green text-black font-bold px-4 py-2 rounded hover:bg-gable-green/90 transition-colors flex items-center gap-2"
+                                class="bg-gable-green text-black font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-gable-green/90 transition-colors flex items-center gap-2"
                             >
                                 ${this.processing ? 'Processing...' : html`${icon(Check, 18)} Confirm Order`}
                             </button>
@@ -167,16 +225,34 @@ export class GableOrderDetail extends LitElement {
                             <button
                                 @click=${() => this.handleRelease()}
                                 ?disabled=${this.processing}
-                                class="bg-amber-500 text-black font-bold px-4 py-2 rounded hover:bg-amber-600 transition-colors flex items-center gap-2"
+                                class="bg-amber-500 text-black font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-amber-600 transition-colors flex items-center gap-2"
                             >
                                 ${this.processing ? 'Processing...' : html`${icon(LockOpen, 18)} Release Hold`}
+                            </button>
+                        ` : nothing}
+                        ${(order.status === 'confirmed' || order.status === 'backordered') ? html`
+                            <button
+                                @click=${() => this.handleFulfil()}
+                                ?disabled=${this.processing}
+                                class="bg-gable-green text-black font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-gable-green/90 transition-colors flex items-center gap-2"
+                            >
+                                ${this.processing ? 'Processing...' : html`${icon(Check, 18)} Fulfil Order`}
+                            </button>
+                        ` : nothing}
+                        ${order.status === 'backordered' ? html`
+                            <button
+                                @click=${() => this.handleAllocate()}
+                                ?disabled=${this.processing}
+                                class="bg-amber-500 text-black font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-amber-600 transition-colors flex items-center gap-2"
+                            >
+                                Allocate Stock
                             </button>
                         ` : nothing}
                         ${(order.status === 'draft' || order.status === 'confirmed' || order.status === 'backordered') ? html`
                             <button
                                 @click=${() => this.handleCancel()}
                                 ?disabled=${this.processing}
-                                class="bg-red-500/20 text-red-400 font-bold px-4 py-2 rounded hover:bg-red-500/30 transition-colors flex items-center gap-2"
+                                class="bg-red-500/20 text-red-400 font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-red-500/30 transition-colors flex items-center gap-2"
                             >
                                 ${icon(XCircle, 18)} Cancel
                             </button>
@@ -184,13 +260,45 @@ export class GableOrderDetail extends LitElement {
                         ${(order.status === 'confirmed' || order.status === 'backordered' || order.status === 'fulfilled') ? html`
                             <button
                                 @click=${() => window.open(`${API_URL}/api/v1/documents/print/pickticket/${order.id}`, '_blank')}
-                                class="bg-white/10 text-white font-bold px-4 py-2 rounded hover:bg-white/20 transition-colors flex items-center gap-2"
+                                class="bg-white/10 text-white font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-white/20 transition-colors flex items-center gap-2"
                             >
                                 ${icon(Printer, 18)} Pick Ticket
                             </button>
                         ` : nothing}
                     </div>
                 </div>
+
+                ${this.fulfilOpen && order.delivery_type === 'pickup' && (order.status === 'confirmed' || order.status === 'backordered') ? html`
+                    <div class="rounded-lg border border-white/10 bg-black/30 p-4 flex items-start gap-3" data-testid="fulfil-pickup">
+                        <div class="flex-1">
+                            <input
+                                type="text"
+                                aria-label="Picked up by"
+                                placeholder="Picked up by"
+                                maxlength="200"
+                                .value=${this.pickedUpBy}
+                                @input=${(e: Event) => { this.pickedUpBy = (e.target as HTMLInputElement).value; this.pickupError = ''; }}
+                                @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this.handleFulfil(); }}
+                                class="bg-black/30 border border-white/10 rounded px-3 py-2 text-white text-sm w-full max-w-sm"
+                            />
+                            ${this.pickupError ? html`<p class="mt-2 text-sm text-red-400" role="alert">${this.pickupError}</p>` : nothing}
+                        </div>
+                        <button
+                            @click=${() => this.handleFulfil()}
+                            ?disabled=${this.processing}
+                            class="bg-gable-green text-black font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-gable-green/90 transition-colors flex items-center gap-2"
+                        >
+                            ${this.processing ? 'Processing...' : html`${icon(Check, 18)} Confirm`}
+                        </button>
+                        <button
+                            @click=${() => this.closeFulfil()}
+                            ?disabled=${this.processing}
+                            class="bg-white/10 text-white font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-white/20 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                ` : nothing}
 
                 ${order.hold_reason ? html`
                     <div class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-300">
@@ -214,6 +322,7 @@ export class GableOrderDetail extends LitElement {
                                     <tr>
                                         <th class="p-4 text-muted-foreground font-medium">Item</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Qty</th>
+                                        <th class="p-4 text-muted-foreground font-medium text-right">Stock</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Price</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Total</th>
                                     </tr>
@@ -236,6 +345,13 @@ export class GableOrderDetail extends LitElement {
                                                 ${line.price_uom && line.uom && line.price_uom !== line.uom
                                                     ? html`<div class="text-[10px] text-zinc-500">per ${line.price_uom}</div>` : ''}
                                             </td>
+                                            <td class="p-4 font-mono text-right text-xs text-zinc-500" data-testid="line-stock">
+                                                ${line.line_type === 'product' && line.product_id !== null ? html`
+                                                    <div class="text-zinc-300">${line.quantity_allocated} allocated</div>
+                                                    ${line.quantity_backordered !== '0' ? html`<div class="text-amber-400">${line.quantity_backordered} back ordered</div>` : nothing}
+                                                    ${line.quantity_fulfilled !== '0' ? html`<div class="text-gable-green">${line.quantity_fulfilled} shipped</div>` : nothing}
+                                                ` : '—'}
+                                            </td>
                                             <td class="p-4 text-white font-mono text-right">
                                                 ${line.unit_price_ten_thousandths !== null
                                                     ? html`${formatPrice4(line.unit_price_ten_thousandths)}`
@@ -249,15 +365,15 @@ export class GableOrderDetail extends LitElement {
                                 </tbody>
                                 <tfoot class="bg-white/5">
                                     <tr>
-                                        <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Subtotal</td>
+                                        <td colspan="4" class="p-4 text-right font-bold text-white uppercase">Subtotal</td>
                                         <td class="p-4 text-right font-bold text-white font-mono">${formatCents(order.subtotal_cents)}</td>
                                     </tr>
                                     <tr>
-                                        <td colspan="3" class="p-4 text-right text-zinc-400">Tax</td>
+                                        <td colspan="4" class="p-4 text-right text-zinc-400">Tax</td>
                                         <td class="p-4 text-right text-zinc-400 font-mono">${formatCents(order.tax_cents)}</td>
                                     </tr>
                                     <tr>
-                                        <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Total</td>
+                                        <td colspan="4" class="p-4 text-right font-bold text-white uppercase">Total</td>
                                         <td class="p-4 text-right font-bold text-gable-green font-mono text-lg">${formatCents(order.total_cents)}</td>
                                     </tr>
                                 </tfoot>
