@@ -28,6 +28,10 @@ var SystemApproverID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 // satisfies it as-is.
 type POSource interface {
 	GetPO(ctx context.Context, id uuid.UUID) (*purchase_order.PurchaseOrder, error)
+	// GetPOBranch returns the branch a purchase order belongs to, nil when
+	// there is no such purchase order; the branch wall reads it to hold the
+	// record a path id addresses to the caller's branches.
+	GetPOBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 }
 
 // APSource is the slice of the accounts-payable service the matcher needs,
@@ -56,6 +60,13 @@ func NewService(db *database.DB, repo Repository, poSvc POSource, apSvc APSource
 		apSvc:  apSvc,
 		logger: logger,
 	}
+}
+
+// GetPOBranch returns the branch the purchase order belongs to, or nil when
+// there is no such purchase order. It never filters by the caller's branch
+// context: the branch wall needs the record's own branch to hold it against.
+func (s *Service) GetPOBranch(ctx context.Context, poID uuid.UUID) (*uuid.UUID, error) {
+	return s.poSvc.GetPOBranch(ctx, poID)
 }
 
 // RunMatch executes a 3-way match for a purchase order.

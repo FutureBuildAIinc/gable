@@ -15,14 +15,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -133,9 +136,52 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.purchaseOrders(mux, purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil))
+	matching.NewHandler(matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default())).
+		WithBranchGuard(wall.guard).RegisterRoutes(mux, wall.scoped("admin", "owner", "finance"))
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+// fixturePOSource answers the matching module's purchase order seam from the
+// fixture's two purchase orders: the branch wall reads the branch, the
+// service reads the record.
+type fixturePOSource struct {
+	f *wallFixture
+}
+
+func (s fixturePOSource) GetPO(_ context.Context, id uuid.UUID) (*purchase_order.PurchaseOrder, error) {
+	switch id {
+	case s.f.poA, s.f.poB:
+		return &purchase_order.PurchaseOrder{ID: id}, nil
+	}
+	return nil, fmt.Errorf("no such purchase order")
+}
+
+func (s fixturePOSource) GetPOBranch(_ context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	switch id {
+	case s.f.poA:
+		return &s.f.branchA, nil
+	case s.f.poB:
+		return &s.f.branchB, nil
+	}
+	return nil, nil
+}
+
+// fixtureAPSource is an empty accounts payable: the cases that pass the wall
+// answer before any invoice is needed.
+type fixtureAPSource struct{}
+
+func (fixtureAPSource) ListVendorInvoices(_ context.Context, _ *uuid.UUID, _ string) ([]ap.VendorInvoice, error) {
+	return nil, nil
+}
+
+func (fixtureAPSource) GetVendorInvoice(_ context.Context, _ uuid.UUID) (*ap.VendorInvoice, error) {
+	return nil, nil
+}
+
+func (fixtureAPSource) ApproveInvoice(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*ap.VendorInvoice, error) {
+	return nil, nil
 }
 
 // call sends one request as role/sub, with an optional X-Branch-Id.
@@ -296,14 +342,18 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 	receive := fmt.Sprintf(`{"lines":[{"line_id":%q,"qty_received":1,"location_id":%q}]}`, f.poLineB, f.yardB)
 	for _, c := range []struct {
 		name, method, path, body, role, sub string
+		want                                int
 	}{
-		{"receive another branch's po", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/receive", receive, "purchasing", "u-a"},
-		{"read another branch's po", "GET", "/api/v1/purchase-orders/" + f.poB.String(), "", "purchasing", "u-a"},
-		{"read another branch's yard", "GET", "/api/v1/locations/" + f.yardB.String(), "", "warehouse", "u-a"},
-		{"read another branch's tree", "GET", "/api/v1/branches/" + f.branchB.String() + "/tree", "", "sales", "u-a"},
+		// The matching read finds no match result behind the wall, hence 404
+		// rather than 200: the switch-off case is that it is not a 403.
+		{"receive another branch's po", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/receive", receive, "purchasing", "u-a", http.StatusOK},
+		{"read another branch's po", "GET", "/api/v1/purchase-orders/" + f.poB.String(), "", "purchasing", "u-a", http.StatusOK},
+		{"read another branch's yard", "GET", "/api/v1/locations/" + f.yardB.String(), "", "warehouse", "u-a", http.StatusOK},
+		{"read another branch's tree", "GET", "/api/v1/branches/" + f.branchB.String() + "/tree", "", "sales", "u-a", http.StatusOK},
+		{"match another branch's po", "GET", "/api/v1/matching/results/" + f.poB.String(), "", "finance", "u-a", http.StatusNotFound},
 	} {
-		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, ""); got != http.StatusOK {
-			t.Errorf("switch off, bound caller %s: %d, want 200", c.name, got)
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, ""); got != c.want {
+			t.Errorf("switch off, bound caller %s: %d, want %d", c.name, got, c.want)
 		}
 	}
 }
@@ -391,6 +441,13 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 		{"read own po", "GET", "/api/v1/purchase-orders/" + f.poA.String(), "", "purchasing", "u-a", A, ok},
 		{"submit foreign po, no header", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/submit", "", "purchasing", "u-a", "", no},
 		{"freight of foreign po, no header", "GET", "/api/v1/purchase-orders/" + f.poB.String() + "/freight", "", "purchasing", "u-a", "", no},
+
+		// Matching acts on a purchase order by its path id.
+		{"match foreign po, no header", "POST", "/api/v1/matching/run/" + f.poB.String(), "", "finance", "u-a", "", no},
+		{"match result of foreign po, no header", "GET", "/api/v1/matching/results/" + f.poB.String(), "", "finance", "u-a", "", no},
+		{"match result of foreign po, header A", "GET", "/api/v1/matching/results/" + f.poB.String(), "", "finance", "u-a", A, no},
+		{"match result of own po", "GET", "/api/v1/matching/results/" + f.poA.String(), "", "finance", "u-a", A, http.StatusNotFound},
+		{"match result of foreign po, admin", "GET", "/api/v1/matching/results/" + f.poB.String(), "", "admin", "boss", "", http.StatusNotFound},
 
 		// Location and branch tree reads.
 		{"read foreign yard, no header", "GET", "/api/v1/locations/" + f.yardB.String(), "", "warehouse", "u-a", "", no},
