@@ -4,7 +4,13 @@
 import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
+//
+// base '/app/' places this bundle under the /app/ path in the combined
+// nginx layout: the front door owns / and the desk owns /app/, so the two
+// bundles' SPA fallbacks never collide. Assets land under /app/assets/ so
+// the nginx location /app/assets/ serves them correctly.
 export default defineConfig({
+  base: '/app/',
   build: {
     sourcemap: false,
     target: 'es2022',
