@@ -53,7 +53,7 @@ identity (manifest), (b) gate their routes and nav on enablement, and
     dependents; `core` apps refuse disable. Toggles are audit-logged.
   - HTTP: `GET /api/v1/apps` (any authenticated role — the SPA needs it to
     build nav), `POST /api/v1/apps/{key}/enable|disable` (admin/owner).
-- **Catalog for unconverted modules** (`cmd/server/catalog.go`): every module
+- **Catalog for unconverted modules** (`core/internal/app/serve/catalog.go`): every module
   not yet converted is declared `core: true` so the Apps page shows the full
   platform truthfully from day one. Converting a module = moving its manifest
   into the module, marking `core: false` where appropriate, and registering
@@ -94,8 +94,8 @@ reporting, pricing, location) converge on this shape during Phase 1.
 ## 5. Conversion recipe (per module)
 
 1. Backend: add `manifest.go`; switch `RegisterRoutes` to `apps.Router`;
-   register in `main.go` via `registry.Add(apps.App{...})` instead of a bare
-   `RegisterRoutes` call; delete its row from `cmd/server/catalog.go`.
+   register in `core/internal/app/serve/serve.go` via `registry.Add(apps.App{...})` instead of a bare
+   `RegisterRoutes` call; delete its row from `core/internal/app/serve/catalog.go`.
 2. Frontend: create `web/apps/desk/src/apps/<key>.ts`; move its routes out of
    `routes.ts` and its tag mappings out of `app.ts`; delete its hardcoded nav
    item(s); add nav entries to the manifest.

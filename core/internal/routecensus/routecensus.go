@@ -138,6 +138,29 @@ func FindModuleRoot(start string) (string, error) {
 	}
 }
 
+// moduleAliases maps a package directory to the module label the census
+// reports for it. R1-4 moved the body of cmd/server, the router assembly,
+// into the importable package internal/app/serve so the one core binary
+// (cmd/core) and the old entry point run the same code; the census reports
+// that package under its historical cmd/server label so api/ROUTES.txt, a
+// pinned artifact, does not churn on the move: the file being byte
+// identical across the move is the evidence the move changed no route. The
+// label also keys the router-assembly rules (the http.NewServeMux exemption
+// and the allowMounts entries), so the serve package keeps the reviewed
+// status the assembly always had.
+var moduleAliases = map[string]string{
+	"internal/app/serve": "cmd/server",
+}
+
+// moduleLabel returns the module label the census reports for dir: dir
+// itself, or its alias when moduleAliases holds one.
+func moduleLabel(dir string) string {
+	if label, ok := moduleAliases[dir]; ok {
+		return label
+	}
+	return dir
+}
+
 // modulePathRe reads the module directive out of go.mod.
 var modulePathRe = regexp.MustCompile(`(?m)^module\s+(\S+)\s*$`)
 
@@ -518,10 +541,11 @@ func Collect(moduleRoot string) (Result, error) {
 				}
 				return true
 			}
-			// An http.NewServeMux outside cmd/server is where wrong-path
-			// mounts begin: cmd/server is the one place the router is
-			// assembled.
-			if isNetHTTPCall(fu, call, "NewServeMux") && fu.relDir != "cmd/server" {
+			// An http.NewServeMux outside the router assembly is where
+			// wrong-path mounts begin: cmd/server is the one place the
+			// router is assembled, and internal/app/serve (its moved body,
+			// which reports under the same label) is the same place.
+			if isNetHTTPCall(fu, call, "NewServeMux") && moduleLabel(fu.relDir) != "cmd/server" {
 				result.Restricted = append(result.Restricted, Unresolved{
 					File:   fu.relPath,
 					Line:   fset.Position(call.Pos()).Line,
@@ -572,7 +596,7 @@ func Collect(moduleRoot string) (Result, error) {
 			}
 			pos, inElse := ifBranch(fu.file, call)
 			route := Route{
-				Module:  fu.relDir,
+				Module:  moduleLabel(fu.relDir),
 				Pattern: pattern,
 				Handler: describeHandler(fset, call.Args[1]),
 				site: routeSite{
@@ -599,7 +623,7 @@ func Collect(moduleRoot string) (Result, error) {
 			// carry the wrong path. The allow list names the mounts the
 			// repo accepted; anything else fails the census.
 			if reason := restrictedHandlerReason(fu, enclosing, call.Args[1], boundSubMuxes); reason != "" {
-				if !allowMounts[fu.relDir+" "+pattern] {
+				if !allowMounts[moduleLabel(fu.relDir)+" "+pattern] {
 					result.Restricted = append(result.Restricted, Unresolved{
 						File:   fu.relPath,
 						Line:   fset.Position(call.Pos()).Line,
@@ -619,8 +643,9 @@ func Collect(moduleRoot string) (Result, error) {
 }
 
 // allowMounts lists the mounts allowed to keep an http.StripPrefix or sub
-// mux handler, keyed by the registering package directory relative to the
-// Go module root and the registered pattern. Such a mount rewrites the
+// mux handler, keyed by the registering package's module label (its
+// directory relative to the Go module root, after the moduleAliases label)
+// and the registered pattern. Such a mount rewrites the
 // paths of everything under it, so the census cannot name the routes the
 // mount carries under their real paths; each entry here is a mount the
 // repo has accepted as a whole, and the list is repeated in
@@ -639,7 +664,7 @@ var allowMounts = map[string]bool{
 // router. The list is repeated in docs/refactor/ROUTE-CENSUS.md. A binding
 // not on this list fails the census.
 var allowMethodValues = map[string]bool{
-	"cmd/server/wire_exposure.go notifier.Handle": true, // event bus subscriber, not a mux
+	"internal/app/serve/wire_exposure.go notifier.Handle": true, // event bus subscriber, not a mux
 }
 
 // httpMethodConsts resolves the net/http method constants a pattern might
