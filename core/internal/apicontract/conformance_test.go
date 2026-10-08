@@ -118,6 +118,11 @@ func TestGoldenResponsesConform(t *testing.T) {
 		}
 		for _, step := range steps {
 			where := fmt.Sprintf("%s %s: %s %s", group, step.Name, step.Request.Method, step.Request.Path)
+			// A database probe step (method SQL) records a table's rows, not
+			// an HTTP exchange: there is no operation to conform to.
+			if step.Request.Method == "SQL" {
+				continue
+			}
 			// Pending routes have no operation to conform to yet; skip them first.
 			if matchesPending(pending, step.Request.Method, step.Request.Path) {
 				skippedPending++

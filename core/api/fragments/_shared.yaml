@@ -156,7 +156,11 @@ components:
         The standard error envelope written by httputil.RespondError. The
         message is always the generic status text; the handler's specific
         message is server log only. request_id echoes the X-Request-ID
-        response header.
+        response header. The lowercase codes (unauthorized, forbidden,
+        idempotency_key_reused) are written by the auth and idempotency
+        layers that wrap the module routes (the machine-key core and the
+        idempotency middleware), in the wire ADR's vocabulary; the uppercase
+        codes are the module handlers'.
       properties:
         error:
           type: object
@@ -164,7 +168,7 @@ components:
           properties:
             code:
               type: string
-              enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, UNPROCESSABLE_ENTITY, PAYMENT_REQUIRED, INTERNAL_ERROR]
+              enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, UNPROCESSABLE_ENTITY, PAYMENT_REQUIRED, INTERNAL_ERROR, unauthorized, forbidden, idempotency_key_reused]
             message:
               type: string
               description: Generic status text such as "Bad Request".

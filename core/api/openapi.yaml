@@ -8571,7 +8571,12 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: >-
+            The file does not exist. The file server answers with net/http's own plain text body, not the standard error envelope.
+          content:
+            text/plain:
+              schema:
+                type: string
   /api/v1/vendors:
     get:
       operationId: vendorList
@@ -8623,6 +8628,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/vendors/{id}:
@@ -8813,7 +8820,7 @@ components:
       type: object
       required: [error, meta]
       description: >-
-        The standard error envelope written by httputil.RespondError. The message is always the generic status text; the handler's specific message is server log only. request_id echoes the X-Request-ID response header.
+        The standard error envelope written by httputil.RespondError. The message is always the generic status text; the handler's specific message is server log only. request_id echoes the X-Request-ID response header. The lowercase codes (unauthorized, forbidden, idempotency_key_reused) are written by the auth and idempotency layers that wrap the module routes (the machine-key core and the idempotency middleware), in the wire ADR's vocabulary; the uppercase codes are the module handlers'.
       properties:
         error:
           type: object
@@ -8821,7 +8828,7 @@ components:
           properties:
             code:
               type: string
-              enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, UNPROCESSABLE_ENTITY, PAYMENT_REQUIRED, INTERNAL_ERROR]
+              enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, UNPROCESSABLE_ENTITY, PAYMENT_REQUIRED, INTERNAL_ERROR, unauthorized, forbidden, idempotency_key_reused]
             message:
               type: string
               description: Generic status text such as "Bad Request".
@@ -14666,7 +14673,8 @@ components:
           type: number
         source:
           type: string
-          enum: [manual, ai]
+          description: How the quote came to be; portal is a quote the dealer portal customer requested.
+          enum: [manual, ai, portal]
         original_filename:
           type: string
         original_content_type:

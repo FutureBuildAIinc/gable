@@ -4620,11 +4620,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description The standard error envelope written by httputil.RespondError. The message is always the generic status text; the handler's specific message is server log only. request_id echoes the X-Request-ID response header. */
+        /** @description The standard error envelope written by httputil.RespondError. The message is always the generic status text; the handler's specific message is server log only. request_id echoes the X-Request-ID response header. The lowercase codes (unauthorized, forbidden, idempotency_key_reused) are written by the auth and idempotency layers that wrap the module routes (the machine-key core and the idempotency middleware), in the wire ADR's vocabulary; the uppercase codes are the module handlers'. */
         Error: {
             error: {
                 /** @enum {string} */
-                code: "BAD_REQUEST" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "UNPROCESSABLE_ENTITY" | "PAYMENT_REQUIRED" | "INTERNAL_ERROR";
+                code: "BAD_REQUEST" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "UNPROCESSABLE_ENTITY" | "PAYMENT_REQUIRED" | "INTERNAL_ERROR" | "unauthorized" | "forbidden" | "idempotency_key_reused";
                 /** @description Generic status text such as "Bad Request". */
                 message: string;
             };
@@ -8150,8 +8150,11 @@ export interface components {
             vehicle_id?: string;
             vehicle_name?: string;
             margin_total: number;
-            /** @enum {string} */
-            source: "manual" | "ai";
+            /**
+             * @description How the quote came to be; portal is a quote the dealer portal customer requested.
+             * @enum {string}
+             */
+            source: "manual" | "ai" | "portal";
             original_filename?: string;
             original_content_type?: string;
             /** @description The AI parse mapping, arbitrary JSON. */
@@ -17262,7 +17265,15 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description The file does not exist. The file server answers with net/http's own plain text body, not the standard error envelope. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
         };
     };
     vendorList: {
@@ -17321,6 +17332,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };

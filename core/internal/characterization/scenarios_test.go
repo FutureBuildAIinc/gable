@@ -3,6 +3,8 @@
 
 package characterization
 
+import "testing"
+
 // The scenario script: an ordered list of groups, each group one golden file
 // under testdata/goldens/. The order is load-bearing in more than one way.
 //
@@ -84,11 +86,30 @@ type stepDef struct {
 	// maskOrderCount marks steps whose order_count field is masked to a
 	// placeholder before comparison (see capturedStep.MaskOrderCount).
 	maskOrderCount bool
+	// maskFields maps response keys to placeholders (see
+	// capturedStep.MaskFields).
+	maskFields map[string]any
+	// setup, when set, runs before the request is built: it may insert
+	// fixture rows through the harness's own SQL (h.dbURL) and set h.vars.
+	// It is for state the API cannot create (an exposed quote), never for
+	// anything the product writes itself.
+	setup func(t *testing.T, h *harness)
+	// sql, when set, makes the step a read-only probe of the throwaway
+	// database instead of an HTTP request: its rows are the recorded
+	// response (see doSQLStep). For effects no route exposes.
+	sql string
+	// captureHeaders names response headers recorded in the golden
+	// (capturedResponse.Headers); all other response headers stay out.
+	captureHeaders []string
 }
 
 type groupDef struct {
 	name  string
 	steps []stepDef
+	// serverEnv, when set, runs the group against its own server process
+	// started with these extra variables (on the same database), for routes
+	// a feature flag mounts.
+	serverEnv map[string]string
 }
 
 func concat(groups ...[]groupDef) []groupDef {
