@@ -8,9 +8,6 @@
  * Note: governance pages were previously routed but had NO sidebar entry
  * (reachable by URL only). The manifest gives the app a nav item — enabling
  * the app is what lights it up.
- *
- * All paths are prefixed /app/ because the desk bundle is mounted at /app/
- * in the combined nginx layout.
  */
 import { ScrollText } from 'lucide';
 import type { FrontendAppManifest } from './types.ts';
@@ -19,13 +16,13 @@ export const governanceApp: FrontendAppManifest = {
   key: 'governance',
   name: 'Governance (RFCs)',
   routes: [
-    // Order matters: '/app/governance/new' must precede '/app/governance/:id'.
-    { path: '/app/governance/new', tag: 'gable-new-rfc', load: () => import('../pages/governance/NewRFC.ts'), layout: 'erp' },
-    { path: '/app/governance/:id', tag: 'gable-rfc-detail', load: () => import('../pages/governance/RFCDetail.ts'), layout: 'erp' },
-    { path: '/app/governance', tag: 'gable-rfc-dashboard', load: () => import('../pages/governance/RFCDashboard.ts'), layout: 'erp' },
+    // Order matters: '/governance/new' must precede '/governance/:id'.
+    { path: '/governance/new', tag: 'gable-new-rfc', load: () => import('../pages/governance/NewRFC.ts'), layout: 'erp' },
+    { path: '/governance/:id', tag: 'gable-rfc-detail', load: () => import('../pages/governance/RFCDetail.ts'), layout: 'erp' },
+    { path: '/governance', tag: 'gable-rfc-dashboard', load: () => import('../pages/governance/RFCDashboard.ts'), layout: 'erp' },
   ],
   nav: [
-    { label: 'RFC Dashboard', path: '/app/governance', icon: ScrollText, order: 10 },
-    { label: 'New RFC', path: '/app/governance/new', icon: ScrollText, order: 20 },
+    { label: 'RFC Dashboard', path: '/governance', icon: ScrollText, order: 10 },
+    { label: 'New RFC', path: '/governance/new', icon: ScrollText, order: 20 },
   ],
 };

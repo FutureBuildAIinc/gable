@@ -50,7 +50,7 @@ export class GablePortalLayout extends LitElement {
     await clearToken();
     localStorage.removeItem('portal_config');
     localStorage.removeItem('portal_user');
-    router.navigate('/');
+    router.navigate('/home');
   }
 
   private get _primaryColor() {

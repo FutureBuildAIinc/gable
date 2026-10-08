@@ -26,13 +26,13 @@ describe('tilesFor', () => {
   it('pins the desk tile first', () => {
     const tiles = tilesFor([app({ key: 'quote' })]);
     expect(tiles[0].key).toBe('desk');
-    expect(tiles[0].path).toBe('/app/home');
+    expect(tiles[0].path).toBe('/home');
   });
 
   it('maps an enabled catalog app to its desk entry', () => {
     const tiles = tilesFor([app({ key: 'quote', name: 'Quotes', category: 'Sales' })]);
     expect(tiles).toHaveLength(2);
-    expect(tiles[1]).toMatchObject({ key: 'quote', name: 'Quotes', path: '/app/quotes', category: 'Sales' });
+    expect(tiles[1]).toMatchObject({ key: 'quote', name: 'Quotes', path: '/quotes', category: 'Sales' });
   });
 
   it('drops a disabled app', () => {

@@ -6,12 +6,9 @@
  *
  * routes.ts is first-match-wins and hand-ordered ("order matters: more-specific
  * paths must come before less-specific ones"). That invariant is invisible in
- * review — moving `/app/quotes/:id` above `/app/quotes/analytics` silently sends the
+ * review — moving `/quotes/:id` above `/quotes/analytics` silently sends the
  * analytics page to the quote detail view. These tests resolve every literal
  * path in the real table through the real router so a bad reorder fails CI.
- *
- * All paths are prefixed /app/ because the desk bundle is mounted at /app/ in
- * the combined nginx layout.
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { routes } from './routes'
@@ -24,7 +21,7 @@ const LAYOUTS = new Set(['erp', 'portal', 'driver', 'yard', 'none'])
 const literalRoutes = routes.filter((r) => !r.path.includes(':') && !r.redirect)
 
 beforeEach(() => {
-  history.replaceState(null, '', '/app/')
+  history.replaceState(null, '', '/')
 })
 
 describe('route table shape', () => {
@@ -73,6 +70,19 @@ describe('route table shape', () => {
   })
 })
 
+describe('stable record routes (the desk is served at the origin root)', () => {
+  const STABLE = ['/home', '/quotes/:id', '/orders/:id', '/invoices/:id', '/inventory/:id', '/accounts/:id', '/pos']
+
+  it('keeps every record route and the home at its unprefixed path', () => {
+    const paths = new Set(routes.map((r) => r.path))
+    expect(STABLE.filter((p) => !paths.has(p))).toEqual([])
+  })
+
+  it('has no route under an /app/ prefix', () => {
+    expect(routes.filter((r) => r.path.startsWith('/app/')).map((r) => r.path)).toEqual([])
+  })
+})
+
 describe('route ordering (no route is shadowed by an earlier pattern)', () => {
   it('resolves every literal path to its own route', () => {
     router.init(routes)
@@ -96,30 +106,30 @@ describe('route ordering (no route is shadowed by an earlier pattern)', () => {
     expect(literalRoutes.length).toBeGreaterThan(30)
   })
 
-  it('keeps /app/quotes/analytics ahead of /app/quotes/:id', () => {
-    history.replaceState(null, '', '/app/quotes/analytics')
+  it('keeps /quotes/analytics ahead of /quotes/:id', () => {
+    history.replaceState(null, '', '/quotes/analytics')
     router.init(routes)
-    expect(router.currentMatch?.route.path).toBe('/app/quotes/analytics')
+    expect(router.currentMatch?.route.path).toBe('/quotes/analytics')
   })
 
-  it('keeps /app/purchasing/new ahead of /app/purchasing/:id', () => {
-    history.replaceState(null, '', '/app/purchasing/new')
+  it('keeps /purchasing/new ahead of /purchasing/:id', () => {
+    history.replaceState(null, '', '/purchasing/new')
     router.init(routes)
-    expect(router.currentMatch?.route.path).toBe('/app/purchasing/new')
+    expect(router.currentMatch?.route.path).toBe('/purchasing/new')
   })
 
   it('still resolves a real detail path through the dynamic pattern', () => {
-    history.replaceState(null, '', '/app/purchasing/po-123')
+    history.replaceState(null, '', '/purchasing/po-123')
     router.init(routes)
-    expect(router.currentMatch?.route.path).toBe('/app/purchasing/:id')
+    expect(router.currentMatch?.route.path).toBe('/purchasing/:id')
     expect(router.currentMatch?.params).toEqual({ id: 'po-123' })
   })
 
-  it('follows the /app/sales -> /app/quotes redirect declared in the table', () => {
-    history.replaceState(null, '', '/app/sales')
+  it('follows the /sales -> /quotes redirect declared in the table', () => {
+    history.replaceState(null, '', '/sales')
     router.init(routes)
-    expect(window.location.pathname).toBe('/app/quotes')
-    expect(router.currentMatch?.route.path).toBe('/app/quotes')
+    expect(window.location.pathname).toBe('/quotes')
+    expect(router.currentMatch?.route.path).toBe('/quotes')
   })
 })
 
@@ -133,13 +143,13 @@ describe('converted-app registry', () => {
   })
 
   it('maps a manifest path to its custom-element tag', () => {
-    expect(tagForPath('/app/millwork/configure')).toBe('gable-door-configurator')
-    expect(appKeyForPath('/app/millwork/configure')).toBe('millwork')
+    expect(tagForPath('/millwork/configure')).toBe('gable-door-configurator')
+    expect(appKeyForPath('/millwork/configure')).toBe('millwork')
   })
 
   it('returns null for a path no converted app owns', () => {
-    expect(tagForPath('/app/orders')).toBeNull()
-    expect(appKeyForPath('/app/orders')).toBeNull()
+    expect(tagForPath('/orders')).toBeNull()
+    expect(appKeyForPath('/orders')).toBeNull()
   })
 
   it('gives every manifest route a tag and a known layout', () => {

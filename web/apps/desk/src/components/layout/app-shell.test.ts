@@ -20,12 +20,12 @@ import './app-shell'
 import { mount, update, text, q, flush } from '../../test/dom'
 
 const TABLE = [
-  { path: '/app/home', load: async () => {}, layout: 'erp' as const },
-  { path: '/app/orders/:id', load: async () => {}, layout: 'erp' as const },
-  { path: '/app/orders', load: async () => {}, layout: 'erp' as const },
-  { path: '/app/invoices', load: async () => {}, layout: 'erp' as const },
-  { path: '/app/accounting/journal-entries', load: async () => {}, layout: 'erp' as const },
-  { path: '/app/accounting/trial-balance', load: async () => {}, layout: 'erp' as const },
+  { path: '/home', load: async () => {}, layout: 'erp' as const },
+  { path: '/orders/:id', load: async () => {}, layout: 'erp' as const },
+  { path: '/orders', load: async () => {}, layout: 'erp' as const },
+  { path: '/invoices', load: async () => {}, layout: 'erp' as const },
+  { path: '/accounting/journal-entries', load: async () => {}, layout: 'erp' as const },
+  { path: '/accounting/trial-balance', load: async () => {}, layout: 'erp' as const },
 ]
 
 /** Put the router on `path`, then mount the shell there. */
@@ -55,7 +55,7 @@ afterEach(() => {
 
 describe('gable-app-shell — chrome', () => {
   it('renders the header, the tab strip and the main region', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
 
     expect(el.querySelector('header')).not.toBeNull()
     expect(el.querySelector('nav[aria-label="Open modules"]')).not.toBeNull()
@@ -70,7 +70,7 @@ describe('gable-app-shell — chrome', () => {
   })
 
   it('offers a skip link to the main region for keyboard users', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     const skip = q<HTMLAnchorElement>(el, 'a[href="#main-content"]')
 
     expect(text(skip)).toBe('Skip to main content')
@@ -78,32 +78,32 @@ describe('gable-app-shell — chrome', () => {
   })
 
   it('labels the global search input', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     expect(q<HTMLInputElement>(el, 'input[aria-label="Search everything"]')).toBeTruthy()
   })
 
   it('mounts the omnibar and the shortcuts modal', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     expect(el.querySelector('gable-omnibar')).not.toBeNull()
     expect(el.querySelector('gable-shortcuts-modal')).not.toBeNull()
   })
 
   it('mounts the branch switcher in the header', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     expect(q(el, 'header gable-branch-switcher')).toBeTruthy()
   })
 })
 
 describe('gable-app-shell — workspace tabs', () => {
   it('pins Home first and opens a tab for the route it mounted on', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     expect(tabLabels(el)).toEqual(['Home', 'Orders'])
   })
 
   it('opens a second tab when the user navigates into another module', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
 
-    router.navigate('/app/invoices')
+    router.navigate('/invoices')
     await flush()
     await update(el, {})
 
@@ -111,10 +111,10 @@ describe('gable-app-shell — workspace tabs', () => {
   })
 
   it('refocuses the existing tab instead of opening a duplicate', async () => {
-    const el = await shellAt('/app/orders')
-    router.navigate('/app/invoices')
+    const el = await shellAt('/orders')
+    router.navigate('/invoices')
     await flush()
-    router.navigate('/app/orders')
+    router.navigate('/orders')
     await flush()
     await update(el, {})
 
@@ -122,8 +122,8 @@ describe('gable-app-shell — workspace tabs', () => {
   })
 
   it('remembers where each module was left and returns there', async () => {
-    const el = await shellAt('/app/orders/ord-42')
-    router.navigate('/app/invoices')
+    const el = await shellAt('/orders/ord-42')
+    router.navigate('/invoices')
     await flush()
     await update(el, {})
 
@@ -133,18 +133,18 @@ describe('gable-app-shell — workspace tabs', () => {
     ordersTab.click()
     await flush()
 
-    expect(window.location.pathname).toBe('/app/orders/ord-42')
+    expect(window.location.pathname).toBe('/orders/ord-42')
   })
 
   it('marks the active tab for assistive tech', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     const active = q(el, 'button[aria-current="page"]')
     expect(text(active)).toBe('Orders')
   })
 
   it('closes a tab and lands on its neighbour', async () => {
-    const el = await shellAt('/app/orders')
-    router.navigate('/app/invoices')
+    const el = await shellAt('/orders')
+    router.navigate('/invoices')
     await flush()
     await update(el, {})
 
@@ -153,11 +153,11 @@ describe('gable-app-shell — workspace tabs', () => {
     await update(el, {})
 
     expect(tabLabels(el)).toEqual(['Home', 'Orders'])
-    expect(window.location.pathname).toBe('/app/orders')
+    expect(window.location.pathname).toBe('/orders')
   })
 
   it('gives the pinned Home tab no close button', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     expect(el.querySelector('button[aria-label="Close Home"]')).toBeNull()
     expect(el.querySelector('button[aria-label="Close Orders"]')).not.toBeNull()
   })
@@ -165,9 +165,9 @@ describe('gable-app-shell — workspace tabs', () => {
   it('restores tabs from a previous session, with their paths', async () => {
     localStorage.setItem(
       'gable_workspace',
-      JSON.stringify({ tabs: [{ key: 'invoice', path: '/app/invoices' }] }),
+      JSON.stringify({ tabs: [{ key: 'invoice', path: '/invoices' }] }),
     )
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
 
     expect(tabLabels(el)).toEqual(['Home', 'Invoicing', 'Orders'])
   })
@@ -177,16 +177,16 @@ describe('gable-app-shell — workspace tabs', () => {
     // zone table, so a retired module cannot render a garbage tab.
     localStorage.setItem(
       'gable_workspace',
-      JSON.stringify({ tabs: [{ key: 'retired-module', path: '/app/retired' }] }),
+      JSON.stringify({ tabs: [{ key: 'retired-module', path: '/retired' }] }),
     )
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
 
     expect(tabLabels(el)).toEqual(['Home', 'Orders'])
   })
 
   it('starts fresh from corrupt persisted state rather than throwing', async () => {
     localStorage.setItem('gable_workspace', 'not json')
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
 
     expect(tabLabels(el)).toEqual(['Home', 'Orders'])
   })
@@ -194,8 +194,8 @@ describe('gable-app-shell — workspace tabs', () => {
 
 describe('gable-app-shell — the active module menu band', () => {
   it('renders the active app menu with its own items', async () => {
-    const el = await shellAt('/app/accounting/journal-entries')
-    const links = Array.from(el.querySelectorAll('a[href^="/app/accounting"]')).map((a) => text(a))
+    const el = await shellAt('/accounting/journal-entries')
+    const links = Array.from(el.querySelectorAll('a[href^="/accounting"]')).map((a) => text(a))
 
     expect(links).toEqual([
       'Chart of Accounts',
@@ -208,8 +208,8 @@ describe('gable-app-shell — the active module menu band', () => {
   })
 
   it('lights the menu item matching the current path', async () => {
-    const el = await shellAt('/app/accounting/journal-entries')
-    const active = Array.from(el.querySelectorAll('a[href^="/app/accounting"]')).find((a) =>
+    const el = await shellAt('/accounting/journal-entries')
+    const active = Array.from(el.querySelectorAll('a[href^="/accounting"]')).find((a) =>
       a.className.includes('text-gable-green'),
     )
 
@@ -217,21 +217,21 @@ describe('gable-app-shell — the active module menu band', () => {
   })
 
   it('moves the highlight when the user navigates inside the module', async () => {
-    const el = await shellAt('/app/accounting/journal-entries')
+    const el = await shellAt('/accounting/journal-entries')
 
-    router.navigate('/app/accounting/trial-balance')
+    router.navigate('/accounting/trial-balance')
     await flush()
     await update(el, {})
 
-    const active = Array.from(el.querySelectorAll('a[href^="/app/accounting"]')).find((a) =>
+    const active = Array.from(el.querySelectorAll('a[href^="/accounting"]')).find((a) =>
       a.className.includes('text-gable-green'),
     )
     expect(text(active ?? null)).toBe('Trial Balance')
   })
 
   it('keeps the parent item lit on a detail route', async () => {
-    const el = await shellAt('/app/orders/ord-42')
-    const active = Array.from(el.querySelectorAll('a[href^="/app/orders"]')).find((a) =>
+    const el = await shellAt('/orders/ord-42')
+    const active = Array.from(el.querySelectorAll('a[href^="/orders"]')).find((a) =>
       a.className.includes('text-gable-green'),
     )
 
@@ -239,15 +239,15 @@ describe('gable-app-shell — the active module menu band', () => {
   })
 
   it('renders no menu band on Home', async () => {
-    const el = await shellAt('/app/home')
+    const el = await shellAt('/home')
     expect(tabLabels(el)).toEqual(['Home'])
-    expect(el.querySelector('a[href^="/app/accounting"]')).toBeNull()
+    expect(el.querySelector('a[href^="/accounting"]')).toBeNull()
   })
 })
 
 describe('gable-app-shell — connectivity and shortcuts', () => {
   it('shows the offline banner when the browser reports offline', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     expect(text(el)).not.toContain('You are offline')
 
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
@@ -259,7 +259,7 @@ describe('gable-app-shell — connectivity and shortcuts', () => {
 
   it('clears the offline banner when connectivity returns', async () => {
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     expect(text(el)).toContain('You are offline')
 
     window.dispatchEvent(new Event('online'))
@@ -269,7 +269,7 @@ describe('gable-app-shell — connectivity and shortcuts', () => {
   })
 
   it('opens the shortcuts modal on "?"', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     const modal = q(el, 'gable-shortcuts-modal') as HTMLElement & { open: boolean }
     expect(modal.open).toBe(false)
 
@@ -280,7 +280,7 @@ describe('gable-app-shell — connectivity and shortcuts', () => {
   })
 
   it('leaves "?" alone while the user is typing in a field', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     const input = q<HTMLInputElement>(el, 'input[aria-label="Search everything"]')
     input.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }))
     await update(el, {})
@@ -289,7 +289,7 @@ describe('gable-app-shell — connectivity and shortcuts', () => {
   })
 
   it('stops listening for shortcuts once removed from the document', async () => {
-    const el = await shellAt('/app/orders')
+    const el = await shellAt('/orders')
     el.remove()
 
     // No listener, no state change, and crucially no error from a detached

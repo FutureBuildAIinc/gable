@@ -47,75 +47,76 @@ export interface WorkspaceTab {
   pinned?: boolean;
 }
 
-const HOME_ZONE: AppZone = { prefix: '/app/home', key: 'home', label: 'Home', icon: House };
+const HOME_ZONE: AppZone = { prefix: '/home', key: 'home', label: 'Home', icon: House };
 
 const staticZones: AppZone[] = [
   HOME_ZONE,
-  { prefix: '/app/dashboard', key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { prefix: '/app/inventory', key: 'inventory', label: 'Inventory', icon: Package, menu: [
-    { label: 'The Pile', path: '/app/inventory' },
+  { prefix: '/dashboard', key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { prefix: '/inventory', key: 'inventory', label: 'Inventory', icon: Package, menu: [
+    { label: 'The Pile', path: '/inventory' },
   ] },
-  { prefix: '/app/quotes', key: 'quote', label: 'Quotes', icon: FileText, menu: [
-    { label: 'Quotes', path: '/app/quotes' },
-    { label: 'Quote Builder', path: '/app/quotes/new' },
-    { label: 'Analytics', path: '/app/quotes/analytics' },
-    { label: 'At-Risk Quotes', path: '/app/quotes/exposure' },
+  { prefix: '/quotes', key: 'quote', label: 'Quotes', icon: FileText, menu: [
+    { label: 'Quotes', path: '/quotes' },
+    { label: 'Quote Builder', path: '/quotes/new' },
+    { label: 'Analytics', path: '/quotes/analytics' },
+    { label: 'At-Risk Quotes', path: '/quotes/exposure' },
   ] },
-  { prefix: '/app/orders', key: 'order', label: 'Orders', icon: ClipboardList, menu: [
-    { label: 'Orders', path: '/app/orders' },
+  { prefix: '/orders', key: 'order', label: 'Orders', icon: ClipboardList, menu: [
+    { label: 'Orders', path: '/orders' },
   ] },
-  { prefix: '/app/invoices', key: 'invoice', label: 'Invoicing', icon: Receipt, menu: [
-    { label: 'Invoices', path: '/app/invoices' },
+  { prefix: '/invoices', key: 'invoice', label: 'Invoicing', icon: Receipt, menu: [
+    { label: 'Invoices', path: '/invoices' },
   ] },
-  { prefix: '/app/reports/daily-till', key: 'pos', label: 'Daily Till', icon: CreditCard, menu: [
-    { label: 'Daily Till', path: '/app/reports/daily-till' },
-    { label: 'POS Terminal', path: '/app/pos' },
+  { prefix: '/reports/daily-till', key: 'pos', label: 'Daily Till', icon: CreditCard, menu: [
+    { label: 'Daily Till', path: '/reports/daily-till' },
+    { label: 'POS Terminal', path: '/pos' },
   ] },
-  { prefix: '/app/reports', key: 'reporting', label: 'Reporting', icon: BarChart3, menu: [
-    { label: 'Saved Reports', path: '/app/reports/saved' },
-    { label: 'Report Builder', path: '/app/reports/builder' },
-    { label: 'AR Aging', path: '/app/reports/ar-aging' },
-    { label: 'Customer Statement', path: '/app/reports/customer-statement' },
-    { label: 'Exposure Portfolio', path: '/app/reports/exposure' },
+  { prefix: '/reports', key: 'reporting', label: 'Reporting', icon: BarChart3, menu: [
+    { label: 'Saved Reports', path: '/reports/saved' },
+    { label: 'Report Builder', path: '/reports/builder' },
+    { label: 'AR Aging', path: '/reports/ar-aging' },
+    { label: 'Customer Statement', path: '/reports/customer-statement' },
+    { label: 'Exposure Portfolio', path: '/reports/exposure' },
   ] },
-  { prefix: '/app/dispatch', key: 'delivery', label: 'Logistics', icon: Truck, menu: [
-    { label: 'Dispatch Board', path: '/app/dispatch' },
-    { label: 'Fleet', path: '/app/fleet' },
+  { prefix: '/dispatch', key: 'delivery', label: 'Logistics', icon: Truck, menu: [
+    { label: 'Dispatch Board', path: '/dispatch' },
+    { label: 'Fleet', path: '/fleet' },
   ] },
-  { prefix: '/app/fleet', key: 'delivery', label: 'Logistics', icon: Truck, menu: [
-    { label: 'Dispatch Board', path: '/app/dispatch' },
-    { label: 'Fleet', path: '/app/fleet' },
+  { prefix: '/fleet', key: 'delivery', label: 'Logistics', icon: Truck, menu: [
+    { label: 'Dispatch Board', path: '/dispatch' },
+    { label: 'Fleet', path: '/fleet' },
   ] },
-  { prefix: '/app/purchasing/vendors', key: 'vendor', label: 'Vendors', icon: Store, menu: [
-    { label: 'Vendors', path: '/app/purchasing/vendors' },
+  { prefix: '/purchasing/vendors', key: 'vendor', label: 'Vendors', icon: Store, menu: [
+    { label: 'Vendors', path: '/purchasing/vendors' },
   ] },
-  { prefix: '/app/purchasing', key: 'purchase_order', label: 'Purchasing', icon: ShoppingBag, menu: [
-    { label: 'Purchase Orders', path: '/app/purchasing' },
-    { label: 'New PO', path: '/app/purchasing/new' },
-    { label: 'Recommendations', path: '/app/purchasing/recommendations' },
+  { prefix: '/purchasing', key: 'purchase_order', label: 'Purchasing', icon: ShoppingBag, menu: [
+    { label: 'Purchase Orders', path: '/purchasing' },
+    { label: 'New PO', path: '/purchasing/new' },
+    { label: 'Recommendations', path: '/purchasing/recommendations' },
   ] },
-  { prefix: '/app/pricing', key: 'pricing', label: 'Pricing', icon: LayoutGrid, menu: [
-    { label: 'Pricing Matrix', path: '/app/pricing' },
+  { prefix: '/pricing', key: 'pricing', label: 'Pricing', icon: LayoutGrid, menu: [
+    { label: 'Pricing Matrix', path: '/pricing' },
   ] },
-  { prefix: '/app/accounts', key: 'customer', label: 'Customers', icon: Users, menu: [
-    { label: 'Accounts', path: '/app/accounts' },
+  { prefix: '/accounts', key: 'customer', label: 'Customers', icon: Users, menu: [
+    { label: 'Accounts', path: '/accounts' },
   ] },
-  { prefix: '/app/accounting', key: 'gl', label: 'General Ledger', icon: BookOpen, menu: [
-    { label: 'Chart of Accounts', path: '/app/accounting/chart-of-accounts' },
-    { label: 'Journal Entries', path: '/app/accounting/journal-entries' },
-    { label: 'Trial Balance', path: '/app/accounting/trial-balance' },
-    { label: 'Profit & Loss', path: '/app/accounting/profit-and-loss' },
-    { label: 'Balance Sheet', path: '/app/accounting/balance-sheet' },
-    { label: 'Accounts Payable', path: '/app/accounting/accounts-payable' },
+  { prefix: '/accounting', key: 'gl', label: 'General Ledger', icon: BookOpen, menu: [
+    { label: 'Chart of Accounts', path: '/accounting/chart-of-accounts' },
+    { label: 'Journal Entries', path: '/accounting/journal-entries' },
+    { label: 'Trial Balance', path: '/accounting/trial-balance' },
+    { label: 'Profit & Loss', path: '/accounting/profit-and-loss' },
+    { label: 'Balance Sheet', path: '/accounting/balance-sheet' },
+    { label: 'Accounts Payable', path: '/accounting/accounts-payable' },
   ] },
-  { prefix: '/app/admin/branches', key: 'location', label: 'Branches', icon: Building2, menu: [
-    { label: 'Branches', path: '/app/admin/branches' },
+  { prefix: '/admin/branches', key: 'location', label: 'Branches', icon: Building2, menu: [
+    { label: 'Branches', path: '/admin/branches' },
   ] },
-  { prefix: '/app/admin', key: 'techadmin', label: 'Tech Admin', icon: Settings, menu: [
-    { label: 'Settings', path: '/app/admin' },
-    { label: 'Apps', path: '/app/admin/apps' },
-    { label: 'Market Indices', path: '/app/admin/market-indices' },
+  { prefix: '/admin', key: 'techadmin', label: 'Tech Admin', icon: Settings, menu: [
+    { label: 'Settings', path: '/admin' },
+    { label: 'Apps', path: '/admin/apps' },
+    { label: 'Market Indices', path: '/admin/market-indices' },
   ] },
+  { prefix: '/sales', key: 'quote', label: 'Quotes', icon: FileText },
 ];
 
 /**
@@ -127,7 +128,7 @@ const manifestZones: AppZone[] = appManifests
   .filter((a) => a.nav.length > 0)
   .map((a) => {
     const nav = [...a.nav].sort((x, y) => x.order - y.order);
-    const prefix = '/app/' + (nav[0].path.replace(/^\/app\//, '').split('/')[0] ?? '');
+    const prefix = '/' + (nav[0].path.split('/')[1] ?? '');
     return {
       prefix,
       key: a.key,
@@ -176,7 +177,7 @@ export function activeMenuPath(menu: ZoneMenuItem[], currentPath: string): strin
 const STORE_KEY = 'gable_workspace';
 
 class WorkspaceService extends EventTarget {
-  private _tabs: WorkspaceTab[] = [{ ...HOME_ZONE, path: '/app/home', pinned: true }];
+  private _tabs: WorkspaceTab[] = [{ ...HOME_ZONE, path: '/home', pinned: true }];
   private _activeKey = 'home';
 
   get tabs(): WorkspaceTab[] {
