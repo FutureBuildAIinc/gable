@@ -1152,16 +1152,16 @@ type autoPOAdapter struct {
 	productSvc *product.Service
 }
 
-func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
-	// Resolve product description for the PO line
-	desc := productID.String()
-	if a.productSvc != nil {
-		p, err := a.productSvc.GetProduct(ctx, productID)
-		if err == nil && p != nil {
+func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
+	// Resolve product description for the PO line; a line with no product
+	// (the quote accept path, which carries none) takes a plain one.
+	desc := "special order"
+	if productID != nil && a.productSvc != nil {
+		if p, err := a.productSvc.GetProduct(ctx, *productID); err == nil && p != nil {
 			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)
 		}
 	}
-	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, &productID, vendorID, desc, quantity, unitCost)
+	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, productID, vendorID, desc, quantity, unitCost)
 }
 
 // posCalcAdapter bridges pricing.Service + customer.Service to pos.PriceCalculator.
