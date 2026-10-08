@@ -524,9 +524,16 @@ type capturedStep struct {
 	// carries the script's own orders on top of the randomly assigned
 	// segment's count - the revenue sequence and row order are stable, that
 	// one count is not. Recorded in the golden, like the other mask flags.
-	MaskOrderCount bool             `json:"mask_order_count,omitempty"`
-	Request        capturedRequest  `json:"request"`
-	Response       capturedResponse `json:"response"`
+	MaskOrderCount bool `json:"mask_order_count,omitempty"`
+	// MaskFields names response keys whose values are replaced with
+	// "<masked>" before comparison, wherever they sit in the body. Used on the
+	// events feed, whose exposure event payloads carry a quote's short id (the
+	// first characters of a random uuid) and a salesperson name drawn at seed
+	// time: both vary per run, the rest of the payload does not. Recorded in
+	// the golden, like the other mask flags.
+	MaskFields []string         `json:"mask_fields,omitempty"`
+	Request    capturedRequest  `json:"request"`
+	Response   capturedResponse `json:"response"`
 }
 
 // doStep executes one scenario step: substitute {vars}, send, capture the
@@ -629,6 +636,10 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 	step.MaskOrderCount = s.maskOrderCount
 	if s.maskOrderCount {
 		maskField(step.Response.Body, "order_count", "<orders>")
+	}
+	step.MaskFields = s.maskFields
+	for _, key := range s.maskFields {
+		maskField(step.Response.Body, key, "<masked>")
 	}
 	if s.sortPrimaryArray {
 		switch body := step.Response.Body.(type) {

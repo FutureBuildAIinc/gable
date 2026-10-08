@@ -34,7 +34,6 @@ GET	/api/v1/dashboard/summary
 GET	/api/v1/dashboard/top-customers
 GET	/api/v1/documents/print/invoice/{id}
 GET	/api/v1/documents/print/pickticket/{id}
-GET	/api/v1/events
 GET	/api/v1/governance/rfcs
 GET	/api/v1/governance/rfcs/{id}
 GET	/api/v1/millwork/options

@@ -24,6 +24,7 @@ tags:
   - name: delivery
   - name: deposits
   - name: edi
+  - name: events
   - name: gl
   - name: health
   - name: integration
@@ -2183,6 +2184,59 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/events:
+    get:
+      operationId: eventsList
+      tags: [events]
+      summary: Read the event feed
+      description: >-
+        Events in commit order, paged by cursor. Role gated admin and owner; the feed is not branch scoped. Query parameters are exactly cursor, limit, types and include: any other name is a 400 unsupported_query_parameter, and a repeated include is a 400.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: >-
+            The opaque next_cursor of an earlier page (ordering scope events.position). Absent means the first page; present but malformed is a 400 naming cursor.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Page size, 1 to 200. Malformed or out of range is a 400 naming limit.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: types
+          in: query
+          required: false
+          description: >-
+            Exact event types, comma separated and repeatable, each name once and dot-delimited lowercase (quote.exposure.flagged). A name that is malformed or repeated is a 400 validation_failed naming types; a filter matching nothing is an empty page.
+          schema:
+            type: string
+        - name: include
+          in: query
+          required: false
+          description: Comma separated expansions; only total is known. total adds the count of matching events.
+          schema:
+            type: string
+            enum: [total]
+      responses:
+        "200":
+          description: One page of events, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
   /api/v1/gl/accounts:
     get:
       operationId: glAccountList
@@ -8754,6 +8808,20 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    WireBadRequest:
+      description: >-
+        The request cannot be consumed or fails validation. The body is the ADR 0001 error envelope: lowercase code, the handler's own message in full, one details entry per offending field or blocker.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireInternalError:
+      description: >-
+        An unexpected server fault in the ADR 0001 error envelope. The message is always the fixed string "internal error" and details is omitted.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     PaymentRequired:
       description: The card charge or its persistence failed.
       content:
@@ -8831,6 +8899,64 @@ components:
           properties:
             request_id:
               type: string
+    WireError:
+      type: object
+      required: [error, meta]
+      description: >-
+        The ADR 0001 section 3 error envelope, written by internal/platform/httpx.WriteError. Converted modules answer with it; routes not yet converted keep the Error envelope above. code is a stable lowercase snake_case machine code, message the handler's own message (the fixed string "internal error" on a 500), details one entry per reason (omitted when empty).
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - bad_request
+                - validation_failed
+                - unsupported_query_parameter
+                - unauthorized
+                - forbidden
+                - not_found
+                - method_not_allowed
+                - stale_revision
+                - duplicate
+                - idempotency_in_progress
+                - invalid_state_transition
+                - conflict
+                - precondition_failed
+                - payload_too_large
+                - unsupported_media_type
+                - idempotency_key_reused
+                - precondition_required
+                - rate_limited
+                - internal_error
+                - unavailable
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                $ref: "#/components/schemas/WireErrorDetail"
+        meta:
+          type: object
+          required: [request_id]
+          properties:
+            request_id:
+              type: string
+              description: The request id, equal to the X-Request-ID response header.
+    WireErrorDetail:
+      type: object
+      required: [message]
+      description: >-
+        One reason. A field entry names the field (a body JSON path, a query parameter name, or cursor); a blocker carries code and no field.
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
     IntegrationError:
       type: object
       required: [error]
@@ -10505,6 +10631,56 @@ components:
         min_order_qty: {type: number}
         pack_qty: {type: number}
         synced_at: {type: string, format: date-time}
+    EventPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: >-
+        The ADR 0001 list envelope with the feed's exception: next_cursor is always a string, the last served position or the request's cursor echoed back when the page is empty, so a poller keeps its place.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        next_cursor:
+          type: string
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+          description: Present only under include=total.
+    Event:
+      type: object
+      required: [event_id, type, org, branch_id, entity, data, at]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          description: Dot-delimited lowercase event type.
+        org:
+          type: string
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+        entity:
+          $ref: "#/components/schemas/EventEntity"
+        data:
+          description: The event's summary payload, any JSON value (an object in practice).
+        at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC at microsecond precision.
+    EventEntity:
+      type: object
+      required: [kind, id]
+      properties:
+        kind:
+          type: string
+        id:
+          type: string
+          format: uuid
     GlAccount:
       type: object
       required: [id, code, name, type, subtype, normal_balance, is_active, description, balance, created_at, updated_at]
