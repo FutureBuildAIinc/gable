@@ -80,11 +80,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApVendorInvoice"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/ap/invoices/{id}:
@@ -146,13 +152,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApVendorInvoice"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          $ref: "#/components/responses/UnprocessableEntityEither"
   /api/v1/ap/payments:
     get:
       operationId: apPaymentList
@@ -210,11 +220,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApPayment"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/ap/aging:

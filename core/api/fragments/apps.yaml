@@ -55,6 +55,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AppsList"
+        "400": { $ref: "#/components/responses/IdempotencyBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404":
@@ -69,13 +70,14 @@ paths:
           description: >-
             Either a disabled dependency blocks the enable (the hand written
             app_dependency_conflict body with the blockers), or the idempotency
-            layer reports an in progress claim (the standard envelope).
+            layer reports an in progress claim (the ADR 0001 envelope).
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/AppsDependencyConflictError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/apps/{key}/disable:
@@ -104,6 +106,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AppsList"
+        "400": { $ref: "#/components/responses/IdempotencyBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404":
@@ -118,14 +121,15 @@ paths:
           description: >-
             A core app (app_core), a dependent enabled app
             (app_dependency_conflict), or an idempotency in progress claim
-            (the standard envelope).
+            (the ADR 0001 envelope).
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/AppsCoreConflictError"
                   - $ref: "#/components/schemas/AppsDependencyConflictError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
 components:

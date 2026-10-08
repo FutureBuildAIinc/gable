@@ -30,7 +30,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/inventory-alerts:
@@ -58,7 +58,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/top-customers:
@@ -83,7 +83,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/order-activity:
@@ -106,7 +106,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/revenue-trend:
@@ -131,7 +131,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
 components:

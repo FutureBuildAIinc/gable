@@ -103,6 +103,33 @@ Transcription conventions (following the models' JSON tags):
   integration seam's lists, which the handler guarantees non null, are
   not.
 
+The error envelope rule. An error answer is declared in the envelope of
+whatever writes it, not of the module it belongs to:
+
+- Middleware that writes the ADR 0001 envelope (`WireError`, lowercase
+  codes) is declared as `WireError`: 401 and 403 from the auth layer, the
+  role guard and the machine key check; and the idempotency layer's 409
+  `idempotency_in_progress`, 422 `idempotency_key_reused`, 400
+  `validation_failed` and `bad_request`, and 413 `payload_too_large`.
+- Handlers, and the middleware that answers through `httputil.RespondError`
+  (the branch check, portal auth, partner auth, the rate limiter), write the
+  legacy `Error` envelope (uppercase codes, generic message), and are
+  declared as `Error`. The `Error` code enum lists only the uppercase codes
+  `RespondError` writes.
+- Where one status can come from either writer on an operation, the response
+  is `oneOf [Error, WireError]` (or the seam's own body in place of `Error`).
+  Every POST, PUT and PATCH that takes an `Idempotency-Key` declares 400,
+  409, 413 and 422 for that reason.
+- Operations reference the shared responses in `_shared.yaml` (`Unauthorized`,
+  `Forbidden`, `ForbiddenEither`, `BadRequest`, `BadRequestEither`,
+  `IdempotencyBadRequest`, `Conflict`, `ConflictEither`, `IdempotencyConflict`,
+  `UnprocessableEntity`, `UnprocessableEntityEither`, `PayloadTooLarge`,
+  `LegacyUnauthorized`, `LegacyForbidden`); a fragment does not repeat an
+  inline copy. A body unique to an operation (a refusal envelope, the exposure
+  block) stays inline as a further `oneOf` leg.
+- Not declared per operation: the auth layer's rare 500 `internal_error` and
+  the machine key lookup's 503 `unavailable` (both `WireError`).
+
 ## Regenerating
 
 From the Go module root (`core/`):

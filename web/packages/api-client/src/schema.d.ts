@@ -15,7 +15,7 @@ export interface paths {
         put?: never;
         /**
          * Receive a signed create_purchase_order event from FB Brain
-         * @description Order of checks, exactly as the receiver runs them. (1) The body is read up to 1 MiB; anything beyond that is silently truncated, which makes the signature fail. (2) X-JWS-Signature must be present, else 401. (3) X-Idempotency-Key must be present, else 400. (4) The signature must be a compact detached JWS (RS256 only) that verifies over the raw request body with Brain's RSA public key, else 401 "invalid JWS signature". (5) The key is looked up in the a2a_inbound_po_log table; a key already logged is a 409 DUPLICATE (the receiver's own check, in addition to the global idempotency layer). (6) The body must be JSON, else 400. (7) An event_type other than create_purchase_order is acknowledged with 200 {"status": "ignored"} and nothing is created. (8) payload must decode into the purchase order payload and its vendor_id must be a UUID, else 400. The purchase order is created through the purchase order service with source A2A, stamped with the branch from the brain_inbound_branch_id system setting (falling back to default_branch_id); a failure is a 500. On success the webhook is logged against the idempotency key (a failure to log is only logged, the answer stays 201) and the answer is 201 {"status":"created","po_id"}. The key is recorded only after a successful creation, so a failed attempt can be retried with the same key. The global idempotency layer (the Idempotency-Key or X-Idempotency-Key header) only claims requests that carry an identifiable principal; this route has no JWT, so outside AUTH_MODE=dev the global layer passes it through uncached, and under AUTH_MODE=dev it claims under the dev principal and may answer 409 (in progress) or 422 (key reused with a different body) in the standard envelope. There is no role guard and no JWT.
+         * @description Order of checks, exactly as the receiver runs them. (1) The body is read up to 1 MiB; anything beyond that is silently truncated, which makes the signature fail. (2) X-JWS-Signature must be present, else 401. (3) X-Idempotency-Key must be present, else 400. (4) The signature must be a compact detached JWS (RS256 only) that verifies over the raw request body with Brain's RSA public key, else 401 "invalid JWS signature". (5) The key is looked up in the a2a_inbound_po_log table; a key already logged is a 409 DUPLICATE (the receiver's own check, in addition to the global idempotency layer). (6) The body must be JSON, else 400. (7) An event_type other than create_purchase_order is acknowledged with 200 {"status": "ignored"} and nothing is created. (8) payload must decode into the purchase order payload and its vendor_id must be a UUID, else 400. The purchase order is created through the purchase order service with source A2A, stamped with the branch from the brain_inbound_branch_id system setting (falling back to default_branch_id); a failure is a 500. On success the webhook is logged against the idempotency key (a failure to log is only logged, the answer stays 201) and the answer is 201 {"status":"created","po_id"}. The key is recorded only after a successful creation, so a failed attempt can be retried with the same key. The global idempotency layer (the Idempotency-Key or X-Idempotency-Key header) only claims requests that carry an identifiable principal; this route has no JWT, so outside AUTH_MODE=dev the global layer passes it through uncached, and under AUTH_MODE=dev it claims under the dev principal. In dev a repeat of a request that already succeeded therefore replays the stored 201 or 200 with Idempotency-Replayed: true, and the receiver's own 409 DUPLICATE is not reached; the layer may also answer 409 (in progress), 422 (key reused with a different body) or, when the body exceeds the size limit, 413 payload_too_large, all in the ADR 0001 envelope. A key that is not 1 to 255 printable ASCII characters is answered 400 validation_failed by the layer in every mode, before the signature is checked. There is no role guard and no JWT.
          */
         post: operations["a2aPurchaseOrderReceive"];
         delete?: never;
@@ -10293,7 +10293,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description The request cannot be consumed. The body is the standard error envelope; the message is the generic status text, and the handler's specific message goes to the server log only. */
+        /** @description A handler (or the branch middleware) cannot consume the request. The body is the standard error envelope; the message is the generic status text, and the specific message goes to the server log only. POST, PUT and PATCH operations that take an Idempotency-Key use BadRequestEither. */
         BadRequest: {
             headers: {
                 [name: string]: unknown;
@@ -10338,7 +10338,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The write conflicts with the resource's current state. */
+        /** @description A handler reports that the write conflicts with the resource's current state (the standard error envelope). Operations that take an Idempotency-Key use ConflictEither. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -10347,8 +10347,89 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The request is semantically invalid for this operation. Used by the idempotency layer when an Idempotency-Key is reused with a request body that differs from the original. */
+        /** @description The idempotency layer refused an Idempotency-Key reused with a request whose method, path, query or body differs from the original (code idempotency_key_reused). Written by middleware, so the ADR 0001 envelope. */
         UnprocessableEntity: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description Either the handler refused the operation as semantically invalid (the standard error envelope, code UNPROCESSABLE_ENTITY), or the idempotency layer refused a reused Idempotency-Key (the ADR 0001 envelope, code idempotency_key_reused). */
+        UnprocessableEntityEither: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"] | components["schemas"]["WireError"];
+            };
+        };
+        /** @description The Idempotency-Key is already in progress under a concurrent request (code idempotency_in_progress). Written by the idempotency layer, so the ADR 0001 envelope. The operation raises no 409 of its own. */
+        IdempotencyConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description Either the handler reports a conflict with the resource's current state (the standard error envelope, code CONFLICT), or the idempotency layer reports the Idempotency-Key in progress (the ADR 0001 envelope, code idempotency_in_progress). */
+        ConflictEither: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"] | components["schemas"]["WireError"];
+            };
+        };
+        /** @description Either the handler cannot consume the request (the standard error envelope, code BAD_REQUEST, generic message), or the idempotency layer rejects the Idempotency-Key header or the body read (the ADR 0001 envelope, codes validation_failed and bad_request, one details entry per fault). */
+        BadRequestEither: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"] | components["schemas"]["WireError"];
+            };
+        };
+        /** @description The idempotency layer rejects an Idempotency-Key that is not 1 to 255 printable ASCII characters (code validation_failed) or a body it cannot read (code bad_request). Written by middleware, so the ADR 0001 envelope. The operation raises no 400 of its own. */
+        IdempotencyBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description An Idempotency-Key was sent and the body exceeds the request size limit (code payload_too_large). Written by the idempotency layer, so the ADR 0001 envelope. */
+        PayloadTooLarge: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description Either the role guard or the machine key scope check refused the caller (the ADR 0001 envelope, code forbidden), or the branch middleware found no grant for the X-Branch-Id (the standard error envelope, code FORBIDDEN). */
+        ForbiddenEither: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"] | components["schemas"]["Error"];
+            };
+        };
+        /** @description No or invalid portal credentials. The portal auth middleware answers with httputil.RespondError, so the standard error envelope. */
+        LegacyUnauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description A portal handler refused the caller. Portal handlers answer with httputil.RespondError, so the standard error envelope. */
+        LegacyForbidden: {
             headers: {
                 [name: string]: unknown;
             };
@@ -10437,6 +10518,15 @@ export interface components {
                 "application/json": components["schemas"]["IntegrationError"];
             };
         };
+        /** @description The body or a parameter is malformed (the seam's own error body), or the idempotency layer rejects the Idempotency-Key header or the body read (the ADR 0001 envelope). */
+        IntegrationBadRequestEither: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["IntegrationError"] | components["schemas"]["WireError"];
+            };
+        };
         /** @description The addressed resource does not exist. */
         IntegrationNotFound: {
             headers: {
@@ -10453,6 +10543,15 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["IntegrationError"];
+            };
+        };
+        /** @description The order was created but could not be confirmed (the seam's own error body), or the idempotency layer reports the Idempotency-Key in progress (the ADR 0001 envelope). */
+        IntegrationConflictEither: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["IntegrationError"] | components["schemas"]["WireError"];
             };
         };
         /** @description The handler failed. */
@@ -10520,13 +10619,13 @@ export interface operations {
                     "application/json": components["schemas"]["A2aCreatedResponse"];
                 };
             };
-            /** @description VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body not JSON, payload not a purchase order payload, or vendor_id not a UUID. The global idempotency layer can also answer 400 in the standard envelope under AUTH_MODE=dev. */
+            /** @description VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body not JSON, payload not a purchase order payload, or vendor_id not a UUID. The global idempotency layer can also answer 400 in the ADR 0001 envelope (validation_failed for a malformed key in every mode; bad_request for an unreadable body under AUTH_MODE=dev). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["A2aError"] | components["schemas"]["Error"];
+                    "application/json": components["schemas"]["A2aError"] | components["schemas"]["WireError"];
                 };
             };
             /** @description UNAUTHORIZED: missing X-JWS-Signature header, or a signature that does not parse or verify against Brain's public key. */
@@ -10547,15 +10646,16 @@ export interface operations {
                     "text/plain": string;
                 };
             };
-            /** @description DUPLICATE: the X-Idempotency-Key was already processed (the receiver's body), or, under AUTH_MODE=dev only, the global layer's in progress claim in the standard envelope. */
+            /** @description DUPLICATE: the X-Idempotency-Key was already processed (the receiver's body), or, under AUTH_MODE=dev only, the global layer's in progress claim in the ADR 0001 envelope. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["A2aError"] | components["schemas"]["Error"];
+                    "application/json": components["schemas"]["A2aError"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             /** @description INTERNAL_ERROR: the idempotency lookup failed or the purchase order could not be created. */
             500: {
@@ -10593,7 +10693,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -10622,7 +10722,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -10651,7 +10751,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -10684,10 +10784,13 @@ export interface operations {
                     "application/json": components["schemas"]["Activity"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -10714,7 +10817,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
@@ -10767,10 +10870,11 @@ export interface operations {
                     "application/json": components["schemas"]["TechAdminCreateKeyResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -10845,10 +10949,11 @@ export interface operations {
                     "application/json": components["schemas"]["TechAdminSaveResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -10921,10 +11026,11 @@ export interface operations {
                     "application/json": components["schemas"]["TechAdminSaveResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11000,10 +11106,11 @@ export interface operations {
                     "application/json": components["schemas"]["StaffModule"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11056,10 +11163,11 @@ export interface operations {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11118,11 +11226,12 @@ export interface operations {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11154,10 +11263,11 @@ export interface operations {
                     "application/json": components["schemas"]["StaffMember"] | components["schemas"]["StaffModuleStatus"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11210,9 +11320,11 @@ export interface operations {
                     "application/json": components["schemas"]["AdminExposureScanResult"];
                 };
             };
+            400: components["responses"]["IdempotencyBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11269,9 +11381,12 @@ export interface operations {
                     "application/json": components["schemas"]["ApVendorInvoice"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11324,10 +11439,12 @@ export interface operations {
                     "application/json": components["schemas"]["ApVendorInvoice"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["UnprocessableEntity"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntityEither"];
         };
     };
     apPaymentList: {
@@ -11380,9 +11497,12 @@ export interface operations {
                     "application/json": components["schemas"]["ApPayment"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11454,6 +11574,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppsList"];
                 };
             };
+            400: components["responses"]["IdempotencyBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /** @description The key names no compiled in manifest, or the manifest has no registry row. The standard error envelope with the generic text. */
@@ -11465,15 +11586,16 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Either a disabled dependency blocks the enable (the hand written app_dependency_conflict body with the blockers), or the idempotency layer reports an in progress claim (the standard envelope). */
+            /** @description Either a disabled dependency blocks the enable (the hand written app_dependency_conflict body with the blockers), or the idempotency layer reports an in progress claim (the ADR 0001 envelope). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppsDependencyConflictError"] | components["schemas"]["Error"];
+                    "application/json": components["schemas"]["AppsDependencyConflictError"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11501,6 +11623,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppsList"];
                 };
             };
+            400: components["responses"]["IdempotencyBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /** @description The key names no compiled in manifest, or the manifest has no registry row. The standard error envelope with the generic text. */
@@ -11512,15 +11635,16 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A core app (app_core), a dependent enabled app (app_dependency_conflict), or an idempotency in progress claim (the standard envelope). */
+            /** @description A core app (app_core), a dependent enabled app (app_dependency_conflict), or an idempotency in progress claim (the ADR 0001 envelope). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppsCoreConflictError"] | components["schemas"]["AppsDependencyConflictError"] | components["schemas"]["Error"];
+                    "application/json": components["schemas"]["AppsCoreConflictError"] | components["schemas"]["AppsDependencyConflictError"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11573,9 +11697,12 @@ export interface operations {
                     "application/json": components["schemas"]["BankreconBankAccount"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11604,9 +11731,12 @@ export interface operations {
                     "application/json": components["schemas"]["BankreconImportResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11635,9 +11765,12 @@ export interface operations {
                     "application/json": components["schemas"]["BankreconStatusResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11666,9 +11799,12 @@ export interface operations {
                     "application/json": components["schemas"]["BankreconStatusResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11722,9 +11858,12 @@ export interface operations {
                     "application/json": components["schemas"]["BankreconSession"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11777,10 +11916,12 @@ export interface operations {
                     "application/json": components["schemas"]["BankreconSession"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["UnprocessableEntity"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntityEither"];
         };
     };
     configuratorListRules: {
@@ -11887,11 +12028,12 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorValidateResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -11921,11 +12063,12 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorBuildSKUResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };
@@ -11956,7 +12099,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11987,9 +12130,12 @@ export interface operations {
                     "application/json": components["schemas"]["Customer"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12018,7 +12164,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -12049,10 +12195,11 @@ export interface operations {
                     "application/json": components["schemas"]["Customer"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -12082,7 +12229,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
@@ -12116,9 +12263,12 @@ export interface operations {
                     "application/json": components["schemas"]["EscalationPolicy"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12147,7 +12297,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12180,9 +12330,12 @@ export interface operations {
                     "application/json": components["schemas"]["Activity"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12211,7 +12364,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12244,9 +12397,12 @@ export interface operations {
                     "application/json": components["schemas"]["Contact"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12275,7 +12431,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -12308,9 +12464,12 @@ export interface operations {
                     "application/json": components["schemas"]["Contact"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12337,7 +12496,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12363,7 +12522,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12390,7 +12549,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12417,7 +12576,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12444,7 +12603,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12471,7 +12630,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12498,7 +12657,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12524,7 +12683,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12555,9 +12714,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryVehicle"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12586,7 +12748,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -12619,9 +12781,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryVehicle"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12648,7 +12813,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12681,9 +12846,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryPhotoUrl"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12709,7 +12877,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12740,9 +12908,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryDriver"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12771,7 +12942,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -12804,9 +12975,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryDriver"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12833,7 +13007,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12866,9 +13040,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryPhotoUrl"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12900,7 +13077,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12931,9 +13108,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryRoute"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12960,9 +13140,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12993,9 +13176,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13024,9 +13210,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryRouteOptimizationResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13055,9 +13244,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryStatusAck"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     deliveryRouteDeliveries: {
@@ -13085,7 +13277,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13116,9 +13308,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryAssignResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13147,7 +13342,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13178,9 +13373,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13213,9 +13411,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryAdjustAck"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13248,9 +13449,12 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryPodPhoto"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13279,7 +13483,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13309,7 +13513,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13340,9 +13544,12 @@ export interface operations {
                     "application/json": components["schemas"]["Deposit"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     depositGet: {
@@ -13370,7 +13577,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -13403,9 +13610,12 @@ export interface operations {
                     "application/json": components["schemas"]["DepositApplication"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     documentsPrintInvoice: {
@@ -13516,9 +13726,12 @@ export interface operations {
                     "application/json": components["schemas"]["EdiTradingPartner"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13575,10 +13788,13 @@ export interface operations {
                     "application/json": components["schemas"]["EdiTradingPartner"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13668,10 +13884,12 @@ export interface operations {
                     };
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["UnprocessableEntity"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntityEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13756,9 +13974,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlAccount"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     glAccountUpdate: {
@@ -13788,9 +14009,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlAccount"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13842,9 +14066,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlJournalEntry"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     glJournalEntryGet: {
@@ -13896,9 +14123,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlStatusResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     glJournalEntryReverse: {
@@ -13928,9 +14158,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlReverseResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     glJournalEntryVoid: {
@@ -13956,9 +14189,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlStatusResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     glTrialBalance: {
@@ -14090,9 +14326,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlStatusResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     glFiscalPeriodReopen: {
@@ -14118,9 +14357,12 @@ export interface operations {
                     "application/json": components["schemas"]["GlStatusResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     governanceListRfcs: {
@@ -14172,11 +14414,12 @@ export interface operations {
                     "application/json": components["schemas"]["GovernanceRFC"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -14243,11 +14486,12 @@ export interface operations {
                     "application/json": components["schemas"]["GovernanceRFC"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -14395,9 +14639,12 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPricedItemList"];
                 };
             };
-            400: components["responses"]["IntegrationBadRequest"];
+            400: components["responses"]["IntegrationBadRequestEither"];
             401: components["responses"]["IntegrationUnauthorized"];
             404: components["responses"]["IntegrationNotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["IntegrationServerError"];
             503: components["responses"]["IntegrationUnavailable"];
         };
@@ -14427,8 +14674,11 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationQuoteResponse"];
                 };
             };
-            400: components["responses"]["IntegrationBadRequest"];
+            400: components["responses"]["IntegrationBadRequestEither"];
             401: components["responses"]["IntegrationUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["IntegrationServerError"];
             503: components["responses"]["IntegrationUnavailable"];
         };
@@ -14456,9 +14706,11 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationOrderResponse"];
                 };
             };
-            400: components["responses"]["IntegrationBadRequest"];
+            400: components["responses"]["IntegrationBadRequestEither"];
             401: components["responses"]["IntegrationUnauthorized"];
-            409: components["responses"]["IntegrationConflict"];
+            409: components["responses"]["IntegrationConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["IntegrationServerError"];
             503: components["responses"]["IntegrationUnavailable"];
         };
@@ -14584,8 +14836,11 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationDeliveryRouteResponse"];
                 };
             };
-            400: components["responses"]["IntegrationBadRequest"];
+            400: components["responses"]["IntegrationBadRequestEither"];
             401: components["responses"]["IntegrationUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["IntegrationServerError"];
             503: components["responses"]["IntegrationUnavailable"];
         };
@@ -14615,9 +14870,10 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationValidateStaffResponse"];
                 };
             };
-            400: components["responses"]["IntegrationBadRequest"];
+            400: components["responses"]["IntegrationBadRequestEither"];
             401: components["responses"]["IntegrationUnauthorized"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["IntegrationServerError"];
             503: components["responses"]["IntegrationUnavailable"];
@@ -14649,7 +14905,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -14680,9 +14936,12 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryStatusAck"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -14713,9 +14972,12 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryStatusAck"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -14746,7 +15008,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -14775,7 +15037,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -14808,10 +15070,13 @@ export interface operations {
                     "application/json": components["schemas"]["CreditMemo"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -14821,6 +15086,8 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
@@ -14838,18 +15105,21 @@ export interface operations {
                     "application/json": components["schemas"]["InvoiceEmailResponse"];
                 };
             };
-            /** @description Customer has no email address on file. */
+            /** @description Customer has no email address on file (the standard error envelope), or the Idempotency-Key header is malformed (the ADR 0001 envelope). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["WireError"];
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -14878,7 +15148,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -14930,9 +15200,12 @@ export interface operations {
                     "application/json": components["schemas"]["Location"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     locationGet: {
@@ -14989,10 +15262,13 @@ export interface operations {
                     "application/json": components["schemas"]["Location"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     locationDelete: {
@@ -15071,9 +15347,12 @@ export interface operations {
                     "application/json": components["schemas"]["Location"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     branchGet: {
@@ -15130,10 +15409,13 @@ export interface operations {
                     "application/json": components["schemas"]["Location"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     branchDelete: {
@@ -15309,10 +15591,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15367,10 +15652,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15422,9 +15710,12 @@ export interface operations {
                     "application/json": components["schemas"]["MatchingConfig"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15500,9 +15791,12 @@ export interface operations {
                     "application/json": components["schemas"]["MatchingResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15559,11 +15853,12 @@ export interface operations {
                     "application/json": components["schemas"]["MillworkOption"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -15595,7 +15890,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15626,9 +15921,12 @@ export interface operations {
                     "application/json": components["schemas"]["Order"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15657,7 +15955,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15684,18 +15982,20 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description The lumber index exposure gate blocks this order. */
+            403: components["responses"]["ForbiddenEither"];
+            /** @description The lumber index exposure gate blocks this order, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExposureBlock"];
+                    "application/json": components["schemas"]["ExposureBlock"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15722,18 +16022,20 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description The lumber index exposure gate blocks this order. */
+            403: components["responses"]["ForbiddenEither"];
+            /** @description The lumber index exposure gate blocks this order, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExposureBlock"];
+                    "application/json": components["schemas"]["ExposureBlock"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15764,10 +16066,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15796,7 +16100,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             /** @description Blocked by unresolved index exposure. */
             409: {
                 headers: {
@@ -15838,9 +16142,12 @@ export interface operations {
                     "application/json": components["schemas"]["OrderExposureOverridden"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15875,10 +16182,11 @@ export interface operations {
                     "application/json": components["schemas"]["ParsingParseResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16004,9 +16312,12 @@ export interface operations {
                     "application/json": components["schemas"]["Payment"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16035,9 +16346,12 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentIntentResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -16066,10 +16380,13 @@ export interface operations {
                     "application/json": components["schemas"]["Payment"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             402: components["responses"]["PaymentRequired"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     paymentRefund: {
@@ -16097,9 +16414,12 @@ export interface operations {
                     "application/json": components["schemas"]["Refund"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16154,7 +16474,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             /** @description The per-IP strict limit (10 per minute) is exhausted; the standard error envelope. */
             429: {
                 headers: {
@@ -16225,7 +16545,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortalDashboard"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16264,7 +16584,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
@@ -16290,7 +16610,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16319,17 +16639,10 @@ export interface operations {
                     "application/json": components["schemas"]["PortalReorderResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16361,18 +16674,19 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCancelOrderResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope. */
+            /** @description The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortalRefusal"];
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16404,18 +16718,11 @@ export interface operations {
                     "application/json": components["schemas"]["PortalOrder"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16438,7 +16745,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortalInvoice"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16463,7 +16770,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16485,7 +16792,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortalDelivery"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16510,7 +16817,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16542,7 +16849,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
@@ -16574,8 +16881,8 @@ export interface operations {
                     "application/json": components["schemas"]["PortalDeliveryReschedule"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
             /** @description Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
             409: {
@@ -16583,9 +16890,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"] | components["schemas"]["PortalRefusal"];
+                    "application/json": components["schemas"]["WireError"] | components["schemas"]["PortalRefusal"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16617,7 +16925,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCatalogProduct"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16639,7 +16947,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCategoryNode"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16664,7 +16972,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16689,7 +16997,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16711,7 +17019,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortalQuote"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16740,18 +17048,11 @@ export interface operations {
                     "application/json": components["schemas"]["PortalQuote"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };
@@ -16776,7 +17077,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16803,18 +17104,19 @@ export interface operations {
                     "application/json": components["schemas"]["PortalQuote"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The quote is not in a decidable state; the refusal envelope. */
+            /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortalRefusal"];
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16842,18 +17144,19 @@ export interface operations {
                     "application/json": components["schemas"]["PortalQuote"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The quote is not in a decidable state; the refusal envelope. */
+            /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortalRefusal"];
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16876,7 +17179,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCart"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -16905,17 +17208,10 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCart"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16947,17 +17243,10 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCart"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -16983,7 +17272,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17012,17 +17301,10 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCheckoutResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -17045,8 +17327,8 @@ export interface operations {
                     "application/json": components["schemas"]["PortalCustomerUser"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17068,8 +17350,8 @@ export interface operations {
                     "application/json": components["schemas"]["PortalInvite"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17098,18 +17380,11 @@ export interface operations {
                     "application/json": components["schemas"]["PortalInvite"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -17139,18 +17414,11 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -17180,18 +17448,11 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -17223,7 +17484,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17254,7 +17515,7 @@ export interface operations {
                     "application/json": components["schemas"]["PosTransaction"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
             403: {
@@ -17265,6 +17526,9 @@ export interface operations {
                     "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
                 };
             };
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17293,7 +17557,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17326,9 +17590,12 @@ export interface operations {
                     "application/json": components["schemas"]["PosTransaction"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17358,7 +17625,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17391,16 +17658,18 @@ export interface operations {
                     "application/json": components["schemas"]["PosTransaction"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description The completion failed (under-tendered sale, declined card, transaction not OPEN). */
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            /** @description The completion failed (under-tendered sale, declined card, transaction not OPEN; the standard error envelope), or the Idempotency-Key was reused with a different request (the ADR 0001 envelope). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["WireError"];
                 };
             };
         };
@@ -17430,9 +17699,12 @@ export interface operations {
                     "application/json": components["schemas"]["PosTransaction"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17461,7 +17733,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17492,9 +17764,12 @@ export interface operations {
                     "application/json": components["schemas"]["PosSyncResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17520,7 +17795,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17551,7 +17826,7 @@ export interface operations {
                     "application/json": components["schemas"]["PosTillSession"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
             403: {
@@ -17562,7 +17837,9 @@ export interface operations {
                     "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
                 };
             };
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17591,7 +17868,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17620,7 +17897,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17653,10 +17930,12 @@ export interface operations {
                     "application/json": components["schemas"]["PosTillReport"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     posTillZReport: {
@@ -17684,7 +17963,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17714,7 +17993,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17744,7 +18023,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17775,7 +18054,7 @@ export interface operations {
                     "application/json": components["schemas"]["PosReturn"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
             403: {
@@ -17786,6 +18065,9 @@ export interface operations {
                     "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
                 };
             };
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17814,7 +18096,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17897,10 +18179,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingRule"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -17930,10 +18213,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingEscalationResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -17987,10 +18271,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingProductCategory"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18022,10 +18307,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingProductCategory"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18085,10 +18371,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingCategoryRule"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18118,10 +18405,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingBulkCount"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18179,10 +18467,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingCategoryRule"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18338,10 +18627,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingRebateProgram"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18426,10 +18716,11 @@ export interface operations {
                     "application/json": components["schemas"]["PricingRebateClaim"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18484,11 +18775,12 @@ export interface operations {
                     "application/json": components["schemas"]["MarketIndex"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18549,11 +18841,12 @@ export interface operations {
                     "application/json": components["schemas"]["MarketIndexRefreshResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18585,11 +18878,12 @@ export interface operations {
                     "application/json": components["schemas"]["MarketIndexRefreshPreview"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -18647,9 +18941,12 @@ export interface operations {
                     "application/json": components["schemas"]["Product"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18753,7 +19050,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18786,9 +19083,12 @@ export interface operations {
                     "application/json": components["schemas"]["PimContent"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18817,7 +19117,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18845,7 +19145,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18873,9 +19173,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18904,7 +19207,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18932,7 +19235,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18965,9 +19268,12 @@ export interface operations {
                     "application/json": components["schemas"]["PimCollateral"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19000,9 +19306,12 @@ export interface operations {
                     "application/json": components["schemas"]["PimContent"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19035,9 +19344,12 @@ export interface operations {
                     "application/json": components["schemas"]["PimMedia"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19070,9 +19382,12 @@ export interface operations {
                     "application/json": components["schemas"]["PimContent"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19101,9 +19416,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19134,9 +19452,12 @@ export interface operations {
                     "application/json": components["schemas"]["Geometry"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19167,9 +19488,12 @@ export interface operations {
                     "application/json": components["schemas"]["ProductLeadTimeUpdate"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     projectList: {
@@ -19190,7 +19514,7 @@ export interface operations {
                     "application/json": components["schemas"]["Project"][];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19219,17 +19543,10 @@ export interface operations {
                     "application/json": components["schemas"]["Project"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -19255,7 +19572,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -19286,17 +19603,10 @@ export interface operations {
                     "application/json": components["schemas"]["Project"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The idempotency key is already being processed by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -19323,7 +19633,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19354,9 +19664,12 @@ export interface operations {
                     "application/json": components["schemas"]["PurchaseOrder"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19382,7 +19695,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -19414,8 +19727,12 @@ export interface operations {
                     "application/json": components["schemas"]["PurchaseOrderRefreshResult"];
                 };
             };
+            400: components["responses"]["IdempotencyBadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19446,8 +19763,12 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["IdempotencyBadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19473,7 +19794,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19501,7 +19822,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19530,7 +19851,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -19559,7 +19880,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19595,10 +19916,11 @@ export interface operations {
                     "application/json": components["schemas"]["PurchaseOrderFreightUploadResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -19632,9 +19954,12 @@ export interface operations {
                     };
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     purchaseOrderReceive: {
@@ -19669,9 +19994,12 @@ export interface operations {
                     };
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19703,9 +20031,12 @@ export interface operations {
                     };
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19736,7 +20067,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19767,9 +20098,12 @@ export interface operations {
                     "application/json": components["schemas"]["Quote"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19795,7 +20129,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19824,7 +20158,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -19857,9 +20191,12 @@ export interface operations {
                     "application/json": components["schemas"]["Quote"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19892,9 +20229,12 @@ export interface operations {
                     "application/json": components["schemas"]["Quote"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19923,10 +20263,13 @@ export interface operations {
                     "application/json": components["schemas"]["QuoteOrderPayload"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19967,7 +20310,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19996,7 +20339,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20025,10 +20368,12 @@ export interface operations {
                     "application/json": components["schemas"]["ExposureRequestAckResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20061,10 +20406,12 @@ export interface operations {
                     "application/json": components["schemas"]["ExposureAcknowledgeResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20097,10 +20444,12 @@ export interface operations {
                     "application/json": components["schemas"]["ExposureOverrideResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20129,9 +20478,12 @@ export interface operations {
                     "application/json": components["schemas"]["EscalateNowResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20160,7 +20512,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -20189,10 +20541,11 @@ export interface operations {
                     "application/json": components["schemas"]["ReportingRows"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -20225,10 +20578,11 @@ export interface operations {
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -20284,10 +20638,11 @@ export interface operations {
                     "application/json": components["schemas"]["ReportingSavedReport"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -20367,10 +20722,11 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -20423,10 +20779,12 @@ export interface operations {
                     "application/json": components["schemas"]["ReportingRow"][];
                 };
             };
+            400: components["responses"]["IdempotencyBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -20479,10 +20837,11 @@ export interface operations {
                     "application/json": components["schemas"]["ReportingScheduleResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -20666,7 +21025,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20695,7 +21054,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
@@ -20725,9 +21084,12 @@ export interface operations {
                     "application/json": components["schemas"]["TaxExemption"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20806,9 +21168,12 @@ export interface operations {
                     "application/json": components["schemas"]["TaxResult"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20857,7 +21222,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20888,9 +21253,12 @@ export interface operations {
                     "application/json": components["schemas"]["Vendor"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -20919,7 +21287,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
@@ -20949,10 +21317,11 @@ export interface operations {
                     "application/json": components["schemas"]["VisionBlueprintScanResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };

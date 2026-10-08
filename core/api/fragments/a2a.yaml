@@ -43,9 +43,15 @@ paths:
         X-Idempotency-Key header) only claims requests that carry an
         identifiable principal; this route has no JWT, so outside
         AUTH_MODE=dev the global layer passes it through uncached, and under
-        AUTH_MODE=dev it claims under the dev principal and may answer 409
-        (in progress) or 422 (key reused with a different body) in the
-        standard envelope. There is no role guard and no JWT.
+        AUTH_MODE=dev it claims under the dev principal. In dev a repeat of a
+        request that already succeeded therefore replays the stored 201 or 200
+        with Idempotency-Replayed: true, and the receiver's own 409 DUPLICATE
+        is not reached; the layer may also answer 409 (in progress), 422 (key
+        reused with a different body) or, when the body exceeds the size
+        limit, 413 payload_too_large, all in the ADR 0001 envelope. A key that
+        is not 1 to 255 printable ASCII characters is answered 400
+        validation_failed by the layer in every mode, before the signature is
+        checked. There is no role guard and no JWT.
       security: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -97,13 +103,14 @@ paths:
             VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body
             not JSON, payload not a purchase order payload, or vendor_id not a
             UUID. The global idempotency layer can also answer 400 in the
-            standard envelope under AUTH_MODE=dev.
+            ADR 0001 envelope (validation_failed for a malformed key in every
+            mode; bad_request for an unreadable body under AUTH_MODE=dev).
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/A2aError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
         "401":
           description: >-
             UNAUTHORIZED: missing X-JWS-Signature header, or a signature that
@@ -116,13 +123,13 @@ paths:
           description: >-
             DUPLICATE: the X-Idempotency-Key was already processed (the
             receiver's body), or, under AUTH_MODE=dev only, the global layer's
-            in progress claim in the standard envelope.
+            in progress claim in the ADR 0001 envelope.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/A2aError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
         "404":
           description: >-
             The route is not mounted (FB Brain disabled or no loadable public
@@ -131,6 +138,7 @@ paths:
             text/plain:
               schema:
                 type: string
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500":
           description: >-

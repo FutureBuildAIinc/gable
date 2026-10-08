@@ -64,10 +64,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TechAdminCreateKeyResponse"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/admin/keys/{id}:
@@ -138,10 +139,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TechAdminSaveResult"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
     delete:
@@ -198,10 +200,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TechAdminSaveResult"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
     delete:
@@ -268,10 +271,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffModule"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/admin/staff:
@@ -317,10 +321,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffMember"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/admin/staff/{id}:
@@ -377,11 +382,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffMember"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/admin/staff/{id}/modules:
@@ -418,10 +424,11 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/StaffMember"
                   - $ref: "#/components/schemas/StaffModuleStatus"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/admin/staff/{id}/modules/{module_id}:
@@ -479,9 +486,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminExposureScanResult"
+        "400": { $ref: "#/components/responses/IdempotencyBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
 components:

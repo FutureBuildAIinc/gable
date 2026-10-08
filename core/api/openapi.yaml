@@ -65,7 +65,7 @@ paths:
       tags: [a2a]
       summary: Receive a signed create_purchase_order event from FB Brain
       description: >-
-        Order of checks, exactly as the receiver runs them. (1) The body is read up to 1 MiB; anything beyond that is silently truncated, which makes the signature fail. (2) X-JWS-Signature must be present, else 401. (3) X-Idempotency-Key must be present, else 400. (4) The signature must be a compact detached JWS (RS256 only) that verifies over the raw request body with Brain's RSA public key, else 401 "invalid JWS signature". (5) The key is looked up in the a2a_inbound_po_log table; a key already logged is a 409 DUPLICATE (the receiver's own check, in addition to the global idempotency layer). (6) The body must be JSON, else 400. (7) An event_type other than create_purchase_order is acknowledged with 200 {"status": "ignored"} and nothing is created. (8) payload must decode into the purchase order payload and its vendor_id must be a UUID, else 400. The purchase order is created through the purchase order service with source A2A, stamped with the branch from the brain_inbound_branch_id system setting (falling back to default_branch_id); a failure is a 500. On success the webhook is logged against the idempotency key (a failure to log is only logged, the answer stays 201) and the answer is 201 {"status":"created","po_id"}. The key is recorded only after a successful creation, so a failed attempt can be retried with the same key. The global idempotency layer (the Idempotency-Key or X-Idempotency-Key header) only claims requests that carry an identifiable principal; this route has no JWT, so outside AUTH_MODE=dev the global layer passes it through uncached, and under AUTH_MODE=dev it claims under the dev principal and may answer 409 (in progress) or 422 (key reused with a different body) in the standard envelope. There is no role guard and no JWT.
+        Order of checks, exactly as the receiver runs them. (1) The body is read up to 1 MiB; anything beyond that is silently truncated, which makes the signature fail. (2) X-JWS-Signature must be present, else 401. (3) X-Idempotency-Key must be present, else 400. (4) The signature must be a compact detached JWS (RS256 only) that verifies over the raw request body with Brain's RSA public key, else 401 "invalid JWS signature". (5) The key is looked up in the a2a_inbound_po_log table; a key already logged is a 409 DUPLICATE (the receiver's own check, in addition to the global idempotency layer). (6) The body must be JSON, else 400. (7) An event_type other than create_purchase_order is acknowledged with 200 {"status": "ignored"} and nothing is created. (8) payload must decode into the purchase order payload and its vendor_id must be a UUID, else 400. The purchase order is created through the purchase order service with source A2A, stamped with the branch from the brain_inbound_branch_id system setting (falling back to default_branch_id); a failure is a 500. On success the webhook is logged against the idempotency key (a failure to log is only logged, the answer stays 201) and the answer is 201 {"status":"created","po_id"}. The key is recorded only after a successful creation, so a failed attempt can be retried with the same key. The global idempotency layer (the Idempotency-Key or X-Idempotency-Key header) only claims requests that carry an identifiable principal; this route has no JWT, so outside AUTH_MODE=dev the global layer passes it through uncached, and under AUTH_MODE=dev it claims under the dev principal. In dev a repeat of a request that already succeeded therefore replays the stored 201 or 200 with Idempotency-Replayed: true, and the receiver's own 409 DUPLICATE is not reached; the layer may also answer 409 (in progress), 422 (key reused with a different body) or, when the body exceeds the size limit, 413 payload_too_large, all in the ADR 0001 envelope. A key that is not 1 to 255 printable ASCII characters is answered 400 validation_failed by the layer in every mode, before the signature is checked. There is no role guard and no JWT.
       security: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -106,13 +106,13 @@ paths:
                 $ref: "#/components/schemas/A2aCreatedResponse"
         "400":
           description: >-
-            VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body not JSON, payload not a purchase order payload, or vendor_id not a UUID. The global idempotency layer can also answer 400 in the standard envelope under AUTH_MODE=dev.
+            VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body not JSON, payload not a purchase order payload, or vendor_id not a UUID. The global idempotency layer can also answer 400 in the ADR 0001 envelope (validation_failed for a malformed key in every mode; bad_request for an unreadable body under AUTH_MODE=dev).
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/A2aError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
         "401":
           description: >-
             UNAUTHORIZED: missing X-JWS-Signature header, or a signature that does not parse or verify against Brain's public key.
@@ -129,13 +129,14 @@ paths:
                 type: string
         "409":
           description: >-
-            DUPLICATE: the X-Idempotency-Key was already processed (the receiver's body), or, under AUTH_MODE=dev only, the global layer's in progress claim in the standard envelope.
+            DUPLICATE: the X-Idempotency-Key was already processed (the receiver's body), or, under AUTH_MODE=dev only, the global layer's in progress claim in the ADR 0001 envelope.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/A2aError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500":
           description: >-
@@ -171,7 +172,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/accounts/{id}/transactions:
@@ -205,7 +206,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/activities/{id}:
@@ -234,7 +235,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
@@ -266,13 +267,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Activity'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -296,7 +303,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -341,10 +348,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TechAdminCreateKeyResponse"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/admin/keys/{id}:
@@ -403,10 +411,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TechAdminSaveResult"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
     delete:
@@ -458,10 +467,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TechAdminSaveResult"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
     delete:
@@ -522,10 +532,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffModule"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/admin/staff:
@@ -568,10 +579,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffMember"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/admin/staff/{id}:
@@ -626,11 +638,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffMember"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/admin/staff/{id}/modules:
@@ -663,10 +676,11 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/StaffMember"
                   - $ref: "#/components/schemas/StaffModuleStatus"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/admin/staff/{id}/modules/{module_id}:
@@ -717,9 +731,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminExposureScanResult"
+        "400": {$ref: "#/components/responses/IdempotencyBadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/ap/invoices:
@@ -779,11 +795,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApVendorInvoice"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/ap/invoices/{id}:
@@ -838,13 +860,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApVendorInvoice"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          $ref: "#/components/responses/UnprocessableEntityEither"
   /api/v1/ap/payments:
     get:
       operationId: apPaymentList
@@ -896,11 +922,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApPayment"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/ap/aging:
@@ -962,6 +994,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AppsList"
+        "400": {$ref: "#/components/responses/IdempotencyBadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404":
@@ -973,13 +1006,14 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: >-
-            Either a disabled dependency blocks the enable (the hand written app_dependency_conflict body with the blockers), or the idempotency layer reports an in progress claim (the standard envelope).
+            Either a disabled dependency blocks the enable (the hand written app_dependency_conflict body with the blockers), or the idempotency layer reports an in progress claim (the ADR 0001 envelope).
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/AppsDependencyConflictError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/apps/{key}/disable:
@@ -1003,6 +1037,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AppsList"
+        "400": {$ref: "#/components/responses/IdempotencyBadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404":
@@ -1014,14 +1049,15 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: >-
-            A core app (app_core), a dependent enabled app (app_dependency_conflict), or an idempotency in progress claim (the standard envelope).
+            A core app (app_core), a dependent enabled app (app_dependency_conflict), or an idempotency in progress claim (the ADR 0001 envelope).
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/AppsCoreConflictError"
                   - $ref: "#/components/schemas/AppsDependencyConflictError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/bankrecon/accounts:
@@ -1067,11 +1103,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankreconBankAccount"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/bankrecon/import:
@@ -1097,11 +1139,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankreconImportResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/bankrecon/match:
@@ -1127,11 +1175,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankreconStatusResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/bankrecon/unmatch:
@@ -1157,11 +1211,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankreconStatusResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/bankrecon/sessions:
@@ -1215,11 +1275,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankreconSession"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/bankrecon/sessions/{id}:
@@ -1274,13 +1340,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankreconSession"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          $ref: "#/components/responses/UnprocessableEntityEither"
   /api/v1/configurator/rules:
     get:
       operationId: configuratorListRules
@@ -1376,11 +1446,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConfiguratorValidateResponse"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/configurator/build-sku:
@@ -1405,11 +1476,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConfiguratorBuildSKUResponse"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
   /api/v1/customers:
     get:
@@ -1430,7 +1502,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -1454,11 +1526,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Customer"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/customers/{id}:
@@ -1486,7 +1564,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/v1/customers/{id}/salesperson:
@@ -1516,13 +1594,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Customer"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -1552,7 +1632,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -1586,11 +1666,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/EscalationPolicy"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/customers/{customerId}/activities:
@@ -1622,7 +1708,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -1652,11 +1738,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Activity"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/customers/{customerId}/contacts:
@@ -1684,7 +1776,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -1714,11 +1806,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Contact"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/contacts/{id}:
@@ -1746,7 +1844,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
@@ -1776,11 +1874,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Contact"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
     delete:
@@ -1803,7 +1907,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/price_levels:
@@ -1823,7 +1927,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/summary:
@@ -1847,7 +1951,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/inventory-alerts:
@@ -1873,7 +1977,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/top-customers:
@@ -1898,7 +2002,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/order-activity:
@@ -1921,7 +2025,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/dashboard/revenue-trend:
@@ -1946,7 +2050,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/delivery/vehicles:
@@ -1971,7 +2075,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -1996,11 +2100,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryVehicle'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/vehicles/{id}:
@@ -2030,7 +2140,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
@@ -2062,11 +2172,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryVehicle'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -2090,7 +2206,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/vehicles/{id}/photo:
@@ -2123,11 +2239,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryPhotoUrl'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/drivers:
@@ -2152,7 +2274,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -2177,11 +2299,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryDriver'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/drivers/{id}:
@@ -2211,7 +2339,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
@@ -2243,11 +2371,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryDriver'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -2271,7 +2405,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/drivers/{id}/photo:
@@ -2304,11 +2438,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryPhotoUrl'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/routes:
@@ -2347,7 +2487,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -2373,11 +2513,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryRoute'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/routes/{id}/dispatch:
@@ -2400,11 +2546,17 @@ paths:
         '200':
           description: Dispatched; the body is empty.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/routes/{id}/reorder:
@@ -2432,11 +2584,17 @@ paths:
         '200':
           description: Reordered; the body is empty.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/routes/{id}/optimize:
@@ -2462,11 +2620,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryRouteOptimizationResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/routes/{id}/complete:
@@ -2493,11 +2657,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryStatusAck'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/delivery/routes/{id}/deliveries:
     get:
       operationId: deliveryRouteDeliveries
@@ -2528,7 +2698,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries:
@@ -2555,11 +2725,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryAssignResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}:
@@ -2589,7 +2765,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/status:
@@ -2618,11 +2794,17 @@ paths:
         '200':
           description: Updated; the body is empty.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/adjust-qty:
@@ -2654,11 +2836,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryAdjustAck'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/pod-photo:
@@ -2691,11 +2879,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeliveryPodPhoto'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/pod-photos:
@@ -2726,7 +2920,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/deposits:
@@ -2753,11 +2947,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Deposit'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     get:
       operationId: depositList
       tags:
@@ -2785,7 +2985,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/deposits/{id}:
@@ -2814,7 +3014,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/deposits/{id}/apply:
@@ -2847,11 +3047,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DepositApplication'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/documents/print/invoice/{id}:
     get:
       operationId: documentsPrintInvoice
@@ -2961,9 +3167,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EdiTradingPartner"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/edi/partners/{id}:
     delete:
@@ -3036,10 +3245,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EdiTradingPartner"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/edi/partners/{id}/catalog:
     get:
@@ -3118,10 +3330,12 @@ paths:
                     type: integer
                   saved_count:
                     type: integer
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntityEither"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/events:
     get:
@@ -3218,11 +3432,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlAccount"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/gl/accounts/{id}:
     put:
       operationId: glAccountUpdate
@@ -3252,11 +3472,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlAccount"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/gl/journal-entries:
@@ -3301,11 +3527,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlJournalEntry"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/gl/journal-entries/{id}:
     get:
       operationId: glJournalEntryGet
@@ -3358,11 +3590,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlStatusResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/gl/journal-entries/{id}/reverse:
     post:
       operationId: glJournalEntryReverse
@@ -3392,11 +3630,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlReverseResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/gl/journal-entries/{id}/void:
     post:
       operationId: glJournalEntryVoid
@@ -3420,11 +3664,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlStatusResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/gl/trial-balance:
     get:
       operationId: glTrialBalance
@@ -3565,11 +3815,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlStatusResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/gl/fiscal-periods/{id}/reopen:
     post:
       operationId: glFiscalPeriodReopen
@@ -3593,11 +3849,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/GlStatusResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/governance/rfcs:
     get:
       operationId: governanceListRfcs
@@ -3639,11 +3901,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceRFC"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/governance/rfcs/{id}:
@@ -3707,11 +3970,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceRFC"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /healthz/live:
@@ -3842,11 +4106,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationPricedItemList"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
         "404":
           $ref: "#/components/responses/IntegrationNotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -3876,9 +4146,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationQuoteResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -3908,11 +4184,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationOrderResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
         "409":
-          $ref: "#/components/responses/IntegrationConflict"
+          $ref: "#/components/responses/IntegrationConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -4038,9 +4318,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationDeliveryRouteResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -4070,11 +4356,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationValidateStaffResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -4113,7 +4401,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/inventory/adjust:
@@ -4140,11 +4428,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/InventoryStatusAck'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/inventory/transfer:
@@ -4171,11 +4465,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/InventoryStatusAck'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/invoices:
@@ -4197,7 +4497,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/invoices/{id}:
@@ -4225,7 +4525,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/v1/invoices/{id}/credit-memo:
@@ -4256,13 +4556,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreditMemo"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/invoices/{id}/email:
@@ -4280,6 +4586,7 @@ paths:
             type: string
             format: uuid
         - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "202":
           description: Email queued.
@@ -4288,17 +4595,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoiceEmailResponse"
         "400":
-          description: Customer has no email address on file.
+          description: >-
+            Customer has no email address on file (the standard error envelope), or the Idempotency-Key header is malformed (the ADR 0001 envelope).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                oneOf:
+                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/credit-memos/{customerId}:
@@ -4326,7 +4642,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/locations:
@@ -4368,11 +4684,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/locations/{id}:
     get:
       operationId: locationGet
@@ -4428,13 +4750,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
     delete:
       operationId: locationDelete
       tags: [location]
@@ -4505,11 +4833,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/branches/{id}:
     get:
       operationId: branchGet
@@ -4567,13 +4901,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
     delete:
       operationId: branchDelete
       tags: [location]
@@ -4737,13 +5077,19 @@ paths:
         "204":
           description: Granted.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/users/{sub}/branches/{branch_id}:
@@ -4799,13 +5145,19 @@ paths:
         "204":
           description: Set.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/matching/config:
@@ -4845,9 +5197,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MatchingConfig"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/matching/exceptions:
     get:
@@ -4915,9 +5270,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MatchingResult"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/millwork/options:
     get:
@@ -4968,11 +5326,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MillworkOption"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/orders:
@@ -4994,7 +5353,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -5020,11 +5379,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Order"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/orders/{id}:
@@ -5052,7 +5417,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/v1/orders/{id}/confirm:
@@ -5075,17 +5440,24 @@ paths:
         "204":
           description: Confirmed.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
-          description: The lumber index exposure gate blocks this order.
+          description: >-
+            The lumber index exposure gate blocks this order, or an idempotency claim in progress (the ADR 0001 envelope).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExposureBlock"
+                oneOf:
+                  - $ref: "#/components/schemas/ExposureBlock"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/orders/{id}/fulfill:
@@ -5108,17 +5480,24 @@ paths:
         "204":
           description: Fulfilled.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
-          description: The lumber index exposure gate blocks this order.
+          description: >-
+            The lumber index exposure gate blocks this order, or an idempotency claim in progress (the ADR 0001 envelope).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExposureBlock"
+                oneOf:
+                  - $ref: "#/components/schemas/ExposureBlock"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/orders/{id}/cancel:
@@ -5147,13 +5526,17 @@ paths:
         "204":
           description: Cancelled.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/orders/{id}/exposure-gate:
@@ -5182,7 +5565,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
           description: Blocked by unresolved index exposure.
           content:
@@ -5221,11 +5604,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderExposureOverridden"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/parsing/upload:
@@ -5258,10 +5647,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParsingParseResponse"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/partner/v1/dashboard:
@@ -5367,11 +5757,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Payment"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/payments/intent:
@@ -5396,11 +5792,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaymentIntentResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/payments/card:
@@ -5426,13 +5828,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Payment"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
           $ref: "#/components/responses/PaymentRequired"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/payments/refund:
     post:
       operationId: paymentRefund
@@ -5454,11 +5862,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Refund"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/invoices/{id}/payments:
@@ -5518,7 +5932,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "429":
           description: The per-IP strict limit (10 per minute) is exhausted; the standard error envelope.
           content:
@@ -5572,7 +5986,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalDashboard"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/orders:
@@ -5621,7 +6035,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -5651,7 +6065,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/portal/v1/orders/reorder:
@@ -5679,15 +6093,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalReorderResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -5723,17 +6135,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalCancelOrderResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope.
+          description: >-
+            The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PortalRefusal"
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -5769,17 +6186,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalOrder"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -5802,7 +6217,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PortalInvoice"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/invoices/{id}:
@@ -5830,7 +6245,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/portal/v1/deliveries:
@@ -5851,7 +6266,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PortalDelivery"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/deliveries/{id}:
@@ -5879,7 +6294,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/portal/v1/deliveries/{id}/reschedule:
@@ -5910,7 +6325,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -5945,9 +6360,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalDeliveryReschedule"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -5956,8 +6371,10 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/WireError"
                   - $ref: "#/components/schemas/PortalRefusal"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6006,7 +6423,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PortalCatalogProduct"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/catalog/categories:
@@ -6028,7 +6445,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PortalCategoryNode"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/catalog/{id}:
@@ -6056,7 +6473,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/portal/v1/catalog/{id}/volume-breaks:
@@ -6086,7 +6503,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/portal/v1/quotes:
@@ -6107,7 +6524,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PortalQuote"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -6134,17 +6551,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalQuote"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/portal/v1/quotes/{id}:
@@ -6172,7 +6587,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/portal/v1/quotes/{id}/accept:
@@ -6200,17 +6615,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalQuote"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The quote is not in a decidable state; the refusal envelope.
+          description: >-
+            The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PortalRefusal"
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6239,17 +6659,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalQuote"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The quote is not in a decidable state; the refusal envelope.
+          description: >-
+            The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PortalRefusal"
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6270,7 +6695,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalCart"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/cart/items:
@@ -6298,15 +6723,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalCart"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6341,15 +6764,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalCart"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6378,7 +6799,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/checkout:
@@ -6406,15 +6827,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalCheckoutResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6437,9 +6856,9 @@ paths:
                 items:
                   $ref: "#/components/schemas/PortalCustomerUser"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/LegacyForbidden"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/invites:
@@ -6460,9 +6879,9 @@ paths:
                 items:
                   $ref: "#/components/schemas/PortalInvite"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/LegacyForbidden"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -6489,17 +6908,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalInvite"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/LegacyForbidden"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6531,17 +6948,15 @@ paths:
         "200":
           description: Changed; no body.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/LegacyForbidden"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6573,17 +6988,15 @@ paths:
         "200":
           description: Changed; no body.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/LegacyForbidden"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -6612,7 +7025,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosTransaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -6623,6 +7036,12 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/Error'
                   - $ref: '#/components/schemas/PosCashierRefusal'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
     get:
@@ -6655,7 +7074,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/transactions/{id}:
@@ -6684,7 +7103,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/pos/transactions/{id}/items:
@@ -6716,11 +7135,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosTransaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/transactions/{id}/items/{itemId}:
@@ -6755,7 +7180,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/transactions/{id}/complete:
@@ -6788,17 +7213,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosTransaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
-          description: The completion failed (under-tendered sale, declined card, transaction not OPEN).
+          description: >-
+            The completion failed (under-tendered sale, declined card, transaction not OPEN; the standard error envelope), or the Idempotency-Key was reused with a different request (the ADR 0001 envelope).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/WireError'
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
@@ -6822,11 +7254,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosTransaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/products/search:
@@ -6854,7 +7292,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/sync:
@@ -6881,11 +7319,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosSyncResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/catalog:
@@ -6908,7 +7352,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/till/open:
@@ -6935,7 +7379,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosTillSession'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -6947,7 +7391,11 @@ paths:
                   - $ref: '#/components/schemas/Error'
                   - $ref: '#/components/schemas/PosCashierRefusal'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/till/current:
@@ -6973,7 +7421,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/till/{id}/report:
@@ -7003,7 +7451,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/till/{id}/close:
@@ -7036,13 +7484,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosTillReport'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/pos/till/{id}/zreport:
     get:
       operationId: posTillZReport
@@ -7069,7 +7521,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/pos/zreports:
@@ -7100,7 +7552,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/returns:
@@ -7127,7 +7579,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PosReturn'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7138,6 +7590,12 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/Error'
                   - $ref: '#/components/schemas/PosCashierRefusal'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
     get:
@@ -7167,7 +7625,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/returns/{id}:
@@ -7196,7 +7654,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/pricing/calculate:
@@ -7284,13 +7742,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingRule"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7318,13 +7778,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingEscalationResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7376,13 +7838,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingProductCategory"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7414,13 +7878,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingProductCategory"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7496,13 +7962,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingCategoryRule"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7534,13 +8002,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingBulkCount"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7595,13 +8065,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingCategoryRule"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7761,13 +8233,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingRebateProgram"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7856,13 +8330,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingRebateClaim"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7915,7 +8391,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketIndex"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -7923,7 +8399,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -7987,7 +8465,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketIndexRefreshResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -7995,7 +8473,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -8027,7 +8507,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketIndexRefreshPreview"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -8035,7 +8515,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -8046,48 +8528,54 @@ paths:
       tags: [product]
       summary: List products
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
-        "200":
+        '200':
           description: The page of products.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProductPage"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ProductPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       operationId: productCreate
       tags: [product]
       summary: Create a product
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Product"
+              $ref: '#/components/schemas/Product'
       responses:
-        "201":
+        '201':
           description: The created product.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/reorder-alerts:
     get:
       operationId: productReorderAlerts
@@ -8096,18 +8584,18 @@ paths:
       description: >-
         The alert rows omit on order quantity, velocity and lead time; they carry the deficit only.
       responses:
-        "200":
+        '200':
           description: The alerts, a bare array that is null when nothing is below its reorder point.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReorderAlertList"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ReorderAlertList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}:
     get:
       operationId: productGet
@@ -8121,20 +8609,20 @@ paths:
             type: string
             format: uuid
       responses:
-        "200":
+        '200':
           description: The product.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/products/{id}/detail:
     get:
       operationId: productDetail
@@ -8190,7 +8678,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
     put:
@@ -8222,11 +8710,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimContent'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/media:
@@ -8257,7 +8751,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/media/{mediaId}:
@@ -8288,7 +8782,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/media/{mediaId}/primary:
@@ -8316,11 +8810,17 @@ paths:
         '200':
           description: Primary media set; the body is empty.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/collateral:
@@ -8351,7 +8851,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/collateral/{collateralId}:
@@ -8382,7 +8882,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/collateral:
@@ -8415,11 +8915,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimCollateral'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/descriptions:
@@ -8452,11 +8958,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimContent'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/image:
@@ -8488,11 +9000,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimMedia'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/seo:
@@ -8525,11 +9043,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimContent'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/margins:
@@ -8545,24 +9069,30 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProductMarginUpdate"
+              $ref: '#/components/schemas/ProductMarginUpdate'
       responses:
-        "200":
+        '200':
           description: Updated; no body.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/dimensions:
     patch:
       operationId: productUpdateDimensions
@@ -8577,28 +9107,34 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Geometry"
+              $ref: '#/components/schemas/Geometry'
       responses:
-        "200":
+        '200':
           description: The persisted geometry.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Geometry"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Geometry'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/lead-time:
     patch:
       operationId: productUpdateLeadTime
@@ -8613,26 +9149,32 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProductLeadTimeUpdate"
+              $ref: '#/components/schemas/ProductLeadTimeUpdate'
       responses:
-        "200":
+        '200':
           description: The echoed request.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProductLeadTimeUpdate"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: '#/components/schemas/ProductLeadTimeUpdate'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/portal/v1/projects:
     get:
       operationId: projectList
@@ -8651,7 +9193,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/Project"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -8678,15 +9220,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/Project"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -8717,7 +9257,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
@@ -8750,15 +9290,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/Project"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -8782,7 +9320,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PurchaseOrder"
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
         "500": {$ref: "#/components/responses/InternalError"}
     post:
       operationId: purchaseOrderCreate
@@ -8806,9 +9344,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PurchaseOrder"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/purchase-orders/recommendations:
     get:
@@ -8827,7 +9368,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PurchaseOrderRecommendationSummary"
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
         "500": {$ref: "#/components/responses/InternalError"}
         "503": {$ref: "#/components/responses/ServiceUnavailable"}
   /api/v1/purchase-orders/refresh-reorder-targets:
@@ -8853,8 +9394,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PurchaseOrderRefreshResult"
+        "400": {$ref: "#/components/responses/IdempotencyBadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/purchase-orders/reorder-check:
     post:
@@ -8880,8 +9425,12 @@ paths:
                     enum: [success]
                   count:
                     type: integer
+        "400": {$ref: "#/components/responses/IdempotencyBadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/purchase-orders/reorder-runs:
     get:
@@ -8901,7 +9450,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PurchaseOrderReorderRun"
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/purchase-orders/source-summary:
     get:
@@ -8922,7 +9471,7 @@ paths:
                 additionalProperties:
                   type: integer
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/purchase-orders/{id}:
     get:
@@ -8948,7 +9497,7 @@ paths:
                 $ref: "#/components/schemas/PurchaseOrder"
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
         "404": {$ref: "#/components/responses/NotFound"}
   /api/v1/purchase-orders/{id}/freight:
     get:
@@ -8975,7 +9524,7 @@ paths:
                   $ref: "#/components/schemas/PurchaseOrderFreightCharge"
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
         "500": {$ref: "#/components/responses/InternalError"}
     post:
       operationId: purchaseOrderFreightUpload
@@ -9010,11 +9559,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PurchaseOrderFreightUploadResponse"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409":
-          $ref: "#/components/responses/Conflict"
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500": {$ref: "#/components/responses/InternalError"}
@@ -9052,9 +9601,12 @@ paths:
                   status:
                     type: string
                     enum: [applied]
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
   /api/v1/purchase-orders/{id}/receive:
     post:
       operationId: purchaseOrderReceive
@@ -9089,9 +9641,12 @@ paths:
                   status:
                     type: string
                     enum: [received]
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/purchase-orders/{id}/submit:
     post:
@@ -9121,9 +9676,12 @@ paths:
                   status:
                     type: string
                     enum: [submitted]
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "403": {$ref: "#/components/responses/ForbiddenEither"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/quotes:
     get:
@@ -9133,22 +9691,22 @@ paths:
       description: >-
         Offset paged quote list. No filters are implemented; any query parameter other than limit and offset is silently ignored.
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The page of quotes.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuotePage"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/QuotePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       operationId: quoteCreate
       tags: [quote]
@@ -9156,49 +9714,55 @@ paths:
       description: >-
         Decodes the full quote shape (lines included) and the optional base64 original upload. Validation is loose: a line without a unit of measure fails at the database cast and surfaces as a 500.
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuoteCreateRequest"
+              $ref: '#/components/schemas/QuoteCreateRequest'
       responses:
-        "201":
+        '201':
           description: The created quote, echoed with server filled fields.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/analytics:
     get:
       operationId: quoteAnalytics
       tags: [quote]
       summary: Quote analytics aggregates
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: Aggregated quote analytics.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuoteAnalytics"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/QuoteAnalytics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}:
     get:
       operationId: quoteGet
@@ -9211,22 +9775,22 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The quote.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       operationId: quoteUpdate
       tags: [quote]
@@ -9240,29 +9804,35 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuoteCreateRequest"
+              $ref: '#/components/schemas/QuoteCreateRequest'
       responses:
-        "200":
+        '200':
           description: The updated quote with lines.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/state:
     put:
       operationId: quoteUpdateState
@@ -9277,29 +9847,35 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuoteStateUpdate"
+              $ref: '#/components/schemas/QuoteStateUpdate'
       responses:
-        "200":
+        '200':
           description: The updated quote.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/convert:
     post:
       operationId: quoteConvertToOrderPayload
@@ -9314,25 +9890,31 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "200":
+        '200':
           description: The order creation payload for the client to POST.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuoteOrderPayload"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/QuoteOrderPayload'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/exposure:
     get:
       operationId: exposureList
@@ -9394,7 +9976,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure:
@@ -9424,7 +10006,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/request-ack:
@@ -9450,13 +10032,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureRequestAckResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/acknowledge:
@@ -9489,13 +10075,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureAcknowledgeResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/override:
@@ -9528,13 +10118,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureOverrideResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/escalate-now:
@@ -9560,11 +10154,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/EscalateNowResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/file:
@@ -9581,23 +10181,23 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The file bytes; the stored content type is echoed.
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/reporting/builder/preview:
     post:
       operationId: reportingBuilderPreview
@@ -9621,13 +10221,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReportingRows"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -9664,13 +10266,15 @@ paths:
                 type: string
                 format: binary
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -9727,13 +10331,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReportingSavedReport"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -9810,13 +10416,15 @@ paths:
         "200":
           description: Updated; no body.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -9867,6 +10475,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ReportingRow"
+        "400":
+          $ref: "#/components/responses/IdempotencyBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -9874,7 +10484,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -9920,13 +10532,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReportingScheduleResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
@@ -10121,7 +10735,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/sales-team/{id}:
@@ -10149,7 +10763,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -10176,9 +10790,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaxExemption"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/exemptions/{customerID}:
     get:
@@ -10250,9 +10867,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaxResult"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /uploads/:
     get:
@@ -10298,7 +10918,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -10323,11 +10943,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Vendor'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/vendors/{id}:
@@ -10356,7 +10982,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -10385,10 +11011,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VisionBlueprintScanResponse"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400": {$ref: "#/components/responses/BadRequestEither"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409": {$ref: "#/components/responses/ConflictEither"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
 components:
   securitySchemes:
@@ -10452,7 +11079,7 @@ components:
   responses:
     BadRequest:
       description: >-
-        The request cannot be consumed. The body is the standard error envelope; the message is the generic status text, and the handler's specific message goes to the server log only.
+        A handler (or the branch middleware) cannot consume the request. The body is the standard error envelope; the message is the generic status text, and the specific message goes to the server log only. POST, PUT and PATCH operations that take an Idempotency-Key use BadRequestEither.
       content:
         application/json:
           schema:
@@ -10487,14 +11114,86 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     Conflict:
-      description: The write conflicts with the resource's current state.
+      description: >-
+        A handler reports that the write conflicts with the resource's current state (the standard error envelope). Operations that take an Idempotency-Key use ConflictEither.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     UnprocessableEntity:
       description: >-
-        The request is semantically invalid for this operation. Used by the idempotency layer when an Idempotency-Key is reused with a request body that differs from the original.
+        The idempotency layer refused an Idempotency-Key reused with a request whose method, path, query or body differs from the original (code idempotency_key_reused). Written by middleware, so the ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    UnprocessableEntityEither:
+      description: >-
+        Either the handler refused the operation as semantically invalid (the standard error envelope, code UNPROCESSABLE_ENTITY), or the idempotency layer refused a reused Idempotency-Key (the ADR 0001 envelope, code idempotency_key_reused).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Error"
+              - $ref: "#/components/schemas/WireError"
+    IdempotencyConflict:
+      description: >-
+        The Idempotency-Key is already in progress under a concurrent request (code idempotency_in_progress). Written by the idempotency layer, so the ADR 0001 envelope. The operation raises no 409 of its own.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    ConflictEither:
+      description: >-
+        Either the handler reports a conflict with the resource's current state (the standard error envelope, code CONFLICT), or the idempotency layer reports the Idempotency-Key in progress (the ADR 0001 envelope, code idempotency_in_progress).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Error"
+              - $ref: "#/components/schemas/WireError"
+    BadRequestEither:
+      description: >-
+        Either the handler cannot consume the request (the standard error envelope, code BAD_REQUEST, generic message), or the idempotency layer rejects the Idempotency-Key header or the body read (the ADR 0001 envelope, codes validation_failed and bad_request, one details entry per fault).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Error"
+              - $ref: "#/components/schemas/WireError"
+    IdempotencyBadRequest:
+      description: >-
+        The idempotency layer rejects an Idempotency-Key that is not 1 to 255 printable ASCII characters (code validation_failed) or a body it cannot read (code bad_request). Written by middleware, so the ADR 0001 envelope. The operation raises no 400 of its own.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    PayloadTooLarge:
+      description: >-
+        An Idempotency-Key was sent and the body exceeds the request size limit (code payload_too_large). Written by the idempotency layer, so the ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    ForbiddenEither:
+      description: >-
+        Either the role guard or the machine key scope check refused the caller (the ADR 0001 envelope, code forbidden), or the branch middleware found no grant for the X-Branch-Id (the standard error envelope, code FORBIDDEN).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/WireError"
+              - $ref: "#/components/schemas/Error"
+    LegacyUnauthorized:
+      description: >-
+        No or invalid portal credentials. The portal auth middleware answers with httputil.RespondError, so the standard error envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    LegacyForbidden:
+      description: >-
+        A portal handler refused the caller. Portal handlers answer with httputil.RespondError, so the standard error envelope.
       content:
         application/json:
           schema:
@@ -10556,6 +11255,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/IntegrationError"
+    IntegrationBadRequestEither:
+      description: >-
+        The body or a parameter is malformed (the seam's own error body), or the idempotency layer rejects the Idempotency-Key header or the body read (the ADR 0001 envelope).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/IntegrationError"
+              - $ref: "#/components/schemas/WireError"
     IntegrationNotFound:
       description: The addressed resource does not exist.
       content:
@@ -10568,6 +11276,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/IntegrationError"
+    IntegrationConflictEither:
+      description: >-
+        The order was created but could not be confirmed (the seam's own error body), or the idempotency layer reports the Idempotency-Key in progress (the ADR 0001 envelope).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/IntegrationError"
+              - $ref: "#/components/schemas/WireError"
     IntegrationServerError:
       description: The handler failed.
       content:

@@ -57,11 +57,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceRFC"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/AppDisabled" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/governance/rfcs/{id}:
@@ -133,11 +134,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GovernanceRFC"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/AppDisabled" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409": { $ref: "#/components/responses/ConflictEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
 components:
