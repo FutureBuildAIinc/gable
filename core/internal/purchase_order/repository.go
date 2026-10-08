@@ -348,3 +348,18 @@ func (r *Repository) ListReorderRuns(ctx context.Context, limit int) ([]ReorderR
 	}
 	return out, nil
 }
+
+// LocationBranch is the branch a location belongs to (locations.branch_id):
+// the branch a receipt into it put the stock in. False when the location has
+// no branch of its own.
+func (r *Repository) LocationBranch(ctx context.Context, id uuid.UUID) (uuid.UUID, bool, error) {
+	var branch *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT branch_id FROM locations WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && branch == nil) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("failed to read the location's branch: %w", err)
+	}
+	return *branch, true, nil
+}

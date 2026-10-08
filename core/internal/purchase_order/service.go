@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -457,7 +458,6 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		rl         ReceiveLineInput
 	}
 	var parsed []parsedLine
-	var parsedProducts []uuid.UUID
 	for _, rl := range receivedLines {
 		lineID, err := uuid.Parse(rl.LineID)
 		if err != nil {
@@ -475,9 +475,6 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		}
 
 		parsed = append(parsed, parsedLine{lineID: lineID, locationID: locationID, poLine: poLine, rl: rl})
-		if poLine.ProductID != nil && rl.QtyReceived > 0 {
-			parsedProducts = append(parsedProducts, *poLine.ProductID)
-		}
 	}
 
 	return s.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -552,8 +549,26 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		}
 
 		// The event is the last write of the receive's own work: what it
-		// received, for the order module's back order release (ADR 0005 5.4).
-		if err := s.recordReceived(txCtx, po, parsedProducts); err != nil {
+		// received and WHERE it landed, for the order module's back order
+		// release (ADR 0005 5.4): the branch of each line's location, not the
+		// purchase order's own.
+		byBranch := map[uuid.UUID][]uuid.UUID{}
+		for _, p := range parsed {
+			if p.poLine.ProductID == nil || p.rl.QtyReceived <= 0 {
+				continue
+			}
+			branch, ok, err := s.repo.LocationBranch(txCtx, p.locationID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				// a location with no branch of its own (a hand seeded row):
+				// the purchase order's branch, as the event always was
+				branch = po.BranchID
+			}
+			byBranch[branch] = append(byBranch[branch], *p.poLine.ProductID)
+		}
+		if err := s.recordReceived(txCtx, po, byBranch); err != nil {
 			return err
 		}
 
@@ -973,28 +988,50 @@ func groupAlertsByVendor(
 	return byVendor, nil
 }
 
-// recordReceived writes purchase_order.received: the purchase order id, its
-// branch and the distinct product ids this receipt put on hand.
-func (s *Service) recordReceived(ctx context.Context, po *PurchaseOrder, products []uuid.UUID) error {
+// recordReceived writes purchase_order.received: the purchase order id, the
+// branch each received location belongs to (the branch the stock landed in,
+// which the order module's back order release queues, not necessarily the
+// purchase order's own branch) and the distinct product ids that landed
+// there. One event per branch the receipt touched; a receipt that put no
+// product on hand (no product lines) keeps one event on the purchase order's
+// branch, as before.
+func (s *Service) recordReceived(ctx context.Context, po *PurchaseOrder, byBranch map[uuid.UUID][]uuid.UUID) error {
 	if s.events == nil {
 		return nil
 	}
-	seen := map[uuid.UUID]bool{}
-	ids := make([]uuid.UUID, 0, len(products))
-	for _, p := range products {
-		if !seen[p] {
-			seen[p] = true
-			ids = append(ids, p)
+	dedupe := func(products []uuid.UUID) []uuid.UUID {
+		seen := map[uuid.UUID]bool{}
+		ids := make([]uuid.UUID, 0, len(products))
+		for _, p := range products {
+			if !seen[p] {
+				seen[p] = true
+				ids = append(ids, p)
+			}
+		}
+		return ids
+	}
+	branches := make([]uuid.UUID, 0, len(byBranch))
+	for b := range byBranch {
+		branches = append(branches, b)
+	}
+	if len(branches) == 0 {
+		byBranch = map[uuid.UUID][]uuid.UUID{po.BranchID: nil}
+		branches = []uuid.UUID{po.BranchID}
+	}
+	sort.Slice(branches, func(i, j int) bool { return branches[i].String() < branches[j].String() })
+	for _, b := range branches {
+		raw, err := json.Marshal(map[string]any{
+			"purchase_order_id": po.ID, "branch_id": b, "status": po.Status, "product_ids": dedupe(byBranch[b]),
+		})
+		if err != nil {
+			return err
+		}
+		branch := b
+		if err := s.events.Write(ctx, outbox.Event{
+			Type: EventReceived, EntityType: "purchase_order", EntityID: po.ID, BranchID: &branch, Data: raw,
+		}); err != nil {
+			return err
 		}
 	}
-	raw, err := json.Marshal(map[string]any{
-		"purchase_order_id": po.ID, "branch_id": po.BranchID, "status": po.Status, "product_ids": ids,
-	})
-	if err != nil {
-		return err
-	}
-	branch := po.BranchID
-	return s.events.Write(ctx, outbox.Event{
-		Type: EventReceived, EntityType: "purchase_order", EntityID: po.ID, BranchID: &branch, Data: raw,
-	})
+	return nil
 }
