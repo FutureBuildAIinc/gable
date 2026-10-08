@@ -4,22 +4,40 @@
 package purchase_order
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
 type Handler struct {
 	service *Service
 	recSvc  *RecommendationService
+	guard   LocationGuard // optional; nil leaves a payload location unchecked (unit tests)
 }
 
 func NewHandler(service *Service, recSvc *RecommendationService) *Handler {
 	return &Handler{service: service, recSvc: recSvc}
+}
+
+// LocationGuard applies the payload branch rule (ADR 0007 section 2.3) to a
+// location id a body names. *middleware.BranchGuard satisfies it.
+type LocationGuard interface {
+	CheckPayloadLocation(ctx context.Context, locationID uuid.UUID) error
+}
+
+// WithBranchGuard makes receiving refuse a location whose branch the caller
+// may not target. Without it a payload location is not checked, so serve
+// always sets it.
+func (h *Handler) WithBranchGuard(g LocationGuard) *Handler {
+	h.guard = g
+	return h
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -161,6 +179,24 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
+	}
+
+	if h.guard != nil {
+		for _, l := range req.Lines {
+			locID, perr := uuid.Parse(l.LocationID)
+			if perr != nil {
+				continue // the service answers an unparseable location id
+			}
+			err := h.guard.CheckPayloadLocation(r.Context(), locID)
+			if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+				httputil.RespondError(w, r, "lines[].location_id is in a branch this caller may not target", http.StatusForbidden, err)
+				return
+			}
+			if err != nil {
+				httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+				return
+			}
+		}
 	}
 
 	lines := make([]ReceiveLineInput, len(req.Lines))

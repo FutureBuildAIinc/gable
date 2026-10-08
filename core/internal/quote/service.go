@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -34,6 +36,12 @@ type EventRecorder interface {
 // already carries one. *database.DB satisfies it.
 type TxRunner interface {
 	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3).
+// *middleware.BranchGuard satisfies it.
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
 }
 
 // Event types the module writes to the outbox.
@@ -61,6 +69,7 @@ type Service struct {
 	events      EventRecorder // optional; nil records nothing (unit tests)
 	tx          TxRunner      // optional; nil runs each method unwrapped (unit tests)
 	logger      *slog.Logger
+	branches    BranchGuard // optional; nil leaves a payload branch unchecked (unit tests)
 	now         func() time.Time
 }
 
@@ -83,6 +92,13 @@ func (s *Service) WithSnapshotService(snapshotSvc SnapshotService) {
 // WithOutbox wires the recorder of quote.created and the transition events.
 func (s *Service) WithOutbox(events EventRecorder) *Service {
 	s.events = events
+	return s
+}
+
+// WithBranchGuard makes Create refuse a payload branch the caller may not
+// target. Without it a payload branch is not checked, so serve always sets it.
+func (s *Service) WithBranchGuard(g BranchGuard) *Service {
+	s.branches = g
 	return s
 }
 
@@ -235,6 +251,9 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 // the sequence and stores it, writing quote.created as the transaction's last
 // statement. A create that fails anywhere leaves no quote and no event.
 func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
+	if err := s.checkPayloadBranch(ctx, d); err != nil {
+		return nil, err
+	}
 	var out *Quote
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		q, err := s.priceDraft(ctx, d)
@@ -555,4 +574,19 @@ func validateStateTransition(from, to QuoteState) error {
 		}
 	}
 	return httpx.InvalidStateTransition(fmt.Sprintf("cannot transition from %s to %s", from.Status(), to.Status()))
+}
+
+// checkPayloadBranch is the payload branch rule: a branch the body names must
+// be one the caller may target, else 403 forbidden naming branch_id.
+func (s *Service) checkPayloadBranch(ctx context.Context, d *Draft) error {
+	if s.branches == nil || d.BranchID == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, *d.BranchID)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "branch_id is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
 }

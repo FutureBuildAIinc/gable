@@ -75,3 +75,20 @@ func IDForQuery(ctx context.Context) *uuid.UUID {
 func With(ctx context.Context, bc *Context) context.Context {
 	return context.WithValue(ctx, Key, bc)
 }
+
+type systemKey struct{}
+
+// WithSystem marks ctx as an explicit system caller: a process that acts for
+// the platform itself (a scheduler, a migration, a receiver that has settled
+// its own authority) rather than for a request's caller. The payload branch
+// guard admits a request that carries no branch Context only when this mark is
+// set; every other context-free call is refused.
+func WithSystem(ctx context.Context) context.Context {
+	return context.WithValue(ctx, systemKey{}, true)
+}
+
+// IsSystem reports whether ctx was marked by WithSystem.
+func IsSystem(ctx context.Context) bool {
+	v, _ := ctx.Value(systemKey{}).(bool)
+	return v
+}
