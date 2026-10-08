@@ -67,7 +67,7 @@ govulncheck result below; everything else builds, vets and tests identically.
 | Install dependencies | `npm ci` | pass |
 | Type check | `npx tsc --noEmit` | pass |
 | Lint | `npm run lint` | pass |
-| Test (with coverage) | `npm run test:coverage` | pass; `app/package.json` has the `test:coverage` script, so this is the branch the CI test step takes |
+| Test (with coverage) | `npm run test:coverage` | pass; `web/apps/desk/package.json` has the `test:coverage` script, so this is the branch the CI test step takes |
 | Build | `npm run build` | pass |
 
 ### License job
@@ -81,8 +81,8 @@ govulncheck result below; everything else builds, vets and tests identically.
 
 | CI step | Command | Result |
 |---|---|---|
-| Build backend image | `docker build -f backend/Dockerfile .` | pass |
-| Build frontend image | `docker build -f app/Dockerfile .` | pass |
+| Build backend image | `docker build -f core/Dockerfile .` | pass |
+| Build frontend image | `docker build -f web/apps/desk/Dockerfile .` | pass |
 
 ### Vulnerabilities job (advisory; not a merge gate)
 

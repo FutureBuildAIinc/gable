@@ -181,7 +181,7 @@ whatever the process happened to keep in memory.
 ### 5. The read API
 
 `GET /api/v1/events?cursor=&types=&limit=` is a list route on the ADR 0001
-rules, served by `internal/events` through `backend/internal/platform/httpx`:
+rules, served by `internal/events` through `core/internal/platform/httpx`:
 
 - the list envelope `{items, next_cursor, limit}` (`total` only under
   `?include=total`), `items` never null;

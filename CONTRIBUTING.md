@@ -26,8 +26,8 @@ make migrate
 DEMO_SEED=1 make seed
 
 # 4. Run the backend and frontend in two terminals
-cd backend && AUTH_MODE=dev go run ./cmd/server   # API on :8080
-cd app && npm install && npm run dev              # SPA on :5173
+cd core && AUTH_MODE=dev go run ./cmd/server   # API on :8080
+cd web/apps/desk && npm install && npm run dev              # SPA on :5173
 ```
 
 `AUTH_MODE=dev` is required to start the backend locally and is **not** a
@@ -83,14 +83,14 @@ The long version, if you'd rather run the pieces yourself:
 
 ```bash
 # ---- Backend (the `backend` job) -----------------------------------------
-cd backend
+cd core
 go vet ./...
 go build ./...
 go run ./cmd/migrate                                  # needs Postgres
 go test -race ./...                                   # needs Postgres
 
 # ---- Frontend (the `frontend` job) ---------------------------------------
-cd app
+cd web/apps/desk
 npm ci
 npx tsc --noEmit
 npm run lint
@@ -103,8 +103,8 @@ pipx install reuse==6.2.0                             # once
 make license-check
 
 # ---- Container images (the `docker` job) ---------------------------------
-docker build -f backend/Dockerfile .
-docker build -f app/Dockerfile .
+docker build -f core/Dockerfile .
+docker build -f web/apps/desk/Dockerfile .
 ```
 
 Equivalent make targets: `build`, `vet`, `test`, `test-short`, `cover`,
@@ -128,7 +128,7 @@ tests. If you haven't booted Postgres, use the short flag — the DB-dependent
 tests skip themselves rather than failing:
 
 ```bash
-cd backend && go test -short ./...    # or: make test-short
+cd core && go test -short ./...    # or: make test-short
 ```
 
 That is the fastest inner loop for changes that don't touch persistence. It is
@@ -159,9 +159,9 @@ headers on each file, and [`REUSE.toml`](./REUSE.toml)).
 
 **Inbound contributions are licensed under the same OpenLBM Standard license
 that governs the file(s) you change.** For example, a change under
-`backend/internal/` is contributed under `LicenseRef-OpenLBM-Commons-1.0`; a
-change under `app/` under `LicenseRef-OpenLBM-Surface-1.0`; a change under
-`backend/pkg/apps/` under `LicenseRef-OpenLBM-Connector-1.0`.
+`core/internal/` is contributed under `LicenseRef-OpenLBM-Commons-1.0`; a
+change under `web/apps/desk/` under `LicenseRef-OpenLBM-Surface-1.0`; a change under
+`core/pkg/apps/` under `LicenseRef-OpenLBM-Connector-1.0`.
 
 Because these are custom licenses (not an off-the-shelf inbound=outbound OSS
 license), we use a **Contributor License Agreement (CLA)**. Before your first

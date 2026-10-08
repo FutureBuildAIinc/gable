@@ -8,7 +8,7 @@
 Accepted for the Gable v1 refactor (item R1-6). This ADR is the design stop the
 cycle plan calls review point 2: the money rule and the wire conventions are
 settled here before any module converts. The platform package
-`backend/internal/platform/httpx` (later `core/internal/platform/httpx`) is its
+`core/internal/platform/httpx` is its
 implementation; no handler uses it yet.
 
 ## Context
@@ -174,8 +174,8 @@ Every error response, from every route, is:
 - `code` is a stable, lowercase, snake_case machine code from the table
   below. Clients branch on it, never on the message text.
 - `message` is the handler's own message, in full. Today's
-  `backend/pkg/httputil` `RespondError`
-  (`backend/pkg/httputil/response.go`, the `RespondError` function) accepts a
+  `core/pkg/httputil` `RespondError`
+  (`core/pkg/httputil/response.go`, the `RespondError` function) accepts a
   handler message but writes only `genericMessage(code)` into the body: the
   client sees "Bad Request" while the specific cause ("line 1: uom is
   required") goes only to the server log. That drop is what this rule fixes.
@@ -628,7 +628,7 @@ template, then module by module):
    precondition has a value to check from the first write.
 4. Lowercase and rename lifecycle state to `status` at the handler
    boundary.
-5. Update every caller: search the desk (`app/`) and the portal for each
+5. Update every caller: search the desk (`web/apps/desk/`) and the portal for each
    converted route's callers and update them in the same pull request.
    The desk's `limit` and `offset` sends become cursor paging; pickers
    that relied on unpaged lists page or search. A request the strict

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 name: add-a-test
-description: Add real test coverage to a Gable module that has none — a table-driven Go test under backend/internal/<module>/ or a vitest test under app/src/ — with the correct SPDX header and no Postgres required. Use when the user says "add a test", "write tests for the invoice module", "this module has no coverage", "help me contribute a test", "what should I test", "improve test coverage", "/write-a-test", or wants a small, safe first contribution.
+description: Add real test coverage to a Gable module that has none — a table-driven Go test under core/internal/<module>/ or a vitest test under web/apps/desk/src/ — with the correct SPDX header and no Postgres required. Use when the user says "add a test", "write tests for the invoice module", "this module has no coverage", "help me contribute a test", "what should I test", "improve test coverage", "/write-a-test", or wants a small, safe first contribution.
 ---
 
 # add-a-test — the best first contribution in this repo
@@ -21,14 +21,14 @@ test: it makes CI green while asserting nothing, and it makes the next refactor 
 Never trust a hardcoded list — compute it:
 
 ```bash
-cd backend
+cd core
 for d in internal/*/; do
   [ -z "$(ls $d*_test.go 2>/dev/null)" ] && echo "no tests: ${d%/}"
 done
 ```
 
 ```bash
-find app/src -name '*.test.ts' -o -name '*.test.tsx'            # what the frontend covers
+find web/apps/desk/src -name '*.test.ts' -o -name '*.test.tsx'            # what the frontend covers
 ```
 
 (`internal/testutil` will show up as "no tests" — it's a shared helper package, not a domain
@@ -46,25 +46,25 @@ already covered it:
 4. **`quote`** — line totals, discounts, expiry.
 5. **`portal`** — the dollars-vs-cents boundary with the ERP side (see the money table in
    `CLAUDE.md`); a test here guards a bug class that has already shipped once.
-6. **Frontend pages and services** — `app/src/lib/utils.ts` (`formatCents`), the router, and
+6. **Frontend pages and services** — `web/apps/desk/src/lib/utils.ts` (`formatCents`), the router, and
    `fetchClient` already have suites; the page components and the remaining services under
-   `app/src/services/` do not.
+   `web/apps/desk/src/services/` do not.
 
 ## 2 · Read before you write
 
 ```bash
 M=invoice
-head -80 backend/internal/$M/model.go        # types, statuses, constants
-grep -n "func (s \*Service)" backend/internal/$M/service.go
-sed -n '1,120p' backend/internal/$M/service.go
+head -80 core/internal/$M/model.go        # types, statuses, constants
+grep -n "func (s \*Service)" core/internal/$M/service.go
+sed -n '1,120p' core/internal/$M/service.go
 ```
 
 Then study a module that already tests well — copy its idiom rather than inventing one:
 
 ```bash
-sed -n '1,80p' backend/internal/tax/service_test.go        # mock repo + table-driven
-ls backend/internal/purchase_order/*_test.go               # 6 test files, good examples
-ls backend/internal/pricing/*_test.go backend/internal/gl/*_test.go
+sed -n '1,80p' core/internal/tax/service_test.go        # mock repo + table-driven
+ls core/internal/purchase_order/*_test.go               # 6 test files, good examples
+ls core/internal/pricing/*_test.go core/internal/gl/*_test.go
 ```
 
 ## 3 · Test the logic, not the database
@@ -74,7 +74,7 @@ logic — tax computation, rounding, state transitions, credit gates, formatting
 
 The established pattern here: define a mock that satisfies the repository interface the
 service depends on, construct the service with it, and table-test the behaviour. That's
-exactly what `backend/internal/tax/service_test.go` does.
+exactly what `core/internal/tax/service_test.go` does.
 
 If the service takes a concrete `*Repository` rather than an interface, you have two honest
 options:
@@ -135,13 +135,13 @@ have wasted the reviewer's time.
 
 ### Vitest skeleton
 
-Config is already in place: `app/vitest.config.ts` (jsdom, globals on), setup at
-`app/src/test/setup.ts`. Put the file next to what it tests, e.g.
-`app/src/services/QuoteService.test.ts`. Read an existing suite for the house idiom:
+Config is already in place: `web/apps/desk/vitest.config.ts` (jsdom, globals on), setup at
+`web/apps/desk/src/test/setup.ts`. Put the file next to what it tests, e.g.
+`web/apps/desk/src/services/QuoteService.test.ts`. Read an existing suite for the house idiom:
 
 ```bash
-ls app/src/lib/*.test.ts app/src/services/*.test.ts app/src/*.test.ts 2>/dev/null
-sed -n '1,60p' app/src/lib/utils.test.ts
+ls web/apps/desk/src/lib/*.test.ts web/apps/desk/src/services/*.test.ts web/apps/desk/src/*.test.ts 2>/dev/null
+sed -n '1,60p' web/apps/desk/src/lib/utils.test.ts
 ```
 
 <!-- REUSE-IgnoreStart -->
@@ -182,7 +182,7 @@ describe('formatCents', () => {
 ```bash
 make vet && make build
 make test-short                    # no Postgres needed
-cd backend && go test -race ./internal/invoice/...
+cd core && go test -race ./internal/invoice/...
 
 make fe-test
 make fe-typecheck
@@ -240,7 +240,7 @@ network calls, no reliance on today's date. If you need time, inject it.
 ```bash
 git fetch origin
 git switch -c test/invoice-tax-rounding origin/staging
-git add backend/internal/invoice/service_test.go
+git add core/internal/invoice/service_test.go
 git commit -m "test(invoice): table-driven coverage for tax rate resolution and rounding"
 ```
 
@@ -248,7 +248,7 @@ git commit -m "test(invoice): table-driven coverage for tax rate resolution and 
 > `staging` yet — branch from `origin/main` and still open the PR **against `staging`**.
 
 Then run **`check-my-contribution`** (it verifies the SPDX header matches the directory —
-`backend/internal/` → `LicenseRef-OpenLBM-Commons-1.0`, `app/` →
+`core/internal/` → `LicenseRef-OpenLBM-Commons-1.0`, `web/apps/desk/` →
 `LicenseRef-OpenLBM-Surface-1.0`) and open the PR against `staging`.
 
 In the PR description, state plainly:

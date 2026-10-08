@@ -1,0 +1,50 @@
+[
+  {
+    "name": "bankrecon.account.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/accounts",
+      "body": {
+        "account_number": "000123456789",
+        "gl_account_id": "<id-1>",
+        "name": "Golden Bank",
+        "routing_number": "012345678"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "000123456789",
+        "created_at": "<ts+0d>",
+        "gl_account_id": "<id-1>",
+        "id": "<id-2>",
+        "is_active": true,
+        "name": "Golden Bank",
+        "routing_number": "012345678"
+      }
+    }
+  },
+  {
+    "name": "bankrecon.account.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/accounts"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "account_number": "000123456789",
+          "created_at": "<ts+0d>",
+          "gl_account_id": "<id-1>",
+          "id": "<id-2>",
+          "is_active": true,
+          "name": "Golden Bank",
+          "routing_number": "012345678"
+        }
+      ]
+    }
+  }
+]

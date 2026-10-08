@@ -32,7 +32,7 @@ back so every dealer benefits.
 | Packaging | Docker |
 
 > **A note on the Go module path.** The backend's module is
-> `github.com/gablelbm/gable` (see [`backend/go.mod`](./backend/go.mod)), but the
+> `github.com/gablelbm/gable` (see [`core/go.mod`](./core/go.mod)), but the
 > repository lives at <https://github.com/FutureBuildAIinc/gable>. That is
 > deliberate and not a mistake: the module path predates the move to the
 > `FutureBuildAIinc` organisation and is load-bearing — every import in the
@@ -58,8 +58,8 @@ make migrate
 DEMO_SEED=1 make seed
 
 # 4. Run backend and frontend in two terminals
-cd backend && AUTH_MODE=dev go run ./cmd/server   # API on :8080
-cd app && npm install && npm run dev              # SPA on :5173
+cd core && AUTH_MODE=dev go run ./cmd/server   # API on :8080
+cd web/apps/desk && npm install && npm run dev              # SPA on :5173
 ```
 
 Open <http://localhost:5173>. To wipe and rebuild the dev database, run

@@ -1,0 +1,101 @@
+[
+  {
+    "name": "configurator.options",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/options?attribute_type=Species"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "allowed": true,
+          "value": "SYP"
+        },
+        {
+          "allowed": true,
+          "value": "Douglas Fir"
+        },
+        {
+          "allowed": true,
+          "value": "Cedar"
+        },
+        {
+          "allowed": true,
+          "value": "Hem-Fir"
+        },
+        {
+          "allowed": true,
+          "value": "SPF"
+        }
+      ]
+    }
+  },
+  {
+    "name": "configurator.validate",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/configurator/validate",
+      "body": {
+        "selections": {
+          "Grade": "#2",
+          "Species": "SYP"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "valid": true
+      }
+    }
+  },
+  {
+    "name": "configurator.build_sku",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/configurator/build-sku",
+      "body": {
+        "product_type": "Lumber",
+        "selections": {
+          "Grade": "#2",
+          "Length": "8",
+          "Species": "SYP"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "description": "Lumber SYP #2",
+        "sku": "NS-LBR-SYP-#2"
+      }
+    }
+  },
+  {
+    "name": "configurator.validate.empty",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/configurator/validate",
+      "body": {
+        "selections": {}
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  }
+]

@@ -19,8 +19,8 @@ A clear and concise description of what you want to happen.
 ## Affected area
 
 Which component would this touch? (e.g. a backend module under
-`backend/internal/`, an installable app under `backend/pkg/apps/`, a frontend
-surface in `app/`). See `LICENSE-MAP.md` for the component map.
+`core/internal/`, an installable app under `core/pkg/apps/`, a frontend
+surface in `web/apps/desk/`). See `LICENSE-MAP.md` for the component map.
 
 ## Alternatives considered
 

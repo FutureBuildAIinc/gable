@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 name: explain-this-code
-description: Orient a newcomer in the Gable codebase — the modular-monolith layout, the 41 domain modules under backend/internal, the backend/pkg/apps connector seam, and the Lit web-component frontend — and teach them how to find things themselves. Use when the user says "where do I start", "how does this codebase work", "give me a tour", "I'm new here", "explain the architecture", "where does the order code live", "how does the frontend work", "what is backend/pkg/apps", "how do I find the code for the delivery screen", "/newcomer-tour", or asks what any module or file does.
+description: Orient a newcomer in the Gable codebase — the modular-monolith layout, the 41 domain modules under core/internal, the core/pkg/apps connector seam, and the Lit web-component frontend — and teach them how to find things themselves. Use when the user says "where do I start", "how does this codebase work", "give me a tour", "I'm new here", "explain the architecture", "where does the order code live", "how does the frontend work", "what is core/pkg/apps", "how do I find the code for the delivery screen", "/newcomer-tour", or asks what any module or file does.
 ---
 
 # explain-this-code — teach the map, not just the answer
@@ -23,15 +23,15 @@ Give this once, at the start, tailored to what they care about.
 
 ```
 gable/
-  backend/          Go 1.25 — one binary, ~41 domain modules (the "modular monolith")
+  core/          Go 1.25 — one binary, ~41 domain modules (the "modular monolith")
     cmd/server/     main.go: wires every module repo→service→handler→routes
-    cmd/migrate/    applies backend/migrations/*.sql in order
+    cmd/migrate/    applies core/migrations/*.sql in order
     cmd/seed/       the demo dataset ("Gable Lumber & Supply", Kelowna BC)
     internal/       the 41 modules. THIS is where business logic lives.
     pkg/            shared plumbing (database, middleware, audit, httputil, metrics…)
     pkg/apps/       the connector seam — the stable surface third parties plug into
     migrations/     plain numbered SQL: 001_…, 002_…
-  app/              Lit 3 + TypeScript + Vite + Tailwind
+  web/apps/desk/    Lit 3 + TypeScript + Vite + Tailwind
     src/routes.ts   THE route table. Start here for any "where is this screen" question.
     src/pages/      one file per screen
     src/components/ reusable gable-* web components
@@ -58,7 +58,7 @@ are **future design, not wired**.
 Start at the route table:
 
 ```bash
-grep -n "delivery" app/src/routes.ts
+grep -n "delivery" web/apps/desk/src/routes.ts
 ```
 
 Every route is `{ path, load: () => import('./pages/...'), layout }`. The `load` path is the
@@ -75,14 +75,14 @@ The five surfaces, and what they're for:
 | `/pos` | *none* | Front-counter POS terminal, full screen |
 
 If a route isn't in `routes.ts`, it belongs to a **converted app** and is declared in
-`app/src/apps/<key>.ts`, spread in via `appRoutes()` from `app/src/apps/registry.ts`.
+`web/apps/desk/src/apps/<key>.ts`, spread in via `appRoutes()` from `web/apps/desk/src/apps/registry.ts`.
 `millwork` and `governance` are converted so far.
 
 ### A backend behaviour
 
 ```bash
-ls backend/internal/                          # the 41 modules
-grep -rn "func (s \*Service)" backend/internal/order/service.go | head -20
+ls core/internal/                          # the 41 modules
+grep -rn "func (s \*Service)" core/internal/order/service.go | head -20
 ```
 
 Every module has the same shape — this is the single most useful thing to know:
@@ -94,19 +94,19 @@ Every module has the same shape — this is the single most useful thing to know
 | `service.go` | Business logic. Rules, validation, transactions. |
 | `handler.go` | HTTP handlers **and** `RegisterRoutes(mux, mw)`. There is no `routes.go`. |
 
-So: "what statuses can an order be in?" → `backend/internal/order/model.go`. "What happens
-when an order is fulfilled?" → `backend/internal/order/service.go`, function `FulfillOrder`.
-"What URL is that?" → `backend/internal/order/handler.go`, `RegisterRoutes`.
+So: "what statuses can an order be in?" → `core/internal/order/model.go`. "What happens
+when an order is fulfilled?" → `core/internal/order/service.go`, function `FulfillOrder`.
+"What URL is that?" → `core/internal/order/handler.go`, `RegisterRoutes`.
 
 ### How a request actually flows
 
 ```
-browser page (app/src/pages/orders/OrderDetail.ts)
-  → app/src/services/OrderService.ts
-    → app/src/services/fetchClient.ts   (adds auth + base URL; never bare fetch)
+browser page (web/apps/desk/src/pages/orders/OrderDetail.ts)
+  → web/apps/desk/src/services/OrderService.ts
+    → web/apps/desk/src/services/fetchClient.ts   (adds auth + base URL; never bare fetch)
       → HTTP /api/v1/orders/{id}
-        → backend/cmd/server/main.go    (mux + middleware; the auth whitelist lives here)
-          → backend/internal/order/handler.go
+        → core/cmd/server/main.go    (mux + middleware; the auth whitelist lives here)
+          → core/internal/order/handler.go
             → service.go   (rules)
               → repository.go  (SQL)
                 → PostgreSQL
@@ -116,19 +116,19 @@ Trace it in both directions — that round trip explains most of the codebase.
 
 ### The wiring
 
-`backend/cmd/server/main.go` is one long initializer. It is the answer to "how does anything
+`core/cmd/server/main.go` is one long initializer. It is the answer to "how does anything
 get connected?" and to "is my new endpoint live?". Grep it:
 
 ```bash
-grep -n "RegisterRoutes" backend/cmd/server/main.go | head -40
-grep -n "publicPaths\|whitelist" backend/cmd/server/main.go
+grep -n "RegisterRoutes" core/cmd/server/main.go | head -40
+grep -n "publicPaths\|whitelist" core/cmd/server/main.go
 ```
 
 An endpoint that isn't in a `RegisterRoutes` call there does not exist at runtime.
 
 ---
 
-## The connector seam: `backend/pkg/apps/`
+## The connector seam: `core/pkg/apps/`
 
 This is the part of the architecture worth understanding early, because it's the project's
 whole strategy and it's also a **license boundary**.
@@ -138,16 +138,16 @@ Gable is turning its modules into installable **apps**: a module declares a mani
 each per instance at **Tech Admin → Apps** (`/admin/apps`).
 
 ```bash
-ls backend/pkg/apps/                 # apps.go, handler.go, registry.go, registry_test.go
-head -30 backend/pkg/apps/apps.go    # the package doc explains the model
+ls core/pkg/apps/                 # apps.go, handler.go, registry.go, registry_test.go
+head -30 core/pkg/apps/apps.go    # the package doc explains the model
 ```
 
 Two things to internalise:
 
 1. **It's the seam third parties build against.** The point is that someone outside the
    project can ship an app without forking the core.
-2. **It's licensed differently.** `backend/pkg/apps/` is `LicenseRef-OpenLBM-Connector-1.0`
-   (permissive, no copyleft) carved out of the `backend/pkg/` Commons default — so plugging in
+2. **It's licensed differently.** `core/pkg/apps/` is `LicenseRef-OpenLBM-Connector-1.0`
+   (permissive, no copyleft) carved out of the `core/pkg/` Commons default — so plugging in
    doesn't drag copyleft across the boundary. Most specific path wins. See
    [`LICENSE-MAP.md`](../../../LICENSE-MAP.md) and the **`licensing-check`** skill.
 
@@ -161,14 +161,14 @@ Conversion recipe and phases: [`docs/modularization-blueprint.md`](../../../docs
 - **Light DOM, not shadow DOM.** Components do `createRenderRoot() { return this; }` so
   Tailwind classes actually apply. If you expect shadow-DOM encapsulation, you won't find it.
 - **All custom elements are prefixed `gable-`.**
-- **Routing is a hand-rolled singleton** in `app/src/lib/router.ts` (popstate/pushState).
+- **Routing is a hand-rolled singleton** in `web/apps/desk/src/lib/router.ts` (popstate/pushState).
   Navigate with `router.navigate(path)`. Route params arrive as
   `@property({ attribute: 'route-id' })`.
 - **State:** `@state()` for internal, `@property()` for external. Cross-component state lives
-  in framework-agnostic singleton services under `app/src/services/`.
-- **Never hardcode a colour.** Tokens are in `app/tailwind.config.js`. JetBrains Mono for all
+  in framework-agnostic singleton services under `web/apps/desk/src/services/`.
+- **Never hardcode a colour.** Tokens are in `web/apps/desk/tailwind.config.js`. JetBrains Mono for all
   numbers, SKUs, prices, and dimensions; Inter for body text.
-- **Money:** `formatCents()` in `app/src/lib/utils.ts` for ERP surfaces. Portal surfaces get
+- **Money:** `formatCents()` in `web/apps/desk/src/lib/utils.ts` for ERP surfaces. Portal surfaces get
   dollars from the API and format directly. Mixing them renders `$738.87` as `$73,887.00`.
 
 ---
@@ -197,12 +197,12 @@ Do this, then explain in their language:
 
 ```bash
 M=order        # or invoice, delivery, inventory, pricing, pos, purchase_order, ...
-ls backend/internal/$M/
-head -60 backend/internal/$M/model.go
-grep -n "func (s \*Service)" backend/internal/$M/service.go
-grep -n "mux.HandleFunc\|RequireRole" backend/internal/$M/handler.go
-grep -rn "$M\." backend/cmd/server/main.go | head
-ls backend/internal/$M/*_test.go 2>/dev/null || echo "no tests yet"
+ls core/internal/$M/
+head -60 core/internal/$M/model.go
+grep -n "func (s \*Service)" core/internal/$M/service.go
+grep -n "mux.HandleFunc\|RequireRole" core/internal/$M/handler.go
+grep -rn "$M\." core/cmd/server/main.go | head
+ls core/internal/$M/*_test.go 2>/dev/null || echo "no tests yet"
 ```
 
 Structure the answer as: **what this module owns** → **the main types and statuses** → **the
@@ -229,7 +229,7 @@ still have none, and adding one is a real, welcome contribution.
 
 ## Ground rules
 
-- **Show real paths and line numbers.** `backend/internal/order/service.go:412`, not "the
+- **Show real paths and line numbers.** `core/internal/order/service.go:412`, not "the
   order service".
 - **Read the file before you describe it.** Do not explain from the module name.
 - **Say when something is aspirational.** NATS events, the full apps conversion, and parts of

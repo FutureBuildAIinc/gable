@@ -1,0 +1,138 @@
+[
+  {
+    "name": "market_index.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/market-indices"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "commodity_kind": "FUTURES",
+          "created_at": "<ts+0d>",
+          "current_value": 498.5,
+          "id": "<id-1>",
+          "index_code": "CME_LBR",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "CME Lumber Futures",
+          "previous_value": 490,
+          "source": "CME",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "COMPOSITE",
+          "created_at": "<ts+0d>",
+          "current_value": 522,
+          "description": "Madison's 497-product composite, public weekly",
+          "id": "<id-2>",
+          "index_code": "MADISONS_COMP",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Madison's Lumber Prices Composite",
+          "previous_value": 515,
+          "source": "MADISONS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "COMPOSITE",
+          "created_at": "<ts+0d>",
+          "current_value": 485,
+          "id": "<id-3>",
+          "index_code": "RL_FRAMING_COMP",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths Framing Lumber Composite",
+          "previous_value": 472,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "PANEL",
+          "created_at": "<ts+0d>",
+          "current_value": 530,
+          "description": "OSB 7/16\" 4x8 spot price",
+          "id": "<id-4>",
+          "index_code": "RL_OSB_716",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths OSB 7/16\"",
+          "previous_value": 522,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MSF"
+        },
+        {
+          "commodity_kind": "DIMENSIONAL_LUMBER",
+          "created_at": "<ts+0d>",
+          "current_value": 412,
+          "description": "Western SPF #2&Btr 2x4 spot price",
+          "id": "<id-5>",
+          "index_code": "RL_SPF_2X4",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths SPF #2&Btr 2x4",
+          "previous_value": 405,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "DIMENSIONAL_LUMBER",
+          "created_at": "<ts+0d>",
+          "current_value": 478,
+          "description": "Southern Yellow Pine 2x4 spot price",
+          "id": "<id-6>",
+          "index_code": "RL_SYP_2X4",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths SYP 2x4",
+          "previous_value": 470,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "COMPOSITE",
+          "created_at": "<ts+0d>",
+          "current_value": 520,
+          "id": "<id-7>",
+          "index_code": "RL_PANEL_COMP",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths Structural Panel Composite",
+          "previous_value": 505,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        }
+      ]
+    }
+  },
+  {
+    "name": "market_index.update_metadata",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/market-indices/<id-5>",
+      "body": {
+        "description": "golden characterisation description"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "commodity_kind": "DIMENSIONAL_LUMBER",
+        "created_at": "<ts+0d>",
+        "current_value": 412,
+        "description": "golden characterisation description",
+        "id": "<id-5>",
+        "index_code": "RL_SPF_2X4",
+        "is_active": true,
+        "last_updated_at": "<ts+0d>",
+        "name": "Random Lengths SPF #2&Btr 2x4",
+        "previous_value": 405,
+        "source": "RANDOM_LENGTHS",
+        "unit": "MBF"
+      }
+    }
+  }
+]
