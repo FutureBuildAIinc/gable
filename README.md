@@ -91,7 +91,7 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 | [`docs/modularization-blueprint.md`](./docs/modularization-blueprint.md) | The installable-apps platform: design and phases |
 | [`docs/design-system.md`](./docs/design-system.md) | Colors, typography, component patterns |
 | [`docs/database-erd.md`](./docs/database-erd.md) | Full schema + entity-relationship diagram |
-| [`CLAUDE.md`](./CLAUDE.md) | Stack, conventions, pre-flight checks, and gotchas for contributors |
+| [`AGENTS.md`](./AGENTS.md) | Stack, conventions, pre-flight checks, and gotchas for contributors |
 | [`.do/`](./.do/) | Example Digital Ocean App Platform deploy specs for self-hosting |
 
 ## Licensing

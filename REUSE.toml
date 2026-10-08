@@ -128,6 +128,8 @@ path = [
   ".dockerignore",
   "docker-compose.yml",
   "Makefile",
+  "manifest.yaml",
+  "scripts/**",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"

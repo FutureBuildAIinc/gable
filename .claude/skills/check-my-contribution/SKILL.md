@@ -107,7 +107,7 @@ make vuln             # pinned govulncheck — informational, not a merge gate
 ## 3 · Repo hygiene
 
 ```bash
-# No build binaries. This repo has shipped 60MB+ blobs before — see CLAUDE.md gotchas.
+# No build binaries. This repo has shipped 60MB+ blobs before — see AGENTS.md gotchas.
 git diff --cached --name-only | while read -r f; do
   [ -f "$f" ] && file "$f" | grep -q "executable\|ELF\|Mach-O" && echo "BINARY: $f"
 done
@@ -203,7 +203,7 @@ Unsure which license applies? Use the **`licensing-check`** skill.
 
 ## 5 · Convention checks (the things reviewers ask for)
 
-From [`CLAUDE.md`](../../../CLAUDE.md) § Pre-Flight Checks — verify each that applies:
+From [`AGENTS.md`](../../../AGENTS.md) § Pre-Flight Checks — verify each that applies:
 
 - [ ] **New DB columns**: UUID v4 PKs (`uuid_generate_v4()`), `DECIMAL(19,4)` for physical
       quantities (never float), money-as-cents in application code, every quantity paired
