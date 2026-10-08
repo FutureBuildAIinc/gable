@@ -10,6 +10,7 @@ import { LocationService } from '../../services/LocationService';
 import type { Product, Inventory } from '../../types/product';
 import type { Location } from '../../types/location';
 import { ToastService } from '../../lib/toast-service';
+import { formatQuantity, parseScaled } from '../../lib/money';
 
 @customElement('gable-inventory-transfer-modal')
 export class GableInventoryTransferModal extends LitElement {
@@ -41,8 +42,9 @@ export class GableInventoryTransferModal extends LitElement {
     try {
       const data = await InventoryService.getInventoryByProduct(this.product.id);
       this._inventory = data;
-      if (data.length > 0) {
-        this._fromLoc = data[0].location_id || data[0].location || '';
+      const withLocation = data.find(i => i.location_id);
+      if (withLocation) {
+        this._fromLoc = withLocation.location_id!;
       }
     } catch {
       ToastService.show('Failed to load data', 'error');
@@ -83,8 +85,9 @@ export class GableInventoryTransferModal extends LitElement {
   }
 
   private get _maxQty(): number {
-    const sourceItem = this._inventory.find(i => (i.location_id || i.location) === this._fromLoc);
-    return sourceItem ? sourceItem.quantity : 0;
+    const sourceItem = this._inventory.find(i => (i.location_id || '') === this._fromLoc);
+    // The levels wire carries scale 4 decimal strings (C3-1b).
+    return sourceItem ? (parseScaled(sourceItem.quantity, 4) ?? 0) / 10000 : 0;
   }
 
   render() {
@@ -115,9 +118,9 @@ export class GableInventoryTransferModal extends LitElement {
                   required
                 >
                   <option value="">Select Source...</option>
-                  ${this._inventory.map(i => html`
-                    <option value=${i.location_id || i.location}>
-                      ${i.location_name || i.location} (${i.quantity})
+                  ${this._inventory.filter(i => i.location_id).map(i => html`
+                    <option value=${i.location_id}>
+                      ${i.location_name} (${formatQuantity(i.quantity)})
                     </option>
                   `)}
                 </select>
