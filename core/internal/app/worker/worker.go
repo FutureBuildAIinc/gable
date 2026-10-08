@@ -104,10 +104,12 @@ func Run() {
 	// Step 1: stop the background jobs. Same reasoning as serve's job stops:
 	// no purge statement may start against a draining pool, and an in-flight
 	// batch (or drain window) finishes before step 2 closes it.
-	logger.Info("Shutdown step 1/2: stopping outbox drain and idempotency purge scheduler...")
+	logger.Info("Shutdown step 1/2: stopping outbox drain...")
 	drain.Stop()
+	logger.Info("Shutdown step 1/2: outbox drain stopped")
+	logger.Info("Shutdown step 1/2: stopping idempotency purge scheduler...")
 	idempotencyScheduler.Stop()
-	logger.Info("Shutdown step 1/2: outbox drain and idempotency purge scheduler stopped")
+	logger.Info("Shutdown step 1/2: idempotency purge scheduler stopped")
 
 	// Step 2: close the database pool, last, as in serve.
 	logger.Info("Shutdown step 2/2: closing database pool...")
@@ -123,6 +125,9 @@ func Run() {
 func newOutboxDrain(db *database.DB, logger *slog.Logger) *outbox.DrainRunner {
 	drain := outbox.NewDrainRunner(db, logger)
 	notifier := notification.NewExposureNotifier(notification.NewLogEmailService(logger), db, logger)
-	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
+	// A closure, not the method value: the route census reads any "Handle"
+	// method value as a route registration it cannot resolve.
+	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier",
+		func(ctx context.Context, e eventbus.Event) error { return notifier.Handle(ctx, e) })
 	return drain
 }
