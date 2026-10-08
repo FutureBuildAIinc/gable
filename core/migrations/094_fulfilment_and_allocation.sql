@@ -292,6 +292,11 @@ CREATE INDEX IF NOT EXISTS idx_invoice_lines_order_line ON invoice_lines (order_
 -- (allocated and quantity both reduced at the order's branch, the row with the
 -- most allocation first), never below zero on either column. No journal entry
 -- is written: COGS for those orders was never posted and is not invented.
+-- Only orders the application never fulfilled are history: an order with any
+-- line already quantity_fulfilled above zero was billed by the C2-2b code,
+-- and re-running this step on it (094 re-applied after its down, which drops
+-- invoices.origin and so re-enters the first apply) would record unshipped
+-- quantity as shipped and consume stock that is still on hand.
 DO $$
 DECLARE
     o RECORD;
@@ -310,6 +315,8 @@ BEGIN
         SELECT ord.id, ord.branch_id FROM orders ord
         WHERE ord.status IN ('CONFIRMED', 'BACKORDERED')
           AND EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = ord.id AND i.status <> 'VOID')
+          AND NOT EXISTS (SELECT 1 FROM order_lines ol
+                          WHERE ol.order_id = ord.id AND ol.quantity_fulfilled > 0)
         ORDER BY ord.created_at, ord.id
     LOOP
         n_orders := n_orders + 1;

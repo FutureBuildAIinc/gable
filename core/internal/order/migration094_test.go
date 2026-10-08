@@ -287,3 +287,67 @@ func TestMigration094_NamesLegacyInvoiceLinesItCannotHold(t *testing.T) {
 		t.Errorf("the error is the bare shape violation: %v", err)
 	}
 }
+
+// RULE (PR 43 review round 1, P2-2): 094 applied again after its down (the
+// down drops invoices.origin, so the re-apply counts as a first apply) must
+// leave an order the C2-2b code partially fulfilled alone: only orders no line
+// of which has quantity_fulfilled above zero are history. The reviewer's case:
+// an order of 10 with 4 billed and 6 still allocated; the re-apply must not
+// consume the six units that never shipped.
+func TestMigration094_ReapplyAfterItsDownKeepsAPartiallyFulfilledOrder(t *testing.T) {
+	conn, _ := scratchDB(t)
+	before, target := files094(t)
+	for _, f := range before {
+		apply(t, conn, f)
+	}
+	seed094(t, conn)
+	ctx := context.Background()
+	apply(t, conn, target)
+
+	// What the application writes after the first apply: the open order of 10
+	// studs is billed 4 by a fulfilment (invoice lines and quantity_fulfilled
+	// written, 6 still allocated); the stock that shipped left the yard
+	// (20/10 after the first apply, minus the 4 shipped: 16 on hand, 6 held).
+	branch := `(SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1)`
+	if _, err := conn.Exec(ctx, `UPDATE order_lines SET quantity_fulfilled = 4, quantity_allocated = 6 WHERE id = $1`, m94L2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `UPDATE inventory SET quantity = 16, allocated = 6 WHERE product_id = $1`, m94Prod); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO invoices (id, order_id, customer_id, status, total_amount, branch_id, origin)
+		VALUES ('00000000-0000-0000-0000-0000000094e6', $1, $2, 'UNPAID', 22, `+branch+`, 'ORDER')`, m94OOpen, m94Cust); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO invoice_lines (invoice_id, product_id, quantity, price_each, line_type, description, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, cost)
+		VALUES ('00000000-0000-0000-0000-0000000094e6', $1, 4, 5.50, 'PRODUCT', '2x4 stud', 'PCS', 'PCS', 1, 1, 5.50, 22.00, 8.00)`, m94Prod); err != nil {
+		t.Fatal(err)
+	}
+
+	// Down, then up: the re-apply sees no invoices.origin and counts as a
+	// first apply.
+	down, err := os.ReadFile("../../migrations/down/094_fulfilment_and_allocation_down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, string(down)); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	apply(t, conn, target)
+
+	// The partially billed order is untouched: still CONFIRMED, its line
+	// 10 ordered / 6 allocated / 0 backordered / 4 fulfilled, and the six
+	// units that never shipped are still on hand and held.
+	if st := scalar[string](t, conn, `SELECT status FROM orders WHERE id = $1`, m94OOpen); st != "CONFIRMED" {
+		t.Errorf("partially fulfilled order status = %s, want CONFIRMED: the re-apply must not migrate it", st)
+	}
+	if got := scalar[string](t, conn,
+		`SELECT quantity::text || '/' || quantity_allocated::text || '/' || quantity_backordered::text || '/' || quantity_fulfilled::text FROM order_lines WHERE id = $1`, m94L2); got != "10.0000/6.0000/0.0000/4.0000" {
+		t.Errorf("partially fulfilled line = %s, want 10.0000/6.0000/0.0000/4.0000", got)
+	}
+	if got := scalar[string](t, conn, `SELECT quantity::text || '/' || allocated::text FROM inventory WHERE product_id = $1`, m94Prod); got != "16.0000/6.0000" {
+		t.Errorf("stud inventory quantity/allocated = %s, want 16.0000/6.0000: the unshipped six stay on hand", got)
+	}
+}
