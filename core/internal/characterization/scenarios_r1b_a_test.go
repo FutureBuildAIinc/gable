@@ -24,6 +24,7 @@ const (
 func r1bAGroups() []groupDef {
 	return concat(
 		r1bACustomerContactsGroups(),
+		customerShipToTermsGroups(),
 		r1bASalesTeamGroups(),
 		r1bACRMGroups(),
 		r1bALocationGroups(),
@@ -43,6 +44,23 @@ func r1bAGroups() []groupDef {
 }
 
 func r1bACustomerContactsGroups() []groupDef {
+	if0 := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
+	policy := "/api/v1/customers/{a_customer}/escalation-policy"
+	// A contact PUT carries the controls it must not reset by leaving them out.
+	contactPut := func(extra map[string]any) map[string]any {
+		b := map[string]any{"first_name": "Golden", "last_name": "Contact", "role": "Buyer", "can_place_orders": true, "order_limit_cents": nil}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+	contact := func(extra map[string]any) map[string]any {
+		b := map[string]any{"first_name": "Golden", "last_name": "Contact", "role": "Buyer"}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
 	return []groupDef{{
 		name: "customer_contacts",
 		steps: []stepDef{
@@ -53,8 +71,8 @@ func r1bACustomerContactsGroups() []groupDef {
 				body: map[string]any{
 					"name": "Golden Contacts Co", "account_number": "GOLD-A-001",
 					"email": "contacts@example.com", "phone": "250-555-0177",
-					"address": "7 Golden Way, Kelowna BC", "tier": "GOLD",
-					"payment_terms": "NET30", "credit_limit": 50000, "primary_branch_id": "{branch}",
+					"address": "7 Golden Way, Kelowna BC", "tier": "gold",
+					"credit_limit_cents": 5000000, "primary_branch_id": "{branch}",
 				},
 				extract: map[string]string{"a_customer": "/id"},
 			},
@@ -63,11 +81,10 @@ func r1bACustomerContactsGroups() []groupDef {
 				name:   "contact.create",
 				method: "POST",
 				path:   "/api/v1/customers/{a_customer}/contacts",
-				body: map[string]any{
-					"first_name": "Golden", "last_name": "Contact", "title": "Purchasing",
-					"email": "golden.contact@example.com", "phone": "250-555-0155",
-					"role": "Buyer", "is_primary": true, "is_active": true,
-				},
+				body: contact(map[string]any{
+					"title": "Purchasing", "email": "golden.contact@example.com", "phone": "250-555-0155",
+					"is_primary": true, "is_active": true, "can_place_orders": true, "order_limit_cents": 250000,
+				}),
 				extract: map[string]string{"a_contact": "/id"},
 			},
 			{
@@ -75,87 +92,101 @@ func r1bACustomerContactsGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/customers/{a_customer}/contacts",
 				body: map[string]any{
-					"first_name": "Golden", "last_name": "Ledger", "role": "AP", "is_active": true,
+					"first_name": "Golden", "last_name": "Ledger", "role": "AP", "is_active": true, "can_place_orders": false,
 				},
 				extract: map[string]string{"a_contact2": "/id"},
 			},
 			{name: "contact.create.bad_customer_id", method: "POST", path: "/api/v1/customers/not-a-uuid/contacts",
-				body: map[string]any{"first_name": "X", "last_name": "Y", "role": "Buyer"}},
+				body: contact(nil)},
 			{name: "contact.create.bad_body", method: "POST", path: "/api/v1/customers/{a_customer}/contacts",
 				body: "not-an-object"},
-			{name: "contact.list", method: "GET", path: "/api/v1/customers/{a_customer}/contacts", sortPrimaryArray: true},
+			{name: "contact.create.invalid", method: "POST", path: "/api/v1/customers/{a_customer}/contacts",
+				body: map[string]any{"role": "Wizard", "order_limit_cents": -5}},
+			{name: "contact.create.unknown_customer", method: "POST", path: "/api/v1/customers/" + r1bAMissingID + "/contacts",
+				body: contact(nil)},
+			{name: "contact.list", method: "GET", path: "/api/v1/customers/{a_customer}/contacts?include=total"},
+			{name: "contact.list.unsupported_parameter", method: "GET", path: "/api/v1/customers/{a_customer}/contacts?offset=0"},
 			{name: "contact.list.bad_customer_id", method: "GET", path: "/api/v1/customers/not-a-uuid/contacts"},
 			{name: "contact.get", method: "GET", path: "/api/v1/contacts/{a_contact}"},
 			{name: "contact.get.not_found", method: "GET", path: "/api/v1/contacts/" + r1bAMissingID},
 			{name: "contact.get.bad_id", method: "GET", path: "/api/v1/contacts/not-a-uuid"},
+			{name: "contact.update.without_revision", method: "PUT", path: "/api/v1/contacts/{a_contact}", body: contactPut(nil)},
 			{
-				name:   "contact.update",
-				method: "PUT",
-				path:   "/api/v1/contacts/{a_contact}",
-				body: map[string]any{
-					"customer_id": "{a_customer}", "first_name": "Golden", "last_name": "Contact-Updated",
-					"title": "Senior Purchasing", "email": "golden.contact.updated@example.com",
-					"role": "Owner", "is_primary": true, "is_active": true,
-				},
+				name:    "contact.update",
+				method:  "PUT",
+				path:    "/api/v1/contacts/{a_contact}",
+				headers: if0("1"),
+				body: contactPut(map[string]any{
+					"last_name": "Contact-Updated", "title": "Senior Purchasing",
+					"email": "golden.contact.updated@example.com", "role": "Owner", "is_primary": true,
+					"is_active": true, "can_place_orders": true, "order_limit_cents": 500000,
+				}),
 			},
+			{name: "contact.update.stale", method: "PUT", path: "/api/v1/contacts/{a_contact}", headers: if0("1"), body: contactPut(nil)},
+			{name: "contact.update.missing_controls", method: "PUT", path: "/api/v1/contacts/{a_contact}", headers: if0("2"), body: map[string]any{"first_name": "Golden", "last_name": "Contact"}},
 			{name: "contact.get.after_update", method: "GET", path: "/api/v1/contacts/{a_contact}"},
-			{name: "contact.update.bad_body", method: "PUT", path: "/api/v1/contacts/{a_contact}", body: "not-an-object"},
-			{name: "contact.update.bad_id", method: "PUT", path: "/api/v1/contacts/not-a-uuid",
-				body: map[string]any{"first_name": "X"}},
-			{name: "contact.update.not_found", method: "PUT", path: "/api/v1/contacts/" + r1bAMissingID,
-				body: map[string]any{
-					"customer_id": "{a_customer}", "first_name": "Nobody", "last_name": "Here",
-					"role": "Buyer", "is_active": true,
-				}},
+			{name: "contact.update.bad_body", method: "PUT", path: "/api/v1/contacts/{a_contact}", headers: if0("2"), body: "not-an-object"},
+			{name: "contact.update.bad_id", method: "PUT", path: "/api/v1/contacts/not-a-uuid", headers: if0("1"),
+				body: contactPut(map[string]any{"first_name": "X"})},
+			{name: "contact.update.not_found", method: "PUT", path: "/api/v1/contacts/" + r1bAMissingID, headers: if0("1"),
+				body: contactPut(map[string]any{"first_name": "Nobody", "last_name": "Here"})},
 
-			// Escalation policy.
-			{name: "escalation_policy.get_default", method: "GET", path: "/api/v1/customers/{a_customer}/escalation-policy"},
+			// Escalation policy, on the customer's revision (create 1, one per write).
+			{name: "escalation_policy.get_default", method: "GET", path: policy},
 			{name: "escalation_policy.get.not_found", method: "GET", path: "/api/v1/customers/" + r1bAMissingID + "/escalation-policy"},
 			{name: "escalation_policy.get.bad_id", method: "GET", path: "/api/v1/customers/not-a-uuid/escalation-policy"},
+			{name: "escalation_policy.set.without_revision", method: "PUT", path: policy,
+				body: map[string]any{"policy": "flag_for_requote", "threshold_percent": "7.5"}},
 			{
-				name:   "escalation_policy.set",
-				method: "PUT",
-				path:   "/api/v1/customers/{a_customer}/escalation-policy",
-				body:   map[string]any{"policy": "FLAG_FOR_REQUOTE", "threshold_pct": 7.5},
+				name:    "escalation_policy.set",
+				method:  "PUT",
+				path:    policy,
+				headers: if0("1"),
+				body:    map[string]any{"policy": "flag_for_requote", "threshold_percent": "7.5"},
 			},
 			{
-				name:   "escalation_policy.set.auto_escalate_signed",
-				method: "PUT",
-				path:   "/api/v1/customers/{a_customer}/escalation-policy",
+				name:    "escalation_policy.set.auto_escalate_signed",
+				method:  "PUT",
+				path:    policy,
+				headers: if0("2"),
 				body: map[string]any{
-					"policy": "AUTO_ESCALATE", "threshold_pct": 5,
+					"policy": "auto_escalate", "threshold_percent": "5",
 					"agreement_signed_at": "{today}T09:00:00Z", "agreement_ref": "GOLD-AGREEMENT-1",
 				},
 			},
-			{name: "escalation_policy.get", method: "GET", path: "/api/v1/customers/{a_customer}/escalation-policy"},
-			{name: "escalation_policy.set.agreement_required", method: "PUT",
-				path: "/api/v1/customers/{a_customer}/escalation-policy",
-				body: map[string]any{"policy": "AUTO_ESCALATE", "threshold_pct": 5}},
-			{name: "escalation_policy.set.invalid_mode", method: "PUT",
-				path: "/api/v1/customers/{a_customer}/escalation-policy",
-				body: map[string]any{"policy": "SHRUG", "threshold_pct": 5}},
-			{name: "escalation_policy.set.threshold_out_of_range", method: "PUT",
-				path: "/api/v1/customers/{a_customer}/escalation-policy",
-				body: map[string]any{"policy": "REQUIRE_ACK", "threshold_pct": 80}},
-			{name: "escalation_policy.set.bad_body", method: "PUT",
-				path: "/api/v1/customers/{a_customer}/escalation-policy", body: "not-an-object"},
+			{name: "escalation_policy.get", method: "GET", path: policy},
+			{name: "escalation_policy.set.stale", method: "PUT", path: policy, headers: if0("1"),
+				body: map[string]any{"policy": "require_ack", "threshold_percent": "5"}},
+			{name: "escalation_policy.set.agreement_required", method: "PUT", path: policy, headers: if0("3"),
+				body: map[string]any{"policy": "auto_escalate", "threshold_percent": "5"}},
+			{name: "escalation_policy.set.invalid_mode", method: "PUT", path: policy, headers: if0("3"),
+				body: map[string]any{"policy": "SHRUG", "threshold_percent": "5"}},
+			{name: "escalation_policy.set.threshold_out_of_range", method: "PUT", path: policy, headers: if0("3"),
+				body: map[string]any{"policy": "require_ack", "threshold_percent": "80"}},
+			{name: "escalation_policy.set.bad_body", method: "PUT", path: policy, headers: if0("3"), body: "not-an-object"},
 
-			// Salesperson assignment.
+			// Salesperson assignment, on the revision (3 after the policy writes).
+			{name: "customer.salesperson.without_revision", method: "PATCH", path: "/api/v1/customers/{a_customer}/salesperson",
+				body: map[string]any{"salesperson_id": r1bARepHeather}},
 			{name: "customer.salesperson.assign", method: "PATCH", path: "/api/v1/customers/{a_customer}/salesperson",
-				body: map[string]any{"salesperson_id": r1bARepHeather}},
+				headers: if0("3"), body: map[string]any{"salesperson_id": r1bARepHeather}},
 			{name: "customer.salesperson.clear", method: "PATCH", path: "/api/v1/customers/{a_customer}/salesperson",
-				body: map[string]any{"salesperson_id": nil}},
+				headers: if0("4"), body: map[string]any{"salesperson_id": nil}},
+			{name: "customer.salesperson.missing_key", method: "PATCH", path: "/api/v1/customers/{a_customer}/salesperson",
+				headers: if0("5"), body: map[string]any{}},
 			{name: "customer.salesperson.bad_body", method: "PATCH", path: "/api/v1/customers/{a_customer}/salesperson",
-				body: map[string]any{"salesperson_id": "not-a-uuid"}},
+				headers: if0("5"), body: map[string]any{"salesperson_id": "not-a-uuid"}},
 			{name: "customer.salesperson.bad_id", method: "PATCH", path: "/api/v1/customers/not-a-uuid/salesperson",
-				body: map[string]any{"salesperson_id": r1bARepHeather}},
+				headers: if0("5"), body: map[string]any{"salesperson_id": r1bARepHeather}},
 			{name: "customer.salesperson.unknown_rep", method: "PATCH", path: "/api/v1/customers/{a_customer}/salesperson",
-				body: map[string]any{"salesperson_id": r1bAMissingID}},
+				headers: if0("5"), body: map[string]any{"salesperson_id": r1bAMissingID}},
 
 			// Delete last: the second contact stays to prove the list.
-			{name: "contact.delete", method: "DELETE", path: "/api/v1/contacts/{a_contact}"},
-			{name: "contact.delete.again", method: "DELETE", path: "/api/v1/contacts/{a_contact}"},
-			{name: "contact.delete.bad_id", method: "DELETE", path: "/api/v1/contacts/not-a-uuid"},
+			{name: "contact.delete.without_revision", method: "DELETE", path: "/api/v1/contacts/{a_contact}"},
+			{name: "contact.delete.stale", method: "DELETE", path: "/api/v1/contacts/{a_contact}", headers: if0("1")},
+			{name: "contact.delete", method: "DELETE", path: "/api/v1/contacts/{a_contact}", headers: if0("2")},
+			{name: "contact.delete.again", method: "DELETE", path: "/api/v1/contacts/{a_contact}", headers: if0("2")},
+			{name: "contact.delete.bad_id", method: "DELETE", path: "/api/v1/contacts/not-a-uuid", headers: if0("1")},
 			{name: "contact.get.after_delete", method: "GET", path: "/api/v1/contacts/{a_contact}"},
 			{name: "contact.list.after_delete", method: "GET", path: "/api/v1/customers/{a_customer}/contacts"},
 		},

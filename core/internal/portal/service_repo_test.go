@@ -352,9 +352,10 @@ func (f *fakePortalRepo) GetLatestRescheduleRequest(context.Context, uuid.UUID, 
 // interface and are never called.
 
 type fakeCustomerRepo struct {
-	customers map[uuid.UUID]*customer.Customer
-	err       error
-	gets      []uuid.UUID
+	customer.Repository // only GetCustomer is reached; anything else is a loud nil call
+	customers           map[uuid.UUID]*customer.Customer
+	err                 error
+	gets                []uuid.UUID
 }
 
 var _ customer.Repository = (*fakeCustomerRepo)(nil)
@@ -370,41 +371,9 @@ func (f *fakeCustomerRepo) GetCustomer(_ context.Context, id uuid.UUID) (*custom
 	}
 	return c, nil
 }
-func (f *fakeCustomerRepo) CreateCustomer(context.Context, *customer.Customer) error { return nil }
 func (f *fakeCustomerRepo) GetCustomerByEmail(context.Context, string) (*customer.Customer, error) {
 	return nil, errors.New("not found")
 }
-func (f *fakeCustomerRepo) ListCustomers(context.Context) ([]customer.Customer, error) {
-	return nil, nil
-}
-func (f *fakeCustomerRepo) ListCustomersPaginated(context.Context, int, int) ([]customer.Customer, int, error) {
-	return nil, 0, nil
-}
-func (f *fakeCustomerRepo) ListPriceLevels(context.Context) ([]customer.PriceLevel, error) {
-	return nil, nil
-}
-func (f *fakeCustomerRepo) GetPriceLevel(context.Context, uuid.UUID) (*customer.PriceLevel, error) {
-	return nil, errors.New("not found")
-}
-func (f *fakeCustomerRepo) UpdateBalance(context.Context, uuid.UUID, float64) error { return nil }
-func (f *fakeCustomerRepo) UpdateSalesperson(context.Context, uuid.UUID, *uuid.UUID) error {
-	return nil
-}
-func (f *fakeCustomerRepo) GetEscalationPolicy(context.Context, uuid.UUID) (*customer.EscalationPolicy, error) {
-	return nil, errors.New("not found")
-}
-func (f *fakeCustomerRepo) SetEscalationPolicy(context.Context, *customer.EscalationPolicy) error {
-	return nil
-}
-func (f *fakeCustomerRepo) CreateContact(context.Context, *customer.Contact) error { return nil }
-func (f *fakeCustomerRepo) GetContact(context.Context, uuid.UUID) (*customer.Contact, error) {
-	return nil, errors.New("not found")
-}
-func (f *fakeCustomerRepo) ListContactsByCustomer(context.Context, uuid.UUID) ([]customer.Contact, error) {
-	return nil, nil
-}
-func (f *fakeCustomerRepo) UpdateContact(context.Context, *customer.Contact) error { return nil }
-func (f *fakeCustomerRepo) DeleteContact(context.Context, uuid.UUID) error         { return nil }
 
 type fakeProductRepo struct {
 	products map[uuid.UUID]*product.Product

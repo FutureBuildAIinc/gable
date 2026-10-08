@@ -1488,9 +1488,37 @@ paths:
       operationId: customerList
       tags: [customer]
       summary: List customers
+      description: >-
+        The cursor list envelope, newest first. q searches name, account number and email (case blind); tier, is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a tier outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - name: q
+          in: query
+          required: false
+          description: Search term for name, account_number and email, at most 100 characters.
+          schema:
+            type: string
+        - name: tier
+          in: query
+          required: false
+          description: One lowercase tier.
+          schema:
+            type: string
+            enum: [retail, silver, gold, platinum]
+        - name: is_active
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: salesperson_id
+          in: query
+          required: false
+          description: Customers assigned to this salesperson.
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
         - $ref: "#/components/parameters/XBranchId"
       responses:
         "200":
@@ -1499,16 +1527,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: customerCreate
       tags: [customer]
       summary: Create a customer
+      description: >-
+        Creates a customer. account_number and name are required; the terms default to NET30, the tier to retail. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1517,10 +1549,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Customer"
+              $ref: "#/components/schemas/CustomerRequest"
       responses:
         "201":
-          description: The created customer.
+          description: The created customer, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1531,14 +1571,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/customers/{id}:
     get:
       operationId: customerGet
@@ -1554,41 +1596,12 @@ paths:
         - $ref: "#/components/parameters/XBranchId"
       responses:
         "200":
-          description: The customer.
-          content:
-            application/json:
+          description: The customer, with its revision as the ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
               schema:
-                $ref: "#/components/schemas/Customer"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "404":
-          $ref: "#/components/responses/NotFound"
-  /api/v1/customers/{id}/salesperson:
-    patch:
-      operationId: customerUpdateSalesperson
-      tags: [customer]
-      summary: Assign or clear the salesperson
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CustomerSalespersonUpdate"
-      responses:
-        "200":
-          description: The updated customer.
+                type: string
           content:
             application/json:
               schema:
@@ -1598,15 +1611,115 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: customerUpdate
+      tags: [customer]
+      summary: Replace a customer header
+      description: >-
+        Replaces the header on the client's revision (If-Match or the body's revision; neither is 428, a stale one is 409 stale_revision). A field left out takes its default (null for an optional one). primary_branch_id is fixed at create and sending it is a 400. Changing the currency override is a 409 conflict with the blocker open_documents while the customer has an order not fulfilled or cancelled, an invoice or credit memo with an open amount, or a deposit with an unapplied amount. Writes customer.updated, naming the part and the fields changed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerUpdateRequest"
+      responses:
+        "200":
+          description: The updated customer at its new revision.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/ConflictEither"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/salesperson:
+    patch:
+      operationId: customerUpdateSalesperson
+      tags: [customer]
+      summary: Assign or clear the salesperson
+      description: >-
+        On the client's revision. The salesperson_id key must be present; null unassigns. Writes customer.updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerSalespersonRequest"
+      responses:
+        "200":
+          description: The updated customer.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/customers/{id}/escalation-policy:
     get:
       operationId: customerGetEscalationPolicy
@@ -1622,27 +1735,124 @@ paths:
         - $ref: "#/components/parameters/XBranchId"
       responses:
         "200":
-          description: The policy.
+          description: The policy, with the customer's revision as the ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/EscalationPolicy"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: customerSetEscalationPolicy
       tags: [customer]
       summary: Set the lumber index escalation policy
       description: >-
-        Validation failures (a missing agreement reference, an invalid policy) are a 400; the reloaded row is returned so server side normalization is visible.
+        On the client's revision (the customer's). auto_escalate requires a signed agreement timestamp; the threshold is above 0 and at most 50 percent. A reference with no timestamp is stamped at now. Writes customer.updated (part escalation_policy).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EscalationPolicyRequest"
+      responses:
+        "200":
+          description: The policy as stored.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/ship-tos:
+    get:
+      operationId: customerListShipTos
+      tags: [customer]
+      summary: List a customer's ship-tos
+      description: >-
+        The cursor list envelope, newest first; is_active filters. An unknown customer is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: is_active
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of ship-tos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipToPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: customerCreateShipTo
+      tags: [customer]
+      summary: Add a ship-to address
+      description: >-
+        code (unique per customer), name and line1 are required. The customer's first active ship-to becomes the default; naming is_default moves the default to this one. Writes customer.updated (part ship_to).
       parameters:
         - name: id
           in: path
@@ -1657,28 +1867,297 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EscalationPolicy"
+              $ref: "#/components/schemas/ShipToRequest"
       responses:
-        "200":
-          description: The reloaded policy.
+        "201":
+          description: The created ship-to.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EscalationPolicy"
+                $ref: "#/components/schemas/ShipTo"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/ship-tos/{id}:
+    get:
+      operationId: shipToGet
+      tags: [customer]
+      summary: Get one ship-to
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ship-to.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipTo"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: shipToUpdate
+      tags: [customer]
+      summary: Replace a ship-to
+      description: >-
+        On the client's revision. A field left out takes its default. Deactivate through is_active; a ship-to is never deleted. Writes customer.updated (part ship_to).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipToRequest"
+      responses:
+        "200":
+          description: The updated ship-to.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipTo"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/payment-terms:
+    get:
+      operationId: paymentTermsList
+      tags: [customer]
+      summary: List payment terms
+      description: >-
+        The cursor list envelope, newest first; is_active and kind filter.
+      parameters:
+        - name: is_active
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: kind
+          in: query
+          required: false
+          description: One lowercase kind.
+          schema:
+            type: string
+            enum: [net_days, day_of_month, due_on_receipt]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of payment terms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentTermsRecordPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: paymentTermsCreate
+      tags: [customer]
+      summary: Create payment terms
+      description: >-
+        code is unique and fixed once created. net_days terms need net_days, day_of_month terms need day_of_month (1 to 31: due on that day of the month after the invoice month, clamped to its length), due_on_receipt takes neither. discount_percent and discount_days go together.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentTermsRecordRequest"
+      responses:
+        "201":
+          description: The created terms.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentTermsRecord"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/payment-terms/{id}:
+    get:
+      operationId: paymentTermsGet
+      tags: [customer]
+      summary: Get one payment terms row
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The terms.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentTermsRecord"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: paymentTermsUpdate
+      tags: [customer]
+      summary: Replace payment terms
+      description: >-
+        On the client's revision. The code cannot change. Deactivate through is_active; terms in use are never deleted, a customer that holds inactive terms keeps them.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentTermsRecordRequest"
+      responses:
+        "200":
+          description: The updated terms.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentTermsRecord"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/customers/{customerId}/activities:
     get:
       operationId: customerListActivities
@@ -1756,6 +2235,8 @@ paths:
       operationId: customerListContacts
       tags: [customer]
       summary: List a customer's contacts
+      description: >-
+        The cursor list envelope, newest first; is_active filters. An unknown customer is a 404.
       parameters:
         - name: customerId
           in: path
@@ -1763,26 +2244,38 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: is_active
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
         - $ref: "#/components/parameters/XBranchId"
       responses:
         "200":
-          description: The contacts, a bare array that is null when the customer has none.
+          description: The page of contacts.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ContactList"
+                $ref: "#/components/schemas/ContactPage"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: customerCreateContact
       tags: [customer]
       summary: Create a contact
+      description: >-
+        first_name and last_name are required. can_place_orders defaults to true; order_limit_cents is the largest order the contact may place (null: no limit of their own). Writes customer.updated (part contact).
       parameters:
         - name: customerId
           in: path
@@ -1797,10 +2290,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Contact"
+              $ref: "#/components/schemas/ContactRequest"
       responses:
         "201":
           description: The created contact.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1811,14 +2312,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/contacts/{id}:
     get:
       operationId: contactGet
@@ -1835,40 +2338,11 @@ paths:
       responses:
         "200":
           description: The contact.
-          content:
-            application/json:
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
               schema:
-                $ref: "#/components/schemas/Contact"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    put:
-      operationId: contactUpdate
-      tags: [customer]
-      summary: Update a contact
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/Contact"
-      responses:
-        "200":
-          description: The updated contact.
+                type: string
           content:
             application/json:
               schema:
@@ -1879,18 +2353,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/InternalError"
-    delete:
-      operationId: contactDelete
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: contactUpdate
       tags: [customer]
-      summary: Delete a contact
+      summary: Replace a contact
+      description: >-
+        On the client's revision. A field left out takes its default. Writes customer.updated (part contact).
       parameters:
         - name: id
           in: path
@@ -1898,38 +2370,105 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IfMatch"
         - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactUpdateRequest"
       responses:
-        "204":
-          description: Deleted.
+        "200":
+          description: The updated contact.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
+    delete:
+      operationId: contactDelete
+      tags: [customer]
+      summary: Delete a contact
+      description: >-
+        On the client's revision, carried by If-Match (a DELETE has no body). Writes customer.updated (part contact).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/price_levels:
     get:
       operationId: customerListPriceLevels
       tags: [customer]
       summary: List price levels
+      description: >-
+        The cursor list envelope, newest first.
       parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
         - $ref: "#/components/parameters/XBranchId"
       responses:
         "200":
-          description: All price levels, a bare array that is null when none exist.
+          description: The page of price levels.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PriceLevelList"
+                $ref: "#/components/schemas/PriceLevelPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/dashboard/summary:
     get:
       operationId: dashboardSummary
@@ -12577,75 +13116,13 @@ components:
           type: string
         description:
           type: string
-    Customer:
-      type: object
-      required: [id, primary_branch_id, name, account_number, tier, credit_limit, balance_due, is_active, created_at, updated_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        primary_branch_id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        account_number:
-          type: string
-        email:
-          type: string
-        phone:
-          type: string
-        address:
-          type: string
-        tier:
-          type: string
-          enum: [RETAIL, SILVER, GOLD, PLATINUM]
-        price_level_id:
-          type: string
-          format: uuid
-        price_level:
-          $ref: "#/components/schemas/PriceLevel"
-        salesperson_id:
-          type: string
-          format: uuid
-        salesperson_name:
-          type: string
-        credit_limit:
-          type: number
-          description: Float dollars.
-        balance_due:
-          type: number
-          description: Float dollars. The account module carries the same fact in cents.
-        is_active:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-    CustomerPage:
-      type: object
-      required: [data, total, limit, offset]
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/Customer"
-        total:
-          type: integer
-        limit:
-          type: integer
-        offset:
-          type: integer
-    CustomerSalespersonUpdate:
-      type: object
-      required: [salesperson_id]
-      properties:
-        salesperson_id:
-          type: [string, "null"]
-          format: uuid
-          description: The salesperson to assign, or null to clear.
+    CustomerTier:
+      type: string
+      enum: [retail, silver, gold, platinum]
+      description: The price tier, lowercase on the wire (ADR 0001 section 6). The database keeps its uppercase enum.
+    TermsKind:
+      type: string
+      enum: [net_days, day_of_month, due_on_receipt]
     PriceLevel:
       type: object
       required: [id, name, multiplier, created_at, updated_at]
@@ -12657,37 +13134,378 @@ components:
           type: string
         multiplier:
           type: number
+          description: "A price multiplier, a rate and not money."
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-    PriceLevelList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/PriceLevel"
+    PriceLevelPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PriceLevel"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    PaymentTermsRef:
+      type: object
+      required: [id, code, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+    Customer:
+      type: object
+      required: [id, account_number, name, email, phone, address, tier, is_active, primary_branch_id, price_level_id, price_level, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        account_number:
+          type: string
+        name:
+          type: string
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        address:
+          type: [string, "null"]
+          description: "The free text billing address; delivery addresses are ship-tos."
+        tier:
+          $ref: "#/components/schemas/CustomerTier"
+        is_active:
+          type: boolean
+        primary_branch_id:
+          type: string
+          format: uuid
+        price_level_id:
+          type: [string, "null"]
+          format: uuid
+        price_level:
+          oneOf:
+            - $ref: "#/components/schemas/PriceLevel"
+            - type: "null"
+        salesperson_id:
+          type: [string, "null"]
+          format: uuid
+        salesperson_name:
+          type: [string, "null"]
+        credit_limit_cents:
+          type: [integer, "null"]
+          description: "Null is no limit; zero is a limit of nothing."
+          format: int64
+        balance_cents:
+          type: integer
+          description: "Read only: the AR core is its single writer."
+          format: int64
+        currency:
+          type: [string, "null"]
+          description: "The customer's override of the dealer default currency; null means the default."
+        effective_currency:
+          type: string
+          description: "The ISO 4217 code a new document of this customer takes."
+        payment_terms_id:
+          type: string
+          format: uuid
+        payment_terms:
+          $ref: "#/components/schemas/PaymentTermsRef"
+        po_required:
+          type: boolean
+          description: "Whether an order of this customer must carry a purchase order number."
+        revision:
+          type: integer
+          description: "Starts at 1 and moves on every write to the customer row; send it back as If-Match."
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    CustomerRequest:
+      type: object
+      required: [account_number, name]
+      description: >-
+        The body of POST and PUT. Unknown fields are a 400. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true, false, and the NET30 terms), and primary_branch_id and revision are PUT/POST specific as the fields say.
+      properties:
+        account_number:
+          type: string
+        name:
+          type: string
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        address:
+          type: [string, "null"]
+        tier:
+          $ref: "#/components/schemas/CustomerTier"
+        is_active:
+          type: boolean
+        primary_branch_id:
+          type: string
+          format: uuid
+          description: Create only; fixed afterwards, and a PUT carrying it is a 400.
+        price_level_id:
+          type: [string, "null"]
+          format: uuid
+        salesperson_id:
+          type: [string, "null"]
+          format: uuid
+        credit_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          description: Null is no limit; zero is a limit of nothing; never negative.
+        currency:
+          type: [string, "null"]
+          description: An enabled ISO 4217 code with a minor unit of 0 or 2 places, or null for the dealer default.
+        payment_terms_id:
+          type: string
+          format: uuid
+          description: Active payment terms; the default NET30 when left out on create.
+        po_required:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match; a revision on create is a 400.
+    CustomerUpdateRequest:
+      type: object
+      required: [account_number, name, payment_terms_id, po_required]
+      description: >-
+        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two controls, payment_terms_id and po_required, which are required so a left out field cannot reset them. primary_branch_id is refused.
+      properties:
+        account_number:
+          type: string
+        name:
+          type: string
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        address:
+          type: [string, "null"]
+        tier:
+          $ref: "#/components/schemas/CustomerTier"
+        is_active:
+          type: boolean
+        primary_branch_id:
+          type: string
+          format: uuid
+          description: Create only; fixed afterwards, and a PUT carrying it is a 400.
+        price_level_id:
+          type: [string, "null"]
+          format: uuid
+        salesperson_id:
+          type: [string, "null"]
+          format: uuid
+        credit_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          description: Null is no limit; zero is a limit of nothing; never negative.
+        currency:
+          type: [string, "null"]
+          description: An enabled ISO 4217 code with a minor unit of 0 or 2 places, or null for the dealer default.
+        payment_terms_id:
+          type: string
+          format: uuid
+          description: Active payment terms, or terms the customer already holds.
+        po_required:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match; a revision on create is a 400.
+    CustomerSalespersonRequest:
+      type: object
+      required: [salesperson_id]
+      properties:
+        salesperson_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson to assign, or null to unassign. The key must be present.
+        revision:
+          type: integer
+          format: int64
     EscalationPolicy:
       type: object
-      required: [customer_id, policy, threshold_pct]
+      required: [customer_id, policy, threshold_percent, agreement_signed_at, agreement_ref, revision]
       properties:
         customer_id:
           type: string
           format: uuid
         policy:
           type: string
-          description: The policy name; an unknown name is a 400 on set.
-        threshold_pct:
-          type: number
-        agreement_signed_at:
+          enum: [auto_escalate, flag_for_requote, require_ack]
+        threshold_percent:
           type: string
+          description: "A decimal string with at most 4 fraction digits, above 0 and at most 50."
+        agreement_signed_at:
+          type: [string, "null"]
           format: date-time
         agreement_ref:
+          type: [string, "null"]
+        revision:
+          type: integer
+          description: "The customer's revision."
+          format: int64
+    EscalationPolicyRequest:
+      type: object
+      required: [policy, threshold_percent]
+      properties:
+        policy:
           type: string
-          description: Required by the set validation for the policies that need a signed agreement.
+          enum: [auto_escalate, flag_for_requote, require_ack]
+        threshold_percent:
+          type: string
+        agreement_signed_at:
+          type: [string, "null"]
+          format: date-time
+          description: Required for auto_escalate.
+        agreement_ref:
+          type: [string, "null"]
+        revision:
+          type: integer
+          format: int64
+    ShipTo:
+      type: object
+      required: [id, customer_id, code, name, line1, line2, city, region, postal_code, country, phone, delivery_instructions, tax_rate_percent, is_default, is_active, revision, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: "Unique per customer."
+        name:
+          type: string
+        line1:
+          type: string
+        line2:
+          type: [string, "null"]
+        city:
+          type: [string, "null"]
+        region:
+          type: [string, "null"]
+        postal_code:
+          type: [string, "null"]
+        country:
+          type: [string, "null"]
+          description: "ISO 3166 alpha-2."
+        phone:
+          type: [string, "null"]
+        delivery_instructions:
+          type: [string, "null"]
+        tax_rate_percent:
+          type: [string, "null"]
+          description: "A decimal string with at most 4 fraction digits (for example \"8.875\"): the rate a delivery to this address is taxed at, or null."
+        is_default:
+          type: boolean
+          description: "At most one ship-to of a customer is the default."
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ShipToPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShipTo"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    ShipToRequest:
+      type: object
+      required: [code, name, line1]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        line1:
+          type: string
+        line2:
+          type: [string, "null"]
+        city:
+          type: [string, "null"]
+        region:
+          type: [string, "null"]
+        postal_code:
+          type: [string, "null"]
+        country:
+          type: [string, "null"]
+          description: Two capital letters.
+        phone:
+          type: [string, "null"]
+        delivery_instructions:
+          type: [string, "null"]
+        tax_rate_percent:
+          type: [string, "null"]
+          description: A decimal string between 0 and 100 with at most 4 fraction digits.
+        is_default:
+          type: boolean
+          description: On create, left out makes the customer's first active ship-to the default. An inactive ship-to cannot be the default.
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match.
     Contact:
       type: object
-      required: [id, customer_id, first_name, last_name, role, is_primary, is_active, created_at, updated_at]
+      required: [id, customer_id, first_name, last_name, title, email, phone, role, is_primary, is_active, can_place_orders, order_limit_cents, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -12700,28 +13518,189 @@ components:
         last_name:
           type: string
         title:
-          type: string
+          type: [string, "null"]
         email:
-          type: string
+          type: [string, "null"]
         phone:
-          type: string
+          type: [string, "null"]
         role:
-          type: string
-          enum: [Buyer, AP, Owner, Site Super]
+          type: [string, "null"]
+          enum: [Buyer, AP, Owner, Site Super, null]
         is_primary:
           type: boolean
         is_active:
           type: boolean
+        can_place_orders:
+          type: boolean
+          description: "Whether this contact may place orders for the customer."
+        order_limit_cents:
+          type: [integer, "null"]
+          description: "The largest order this contact may place; null is no limit of their own."
+          format: int64
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-    ContactList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/Contact"
+    ContactPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Contact"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    ContactRequest:
+      type: object
+      required: [first_name, last_name]
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        title:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        role:
+          type: [string, "null"]
+          enum: [Buyer, AP, Owner, Site Super, null]
+        is_primary:
+          type: boolean
+        is_active:
+          type: boolean
+        can_place_orders:
+          type: boolean
+          description: Defaults to true.
+        order_limit_cents:
+          type: [integer, "null"]
+          format: int64
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match.
+    ContactUpdateRequest:
+      type: object
+      required: [first_name, last_name, can_place_orders, order_limit_cents]
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        title:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        role:
+          type: [string, "null"]
+          enum: [Buyer, AP, Owner, Site Super, null]
+        is_primary:
+          type: boolean
+        is_active:
+          type: boolean
+        can_place_orders:
+          type: boolean
+          description: Required on a PUT, so a left out field cannot re-grant order authority.
+        order_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          description: Required on a PUT; null is an explicit no limit of the contact's own.
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match.
+    PaymentTermsRecord:
+      type: object
+      required: [id, code, name, kind, net_days, day_of_month, discount_percent, discount_days, is_active, revision, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        kind:
+          $ref: "#/components/schemas/TermsKind"
+        net_days:
+          type: [integer, "null"]
+        day_of_month:
+          type: [integer, "null"]
+        discount_percent:
+          type: [string, "null"]
+          description: "A decimal string with at most 4 fraction digits."
+        discount_days:
+          type: [integer, "null"]
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PaymentTermsRecordPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentTermsRecord"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    PaymentTermsRecordRequest:
+      type: object
+      required: [code, name, kind]
+      properties:
+        code:
+          type: string
+          description: Capital letters, digits, underscore or hyphen; fixed once created.
+        name:
+          type: string
+        kind:
+          $ref: "#/components/schemas/TermsKind"
+        net_days:
+          type: [integer, "null"]
+        day_of_month:
+          type: [integer, "null"]
+        discount_percent:
+          type: [string, "null"]
+        discount_days:
+          type: [integer, "null"]
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match.
     CustomerActivityCreate:
       type: object
       required: [activity_type]

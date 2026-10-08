@@ -6,6 +6,8 @@ package serve
 import (
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/purchase_order"
@@ -44,6 +46,14 @@ func (w *branchWall) locations(mux *http.ServeMux, h *location.Handler) {
 
 func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {
 	inventory.NewHandler(svc).WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "warehouse"))
+}
+
+// customers mounts the customer routes: the create takes primary_branch_id from
+// its body, so it is held to the caller's branch context; payment terms writes
+// take the narrower finance guard.
+func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
+	customer.NewHandler(svc.WithBranchGuard(customerguard.New(w.guard))).
+		RegisterRoutes(mux, w.scoped("admin", "owner", "sales"), w.scoped("admin", "owner", "finance"))
 }
 
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {

@@ -40,9 +40,12 @@ func (s *Service) GetDashboard(ctx context.Context, customerID uuid.UUID) (*Dash
 		return nil, fmt.Errorf("failed to get customer: %w", err)
 	}
 
+	// The partner dashboard keeps its float dollar wire until the partner
+	// module converts; a customer with no limit reads 0, as it always did.
+	limit, _ := cust.CreditLimitDollars()
 	return &DashboardDTO{
-		BalanceDue:  cust.BalanceDue,
-		CreditLimit: cust.CreditLimit,
+		BalanceDue:  float64(cust.BalanceCents) / 100,
+		CreditLimit: limit,
 	}, nil
 }
 

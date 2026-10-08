@@ -15,7 +15,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './ActivityFeed'
 import type { GableActivityFeed } from './ActivityFeed'
-import type { Activity, Contact } from '../../types/crm'
+import type { Activity } from '../../types/crm'
+import type { Contact } from '../../types/customer'
 import { mountAsync, update, flush, text, q, jsonResponse } from '../../test/dom'
 
 const CUSTOMER = '33333333-3333-4333-8333-333333333333'
@@ -25,9 +26,15 @@ const CONTACT: Contact = {
   customer_id: CUSTOMER,
   first_name: 'Dana',
   last_name: 'Ramirez',
+  title: null,
+  email: null,
+  phone: null,
   role: 'Buyer',
   is_primary: true,
   is_active: true,
+  can_place_orders: true,
+  order_limit_cents: null,
+  revision: 1,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
@@ -55,8 +62,8 @@ function serve() {
       if (method === 'GET' && url.endsWith('/activities')) {
         return Promise.resolve(jsonResponse(activities))
       }
-      if (method === 'GET' && url.endsWith('/contacts')) {
-        return Promise.resolve(jsonResponse([CONTACT]))
+      if (method === 'GET' && new URL(url, 'http://localhost').pathname.endsWith('/contacts')) {
+        return Promise.resolve(jsonResponse({ items: [CONTACT], next_cursor: null, limit: 200 }))
       }
       if (method === 'POST' && url.endsWith('/activities')) {
         const sent = JSON.parse(body ?? '{}')

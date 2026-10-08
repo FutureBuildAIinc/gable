@@ -3,7 +3,10 @@
 
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Guards the F6 boot fail-closed in Load(): an insecure OPENROUTER_BASE_URL must
 // refuse to start, while the secure default and loopback self-host forms boot.
@@ -77,6 +80,22 @@ func TestLoad_RateLimitPerMinute(t *testing.T) {
 	t.Setenv("RATE_LIMIT_PER_MINUTE", "2000")
 	if cfg, err = Load(); err != nil || cfg.RateLimitPerMinute != 2000 {
 		t.Fatalf("with the variable set = %d (%v), want 2000", cfg.RateLimitPerMinute, err)
+	}
+}
+
+// A limit below 1 would turn every request into a 429 (or, with zero, disable
+// the limiter by accident), so config load refuses it instead of booting.
+func TestLoad_RateLimitPerMinuteRefusesBelowOne(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+	for _, v := range []string{"0", "-1", "-120"} {
+		t.Setenv("RATE_LIMIT_PER_MINUTE", v)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RATE_LIMIT_PER_MINUTE") {
+			t.Errorf("Load() with RATE_LIMIT_PER_MINUTE=%q = %v, want an error naming the variable", v, err)
+		}
+	}
+	t.Setenv("RATE_LIMIT_PER_MINUTE", "1")
+	if cfg, err := Load(); err != nil || cfg.RateLimitPerMinute != 1 {
+		t.Errorf("Load() with RATE_LIMIT_PER_MINUTE=1 = %v (%v), want 1", cfg, err)
 	}
 }
 

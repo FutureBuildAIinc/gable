@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/purchase_order"
@@ -101,6 +102,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	mux := http.NewServeMux()
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)), location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
 	wall.inventory(mux, inventory.NewService(inventory.NewRepository(db)))
+	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.purchaseOrders(mux, purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil))
 	f.srv = httptest.NewServer(asRole(mux))
@@ -179,6 +181,28 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 	}
 	if got := f.call(t, "POST", "/api/v1/quotes", quoteBody(B), "sales", "u-a", ""); got != no {
 		t.Errorf("sales quote at ungranted branch, no header: %d, want 403", got)
+	}
+
+	// Customers: a sales user granted only A may not create a customer at B.
+	customerBody := func(branch string) string {
+		return fmt.Sprintf(`{"account_number":"WALL-%s","name":"wall","primary_branch_id":%q}`, uuid.NewString()[:8], branch)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM customer_branches WHERE branch_id IN ($1, $2)`, f.branchA, f.branchB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'customer' AND branch_id IN ($1, $2)`, f.branchA, f.branchB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM customers WHERE account_number LIKE 'WALL-%'`)
+	})
+	if got := f.call(t, "POST", "/api/v1/customers", customerBody(B), "sales", "u-a", A); got != no {
+		t.Errorf("sales customer at foreign branch, header A: %d, want 403", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/customers", customerBody(B), "sales", "u-a", ""); got != no {
+		t.Errorf("sales customer at ungranted branch, no header: %d, want 403", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/customers", customerBody(A), "sales", "u-a", A); got != http.StatusCreated {
+		t.Errorf("sales customer at own branch: %d, want 201", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/customers", customerBody(B), "admin", "boss", ""); got != http.StatusCreated {
+		t.Errorf("admin customer at any branch: %d, want 201", got)
 	}
 
 	// Purchase order receipt: refused for a granted user, passed to the module

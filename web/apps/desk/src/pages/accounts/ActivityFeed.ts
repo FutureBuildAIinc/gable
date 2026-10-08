@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { crmApi } from '../../services/crmApi.ts';
+import { CustomerService } from '../../services/CustomerService.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { format } from 'date-fns';
 import type { Activity, Contact } from '../../types/crm.ts';
@@ -38,10 +39,10 @@ export class GableActivityFeed extends LitElement {
             this.loading = true;
             const [acts, conts] = await Promise.all([
                 crmApi.listActivities(this.customerId),
-                crmApi.listContacts(this.customerId),
+                CustomerService.listContacts(this.customerId, { limit: 200 }),
             ]);
             this.activities = acts || [];
-            this.contacts = conts || [];
+            this.contacts = conts.items;
         } catch (err: unknown) {
             console.error('Failed to load activity data', err);
             ToastService.show('Failed to load activity data', 'error');

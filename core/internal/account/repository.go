@@ -103,7 +103,7 @@ func (r *PostgresRepository) GetBalance(ctx context.Context, customerID uuid.UUI
 
 func (r *PostgresRepository) GetCreditLimit(ctx context.Context, customerID uuid.UUID) (int64, error) {
 	var limitFloat float64
-	query := `SELECT credit_limit FROM customers WHERE id = $1`
+	query := `SELECT COALESCE(credit_limit, 0) FROM customers WHERE id = $1`
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, customerID).Scan(&limitFloat)
 	if err != nil {
 		if err == pgx.ErrNoRows {

@@ -135,9 +135,12 @@ POST	/api/v1/customers/{customerId}/activities	internal/crm	h.HandleCreateActivi
 GET	/api/v1/customers/{customerId}/contacts	internal/customer	h.HandleListContacts
 POST	/api/v1/customers/{customerId}/contacts	internal/customer	h.HandleCreateContact
 GET	/api/v1/customers/{id}	internal/customer	h.HandleGetCustomer
+PUT	/api/v1/customers/{id}	internal/customer	h.HandleUpdateCustomer
 GET	/api/v1/customers/{id}/escalation-policy	internal/customer	h.HandleGetEscalationPolicy
 PUT	/api/v1/customers/{id}/escalation-policy	internal/customer	h.HandleSetEscalationPolicy
 PATCH	/api/v1/customers/{id}/salesperson	internal/customer	h.HandleUpdateSalesperson
+GET	/api/v1/customers/{id}/ship-tos	internal/customer	h.HandleListShipTos
+POST	/api/v1/customers/{id}/ship-tos	internal/customer	h.HandleCreateShipTo
 GET	/api/v1/dashboard/inventory-alerts	internal/dashboard	h.HandleInventoryAlerts
 GET	/api/v1/dashboard/order-activity	internal/dashboard	h.HandleOrderActivity
 GET	/api/v1/dashboard/revenue-trend	internal/dashboard	h.HandleRevenueTrend
@@ -236,6 +239,10 @@ GET	/api/v1/orders/{id}/exposure-gate	internal/order	h.HandleExposureGate
 POST	/api/v1/orders/{id}/exposure-override	internal/order	h.HandleExposureOverride
 POST	/api/v1/orders/{id}/fulfill	internal/order	h.HandleFulfillOrder
 POST	/api/v1/parsing/upload	internal/parsing	h.HandleUpload
+GET	/api/v1/payment-terms	internal/customer	h.HandleListTerms
+POST	/api/v1/payment-terms	internal/customer	h.HandleCreateTerms
+GET	/api/v1/payment-terms/{id}	internal/customer	h.HandleGetTerms
+PUT	/api/v1/payment-terms/{id}	internal/customer	h.HandleUpdateTerms
 POST	/api/v1/payments	internal/payment	h.CreatePayment
 POST	/api/v1/payments/card	internal/payment	h.ProcessCardPayment
 POST	/api/v1/payments/intent	internal/payment	h.CreatePaymentIntent
@@ -346,6 +353,8 @@ GET	/api/v1/reports/exposure	internal/pricing	h.HandleReportExposure
 GET	/api/v1/reports/sales-summary	internal/reporting	h.HandleSalesSummary
 GET	/api/v1/sales-team	internal/salesteam	h.HandleList
 GET	/api/v1/sales-team/{id}	internal/salesteam	h.HandleGet
+GET	/api/v1/ship-tos/{id}	internal/customer	h.HandleGetShipTo
+PUT	/api/v1/ship-tos/{id}	internal/customer	h.HandleUpdateShipTo
 POST	/api/v1/tax/exemptions	internal/tax	h.createExemption
 GET	/api/v1/tax/exemptions/{customerID}	internal/tax	h.getExemptions
 DELETE	/api/v1/tax/exemptions/{id}	internal/tax	h.deleteExemption
