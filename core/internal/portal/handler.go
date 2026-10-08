@@ -45,7 +45,15 @@ func portalWriteError(w http.ResponseWriter, r *http.Request, msg string, err er
 }
 
 func portalWriteJSON(w http.ResponseWriter, data interface{}) {
+	portalWriteJSONStatus(w, http.StatusOK, data)
+}
+
+// portalWriteJSONStatus sets the Content-Type header before WriteHeader, the only
+// order in which the header reaches the wire. Handlers must never call
+// WriteHeader themselves ahead of a JSON body.
+func portalWriteJSONStatus(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
@@ -301,8 +309,7 @@ func (h *Handler) HandleReorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	portalWriteJSON(w, resp)
+	portalWriteJSONStatus(w, http.StatusCreated, resp)
 }
 
 // HandleListInvoices returns invoices for the customer.
@@ -494,8 +501,7 @@ func (h *Handler) HandleCreateQuote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	portalWriteJSON(w, q)
+	portalWriteJSONStatus(w, http.StatusCreated, q)
 }
 
 // HandleAcceptQuote accepts a priced quote.
@@ -553,8 +559,7 @@ func (h *Handler) HandleRequestReschedule(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.WriteHeader(http.StatusAccepted)
-	portalWriteJSON(w, dto)
+	portalWriteJSONStatus(w, http.StatusAccepted, dto)
 }
 
 // HandleGetReschedule returns the newest reschedule request for a delivery, or
@@ -689,8 +694,7 @@ func (h *Handler) HandleAddToCart(w http.ResponseWriter, r *http.Request) {
 		portalWriteError(w, r, "Failed to add to cart", err, http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	portalWriteJSON(w, cart)
+	portalWriteJSONStatus(w, http.StatusCreated, cart)
 }
 
 // HandleUpdateCartItem updates a cart item quantity.
@@ -752,8 +756,7 @@ func (h *Handler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 		portalWriteError(w, r, "Checkout failed", err, http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	portalWriteJSON(w, resp)
+	portalWriteJSONStatus(w, http.StatusCreated, resp)
 }
 
 // --- User Management Handlers (Sprint 34) ---
@@ -803,8 +806,7 @@ func (h *Handler) HandleInviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	portalWriteJSON(w, invite)
+	portalWriteJSONStatus(w, http.StatusCreated, invite)
 }
 
 func (h *Handler) HandleUpdateUserRole(w http.ResponseWriter, r *http.Request) {
