@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Known deviations from contract conformance. The conformance test fails when
+# an unlisted step fails and when a listed step now passes (strike the line).
+# One line per golden step: group, tab, step name, tab, reason.

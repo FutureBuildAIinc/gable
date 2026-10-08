@@ -30,18 +30,63 @@ type Operation struct {
 	Method string // upper case HTTP method
 	Path   string // the templated path exactly as the document carries it
 	ID     string // operationId, "" when the document lacks one
+	// Responses maps each declared status code ("200", "404", "default")
+	// to its declaration, with a $ref into #/components/responses already
+	// resolved. The conformance pass checks a golden's recorded status and
+	// content type against it and validates the body under the matching
+	// media type's schema.
+	Responses map[string]ResponseDecl
+}
+
+// ResponseDecl is one declared response of an operation.
+type ResponseDecl struct {
+	Description string
+	// Content maps each declared media type exactly as the document spells
+	// it (application/json) to its declaration. Empty when the response
+	// declares no body at all (a 204 or an undetailed status).
+	Content map[string]MediaTypeDecl
+}
+
+// MediaTypeDecl is one declared media type of a response.
+type MediaTypeDecl struct {
+	// Schema is the body's JSON Schema node as the document carries it,
+	// usually a $ref map into #/components/schemas. Nil when the media
+	// type declares no schema. $refs inside the node are left for the
+	// validator to resolve against the whole document (Spec.Document).
+	Schema any
 }
 
 // Spec is the loaded contract.
 type Spec struct {
 	// paths maps each templated path to its methods, lower case.
 	paths map[string]map[string]Operation
+	// document is the whole assembled YAML document as decoded, kept for
+	// consumers that need to resolve $refs the Operation fields already
+	// dereferenced (the conformance pass compiles response schemas
+	// against it as one JSON Schema resource).
+	document any
+}
+
+// Document returns the whole assembled document as decoded from YAML
+// (map[string]any, []any, string, bool, int, nil). Callers that need the
+// JSON Schema validator's view of it must convert it to JSON values first.
+func (s *Spec) Document() any { return s.document }
+
+// yamlResponse is one response entry, either inline (description, content)
+// or a $ref into #/components/responses.
+type yamlResponse struct {
+	Ref         string `yaml:"$ref"`
+	Description string `yaml:"description"`
+	Content     map[string]struct {
+		Schema any `yaml:"schema"`
+	} `yaml:"content"`
 }
 
 // Load reads and validates an assembled OpenAPI document. It fails on a
-// document with no paths (an unassembled or empty contract) and on an
-// operation without an operationId, both of which make coverage answers
-// meaningless.
+// document with no paths (an unassembled or empty contract), on an
+// operation without an operationId, and on a response $ref that does not
+// name a shared response, all of which make coverage or conformance
+// answers meaningless.
 func Load(path string) (*Spec, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -49,8 +94,12 @@ func Load(path string) (*Spec, error) {
 	}
 	var doc struct {
 		Paths map[string]map[string]struct {
-			OperationID string `yaml:"operationId"`
+			OperationID string                  `yaml:"operationId"`
+			Responses   map[string]yamlResponse `yaml:"responses"`
 		} `yaml:"paths"`
+		Components struct {
+			Responses map[string]yamlResponse `yaml:"responses"`
+		} `yaml:"components"`
 	}
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
@@ -58,6 +107,29 @@ func Load(path string) (*Spec, error) {
 	if len(doc.Paths) == 0 {
 		return nil, fmt.Errorf("%s carries no paths; run go run ./api/tools/merge", path)
 	}
+
+	resolve := func(r yamlResponse, where string) (ResponseDecl, error) {
+		if r.Ref != "" {
+			name, ok := strings.CutPrefix(r.Ref, "#/components/responses/")
+			if !ok {
+				return ResponseDecl{}, fmt.Errorf("%s: %s: response $ref outside components/responses is not supported: %q", path, where, r.Ref)
+			}
+			shared, ok := doc.Components.Responses[name]
+			if !ok {
+				return ResponseDecl{}, fmt.Errorf("%s: %s: response $ref names no shared response: %q", path, where, r.Ref)
+			}
+			if shared.Ref != "" {
+				return ResponseDecl{}, fmt.Errorf("%s: %s: a shared response may not itself be a $ref: %q", path, where, r.Ref)
+			}
+			r = shared
+		}
+		decl := ResponseDecl{Description: r.Description, Content: make(map[string]MediaTypeDecl, len(r.Content))}
+		for media, mt := range r.Content {
+			decl.Content[media] = MediaTypeDecl{Schema: mt.Schema}
+		}
+		return decl, nil
+	}
+
 	s := &Spec{paths: make(map[string]map[string]Operation, len(doc.Paths))}
 	for path, methods := range doc.Paths {
 		for method, op := range methods {
@@ -68,12 +140,25 @@ func Load(path string) (*Spec, error) {
 			if op.OperationID == "" {
 				return nil, fmt.Errorf("%s: %s %s has no operationId", path, m, path)
 			}
+			responses := make(map[string]ResponseDecl, len(op.Responses))
+			for status, r := range op.Responses {
+				decl, err := resolve(r, fmt.Sprintf("%s %s responses %s", m, path, status))
+				if err != nil {
+					return nil, err
+				}
+				responses[status] = decl
+			}
 			if s.paths[path] == nil {
 				s.paths[path] = map[string]Operation{}
 			}
-			s.paths[path][m] = Operation{Method: m, Path: path, ID: op.OperationID}
+			s.paths[path][m] = Operation{Method: m, Path: path, ID: op.OperationID, Responses: responses}
 		}
 	}
+	var document any
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	s.document = document
 	return s, nil
 }
 
@@ -85,6 +170,24 @@ func (s *Spec) Has(method, pattern string) bool {
 		return false
 	}
 	_, ok = methods[strings.ToUpper(method)]
+	return ok
+}
+
+// Covers reports whether the contract describes a census route: the exact
+// method and pattern, or, for a wildcard (*) census method (a mount), any
+// operation on the pattern.
+func (s *Spec) Covers(method, pattern string) bool {
+	if s.Has(method, pattern) {
+		return true
+	}
+	return method == "*" && specHasAnyMethod(s, pattern)
+}
+
+// specHasAnyMethod reports whether the contract carries any operation on the
+// path, regardless of method. Used to satisfy a wildcard (*) census entry
+// (a mount) with any concrete method the fragment describes.
+func specHasAnyMethod(spec *Spec, pattern string) bool {
+	_, ok := spec.paths[pattern]
 	return ok
 }
 

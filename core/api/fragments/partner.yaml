@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The partner module, transcribed from internal/partner as it behaves today.
+# These routes sit behind the ERP's JWT auth and then a second gate that
+# resolves the JWT's email to a customer: an email no customer carries (or an
+# inactive customer) is a 403. The quotes are the ERP's own quote model, the
+# same shape /api/v1/quotes serves, and the list can be null. Quirks preserved:
+# the dashboard's money fields are float dollars; a malformed UUID on the
+# one-quote read is a 400; every other failure is a 404.
+paths:
+  /api/partner/v1/dashboard:
+    get:
+      operationId: partnerDashboard
+      tags: [partner]
+      summary: The partner's balance snapshot
+      description: Balance due and credit limit for the customer the caller's email resolves to.
+      responses:
+        "200":
+          description: The AR snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PartnerDashboard"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller's email resolves to no customer, or to an inactive one; the standard error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/partner/v1/quotes:
+    get:
+      operationId: partnerListQuotes
+      tags: [partner]
+      summary: The partner's quotes
+      description: The customer's quotes in the ERP's own quote shape; a bare array, or null when the customer has no quotes.
+      responses:
+        "200":
+          description: The quotes, a bare array, or null when the customer has no quotes.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/Quote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller's email resolves to no customer, or to an inactive one; the standard error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/partner/v1/quotes/{id}:
+    get:
+      operationId: partnerGetQuote
+      tags: [partner]
+      summary: One quote
+      description: >-
+        The ERP's own quote shape. Every failure, a quote that does not
+        exist, one belonging to another customer, and a repository fault,
+        is the handler's fixed 404. A malformed UUID is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller's email resolves to no customer, or to an inactive one; the standard error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  schemas:
+    PartnerDashboard:
+      type: object
+      required: [balance_due, credit_limit]
+      properties:
+        balance_due:
+          type: number
+          description: Float dollars.
+        credit_limit:
+          type: number
+          description: Float dollars.

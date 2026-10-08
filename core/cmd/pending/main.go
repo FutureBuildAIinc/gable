@@ -57,7 +57,7 @@ func main() {
 
 	var pending []string
 	for _, r := range census {
-		if !spec.Has(r.Method, r.Pattern) {
+		if !spec.Covers(r.Method, r.Pattern) {
 			pending = append(pending, r.Method+"\t"+r.Pattern)
 		}
 	}

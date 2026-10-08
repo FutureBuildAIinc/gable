@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The /uploads/ file server, transcribed from internal/app/serve/serve.go as
+# it behaves today. A static file server over the "uploads" directory, behind
+# the user JWT (BearerJWT) and the RequireRole guard (admin, owner, user). A
+# machine key is refused 403 here: keys are accepted on /api/v1 module routes
+# only (pkg/middleware/machinekey.go, TestMachineKeyOutsideModuleRoutesRefused).
+# Content-Type comes from net/http's FileServer: the file extension first
+# (mime.TypeByExtension), then content sniffing (DetectContentType) when the
+# extension is unknown; Content-Disposition is always attachment and
+# X-Content-Type-Options is nosniff. The census pattern is the literal
+# /uploads/ with a wildcard method (*): http.FileServer does not look at the
+# method, so every method (GET, HEAD, POST, PUT, DELETE, OPTIONS) is answered
+# exactly like GET. Only GET is described as an operation.
+paths:
+  /uploads/:
+    get:
+      operationId: uploadsFile
+      tags: [uploads]
+      summary: Serve an uploaded file
+      description: >-
+        Authenticated access to the dealer file store under the uploads
+        directory. The path after /uploads/ is the file path within the
+        uploads directory. Content-Type is derived from the file extension
+        first and by content sniffing when the extension is unknown;
+        Content-Disposition is always attachment; X-Content-Type-Options is
+        nosniff. A nonexistent file is a 404. The mount registers for every
+        HTTP method and the file server ignores the method, so any other
+        method on the same path answers the same file with the same status.
+        A user JWT whose roles do not include admin, owner or user is a 403;
+        a machine key is a 403 on this path whatever scope it holds.
+      security:
+        - BearerJWT: []
+      responses:
+        "200":
+          description: The file bytes; Content-Type is derived from the file extension, then sniffed.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components: {}
