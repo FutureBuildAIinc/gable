@@ -78,6 +78,15 @@ func (s *Service) ListLocations(ctx context.Context) ([]Location, error) {
 	return s.repo.ListLocations(ctx)
 }
 
+// ListLocationsIn lists the locations of the given branches, or every
+// location when the slice is empty.
+func (s *Service) ListLocationsIn(ctx context.Context, branches []uuid.UUID) ([]Location, error) {
+	if len(branches) == 0 {
+		return s.repo.ListLocations(ctx)
+	}
+	return s.repo.ListLocationsInBranches(ctx, branches)
+}
+
 func (s *Service) ListBranches(ctx context.Context, includeInactive bool) ([]Location, error) {
 	return s.repo.ListBranches(ctx, includeInactive)
 }

@@ -101,6 +101,22 @@ func (f *fakeRepo) ListLocations(context.Context) ([]Location, error) {
 	return out, nil
 }
 
+func (f *fakeRepo) ListLocationsInBranches(_ context.Context, branches []uuid.UUID) ([]Location, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]Location, 0, len(f.locations))
+	for _, l := range f.locations {
+		for _, b := range branches {
+			if l.BranchID != nil && *l.BranchID == b {
+				out = append(out, *l)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) ListBranches(_ context.Context, includeInactive bool) ([]Location, error) {
 	f.listBranchesArgs = append(f.listBranchesArgs, includeInactive)
 	if f.err != nil {

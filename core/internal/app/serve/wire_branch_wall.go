@@ -38,9 +38,10 @@ func newBranchWall(db *database.DB) *branchWall {
 	return w
 }
 
-// locations mounts the location routes. They are not branch scoped as a group
-// (the branch switcher reads /me/branches before a branch is chosen), but the
-// create writes into a branch's tree, so it runs behind the branch middleware.
+// locations mounts the location routes behind the branch middleware: the
+// create writes into a branch's tree, the by-id reads and the list are held
+// to the caller's branches (the branch switcher reads /me/branches, not this
+// list).
 func (w *branchWall) locations(mux *http.ServeMux, h *location.Handler) {
 	h.WithBranchWall(w.guard, w.mw).RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
 }

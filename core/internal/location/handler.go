@@ -82,12 +82,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Legacy / shared location endpoints.
 	create := http.HandlerFunc(h.CreateLocation)
 	read := http.HandlerFunc(h.GetLocation)
+	list := http.HandlerFunc(h.ListLocations)
 	if h.branchMw != nil {
 		create = h.branchMw(create).ServeHTTP
 		read = h.branchMw(read).ServeHTTP
+		list = h.branchMw(list).ServeHTTP
 	}
 	mux.HandleFunc("POST /api/v1/locations", guard(create))
-	mux.HandleFunc("GET /api/v1/locations", guard(h.ListLocations))
+	mux.HandleFunc("GET /api/v1/locations", guard(list))
 	mux.HandleFunc("GET /api/v1/locations/{id}", guard(read))
 	mux.HandleFunc("PUT /api/v1/locations/{id}", adminGuard(h.UpdateLocation))
 	mux.HandleFunc("DELETE /api/v1/locations/{id}", adminGuard(h.DeleteLocation))
@@ -166,13 +168,55 @@ func (h *Handler) CreateLocation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, loc)
 }
 
+// ListLocations serves GET /api/v1/locations. Behind the branch wall the
+// list covers only the caller's branches: with a context branch that
+// branch's rows, with no context branch the rows of the branches granted to
+// the user, and an administrator without a header, an unbound key and the
+// single-branch switch see every location, as before. The branch switcher
+// reads /me/branches, so it does not ride on this list.
 func (h *Handler) ListLocations(w http.ResponseWriter, r *http.Request) {
-	locs, err := h.service.ListLocations(r.Context())
+	branches, err := h.listScope(r.Context())
+	if err != nil {
+		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+		return
+	}
+	locs, err := h.service.ListLocationsIn(r.Context(), branches)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to list locations", http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, locs)
+}
+
+// listScope resolves the branch ids a caller's location list covers; nil is
+// every branch. A request that did not run the branch middleware, an
+// administrator (the single-branch switch makes every caller one) and an
+// unbound key cover every branch; a bound caller is held to its context
+// branch, or to its granted branches when the middleware left no context
+// branch.
+func (h *Handler) listScope(ctx context.Context) ([]uuid.UUID, error) {
+	bc := middleware.BranchFromContext(ctx)
+	if bc == nil {
+		return nil, nil
+	}
+	if bc.BranchID != nil {
+		return []uuid.UUID{*bc.BranchID}, nil
+	}
+	if bc.IsAdmin || bc.UserSub == "" {
+		return nil, nil
+	}
+	if h.userRepo == nil {
+		return nil, nil
+	}
+	grants, err := h.userRepo.ListUserBranches(ctx, bc.UserSub)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(grants))
+	for _, g := range grants {
+		ids = append(ids, g.ID)
+	}
+	return ids, nil
 }
 
 func (h *Handler) GetLocation(w http.ResponseWriter, r *http.Request) {

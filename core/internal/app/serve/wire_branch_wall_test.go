@@ -81,8 +81,8 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 		typ    string
 		parent any
 	}{{f.branchA, "BRANCH", nil}, {f.branchB, "BRANCH", nil}, {f.yardA, "YARD", f.branchA}, {f.yardB, "YARD", f.branchB}} {
-		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id) VALUES ($1, $2, $3, $4)`,
-			r.id, r.typ, "wl-"+r.id.String()[:8], r.parent); err != nil {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name, parent_id) VALUES ($1, $2, $3, $4, $5)`,
+			r.id, r.typ, "wl-"+r.id.String()[:8], "wl branch "+r.id.String()[:8], r.parent); err != nil {
 			t.Fatalf("seed location: %v", err)
 		}
 	}
@@ -324,6 +324,32 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 	if got := f.call(t, "POST", "/api/v1/locations", create("BRANCH", nil), "admin", "boss", ""); got != http.StatusCreated {
 		t.Errorf("admin create type BRANCH: %d, want 201", got)
 	}
+
+	// The location list is filtered to the caller's branches: a user granted
+	// only A sees branch A's rows only, through its context branch or, with
+	// none, through its grants; an administrator is held to a header it
+	// sends and sees every branch without one.
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantA, wantB            bool
+	}{
+		{"warehouse, header A", "warehouse", "u-a", A, true, false},
+		{"warehouse, no header", "warehouse", "u-a", "", true, false},
+		{"admin, header A", "admin", "boss", A, true, false},
+		{"admin, no header", "admin", "boss", "", true, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/locations", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("location list, %s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), f.yardA.String()); got != c.wantA {
+			t.Errorf("location list, %s: yard A present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), f.yardB.String()); got != c.wantB {
+			t.Errorf("location list, %s: yard B present = %v, want %v", c.name, got, c.wantB)
+		}
+	}
 }
 
 // With multi_branch_enabled off the deployment is single branch and the
@@ -354,6 +380,13 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, ""); got != c.want {
 			t.Errorf("switch off, bound caller %s: %d, want %d", c.name, got, c.want)
 		}
+	}
+
+	// With the switch off every caller is an administrator, so the location
+	// list is unfiltered.
+	_, listBody := f.callBody(t, "GET", "/api/v1/locations", "", "warehouse", "u-a", "")
+	if !strings.Contains(string(listBody), f.yardB.String()) {
+		t.Errorf("switch off, location list does not carry branch B's yard")
 	}
 }
 
