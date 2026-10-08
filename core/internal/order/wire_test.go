@@ -335,19 +335,54 @@ func TestOrderCreateValidation(t *testing.T) {
 func TestOrderCreateEqualUnitsPairMustBeOneAndOne(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
-	r := f.do("POST", "/api/v1/orders", map[string]any{
-		"customer_id": f.customerID.String(), "delivery_type": "pickup",
-		"lines": []map[string]any{{
-			"product_id": f.productID.String(), "quantity": "10", "uom": "PCS", "price_uom": "PCS",
-			"uom_qty": "12", "price_uom_qty": "1", "unit_price_ten_thousandths": 55000, "override_reason": "match",
-		}},
-	})
-	if r.status != 400 {
-		t.Fatalf("create = %d: %s", r.status, r.raw)
+	for _, c := range []struct {
+		name string
+		line map[string]any
+	}{
+		{"equal units named, pair not 1 and 1", map[string]any{
+			"quantity": "10", "uom": "PCS", "price_uom": "PCS",
+			"uom_qty": "12", "price_uom_qty": "1", "unit_price_ten_thousandths": 55000, "override_reason": "match"}},
+		// The server fills uom from the product; the rule runs on the
+		// resolved unit (review P1-3, probe 1: a 201 at 550 cents where
+		// 187.5 PCS at 5.50 is 103125).
+		{"uom omitted, equal after the product fills it", map[string]any{
+			"quantity": "187.5", "price_uom": "PCS", "uom_qty": "187.5", "price_uom_qty": "1"}},
+		{"uom and price_uom omitted, pair not 1 and 1", map[string]any{
+			"quantity": "10", "uom_qty": "12", "price_uom_qty": "1"}},
+		// Probe 2: a different price unit with no pair (a 201 at 5500).
+		{"uom omitted, price_uom differs, no pair", map[string]any{
+			"quantity": "10", "price_uom": "MBF"}},
+		{"uom named, price_uom differs, no pair", map[string]any{
+			"quantity": "10", "uom": "PCS", "price_uom": "MBF"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			line := c.line
+			line["product_id"] = f.productID.String()
+			body := map[string]any{"customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": []map[string]any{line}}
+			r := f.do("POST", "/api/v1/orders", body)
+			if r.status != 400 {
+				t.Fatalf("create = %d: %s", r.status, r.raw)
+			}
+			code, _, details := errorOf(t, r)
+			if code != "validation_failed" || len(details) == 0 || details[0]["field"] != "lines[0].uom_qty" {
+				t.Errorf("code=%q details=%v, want a 400 on lines[0].uom_qty", code, details)
+			}
+			// The same line on a draft's PUT is held to the same rule.
+			draft := f.create()
+			put := map[string]any{"revision": revision(t, draft), "customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": []map[string]any{line}}
+			pr := f.do("PUT", "/api/v1/orders/"+str(t, draft.body, "id"), put)
+			if pr.status != 400 {
+				t.Fatalf("put = %d: %s", pr.status, pr.raw)
+			}
+		})
 	}
-	code, _, details := errorOf(t, r)
-	if code != "validation_failed" || len(details) == 0 || details[0]["field"] != "lines[0].uom_qty" {
-		t.Errorf("code=%q details=%v, want a 400 on lines[0].uom_qty", code, details)
+	// A pair beside a different price unit still passes, with the unit
+	// omitted: 187.5 PCS to 1 MBF.
+	ok := f.do("POST", "/api/v1/orders", f.createBody(map[string]any{
+		"product_id": f.productID.String(), "quantity": "187.5", "price_uom": "MBF",
+		"uom_qty": "187.5", "price_uom_qty": "1", "unit_price_ten_thousandths": 5000000, "override_reason": "per MBF"}))
+	if ok.status != 201 {
+		t.Fatalf("a real pair with the unit omitted = %d: %s", ok.status, ok.raw)
 	}
 }
 

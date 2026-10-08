@@ -341,6 +341,12 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 				priceUOM = *line.UOM
 			}
 			line.PriceUOM = &priceUOM
+			// The pair rules of ADR 0001 7a run on the RESOLVED units: the
+			// parse sees only what the request named, and a stocked line's
+			// unit is filled from the product just above.
+			if err := checkResolvedPair(i, *line.UOM, priceUOM, pl.UOMQty, pl.PriceUOMQty); err != nil {
+				return nil, out, err
+			}
 			if pl.UOMQty == 0 && pl.PriceUOMQty == 0 {
 				line.UOMQty, line.PriceUOMQty = salesdocPtr(salesdoc.One), salesdocPtr(salesdoc.One)
 			} else {
@@ -444,6 +450,27 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 		}
 	}
 	return outLines, out, nil
+}
+
+// checkResolvedPair holds a line's conversion pair to the rules of ADR 0001
+// section 7a once both units are known: equal units need a pair of 1 and 1
+// (or none), and a different price unit needs a pair. A zero pair side means
+// the request sent none.
+func checkResolvedPair(i int, uom, priceUOM string, uomQty, priceUOMQty httpx.Quantity) error {
+	field := fmt.Sprintf("lines[%d].uom_qty", i)
+	sent := uomQty != 0 || priceUOMQty != 0
+	var msg string
+	switch {
+	case uom == priceUOM && sent && (uomQty != salesdoc.One || priceUOMQty != salesdoc.One):
+		msg = "must be 1 when price_uom equals uom: the units agree, so the pair is 1 and 1"
+	case uom != priceUOM && !sent:
+		msg = "is required when price_uom differs from uom: send uom_qty and price_uom_qty"
+	default:
+		return nil
+	}
+	return &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
+		Message: "one or more fields failed validation",
+		Details: []httpx.FieldError{{Field: field, Message: msg}}}
 }
 
 func actorString(actor string) *string {
