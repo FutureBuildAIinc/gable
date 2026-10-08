@@ -46,27 +46,27 @@ func ParseLocationType(name string) (LocationType, bool) {
 // parent and a denormalized BranchID (kept up to date by a DB trigger).
 // Optional fields are present with null, never omitted (ADR 0001 section 12).
 type Location struct {
-	ID       uuid.UUID    `json:"id"`
-	ParentID *uuid.UUID   `json:"parent_id"`
-	Path     string       `json:"path"`
-	Type     LocationType `json:"type"`
-	Code     string       `json:"code"`
-	Description *string   `json:"description"`
+	ID          uuid.UUID    `json:"id"`
+	ParentID    *uuid.UUID   `json:"parent_id"`
+	Path        string       `json:"path"`
+	Type        LocationType `json:"type"`
+	Code        string       `json:"code"`
+	Description *string      `json:"description"`
 
 	// Branch-only metadata. Non-branch rows leave these fields null.
-	Name                *string   `json:"name"`
-	Address             *string   `json:"address"`
-	City                *string   `json:"city"`
-	State               *string   `json:"state"`
-	Zip                 *string   `json:"zip"`
-	Phone               *string   `json:"phone"`
-	TaxJurisdictionCode *string   `json:"tax_jurisdiction_code"`
-	DefaultTaxRate      *float64  `json:"default_tax_rate"`
-	Timezone            *string   `json:"timezone"`
-	Active              bool      `json:"active"`
+	Name                *string    `json:"name"`
+	Address             *string    `json:"address"`
+	City                *string    `json:"city"`
+	State               *string    `json:"state"`
+	Zip                 *string    `json:"zip"`
+	Phone               *string    `json:"phone"`
+	TaxJurisdictionCode *string    `json:"tax_jurisdiction_code"`
+	DefaultTaxRate      *float64   `json:"default_tax_rate"`
+	Timezone            *string    `json:"timezone"`
+	Active              bool       `json:"active"`
 	BranchID            *uuid.UUID `json:"branch_id"`
 
-	Revision  int64          `json:"revision"`
+	Revision  int64           `json:"revision"`
 	CreatedAt httpx.Timestamp `json:"created_at"`
 	UpdatedAt httpx.Timestamp `json:"updated_at"`
 }

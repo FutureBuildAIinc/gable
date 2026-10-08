@@ -37,7 +37,7 @@ const locationColumns = `
 // ListScope is a location list's branch scope: nil is every branch, an
 // empty slice is no branches (a bound caller with no grants lists nothing).
 type ListScope struct {
-	Branches       []uuid.UUID
+	Branches        []uuid.UUID
 	IncludeInactive bool
 }
 

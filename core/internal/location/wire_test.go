@@ -11,6 +11,7 @@ package location_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -109,7 +110,7 @@ func TestBranchListEnvelopeAndRevision(t *testing.T) {
 	}
 	id := created.body["id"].(string)
 	defer func() {
-		_, _ = f.db.Pool.Exec(f.t.Context(), `DELETE FROM locations WHERE id = $1`, id)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, id)
 	}()
 
 	list := f.do("GET", "/api/v1/branches?limit=1&include=total", nil)
@@ -174,7 +175,7 @@ func TestLocationsListAndTree(t *testing.T) {
 	}
 	id := created.body["id"].(string)
 	defer func() {
-		_, _ = f.db.Pool.Exec(f.t.Context(), `DELETE FROM locations WHERE id = $1`, id)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, id)
 	}()
 
 	list := f.do("GET", "/api/v1/locations?limit=2", nil)

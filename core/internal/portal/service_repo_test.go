@@ -5,8 +5,8 @@ package portal
 
 import (
 	"context"
-	"strconv"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -459,8 +459,8 @@ func (f *fakePricingRepo) ListRules(context.Context) ([]pricing.PricingRule, err
 func (f *fakePricingRepo) ListRulesPage(context.Context, *pricing.RuleCursor, int) ([]pricing.PricingRule, error) {
 	return nil, nil
 }
-func (f *fakePricingRepo) CountRules(context.Context) (int64, error) { return 0, nil }
-func (f *fakePricingRepo) CreateRule(context.Context, *pricing.PricingRule) error   { return nil }
+func (f *fakePricingRepo) CountRules(context.Context) (int64, error)              { return 0, nil }
+func (f *fakePricingRepo) CreateRule(context.Context, *pricing.PricingRule) error { return nil }
 
 type fakeInventoryRepo struct {
 	byProduct map[uuid.UUID][]inventory.Inventory

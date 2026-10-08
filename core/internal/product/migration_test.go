@@ -183,6 +183,12 @@ func TestMigration093_BackfillsRowsThatExist(t *testing.T) {
 		t.Fatalf("a seven figure reorder point no longer fits: %v", err)
 	}
 
+	// The percentage columns widened too: a 150 percent markup and a 100
+	// percent discount overflowed NUMERIC(6,4) with a 500.
+	if _, err := conn.Exec(ctx, `UPDATE pricing_rules SET markup_pct = 150, discount_pct = 100, margin_floor_pct = 12.5 WHERE id = '00000000-0000-0000-0000-0000000000d1'`); err != nil {
+		t.Fatalf("a percentage past 99.9999 no longer fits: %v", err)
+	}
+
 	// 3: the keyset indexes exist.
 	for _, index := range []string{"idx_products_created_at_id", "idx_locations_created_at_id", "idx_pricing_rules_created_at_id", "idx_category_pricing_rules_created_at_id"} {
 		if n := scalar[int](t, conn, `SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`, index); n != 1 {
@@ -207,9 +213,19 @@ func TestMigration093_BackfillsRowsThatExist(t *testing.T) {
 		t.Fatalf("the refusal does not name the row: %v", err)
 	}
 
+	// The same for a percentage: the rule written above is named.
+	if _, err := conn.Exec(ctx, `UPDATE products SET reorder_point = 40, reorder_qty = 200 WHERE id = '00000000-0000-0000-0000-0000000000f1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, string(downSQL)); err == nil {
+		t.Fatal("the down narrowed past a 150 percent markup")
+	} else if !strings.Contains(err.Error(), "00000000-0000-0000-0000-0000000000d1") {
+		t.Fatalf("the refusal does not name the pricing rule: %v", err)
+	}
+
 	// Inside the bound, the down applies: revisions go, the columns narrow,
 	// and the up applies again.
-	if _, err := conn.Exec(ctx, `UPDATE products SET reorder_point = 40, reorder_qty = 200 WHERE id = '00000000-0000-0000-0000-0000000000f1'`); err != nil {
+	if _, err := conn.Exec(ctx, `UPDATE pricing_rules SET markup_pct = 50, discount_pct = 10, margin_floor_pct = 12.5 WHERE id = '00000000-0000-0000-0000-0000000000d1'`); err != nil {
 		t.Fatal(err)
 	}
 	applyFile(t, conn, downFile)

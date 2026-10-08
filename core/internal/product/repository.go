@@ -11,8 +11,10 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ErrNotFound is the read answer for a row that is not there.
@@ -58,22 +60,69 @@ const productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price:
 	       p.lead_time_days, p.revision, p.created_at, p.updated_at,
 	       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)`
 
+// stockColumns and stockJoin read a product's stock totals in the same
+// statement as the product, in the stocking unit (ADR 0006 7.1): one
+// lateral aggregate per product row, never a second statement per row.
+// The totals are held to the branch wall like every other branch scoped
+// read: a context branch sums its own stock, a bound caller with no context
+// branch sums the branches granted to them, and an unwalled caller sums
+// every branch. $%d is the context branch and $%d the granted user sub.
+const stockColumns = `, COALESCE(st.on_hand, '0'), COALESCE(st.allocated, '0')`
+
+func stockJoin(branchArg, subArg int) string {
+	return fmt.Sprintf(` LEFT JOIN LATERAL (
+		SELECT SUM(i.quantity)::text AS on_hand, SUM(i.allocated)::text AS allocated
+		  FROM inventory i LEFT JOIN locations l ON l.id = i.location_id
+		 WHERE i.product_id = p.id
+		   AND (($%[1]d::uuid IS NOT NULL AND l.branch_id = $%[1]d)
+		     OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NOT NULL AND l.branch_id IN
+		         (SELECT branch_id FROM user_locations WHERE user_sub = $%[2]d))
+		     OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NULL))
+	) st ON TRUE`, branchArg, subArg)
+}
+
 // scanProduct fills a domain row from the shared column list.
 func scanProduct(scanner interface{ Scan(dest ...any) error }) (*Product, error) {
+	return scanProductWith(scanner, false)
+}
+
+// scanProductStock fills a domain row from the shared column list followed
+// by stockColumns.
+func scanProductStock(scanner interface{ Scan(dest ...any) error }) (*Product, error) {
+	return scanProductWith(scanner, true)
+}
+
+func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock bool) (*Product, error) {
 	var p Product
-	var basePrice, weight, reorderPoint, reorderQty, avgCost string
+	var basePrice, weight, reorderPoint, reorderQty, avgCost, onHand, allocated string
 	var created, updated time.Time
-	if err := scanner.Scan(
+	dest := []any{
 		&p.ID, &p.SKU, &p.Description, &p.UOMPrimary, &basePrice, &p.Vendor, &p.VendorID, &p.UPC,
 		&weight,
 		&p.LengthIn, &p.WidthIn, &p.HeightIn, &p.Stackable, &p.GeometrySource,
 		&reorderPoint, &reorderQty,
 		&p.LeadTimeDays, &p.Revision, &created, &updated,
 		&avgCost, &p.TargetMargin, &p.CommissionRate,
-	); err != nil {
+	}
+	if withStock {
+		dest = append(dest, &onHand, &allocated)
+	}
+	if err := scanner.Scan(dest...); err != nil {
 		return nil, err
 	}
 	var err error
+	if withStock {
+		q, err := httpx.ParseQuantity(onHand)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read on hand: %w", err)
+		}
+		a, err := httpx.ParseQuantity(allocated)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read allocated: %w", err)
+		}
+		p.OnHand, p.Allocated, p.Available = q, a, q-a
+		p.TotalQuantity, p.TotalAllocated = qtyFloat(q), qtyFloat(a)
+	}
 	if p.BasePriceScaled, err = httpx.ParsePrice(basePrice); err != nil {
 		return nil, fmt.Errorf("read base price: %w", err)
 	}
@@ -96,30 +145,6 @@ func scanProduct(scanner interface{ Scan(dest ...any) error }) (*Product, error)
 	p.CreatedAt = httpx.TimestampOf(created)
 	p.UpdatedAt = httpx.TimestampOf(updated)
 	return &p, nil
-}
-
-// inventoryTotals reads a product's stock totals into the domain row: the
-// stocking unit sums of quantity, allocated and their difference (ADR 0006
-// 7.1), with the legacy float copies beside them.
-func (r *PostgresRepository) inventoryTotals(ctx context.Context, p *Product) error {
-	row := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT COALESCE(SUM(i.quantity), 0)::text, COALESCE(SUM(i.allocated), 0)::text
-		FROM inventory i WHERE i.product_id = $1`, p.ID)
-	var onHand, allocated string
-	if err := row.Scan(&onHand, &allocated); err != nil {
-		return fmt.Errorf("failed to read stock totals: %w", err)
-	}
-	q, err := httpx.ParseQuantity(onHand)
-	if err != nil {
-		return fmt.Errorf("failed to read on hand: %w", err)
-	}
-	a, err := httpx.ParseQuantity(allocated)
-	if err != nil {
-		return fmt.Errorf("failed to read allocated: %w", err)
-	}
-	p.OnHand, p.Allocated, p.Available = q, a, q-a
-	p.TotalQuantity, p.TotalAllocated = qtyFloat(q), qtyFloat(a)
-	return nil
 }
 
 // qtyFloat renders a quantity as the float the unconverted readers expect.
@@ -159,25 +184,34 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 // violation names the reference that does not exist (the recipe's rule: a
 // bad reference is a 400, never a 500).
 func mapWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			return httpx.Duplicate("a product with this sku already exists",
+				httpx.FieldError{Field: "sku", Message: "already in use"})
+		case "23503":
+			return httpx.BadRequest("vendor_id does not name an existing vendor",
+				httpx.FieldError{Field: "vendor_id", Message: "no such vendor"})
+		}
+	}
 	return fmt.Errorf("failed to create product: %w", err)
 }
 
 // GetProduct retrieves a product by its ID
 func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Product, error) {
 	query := `
-		SELECT ` + productColumns + `
-		FROM products p
+		SELECT ` + productColumns + stockColumns + `
+		FROM products p` + stockJoin(2, 3) + `
 		WHERE p.id = $1`
 
-	p, err := scanProduct(r.db.GetExecutor(ctx).QueryRow(ctx, query, id))
+	p, err := scanProductStock(r.db.GetExecutor(ctx).QueryRow(ctx, query, id,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get product: %w", err)
-	}
-	if err := r.inventoryTotals(ctx, p); err != nil {
-		return nil, err
 	}
 	return p, nil
 }
@@ -214,10 +248,10 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 // page; the caller asks for limit+1 rows and reads whether another page
 // exists.
 func (r *PostgresRepository) ListProductsPage(ctx context.Context, after *time.Time, afterID *uuid.UUID, limit int) ([]Product, error) {
-	query := `SELECT ` + productColumns + ` FROM products p`
-	args := []any{}
+	args := []any{middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
+	query := `SELECT ` + productColumns + stockColumns + ` FROM products p` + stockJoin(1, 2)
 	if after != nil {
-		query += ` WHERE (p.created_at, p.id) < ($1, $2)`
+		query += ` WHERE (p.created_at, p.id) < ($3, $4)`
 		args = append(args, *after, *afterID)
 	}
 	query += ` ORDER BY p.created_at DESC, p.id DESC`
@@ -232,12 +266,9 @@ func (r *PostgresRepository) ListProductsPage(ctx context.Context, after *time.T
 
 	var products []Product
 	for rows.Next() {
-		p, err := scanProduct(rows)
+		p, err := scanProductStock(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan product: %w", err)
-		}
-		if err := r.inventoryTotals(ctx, p); err != nil {
-			return nil, err
 		}
 		products = append(products, *p)
 	}
@@ -265,12 +296,17 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 		       (p.reorder_point - COALESCE(SUM(i.quantity), 0))::text AS deficit
 		FROM products p
 		LEFT JOIN inventory i ON p.id = i.product_id
+		  AND ($1::uuid IS NULL AND $2::text IS NULL
+		    OR i.location_id IN (SELECT l.id FROM locations l
+		         WHERE ($1::uuid IS NOT NULL AND l.branch_id = $1)
+		            OR ($1::uuid IS NULL AND l.branch_id IN
+		                (SELECT branch_id FROM user_locations WHERE user_sub = $2))))
 		WHERE p.reorder_point > 0
 		GROUP BY p.id
 		HAVING COALESCE(SUM(i.quantity), 0) < p.reorder_point
 		ORDER BY (p.reorder_point - COALESCE(SUM(i.quantity), 0)) DESC`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list reorder alerts: %w", err)
 	}

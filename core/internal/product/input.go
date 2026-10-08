@@ -20,9 +20,9 @@ type createRequest struct {
 
 	BasePrice *json.RawMessage `json:"base_price_ten_thousandths"`
 
-	Vendor   *string    `json:"vendor"`
-	VendorID *string    `json:"vendor_id"`
-	UPC      *string    `json:"upc"`
+	Vendor   *string `json:"vendor"`
+	VendorID *string `json:"vendor_id"`
+	UPC      *string `json:"upc"`
 
 	WeightLbs *float64 `json:"weight_lbs"`
 
@@ -59,6 +59,7 @@ func ParseCreate(r *http.Request) (*Product, error) {
 		if n, ok := v.Int("base_price_ten_thousandths", *req.BasePrice, true); ok {
 			p.BasePriceScaled = httpx.Price(n)
 			v.Check(p.BasePriceScaled >= 0, "base_price_ten_thousandths", "a unit price is never negative")
+			v.Check(int64(p.BasePriceScaled) <= int64(httpx.QuantityMax), "base_price_ten_thousandths", "is larger than a price can be (99999999.9999)")
 			p.BasePrice = float64(p.BasePriceScaled) / 10_000
 		}
 	}
@@ -121,7 +122,7 @@ func parseMargins(r *http.Request) (targetMargin, commissionRate float64, revisi
 
 // leadTimeRequest is the PATCH /products/{id}/lead-time body.
 type leadTimeRequest struct {
-	LeadTimeDays *int  `json:"lead_time_days"`
+	LeadTimeDays *int   `json:"lead_time_days"`
 	Revision     *int64 `json:"revision"`
 }
 

@@ -67,9 +67,9 @@ type PIMCollateral struct {
 // summary it embeds is the converted product wire (ADR 0006 7.1: PIM's
 // product detail carries the same product summary), so the two cannot drift.
 type ProductDetail struct {
-	Product   product.View    `json:"product"`
-	Content   *PIMContent     `json:"content"`
-	Media     []PIMMedia      `json:"media"`
+	Product    product.View    `json:"product"`
+	Content    *PIMContent     `json:"content"`
+	Media      []PIMMedia      `json:"media"`
 	Collateral []PIMCollateral `json:"collateral"`
 }
 

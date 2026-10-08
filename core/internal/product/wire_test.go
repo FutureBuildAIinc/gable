@@ -102,11 +102,11 @@ func (f *fixture) uniqueSKU() string { return "WIRE-" + uuid.NewString()[:12] }
 func (f *fixture) createProduct(overrides map[string]any) resp {
 	f.t.Helper()
 	body := map[string]any{
-		"sku":                         f.uniqueSKU(),
-		"description":                 "2x4x8 SPF stud",
-		"stock_uom":                   "PCS",
-		"base_price_ten_thousandths":  5250000,
-		"reorder_point":               "40",
+		"sku":                        f.uniqueSKU(),
+		"description":                "2x4x8 SPF stud",
+		"stock_uom":                  "PCS",
+		"base_price_ten_thousandths": 5250000,
+		"reorder_point":              "40",
 	}
 	for k, v := range overrides {
 		body[k] = v

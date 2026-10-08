@@ -5,13 +5,13 @@ package location
 
 import (
 	"context"
-	"time"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -25,7 +25,6 @@ import (
 // produces orphan rows whose branch_id trigger has nothing to derive from.
 //
 // Tests are CORRECTNESS unless labelled CHARACTERIZATION.
-
 
 // errText flattens a contract error into the message plus every field
 // detail, so substring assertions keep working after the module moved onto

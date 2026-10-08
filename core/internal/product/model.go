@@ -78,13 +78,13 @@ type Product struct {
 	Stackable      *bool    `json:"-"`
 	GeometrySource *string  `json:"-"`
 
-	ReorderPoint   float64        `json:"-"`
-	ReorderQty     float64        `json:"-"`
-	TotalQuantity  float64        `json:"-"`
-	TotalAllocated float64        `json:"-"`
-	AverageUnitCost float64       `json:"-"`
-	TargetMargin   float64        `json:"-"`
-	CommissionRate float64        `json:"-"`
+	ReorderPoint    float64 `json:"-"`
+	ReorderQty      float64 `json:"-"`
+	TotalQuantity   float64 `json:"-"`
+	TotalAllocated  float64 `json:"-"`
+	AverageUnitCost float64 `json:"-"`
+	TargetMargin    float64 `json:"-"`
+	CommissionRate  float64 `json:"-"`
 
 	// The exact forms of the fields above, as the wire serves them (ADR 0006
 	// 7.1): the scaled base price and cost, the stocking quantities as scale 4
@@ -92,14 +92,14 @@ type Product struct {
 	// Available carry the stocking unit's totals (quantity, allocated and
 	// quantity - allocated); TotalQuantity and TotalAllocated above keep the
 	// legacy float copies for the unconverted readers.
-	BasePriceScaled      httpx.Price    `json:"-"`
-	AverageUnitCostScaled httpx.Price   `json:"-"`
-	OnHand               httpx.Quantity `json:"-"`
-	Allocated            httpx.Quantity `json:"-"`
-	Available            httpx.Quantity `json:"-"`
-	ReorderPointQ        httpx.Quantity `json:"-"`
-	ReorderQtyQ          httpx.Quantity `json:"-"`
-	Revision             int64          `json:"-"`
+	BasePriceScaled       httpx.Price    `json:"-"`
+	AverageUnitCostScaled httpx.Price    `json:"-"`
+	OnHand                httpx.Quantity `json:"-"`
+	Allocated             httpx.Quantity `json:"-"`
+	Available             httpx.Quantity `json:"-"`
+	ReorderPointQ         httpx.Quantity `json:"-"`
+	ReorderQtyQ           httpx.Quantity `json:"-"`
+	Revision              int64          `json:"-"`
 
 	// LeadTimeDays is the dealer-published lead time (migration 084): nil
 	// means unpublished and is a different fact than zero.
@@ -115,15 +115,15 @@ type Product struct {
 // allocated and available in the stocking unit. A list item is the same
 // shape: every field the summary carries the full read carries too.
 type View struct {
-	ID          uuid.UUID  `json:"id"`
-	SKU         string     `json:"sku"`
-	Description string     `json:"description"`
-	StockUOM    UOM        `json:"stock_uom"`
+	ID          uuid.UUID `json:"id"`
+	SKU         string    `json:"sku"`
+	Description string    `json:"description"`
+	StockUOM    UOM       `json:"stock_uom"`
 
-	BasePrice           httpx.Price `json:"base_price_ten_thousandths"`
-	AverageUnitCost     httpx.Price `json:"average_unit_cost_ten_thousandths"`
-	TargetMargin        float64     `json:"target_margin"`
-	CommissionRate      float64     `json:"commission_rate"`
+	BasePrice       httpx.Price `json:"base_price_ten_thousandths"`
+	AverageUnitCost httpx.Price `json:"average_unit_cost_ten_thousandths"`
+	TargetMargin    float64     `json:"target_margin"`
+	CommissionRate  float64     `json:"commission_rate"`
 
 	Vendor   *string    `json:"vendor"`
 	VendorID *uuid.UUID `json:"vendor_id"`
@@ -146,7 +146,7 @@ type View struct {
 	Allocated httpx.Quantity `json:"allocated"`
 	Available httpx.Quantity `json:"available"`
 
-	Revision  int64          `json:"revision"`
+	Revision  int64           `json:"revision"`
 	CreatedAt httpx.Timestamp `json:"created_at"`
 	UpdatedAt httpx.Timestamp `json:"updated_at"`
 }
@@ -245,11 +245,11 @@ const GeometrySourceParametric = "parametric"
 
 // ReorderAlert represents a product that's below its reorder point.
 type ReorderAlert struct {
-	ProductID    uuid.UUID  `json:"product_id"`
-	SKU          string     `json:"sku"`
-	Description  string     `json:"description"`
-	Vendor       *string    `json:"vendor"`
-	VendorID     *uuid.UUID `json:"vendor_id"`
+	ProductID    uuid.UUID      `json:"product_id"`
+	SKU          string         `json:"sku"`
+	Description  string         `json:"description"`
+	Vendor       *string        `json:"vendor"`
+	VendorID     *uuid.UUID     `json:"vendor_id"`
 	ReorderPoint httpx.Quantity `json:"reorder_point"`
 	ReorderQty   httpx.Quantity `json:"reorder_qty"`
 	CurrentStock httpx.Quantity `json:"current_stock"`

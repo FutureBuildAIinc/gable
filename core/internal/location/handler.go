@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -101,7 +101,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Branch CRUD.
 	mux.HandleFunc("GET /api/v1/branches", guard(h.ListBranches))
 	mux.HandleFunc("POST /api/v1/branches", adminGuard(h.CreateBranch))
-	mux.HandleFunc("GET /api/v1/branches/{id}", guard(h.GetBranch))
+	getBranch := http.HandlerFunc(h.GetBranch)
+	if h.branchMw != nil {
+		getBranch = h.branchMw(getBranch).ServeHTTP
+	}
+	mux.HandleFunc("GET /api/v1/branches/{id}", guard(getBranch))
 	mux.HandleFunc("PUT /api/v1/branches/{id}", adminGuard(h.UpdateBranch))
 	mux.HandleFunc("DELETE /api/v1/branches/{id}", adminGuard(h.DeleteBranch))
 	tree := http.HandlerFunc(h.GetBranchTree)
@@ -201,7 +205,7 @@ type locationUpdateRequest struct {
 	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64 `json:"default_tax_rate"`
 	Timezone            *string  `json:"timezone"`
-	Active              bool     `json:"active"`
+	Active              *bool    `json:"active"`
 	Revision            *int64   `json:"revision"`
 }
 
@@ -454,7 +458,10 @@ func (h *Handler) UpdateLocation(w http.ResponseWriter, r *http.Request) {
 	loc := *current
 	loc.Path, loc.Code, loc.Description = req.Path, req.Code, req.Description
 	loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone = req.Name, req.Address, req.City, req.State, req.Zip, req.Phone
-	loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone, loc.Active = req.TaxJurisdictionCode, req.DefaultTaxRate, req.Timezone, req.Active
+	loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone = req.TaxJurisdictionCode, req.DefaultTaxRate, req.Timezone
+	if req.Active != nil {
+		loc.Active = *req.Active // omitted keeps the stored value
+	}
 	if loc.Code == "" {
 		loc.Code = current.Code
 	}
@@ -603,6 +610,19 @@ func (h *Handler) GetBranch(w http.ResponseWriter, r *http.Request) {
 			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
+	// The record branch rule (ADR 0007 section 2.3): the path id is the
+	// branch itself, so a branch the caller may not target is a 403.
+	if h.guard != nil {
+		err := h.guard.CheckPayloadBranch(r.Context(), id)
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httpx.WriteError(w, r, httpx.Forbidden("branch is outside the branches this caller may target"))
+			return
+		}
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
 	loc, err := h.service.GetLocation(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -620,14 +640,41 @@ func (h *Handler) GetBranch(w http.ResponseWriter, r *http.Request) {
 	writeLocJSON(w, http.StatusOK, loc)
 }
 
+// requireBranch answers 404 for a path id that is not a branch, so the
+// branch routes never act on a zone, a yard or a bin.
+func (h *Handler) requireBranch(w http.ResponseWriter, r *http.Request) bool {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return true // the shared handler answers the malformed id
+	}
+	isBranch, err := h.service.IsBranch(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			httpx.WriteError(w, r, httpx.NotFound("no such branch"))
+			return false
+		}
+		httpx.WriteError(w, r, err)
+		return false
+	}
+	if !isBranch {
+		httpx.WriteError(w, r, httpx.NotFound("no such branch"))
+		return false
+	}
+	return true
+}
+
 func (h *Handler) UpdateBranch(w http.ResponseWriter, r *http.Request) {
 	// Reuses UpdateLocation; the type column is not mutable from this endpoint.
-	h.UpdateLocation(w, r)
+	if h.requireBranch(w, r) {
+		h.UpdateLocation(w, r)
+	}
 }
 
 func (h *Handler) DeleteBranch(w http.ResponseWriter, r *http.Request) {
 	// Soft-archive via DeleteLocation (sets active=false).
-	h.DeleteLocation(w, r)
+	if h.requireBranch(w, r) {
+		h.DeleteLocation(w, r)
+	}
 }
 
 func (h *Handler) GetBranchTree(w http.ResponseWriter, r *http.Request) {

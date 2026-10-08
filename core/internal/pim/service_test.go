@@ -5,7 +5,6 @@ package pim
 
 import (
 	"context"
-	"time"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/product"
