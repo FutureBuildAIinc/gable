@@ -38,7 +38,7 @@
         "reorder_qty": 500,
         "sku": "LUM-248-PREM",
         "target_margin": 0,
-        "total_allocated": 0,
+        "total_allocated": 14,
         "total_quantity": 433,
         "uom_primary": "PCS",
         "upc": null,

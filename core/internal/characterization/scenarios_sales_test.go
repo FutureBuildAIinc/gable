@@ -370,7 +370,7 @@ func orderGroups() []groupDef {
 				path:   "/api/v1/orders",
 				body: map[string]any{
 					"customer_id":   "{myCustomer}",
-					"delivery_type": "pickup",
+					"delivery_type": "delivery",
 					"lines": []map[string]any{
 						{"product_id": "{product}", "quantity": "5"},
 					},
@@ -382,7 +382,7 @@ func orderGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/orders",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "delivery_type": "pickup",
+					"customer_id": "{myCustomer}", "delivery_type": "delivery",
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "0"}},
 				},
 			},
@@ -391,7 +391,7 @@ func orderGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/orders",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "delivery_type": "pickup",
+					"customer_id": "{myCustomer}", "delivery_type": "delivery",
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "1",
 						"unit_price_ten_thousandths": 100000}},
 				},
@@ -404,7 +404,7 @@ func orderGroups() []groupDef {
 				path:   "/api/v1/orders/{myOrder}",
 				body: map[string]any{
 					"customer_id":   "{myCustomer}",
-					"delivery_type": "pickup",
+					"delivery_type": "delivery",
 					"revision":      1,
 					"lines": []map[string]any{
 						{"product_id": "{product}", "quantity": "6"},
@@ -420,13 +420,13 @@ func orderGroups() []groupDef {
 				method: "PUT",
 				path:   "/api/v1/orders/{myOrder}",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "delivery_type": "pickup", "revision": 1,
+					"customer_id": "{myCustomer}", "delivery_type": "delivery", "revision": 1,
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "6"}},
 				},
 			},
 			{name: "order.update.missing_precondition", method: "PUT",
 				path: "/api/v1/orders/{myOrder}",
-				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "pickup",
+				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "delivery",
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "6"}}}},
 			{name: "order.list.status_filter", method: "GET", path: "/api/v1/orders?status=draft&limit=2"},
 			{name: "order.list.unsupported_parameter", method: "GET", path: "/api/v1/orders?customer=none"},
@@ -448,7 +448,7 @@ func orderGroups() []groupDef {
 				path:   "/api/v1/orders",
 				body: map[string]any{
 					"customer_id":   "{myCustomer}",
-					"delivery_type": "pickup",
+					"delivery_type": "delivery",
 					"lines": []map[string]any{
 						{"product_id": "{product}", "quantity": "1"},
 					},
@@ -464,7 +464,7 @@ func orderGroups() []groupDef {
 				body: map[string]any{"to": "cancelled", "reason": "second attempt"}},
 			// An edit of a cancelled order: the recipe's edit rule.
 			{name: "order.update.not_draft", method: "PUT", path: "/api/v1/orders/{myCancelOrder}",
-				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "pickup", "revision": 2,
+				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "delivery", "revision": 2,
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "1"}}}},
 			// A forbidden edge of the transition table.
 			{name: "order.transition.forbidden", method: "POST", path: "/api/v1/orders/{myOrder}/transitions",

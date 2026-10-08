@@ -268,14 +268,7 @@
     "response": {
       "status": 200,
       "content_type": "application/x-sql-rows",
-      "body": [
-        {
-          "lines": 1,
-          "status": "UNPAID",
-          "tax_amount": "1.12",
-          "total_amount": "10.48"
-        }
-      ]
+      "body": []
     }
   }
 ]

@@ -6,7 +6,7 @@
       "path": "/api/v1/orders",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",
@@ -26,7 +26,7 @@
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "customer_po": null,
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "hold_note": null,
         "hold_reason": null,
         "id": "<id-4>",
@@ -100,7 +100,7 @@
       "path": "/api/v1/orders",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",
@@ -136,7 +136,7 @@
       "path": "/api/v1/orders",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",
@@ -183,7 +183,7 @@
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "customer_po": null,
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "hold_note": null,
         "hold_reason": null,
         "id": "<id-4>",
@@ -257,7 +257,7 @@
       "path": "/api/v1/orders/<id-4>",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",
@@ -278,7 +278,7 @@
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "customer_po": null,
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "hold_note": null,
         "hold_reason": null,
         "id": "<id-4>",
@@ -352,7 +352,7 @@
       "path": "/api/v1/orders/<id-4>",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",
@@ -383,7 +383,7 @@
       "path": "/api/v1/orders/<id-4>",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",
@@ -425,7 +425,7 @@
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
             "customer_po": null,
-            "delivery_type": "pickup",
+            "delivery_type": "delivery",
             "hold_note": null,
             "hold_reason": null,
             "id": "<id-4>",
@@ -552,7 +552,7 @@
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
             "customer_po": null,
-            "delivery_type": "pickup",
+            "delivery_type": "delivery",
             "hold_note": null,
             "hold_reason": null,
             "id": "<id-4>",
@@ -592,7 +592,7 @@
       "path": "/api/v1/orders",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",
@@ -612,7 +612,7 @@
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "customer_po": null,
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "hold_note": null,
         "hold_reason": null,
         "id": "<id-16>",
@@ -701,7 +701,7 @@
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "customer_po": null,
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "hold_note": null,
         "hold_reason": null,
         "id": "<id-16>",
@@ -799,7 +799,7 @@
       "path": "/api/v1/orders/<id-16>",
       "body": {
         "customer_id": "<id-1>",
-        "delivery_type": "pickup",
+        "delivery_type": "delivery",
         "lines": [
           {
             "product_id": "<id-2>",

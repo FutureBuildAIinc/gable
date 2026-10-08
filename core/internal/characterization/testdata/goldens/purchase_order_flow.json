@@ -61,7 +61,7 @@
       "content_type": "application/json",
       "body": {
         "MANUAL": 13,
-        "SPECIAL_ORDER": 5
+        "SPECIAL_ORDER": 2
       }
     }
   },
@@ -2765,7 +2765,7 @@
       "content_type": "application/json",
       "body": {
         "MANUAL": 15,
-        "SPECIAL_ORDER": 5
+        "SPECIAL_ORDER": 2
       }
     }
   },
@@ -2808,7 +2808,7 @@
       "body": {
         "MANUAL": 15,
         "REORDER": 1,
-        "SPECIAL_ORDER": 5
+        "SPECIAL_ORDER": 2
       }
     }
   }
