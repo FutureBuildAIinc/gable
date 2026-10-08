@@ -166,6 +166,40 @@ func TestLog_PoolPathSurvivesCancelledRequestContext(t *testing.T) {
 	}
 }
 
+func TestLog_ActorIDIsResolvedActor_UserIDKeepsLegacyOverride(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+	entityID := uuid.New()
+
+	// Some callers (OverrideExposure, the pricing exposure adapter) pass an
+	// explicit entry.UserID. That value is a legacy attribution and stays in
+	// user_id; actor_id records what pkg/actor resolved for the request, so a
+	// key or agent row can never carry a different actor_id than its kind
+	// claims.
+	claims := &middleware.UserClaims{}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), middleware.UserContextKey, claims)
+
+	logger.Log(ctx, audit.Entry{
+		Action:     "exposure.overridden",
+		EntityType: "override_test",
+		EntityID:   entityID,
+		UserID:     "legacy-attribution-9",
+	})
+
+	rows := fetchRows(t, db, entityID)
+	if len(rows) != 1 {
+		t.Fatalf("audit rows = %d, want 1", len(rows))
+	}
+	r := rows[0]
+	if r.ActorID == nil || *r.ActorID != "user-123" {
+		t.Errorf("actor_id = %v, want the resolved actor user-123, never the legacy override", r.ActorID)
+	}
+	if r.UserID == nil || *r.UserID != "legacy-attribution-9" {
+		t.Errorf("user_id = %v, want the legacy override legacy-attribution-9", r.UserID)
+	}
+}
+
 func TestLog_UserCallRecordsSubject(t *testing.T) {
 	db := testutil.RequireDB(t)
 	logger := audit.NewLogger(db)
