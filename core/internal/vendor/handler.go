@@ -59,6 +59,7 @@ func (h *Handler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to create vendor", http.StatusInternalServerError, err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(v)
 }
@@ -81,5 +82,6 @@ func (h *Handler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
 }

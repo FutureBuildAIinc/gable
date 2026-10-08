@@ -21,7 +21,7 @@ import (
 )
 
 // recorder is a subscriber handler that records every delivered event, the
-// same shape the exposure notifier's handler has in the server.
+// same shape the exposure notifier's handler has in the worker.
 type recorder struct {
 	mu        sync.Mutex
 	delivered []delivered

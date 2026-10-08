@@ -26,26 +26,41 @@ environments can share one cluster without stepping on each other.
 ```
 git push -> DO App Platform pulls branch
             |
-            |- builds core/Dockerfile  -> main + migrate + seed binaries
+            |- builds core/Dockerfile  -> the one `core` binary
             |                                 (alpine, port 8080)
             |
             |- builds web/apps/desk/Dockerfile      -> nginx + Vite SPA bundle
             |                                 (VITE_API_URL baked at build time)
             |
-            |- deploys backend + frontend services
+            |- deploys backend + frontend services + the worker
             |
-            `- runs POST_DEPLOY job: ./migrate && ./seed
+            `- runs POST_DEPLOY job: core migrate && core seed
                                       (against the env's logical DB)
 ```
 
-The same Docker image used for the backend service is reused for the post-deploy
-migrate-and-seed job — that's why `core/Dockerfile` builds three binaries
-(`main`, `migrate`, `seed`) into the runtime image. The job entrypoint is
-overridden via `run_command`.
+The same Docker image — one `core` binary, built by `core/Dockerfile` — runs
+every backend component. The backend service uses the image's default command
+(`core serve`); the worker overrides its run command to `./core worker`; the
+post-deploy migrate-and-seed job overrides its entrypoint via `run_command`.
+Every backend component is therefore always in step with the code you deploy.
 
 Frontend routing: App Platform splits traffic by path. The backend service owns
 `/api`, `/health`, `/healthz`, `/metrics`. The frontend owns `/`. The SPA calls
 `/api/v1/*` on the same hostname, which App Platform routes back to the backend.
+
+## Running the worker
+
+The background jobs run in a dedicated **worker** component, not inside the
+backend service. Today that is one job: the nightly purge of expired
+`idempotency_keys` rows. `core serve` does not start it, so a deployment
+without a worker accumulates expired rows without bound.
+
+Both example specs declare it under `workers:` — the same `core/Dockerfile`
+image as the backend, `run_command: ./core worker`, no routes and no port, and
+`DATABASE_URL` as its only variable. If you adapt the spec for your own
+deployment, keep a worker component in it (or run `./core worker` beside the
+server however else you deploy): the jobs are part of the platform's
+operational behaviour, not an optional extra.
 
 ## First-time setup
 

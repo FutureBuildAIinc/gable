@@ -13,9 +13,24 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-1>\",\"name\":\"Golden Truck 01\",\"vehicle_type\":\"BOX_TRUCK\",\"license_plate\":\"GLD0001\",\"capacity_weight_lbs\":5000,\"vin\":null,\"year\":null,\"make\":null,\"model\":null,\"insurance_expiry\":null,\"next_service_date\":null,\"odometer_miles\":null,\"notes\":null,\"photo_url\":null,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "capacity_weight_lbs": 5000,
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "insurance_expiry": null,
+        "license_plate": "GLD0001",
+        "make": null,
+        "model": null,
+        "name": "Golden Truck 01",
+        "next_service_date": null,
+        "notes": null,
+        "odometer_miles": null,
+        "photo_url": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_type": "BOX_TRUCK",
+        "vin": null,
+        "year": null
       }
     }
   },
@@ -207,9 +222,20 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-10>\",\"name\":\"Golden Driver\",\"license_number\":\"GLD-DL-1\",\"status\":\"ACTIVE\",\"phone_number\":\"250-555-0198\",\"cdl_class\":null,\"cdl_expiry\":null,\"hire_date\":null,\"email\":null,\"photo_url\":null,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "cdl_class": null,
+        "cdl_expiry": null,
+        "created_at": "<ts+0d>",
+        "email": null,
+        "hire_date": null,
+        "id": "<id-10>",
+        "license_number": "GLD-DL-1",
+        "name": "Golden Driver",
+        "phone_number": "250-555-0198",
+        "photo_url": null,
+        "status": "ACTIVE",
+        "updated_at": "<ts+0d>"
       }
     }
   },

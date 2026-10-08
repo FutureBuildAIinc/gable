@@ -186,9 +186,10 @@ pretend it happened silently.
 
 ### 4. The drain runner
 
-`pkg/outbox.DrainRunner` is a poller with `Start` and `Stop`, started from
-the server for now (item R1-4 gives the `worker` role its own jobs, and
-moving it there changes only the wiring). Each registered subscriber, a
+`pkg/outbox.DrainRunner` is a poller with `Start` and `Stop`, started
+by the `worker` role (`internal/app/worker`), never by `serve`, so serve
+replicas never contend for the cursors (a second drain instance still skips a
+busy cursor safely, as below). Each registered subscriber, a
 (durable name, subject pattern, handler) triple mirroring its `pkg/eventbus`
 subscription shape, is drained per tick in one short transaction:
 

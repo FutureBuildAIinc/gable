@@ -632,6 +632,54 @@ func TestIdempotency_PrincipalScoping(t *testing.T) {
 	}
 }
 
+// A machine key caller claims under its own principal, in every auth mode:
+// the key is the identity the auth chain identified, so its retries share
+// its namespace (never the dev one) and outside dev they are cached rather
+// than passed through uncached the way a truly anonymous caller is.
+func TestIdempotency_MachineKeyPrincipal(t *testing.T) {
+	db := testutil.RequireDB(t)
+
+	t.Setenv("AUTH_MODE", "")
+	idemKey := newKey()
+	deleteKeyRows(t, db, "key:key-idem-1", idemKey)
+
+	var calls int32
+	mw := Idempotency(db)
+	h := countingHandler(&calls, http.StatusCreated, `{"key":true}`)
+
+	for i := 0; i < 2; i++ {
+		r := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, "")
+		r = r.WithContext(WithKeyID(r.Context(), "key-idem-1"))
+		r.Header.Set(IdempotencyHeader, idemKey)
+		w := serve(t, mw, h, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("keyed request %d: status = %d", i, w.Code)
+		}
+		if i == 1 && w.Header().Get(IdempotencyReplayedHeader) != "true" {
+			t.Fatal("keyed replay not marked replayed")
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("keyed replay: handler calls = %d, want 1 (a machine key's claims are cached on its own principal)", calls)
+	}
+
+	// The same Idempotency-Key under a different key principal is a
+	// different claim: it executes rather than replaying the other key's
+	// stored answer.
+	var otherCalls int32
+	other := countingHandler(&otherCalls, http.StatusCreated, `{"key":true}`)
+	deleteKeyRows(t, db, "key:key-idem-2", idemKey)
+	r := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, "")
+	r = r.WithContext(WithKeyID(r.Context(), "key-idem-2"))
+	r.Header.Set(IdempotencyHeader, idemKey)
+	if w := serve(t, mw, other, r); w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) == "true" {
+		t.Fatalf("different key principal: status = %d, want a fresh execution", w.Code)
+	}
+	if otherCalls != 1 {
+		t.Fatalf("different key principal: handler calls = %d, want 1", otherCalls)
+	}
+}
+
 // Under AUTH_MODE=dev the caller is the fixed dev principal; without an
 // identity and without dev mode, keyed requests pass through uncached rather
 // than joining a shared anonymous namespace.

@@ -29,26 +29,27 @@ run:
    connection, not observed to collide. Other packages' tests share the
    `DATABASE_URL` database; the harness never touches it beyond
    `CREATE`/`DROP` of its own.
-2. **Migrate and seed.** It builds `cmd/migrate`, `cmd/seed` and `cmd/server`
-   from the working tree, migrates the fresh database, and seeds it with
-   `DEMO_SEED=1`. The seed draws its demo data through Go's global `math/rand`
-   source, which auto-seeds randomly at startup; the harness runs it with
-   `GODEBUG=randautoseed=0` and `TZ=Etc/UTC`, so the same draw sequence lands
-   on every run and every machine. (The draw sequence is consumed inside
-   map-iteration loops, so which customer owns which drawn value still varies
-   per run; see the identity mask below for what that rules out.) After the
-   seed binary finishes, the harness inserts its own clock-window fixture
-   rows through SQL on the fresh database (see "Clock-window fixture rows"
-   below).
-3. **Real server.** It runs the real `cmd/server` binary as a subprocess on a
-   free port with `AUTH_MODE=dev` (the same shape as CI's backend job). The
-   whole wiring of `cmd/server/main.go` (middleware order, schedulers,
-   adapters) is the behaviour under characterisation, so the harness exercises
-   the production entry point rather than reconstructing the handler in
-   process, which would fork the wiring and drift. The subprocess runs in its
-   own process group, stopped by that group number even when the test fails,
-   and carries `Pdeathsig=SIGKILL` on Linux so a killed test process takes the
-   server with it.
+2. **Migrate and seed.** It builds `cmd/core` once from the working tree,
+   runs `core migrate` against the fresh database, and seeds it with
+   `core seed` and `DEMO_SEED=1`. The seed draws its demo data through Go's
+   global `math/rand` source, which auto-seeds randomly at startup; the
+   harness runs it with `GODEBUG=randautoseed=0` and `TZ=Etc/UTC`, so the
+   same draw sequence lands on every run and every machine. (The draw
+   sequence is consumed inside map-iteration loops, so which customer owns
+   which drawn value still varies per run; see the identity mask below for
+   what that rules out.) After the seed finishes, the harness inserts its
+   own clock-window fixture rows through SQL on the fresh database (see
+   "Clock-window fixture rows" below).
+3. **Real server.** It runs the real server - the `serve` role of the one
+   `core` binary, `core serve` - as a subprocess on a free port with
+   `AUTH_MODE=dev` (the same shape as CI's backend job). The whole wiring of
+   `core/internal/app/serve` (middleware order, schedulers,
+   adapters) is the behaviour under characterisation, so the harness
+   exercises the production entry point rather than reconstructing the
+   handler in process, which would fork the wiring and drift. The subprocess
+   runs in its own process group, stopped by that group number even when the
+   test fails, and carries `Pdeathsig=SIGKILL` on Linux so a killed test
+   process takes the server with it.
 4. **Script.** It replays a fixed, ordered script of 202 requests across 44
    groups (one golden file per group). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
@@ -67,13 +68,14 @@ run:
 
 ### Subprocess environments are built from an allow list
 
-Every subprocess the harness starts (`go build`, migrate, seed, server) gets
-an environment built from a fixed allow list (`PATH`, `HOME`, `GOCACHE`,
-`GOMODCACHE`, `GOFLAGS`, `GOPATH`, `TMPDIR`) plus the harness's explicit
-values - never from `os.Environ()`. A variable in a developer's shell
-(`INTEGRATION_API_KEY`, `RUN_PAYMENTS_*`, `AVALARA_*`, `CORS_ORIGINS`, ...)
-configures the server and would silently change the goldens per machine;
-`TestSubprocessEnvBlocksOutsideVariables` pins the allow list.
+Every subprocess the harness starts (`go build`, `core migrate`, `core seed`,
+`core serve`) gets an environment built from a fixed allow list (`PATH`,
+`HOME`, `GOCACHE`, `GOMODCACHE`, `GOFLAGS`, `GOPATH`, `TMPDIR`) plus the
+harness's explicit values - never from `os.Environ()`. A variable in a
+developer's shell (`INTEGRATION_API_KEY`, `RUN_PAYMENTS_*`, `AVALARA_*`,
+`CORS_ORIGINS`, ...) configures the server and would silently change the
+goldens per machine; `TestSubprocessEnvBlocksOutsideVariables` pins the allow
+list.
 
 ### Clock-window fixture rows
 

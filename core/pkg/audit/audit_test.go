@@ -8,8 +8,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/actor"
@@ -291,6 +293,52 @@ func TestLog_KeyCallRecordsKeyID(t *testing.T) {
 	}
 }
 
+func TestLog_AgentOverMachineKeyKeepsUserIDNull(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+	entityID := uuid.New()
+
+	// The shape the review flagged: a machine-key request also carrying the
+	// agent headers. The actor middleware runs outside auth, so once the
+	// machine-key core has set the key id the context holds both, and
+	// pkg/actor resolves kind agent with the key id as the principal (an
+	// agent driving a keyed integration). The legacy user_id column must
+	// still stay NULL: an agent over a key is no more a user than the key
+	// alone is.
+	var reqCtx context.Context
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/quotes", nil)
+	req.Header.Set(actor.HeaderActingAs, "agent")
+	req.Header.Set(actor.HeaderAgentTool, "probe")
+	handler := actor.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCtx = r.Context()
+	}))
+	handler.ServeHTTP(rec, req)
+
+	ctx := actor.WithKeyID(reqCtx, "key-999")
+
+	logger.Log(ctx, audit.Entry{
+		Action:     "key.agent.action",
+		EntityType: "agent_key_test",
+		EntityID:   entityID,
+	})
+
+	rows := fetchRows(t, db, entityID)
+	if len(rows) != 1 {
+		t.Fatalf("audit rows = %d, want 1", len(rows))
+	}
+	r := rows[0]
+	if r.ActorKind != actor.KindAgent {
+		t.Errorf("actor_kind = %q, want %q (the marker must still mark the row)", r.ActorKind, actor.KindAgent)
+	}
+	if r.ActorID == nil || *r.ActorID != "key-999" {
+		t.Errorf("actor_id = %v, want the key id key-999 (the principal behind the agent)", r.ActorID)
+	}
+	if r.UserID != nil {
+		t.Errorf("user_id = %v, want NULL (an agent over a key is still not a user)", *r.UserID)
+	}
+}
+
 func TestLog_AgentCallRecordsUserMarkerAndTool(t *testing.T) {
 	db := testutil.RequireDB(t)
 	logger := audit.NewLogger(db)
@@ -336,5 +384,67 @@ func TestLog_AgentCallRecordsUserMarkerAndTool(t *testing.T) {
 	}
 	if r.UserID == nil || *r.UserID != "user-789" {
 		t.Errorf("user_id = %v, want the acted-for user's subject user-789", r.UserID)
+	}
+}
+
+func TestAuditKeyRefusalBoundsStoredPathAndScope(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+
+	// The refused path is caller controlled: a verbatim copy lets one refused
+	// request write an attacker sized audit_log row. The stored copies of the
+	// path and the scope are bounded, cut on a rune boundary, and marked as
+	// truncated; the full path goes to the server log line only. The path
+	// here is ~40 KB of three byte runes, so a byte cut at 512 would split
+	// one and a stored copy that survives must still be valid UTF-8.
+	keyID := uuid.New()
+	bigPath := "/api/v1/quotes/" + strings.Repeat("\u20ac", 13334)
+	bigScope := strings.Repeat("s", 300)
+	logger.AuditKeyRefusal(context.Background(), keyID.String(), "key.scope_refused", bigScope, "GET", bigPath)
+
+	var path, scope string
+	var pathMarked, scopeMarked bool
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'path', changes->>'scope',
+		        COALESCE((changes->>'path_truncated')::boolean, false),
+		        COALESCE((changes->>'scope_truncated')::boolean, false)
+		   FROM audit_log WHERE entity_id = $1 AND action = 'key.scope_refused'`, keyID,
+	).Scan(&path, &scope, &pathMarked, &scopeMarked)
+	if err != nil {
+		t.Fatalf("no key.scope_refused row for key %s: %v", keyID, err)
+	}
+	if len(path) > 512 {
+		t.Errorf("stored path is %d bytes, want at most 512", len(path))
+	}
+	if !utf8.ValidString(path) {
+		t.Errorf("stored path is not valid UTF-8: the cut split a rune")
+	}
+	if !pathMarked {
+		t.Errorf("a truncated stored path must be marked as truncated")
+	}
+	if len(scope) > 128 {
+		t.Errorf("stored scope is %d bytes, want at most 128", len(scope))
+	}
+	if !scopeMarked {
+		t.Errorf("a truncated stored scope must be marked as truncated")
+	}
+
+	// A refusal under the bounds is stored verbatim and carries no marker.
+	keyID = uuid.New()
+	logger.AuditKeyRefusal(context.Background(), keyID.String(), "key.scope_refused", "quotes:write", "GET", "/api/v1/quotes")
+	err = db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'path', changes->>'scope',
+		        COALESCE((changes->>'path_truncated')::boolean, false),
+		        COALESCE((changes->>'scope_truncated')::boolean, false)
+		   FROM audit_log WHERE entity_id = $1 AND action = 'key.scope_refused'`, keyID,
+	).Scan(&path, &scope, &pathMarked, &scopeMarked)
+	if err != nil {
+		t.Fatalf("no key.scope_refused row for key %s: %v", keyID, err)
+	}
+	if path != "/api/v1/quotes" || scope != "quotes:write" {
+		t.Errorf("untruncated refusal stored path=%q scope=%q, want them verbatim", path, scope)
+	}
+	if pathMarked || scopeMarked {
+		t.Errorf("untruncated refusal marked path=%v scope=%v, want no markers", pathMarked, scopeMarked)
 	}
 }

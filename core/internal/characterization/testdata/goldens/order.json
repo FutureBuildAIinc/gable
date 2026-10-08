@@ -17,9 +17,31 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-3>\",\"branch_id\":\"<id-4>\",\"customer_id\":\"<id-1>\",\"status\":\"DRAFT\",\"total_amount\":2750,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"total_cost\":0,\"total_margin\":0,\"margin_percent\":0,\"total_commission\":0,\"lines\":[{\"id\":\"<id-5>\",\"order_id\":\"<id-3>\",\"product_id\":\"<id-2>\",\"quantity\":5,\"price_each\":550,\"unit_cost\":0,\"commission_rate\":0,\"is_special_order\":false}]}\n"
+        "branch_id": "<id-3>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "id": "<id-4>",
+        "lines": [
+          {
+            "commission_rate": 0,
+            "id": "<id-5>",
+            "is_special_order": false,
+            "order_id": "<id-4>",
+            "price_each": 550,
+            "product_id": "<id-2>",
+            "quantity": 5,
+            "unit_cost": 0
+          }
+        ],
+        "margin_percent": 0,
+        "status": "DRAFT",
+        "total_amount": 2750,
+        "total_commission": 0,
+        "total_cost": 0,
+        "total_margin": 0,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -27,7 +49,7 @@
     "name": "order.get",
     "request": {
       "method": "GET",
-      "path": "/api/v1/orders/<id-3>"
+      "path": "/api/v1/orders/<id-4>"
     },
     "response": {
       "status": 200,
@@ -37,13 +59,13 @@
         "created_at": "<ts+0d>",
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
-        "id": "<id-3>",
+        "id": "<id-4>",
         "lines": [
           {
             "commission_rate": 0,
             "id": "<id-5>",
             "is_special_order": false,
-            "order_id": "<id-3>",
+            "order_id": "<id-4>",
             "price_each": 550,
             "product_id": "<id-2>",
             "product_name": "2x4x8 SPF Premium",
@@ -66,7 +88,7 @@
     "name": "order.exposure_gate",
     "request": {
       "method": "GET",
-      "path": "/api/v1/orders/<id-3>/exposure-gate"
+      "path": "/api/v1/orders/<id-4>/exposure-gate"
     },
     "response": {
       "status": 200,
@@ -92,7 +114,7 @@
             "created_at": "<ts+0d>",
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
-            "id": "<id-3>",
+            "id": "<id-4>",
             "margin_percent": 0,
             "status": "DRAFT",
             "total_amount": 2750,
@@ -126,9 +148,31 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-7>\",\"branch_id\":\"<id-4>\",\"customer_id\":\"<id-1>\",\"status\":\"DRAFT\",\"total_amount\":550,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"total_cost\":0,\"total_margin\":0,\"margin_percent\":0,\"total_commission\":0,\"lines\":[{\"id\":\"<id-8>\",\"order_id\":\"<id-7>\",\"product_id\":\"<id-2>\",\"quantity\":1,\"price_each\":550,\"unit_cost\":0,\"commission_rate\":0,\"is_special_order\":false}]}\n"
+        "branch_id": "<id-3>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "id": "<id-7>",
+        "lines": [
+          {
+            "commission_rate": 0,
+            "id": "<id-8>",
+            "is_special_order": false,
+            "order_id": "<id-7>",
+            "price_each": 550,
+            "product_id": "<id-2>",
+            "quantity": 1,
+            "unit_cost": 0
+          }
+        ],
+        "margin_percent": 0,
+        "status": "DRAFT",
+        "total_amount": 550,
+        "total_commission": 0,
+        "total_cost": 0,
+        "total_margin": 0,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -176,7 +220,7 @@
     "name": "order.exposure_override",
     "request": {
       "method": "POST",
-      "path": "/api/v1/orders/<id-3>/exposure-override",
+      "path": "/api/v1/orders/<id-4>/exposure-override",
       "body": {
         "notes": "golden characterisation override"
       }

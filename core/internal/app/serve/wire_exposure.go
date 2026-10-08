@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-package main
+package serve
 
 import (
 	"context"
@@ -9,13 +9,11 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/delivery"
-	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
-	"github.com/gablelbm/gable/pkg/eventbus"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -23,26 +21,20 @@ import (
 
 // ExposureWiring is the handle main.go keeps after wiring the lumber
 // index-aware price-protection subsystem. Call Shutdown during graceful
-// shutdown to stop the outbox drain and the safety-net cron.
+// shutdown to stop the safety-net cron. The outbox drain that delivers the
+// exposure notifications is not here: it is a background job and runs in the
+// worker role (internal/app/worker).
 type ExposureWiring struct {
-	// Drain delivers committed outbox events to the registered subscribers
-	// (the exposure notifier) past each subscriber's cursor. main.go starts
-	// it after this wiring returns; Shutdown stops it before the pool
-	// closes. See pkg/outbox.
-	Drain *outbox.DrainRunner
 	// Scheduler is the nightly safety-net re-evaluation cron. Disabled unless
 	// system_settings has exposure.enabled = "true".
 	Scheduler *quote.ExposureScheduler
 }
 
-// Shutdown stops the drain and the safety-net cron, bounded by ctx. Safe to
+// Shutdown stops the safety-net cron, bounded by ctx. Safe to
 // call on a nil receiver so main.go's shutdown path needs no guard.
 func (w *ExposureWiring) Shutdown(ctx context.Context) {
 	if w == nil {
 		return
-	}
-	if w.Drain != nil {
-		w.Drain.Stop()
 	}
 	if w.Scheduler != nil {
 		w.Scheduler.Stop()
@@ -62,7 +54,6 @@ type exposureDeps struct {
 	QuoteSvc      *quote.Service
 	OrderSvc      *order.Service
 	DeliverySvc   *delivery.Service
-	EmailSvc      notification.EmailService
 	// EventsOrg is the org slug the outbox writer stamps on every event
 	// (EVENTS_ORG, "default" when unset): one database per dealer today, so
 	// the org is a property of the deployment.
@@ -89,7 +80,7 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 		logger = slog.Default()
 	}
 
-	// In-process delivery: the outbox drain delivers committed events_outbox
+	// Delivery: the worker role's outbox drain delivers committed events_outbox
 	// rows (pkg/outbox) synchronously to each registered subscriber handler,
 	// so delivery follows the commit, not the process lifetime. The eventbus
 	// package's Event envelope and subject wildcard rules remain the shared
@@ -141,16 +132,9 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 		deps.DeliverySvc.WithExposureGate(exposureChecker)
 	}
 
-	// Notifications: turn exposure events into salesperson alerts + customer
-	// notices. The notifier's handler is registered on the drain for the
-	// wildcard subject, so every exposure event committed to the outbox is
-	// delivered to it exactly by the drain's at-least-once, per-cursor rule;
-	// the notifier dedups on the outbox event_id.
-	drain := outbox.NewDrainRunner(deps.DB, logger)
-	if deps.EmailSvc != nil {
-		notifier := notification.NewExposureNotifier(deps.EmailSvc, deps.DB, logger)
-		drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
-	}
+	// Notifications: the exposure notifier is registered on the outbox drain
+	// in the worker role (internal/app/worker), which delivers every exposure
+	// event committed to the outbox to it, at least once, per cursor.
 
 	// Nightly safety net. Off by default; an operator enables it by setting
 	// exposure.enabled = "true" in system_settings. It re-evaluates every open
@@ -162,7 +146,7 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 		logger.Error("exposure safety-net scheduler failed to start", "error", err)
 	}
 
-	return &ExposureWiring{Drain: drain, Scheduler: scheduler}
+	return &ExposureWiring{Scheduler: scheduler}
 }
 
 // exposureRoutes carries the collaborators the exposure HTTP surface needs.

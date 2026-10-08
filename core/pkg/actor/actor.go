@@ -67,18 +67,18 @@ const (
 	agentToolKey
 )
 
-// WithKeyID records a machine key's id in the context. The scoped-key
-// middleware (R1-13) calls this once it has validated a Bearer machine key
-// against the api_keys table, so downstream audit rows can attribute the
-// write to that key.
+// WithKeyID records a machine key's id in the context. The canonical home of
+// the value is pkg/middleware (the scoped-key auth core, R1-13, sets it once
+// it has validated a Bearer machine key against the api_keys table); this
+// package reads it from there, and these helpers delegate so callers keep one
+// import.
 func WithKeyID(ctx context.Context, keyID string) context.Context {
-	return context.WithValue(ctx, keyIDKey, keyID)
+	return middleware.WithKeyID(ctx, keyID)
 }
 
 // KeyIDFromContext returns the machine key id set by WithKeyID, if any.
 func KeyIDFromContext(ctx context.Context) (string, bool) {
-	id, ok := ctx.Value(keyIDKey).(string)
-	return id, ok && id != ""
+	return middleware.KeyIDFromContext(ctx)
 }
 
 // validateHeaderValue reports whether a trimmed identity header value is
