@@ -18,9 +18,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// The seam quotes cents the order will bill: a sub cent price is rounded half
-// away from zero, never truncated (a price of 8.0082 is 801 cents, 20.025 is
-// 2003, where a float multiply and truncation answered 800 and 2002).
+// The seam quotes cents the order will bill: a sub cent unit price is rounded
+// half away from zero, never truncated (a price of 8.0082 is 801 cents, 20.025
+// is 2003, where a float multiply and truncation answered 800 and 2002), and
+// the total is the order's own extension, the exact scale 4 price extended
+// once (3 x 20.025 is 60.075 = 6008 cents), never the rounded unit price
+// times the quantity (2003 x 3 = 6009, a cent above the bill).
 func TestBulkPrice_RoundsSubCentPricesHalfAwayFromZero(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
@@ -37,7 +40,7 @@ func TestBulkPrice_RoundsSubCentPricesHalfAwayFromZero(t *testing.T) {
 		base  string
 		unit  int64
 		total int64
-	}{{"8.0082", 801, 2403}, {"20.025", 2003, 6009}, {"1.0049", 100, 300}}
+	}{{"8.0082", 801, 2402}, {"20.025", 2003, 6008}, {"1.0049", 100, 301}}
 	var items []map[string]any
 	var ids []uuid.UUID
 	for _, c := range cases {
