@@ -34,8 +34,10 @@ let seeded: Seeded | undefined;
 
 async function firstCustomerAndProduct(request: import('@playwright/test').APIRequestContext): Promise<Seeded> {
   if (seeded) return seeded;
-  const customers = (await (await request.get('/api/v1/customers')).json()) as { id: string; name: string }[] | { data: { id: string; name: string }[] };
-  const customer = (Array.isArray(customers) ? customers : customers.data)[0];
+  // The customer list is the cursor envelope, newest first; the customer spec adds customers
+  // named E2E-*, so the seeded customers are the ones a quote is built for.
+  const customers = (await (await request.get('/api/v1/customers?limit=200')).json()) as { items: { id: string; name: string; account_number: string }[] };
+  const customer = customers.items.find((c) => !c.account_number.startsWith('E2E-'))!;
   const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string; uom_primary: string }[] | { data: { id: string; sku: string; uom_primary: string }[] };
   const product = (Array.isArray(products) ? products : products.data)[0];
   seeded = { customer, product };
