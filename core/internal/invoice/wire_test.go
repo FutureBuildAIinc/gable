@@ -761,3 +761,94 @@ func TestPartialInvoiceLineDiscountsSumExactly(t *testing.T) {
 		t.Errorf("totals %d + %d, want 998 (1000 less the discount)", a.total, b.total)
 	}
 }
+
+// RULE (ADR 0005 6.2): a void of one of several partial invoices of an order gives
+// back exactly its quantities: the other invoice stands, the order line's
+// fulfilled quantity drops by the voided piece, the returned stock is allocated
+// to the order again, and the order lands confirmed, not fulfilled.
+func TestVoidOfAPartialInvoiceReopensOnlyItsPiece(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	orderID, r := f.confirmedOrder(f.pickupLine("10"))
+	line := f.do("GET", "/api/v1/orders/"+orderID, nil).body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	first, r2 := f.fulfil(orderID, r, []map[string]any{{"order_line_id": line, "quantity": "4"}})
+	second, _ := f.fulfil(orderID, r2, nil)
+	if f.stock() != "90.0000/0.0000" {
+		t.Fatalf("stock after both bills = %s", f.stock())
+	}
+	if v := f.voidInvoice(first, rev(t, f.getInvoice(first)), "the first piece was billed twice"); v.status != 200 {
+		t.Fatalf("void = %d: %s", v.status, v.raw)
+	}
+	o := f.do("GET", "/api/v1/orders/"+orderID, nil)
+	ol := o.body["lines"].([]any)[0].(map[string]any)
+	if str(t, o.body, "status") != "confirmed" || str(t, ol, "quantity_fulfilled") != "6" || str(t, ol, "quantity_allocated") != "4" || str(t, ol, "quantity_backordered") != "0" {
+		t.Errorf("order %v fulfilled %v allocated %v backordered %v, want confirmed 6/4/0", o.body["status"], ol["quantity_fulfilled"], ol["quantity_allocated"], ol["quantity_backordered"])
+	}
+	if ids := o.body["invoice_ids"].([]any); len(ids) != 1 || ids[0] != second {
+		t.Errorf("invoice_ids = %v, want only the second invoice", ids)
+	}
+	if f.stock() != "94.0000/4.0000" {
+		t.Errorf("stock = %s, want 94 on hand (4 returned) and 4 allocated", f.stock())
+	}
+	if f.getInvoice(second).body["status"] != "unpaid" {
+		t.Error("the other invoice moved")
+	}
+	// the 4 bill again
+	third, _ := f.fulfil(orderID, rev(t, o), nil)
+	if l := f.getInvoice(third).body["lines"].([]any)[0].(map[string]any); str(t, l, "quantity") != "4" {
+		t.Errorf("the re-bill is for %v, want 4", l["quantity"])
+	}
+}
+
+// RULE (ADR 0005 6.2, 2.6): a void returns a kit's components and gives back
+// whole kits: two kits of four posts each bill, void, and the components are
+// allocated again in whole kits.
+func TestVoidOfAKitInvoiceReturnsWholeKits(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	kit, post := uuid.New(), uuid.New()
+	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, is_kit, taxable) VALUES ($1, $2, 'A fence kit', 'EA', 100.00, TRUE, TRUE)`, kit, "VK-KIT-"+uuid.NewString()[:6])
+	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, 'A fence post', 'EA', 12.50, 5.00)`, post, "VK-POST-"+uuid.NewString()[:6])
+	mustExec(t, db, `INSERT INTO product_kit_components (kit_product_id, component_product_id, quantity, position) VALUES ($1, $2, 4, 0)`, kit, post)
+	mustExec(t, db, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 9, 0)`, post, f.yardID)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoice_lines WHERE product_id IN ($1, $2)`, kit, post)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE product_id IN ($1, $2)`, kit, post)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_kit_components WHERE kit_product_id = $1`, kit)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM inventory WHERE product_id = $1`, post)
+	})
+	orderID, r := f.confirmedOrder(map[string]any{"product_id": kit.String(), "quantity": "2"})
+	invID, _ := f.fulfil(orderID, r, nil)
+	posts := func() string {
+		var s string
+		if err := db.Pool.QueryRow(context.Background(), `SELECT quantity::text || '/' || allocated::text FROM inventory WHERE product_id = $1`, post).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if posts() != "1.0000/0.0000" {
+		t.Fatalf("posts after billing two kits = %s, want 1 left", posts())
+	}
+	if v := f.voidInvoice(invID, rev(t, f.getInvoice(invID)), "kits billed by mistake"); v.status != 200 {
+		t.Fatalf("void = %d: %s", v.status, v.raw)
+	}
+	if posts() != "9.0000/8.0000" {
+		t.Errorf("posts after the void = %s, want 9 on hand and 8 allocated (two whole kits)", posts())
+	}
+	o := f.do("GET", "/api/v1/orders/"+orderID, nil)
+	if str(t, o.body, "status") != "confirmed" {
+		t.Errorf("order status = %v, want confirmed", o.body["status"])
+	}
+	for _, l := range o.body["lines"].([]any) {
+		lm := l.(map[string]any)
+		if str(t, lm, "quantity_fulfilled") != "0" {
+			t.Errorf("a %v line still has %v fulfilled", lm["line_type"], lm["quantity_fulfilled"])
+		}
+		if lm["line_type"] == "component" && (str(t, lm, "quantity_allocated") != "8" || str(t, lm, "quantity_backordered") != "0") {
+			t.Errorf("component allocated %v backordered %v, want 8/0", lm["quantity_allocated"], lm["quantity_backordered"])
+		}
+	}
+}

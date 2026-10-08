@@ -25,6 +25,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -438,3 +439,51 @@ func TestSaturationNeedsNoSecondConnection(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// RULE (ADR 0005 6.2 and 11): a payment and a void of the same invoice race on
+// the invoice row, and either order leaves the books consistent: the void wins
+// (and the payment is refused, the invoice void) or the payment wins (and the
+// void is refused with has_applications), never a void invoice with a payment.
+func TestPaymentAndVoidRaceLeavesNoVoidInvoiceWithAPayment(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	f := newFixture(t, db)
+	acct := account.NewService(account.NewRepository(db), db, slog.Default())
+	pay := payment.NewService(db, payment.NewRepository(db), invoice.NewRepository(db), acct)
+	voided, paid := 0, 0
+	for i := 0; i < 16; i++ {
+		invID, _ := f.invoice("1")
+		revision := rev(t, f.getInvoice(invID))
+		var wg sync.WaitGroup
+		var voidStatus int
+		var payErr error
+		wg.Add(2)
+		skew := time.Duration(i%4) * 1500 * time.Microsecond
+		go func() {
+			defer wg.Done()
+			if i%2 == 1 {
+				time.Sleep(skew) // the payment starts first on odd rounds
+			}
+			voidStatus = f.voidInvoice(invID, revision, "race").status
+		}()
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				time.Sleep(skew)
+			}
+			_, payErr = pay.ProcessPayment(context.Background(), uuid.MustParse(invID), 100, payment.PaymentMethodCash, "race", "")
+		}()
+		wg.Wait()
+		status := str(t, f.getInvoice(invID).body, "status")
+		payments := countOf(t, db, `SELECT count(*) FROM payments WHERE invoice_id = $1`, invID)
+		switch {
+		case status == "void" && payments == 0 && voidStatus == 200 && payErr != nil:
+			voided++
+		case status != "void" && payments == 1 && voidStatus == http.StatusConflict && payErr == nil:
+			paid++
+		default:
+			t.Fatalf("round %d: invoice %s, %d payments, void answered %d, payment error %v: the books disagree", i, status, payments, voidStatus, payErr)
+		}
+	}
+	t.Logf("16 races: %d voids won, %d payments won", voided, paid)
+}

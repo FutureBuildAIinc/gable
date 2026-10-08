@@ -35,14 +35,18 @@ async function freshCustomer(request: APIRequestContext) {
   return (await res.json()) as { id: string; name: string };
 }
 
-async function stockedProduct(request: APIRequestContext) {
+// Products with plenty on hand in total; an earlier spec's back order may have
+// emptied the default branch of some, so the caller tries each until one confirms.
+async function stockedProducts(request: APIRequestContext) {
   const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string }[] | { data: { id: string; sku: string }[] };
   const list = Array.isArray(products) ? products : products.data;
+  const out: { id: string; sku: string }[] = [];
   for (const p of list) {
     const inv = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { quantity: number; allocated: number }[];
-    if (Array.isArray(inv) && inv.reduce((n, r) => n + (r.quantity - r.allocated), 0) >= 50) return p;
+    if (Array.isArray(inv) && inv.reduce((n, r) => n + (r.quantity - r.allocated), 0) >= 50) out.push(p);
   }
-  throw new Error('no stocked product in the demo seed');
+  if (out.length === 0) throw new Error('no stocked product in the demo seed');
+  return out;
 }
 
 interface Billed {
@@ -63,24 +67,33 @@ interface Billed {
 // fulfilment route bills the invoice (Location names it).
 async function billedInvoice(request: APIRequestContext, customer?: { id: string; name: string }): Promise<Billed> {
   const cust = customer ?? (await freshCustomer(request));
-  const product = await stockedProduct(request);
-  const created = await request.post('/api/v1/orders', {
-    data: { customer_id: cust.id, delivery_type: 'delivery', lines: [{ product_id: product.id, quantity: '10' }] },
-  });
-  expect(created.status(), await created.text()).toBe(201);
-  const order = await created.json();
-  const confirmed = await request.post(`/api/v1/orders/${order.id}/transitions`, { data: { to: 'confirmed', revision: order.revision } });
-  expect(confirmed.status(), await confirmed.text()).toBe(200);
-  const confirmedOrder = await confirmed.json();
-  expect(confirmedOrder.status).toBe('confirmed');
-  const fulfilled = await request.post(`/api/v1/orders/${order.id}/fulfillments`, {
-    data: { revision: confirmedOrder.revision },
-    headers: { 'If-Match': `"${confirmedOrder.revision}"` },
-  });
-  expect(fulfilled.status(), await fulfilled.text()).toBe(201);
-  const invoiceId = fulfilled.headers()['location'].replace('/api/v1/invoices/', '');
-  const invoice = await (await request.get(`/api/v1/invoices/${invoiceId}`)).json();
-  return { customer: cust, product, invoice };
+  for (const product of await stockedProducts(request)) {
+    const created = await request.post('/api/v1/orders', {
+      data: { customer_id: cust.id, delivery_type: 'delivery', lines: [{ product_id: product.id, quantity: '10' }] },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const order = await created.json();
+    const confirmed = await request.post(`/api/v1/orders/${order.id}/transitions`, { data: { to: 'confirmed', revision: order.revision } });
+    expect(confirmed.status(), await confirmed.text()).toBe(200);
+    const confirmedOrder = await confirmed.json();
+    if (confirmedOrder.status !== 'confirmed' || confirmedOrder.lines[0].quantity_allocated !== '10') {
+      // not fully allocated at this branch: give this order up and try the next product
+      const cancelled = await request.post(`/api/v1/orders/${order.id}/transitions`, {
+        data: { to: 'cancelled', revision: confirmedOrder.revision, reason: 'e2e: not enough stock here' },
+      });
+      expect(cancelled.status(), await cancelled.text()).toBe(200);
+      continue;
+    }
+    const fulfilled = await request.post(`/api/v1/orders/${order.id}/fulfillments`, {
+      data: { revision: confirmedOrder.revision },
+      headers: { 'If-Match': `"${confirmedOrder.revision}"` },
+    });
+    expect(fulfilled.status(), await fulfilled.text()).toBe(201);
+    const invoiceId = fulfilled.headers()['location'].replace('/api/v1/invoices/', '');
+    const invoice = await (await request.get(`/api/v1/invoices/${invoiceId}`)).json();
+    return { customer: cust, product, invoice };
+  }
+  throw new Error('no product could be fully allocated for ten units');
 }
 
 test.describe('Invoices and credit memos', () => {
