@@ -761,15 +761,27 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		}
 	}
 	// The fixture's cleanup already deletes this product's inventory rows.
+	// One legacy row with only the deprecated location text and no
+	// location_id: it has no branch on its joined location, so no scoped arm
+	// matches it, and it stays visible to an administrator without a header
+	// and to callers with no branch context only (the contract row names the
+	// choice; C4-1 migrates legacy rows onto locations).
+	legacyName := "wl-inv-legacy-" + f.productID.String()[:8]
+	if _, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO inventory (product_id, location, quantity) VALUES ($1, $2, 7)`,
+		f.productID, legacyName); err != nil {
+		t.Fatalf("seed legacy inventory: %v", err)
+	}
 
 	for _, c := range []struct {
 		name, role, sub, header string
 		wantA, wantB            bool
+		wantLegacy              bool
 	}{
-		{"warehouse, header A", "warehouse", "u-a", A, true, false},
-		{"warehouse, no header", "warehouse", "u-a", "", true, false},
-		{"warehouse u-none, no header", "warehouse", "u-none", "", false, false},
-		{"admin, no header", "admin", "boss", "", true, true},
+		{"warehouse, header A", "warehouse", "u-a", A, true, false, false},
+		{"warehouse, no header", "warehouse", "u-a", "", true, false, false},
+		{"warehouse u-none, no header", "warehouse", "u-none", "", false, false, false},
+		{"admin, no header", "admin", "boss", "", true, true, true},
 	} {
 		status, body := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", c.role, c.sub, c.header)
 		if status != http.StatusOK {
@@ -781,6 +793,9 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		}
 		if got := strings.Contains(string(body), f.yardB.String()); got != c.wantB {
 			t.Errorf("inventory list, %s: branch B's row present = %v, want %v", c.name, got, c.wantB)
+		}
+		if got := strings.Contains(string(body), legacyName); got != c.wantLegacy {
+			t.Errorf("inventory list, %s: legacy row present = %v, want %v", c.name, got, c.wantLegacy)
 		}
 	}
 }
