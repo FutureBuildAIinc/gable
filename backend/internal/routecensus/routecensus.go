@@ -400,6 +400,44 @@ func Collect(moduleRoot string) (Result, error) {
 		}
 	}
 
+	// boundSubMuxes holds, per function, the names bound to an
+	// http.NewServeMux or http.StripPrefix result in that function. A
+	// handler argument naming one of them mounts path rewriting.
+	boundSubMuxes := map[*ast.FuncDecl]map[string]bool{}
+	for _, fu := range fileUnits {
+		ast.Inspect(fu.file, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+			binds := false
+			for _, rhs := range as.Rhs {
+				if isNetHTTPCall(fu, rhs, "NewServeMux") || isNetHTTPCall(fu, rhs, "StripPrefix") {
+					binds = true
+					break
+				}
+			}
+			if !binds {
+				return true
+			}
+			fd := enclosingFunc(fu.file, as)
+			if fd == nil {
+				return true
+			}
+			names := boundSubMuxes[fd]
+			if names == nil {
+				names = map[string]bool{}
+				boundSubMuxes[fd] = names
+			}
+			for _, lhs := range as.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					names[id.Name] = true
+				}
+			}
+			return true
+		})
+	}
+
 	// Second pass: collect registrations.
 	for _, fu := range fileUnits {
 		// Collect each function's local const declarations once, so an
@@ -427,6 +465,18 @@ func Collect(moduleRoot string) (Result, error) {
 						})
 					}
 				}
+				return true
+			}
+			// An http.NewServeMux outside cmd/server is where wrong-path
+			// mounts begin: cmd/server is the one place the router is
+			// assembled.
+			if isNetHTTPCall(fu, call, "NewServeMux") && fu.relDir != "cmd/server" {
+				result.Restricted = append(result.Restricted, Unresolved{
+					File:   fu.relPath,
+					Line:   fset.Position(call.Pos()).Line,
+					Callee: "NewServeMux",
+					Detail: "http.NewServeMux outside cmd/server; assemble sub muxes in cmd/server or extend the allow list in internal/routecensus",
+				})
 				return true
 			}
 			if gatedCalls[call] {
@@ -489,6 +539,21 @@ func Collect(moduleRoot string) (Result, error) {
 				})
 				return true
 			}
+			// A handler that mounts an http.StripPrefix or a sub mux
+			// rewrites the paths of everything under it, so this row would
+			// carry the wrong path. The allow list names the mounts the
+			// repo accepted; anything else fails the census.
+			if reason := restrictedHandlerReason(fu, enclosing, call.Args[1], boundSubMuxes); reason != "" {
+				if !allowMounts[fu.relDir+" "+pattern] {
+					result.Restricted = append(result.Restricted, Unresolved{
+						File:   fu.relPath,
+						Line:   fset.Position(call.Pos()).Line,
+						Callee: callee,
+						Detail: reason + "; restructure the mount or extend the allow list in internal/routecensus",
+					})
+					return true
+				}
+			}
 			result.Routes = append(result.Routes, route)
 			return true
 		})
@@ -496,6 +561,18 @@ func Collect(moduleRoot string) (Result, error) {
 
 	result.Routes, result.Duplicates = dedupe(result.Routes)
 	return result, nil
+}
+
+// allowMounts lists the mounts allowed to keep an http.StripPrefix or sub
+// mux handler, keyed by the registering package directory relative to the
+// Go module root and the registered pattern. Such a mount rewrites the
+// paths of everything under it, so the census cannot name the routes the
+// mount carries under their real paths; each entry here is a mount the
+// repo has accepted as a whole, and the list is repeated in
+// docs/refactor/ROUTE-CENSUS.md. A mount not on this list fails the
+// census as restricted.
+var allowMounts = map[string]bool{
+	"cmd/server /uploads/": true, // the uploads file server
 }
 
 // httpMethodConsts resolves the net/http method constants a pattern might
@@ -567,6 +644,49 @@ func parenSelector(e ast.Expr) *ast.SelectorExpr {
 			return nil
 		}
 	}
+}
+
+// isNetHTTPCall reports whether e is, through any parentheses, a call of
+// the named net/http function.
+func isNetHTTPCall(fu *fileUnit, e ast.Expr, fn string) bool {
+	switch t := e.(type) {
+	case *ast.ParenExpr:
+		return isNetHTTPCall(fu, t.X, fn)
+	case *ast.CallExpr:
+		sel, ok := t.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		return sel.Sel.Name == fn && fu.imports[pkg.Name] == "net/http"
+	}
+	return false
+}
+
+// restrictedHandlerReason reports why a handler expression mounts a path
+// rewriting construct, or the empty string when it does not. bound holds
+// the sub mux and StripPrefix results bound in each function.
+func restrictedHandlerReason(fu *fileUnit, fd *ast.FuncDecl, e ast.Expr, bound map[*ast.FuncDecl]map[string]bool) string {
+	reason := ""
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch t := n.(type) {
+		case *ast.CallExpr:
+			if isNetHTTPCall(fu, t, "StripPrefix") {
+				reason = "handler mounts through http.StripPrefix"
+				return false
+			}
+		case *ast.Ident:
+			if bound[fd][t.Name] {
+				reason = "handler is a sub mux bound in this function"
+				return false
+			}
+		}
+		return true
+	})
+	return reason
 }
 
 // enclosingFunc finds the function declaration holding n, or nil.

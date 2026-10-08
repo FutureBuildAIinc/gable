@@ -104,6 +104,42 @@ func TestHandleFuncMethodValueIsUnresolved(t *testing.T) {
 	t.Fatalf("want an unresolved HandleFunc binding in internal/zz/zz.go, got %+v", result.Unresolved)
 }
 
+// TestSubMuxMountsFailUnlessAllowListed pins the fix for the review's F3:
+// an http.NewServeMux outside cmd/server and a StripPrefix mount fail the
+// census, unless the mount is on the allow list (the /uploads/ file
+// server), which is still listed as its outer route.
+func TestSubMuxMountsFailUnlessAllowListed(t *testing.T) {
+	result := collectFixture(t, "submux")
+	if err := result.Validate(); err == nil {
+		t.Fatalf("want restricted registrations, got none (routes %+v, restricted %+v)", result.Routes, result.Restricted)
+	}
+	var newServeMux, stripPrefix int
+	for _, u := range result.Restricted {
+		if u.File != "internal/zz/zz.go" {
+			t.Errorf("restricted entry outside internal/zz/zz.go: %v", u)
+			continue
+		}
+		switch u.Callee {
+		case "NewServeMux":
+			newServeMux++
+		case "Handle":
+			stripPrefix++
+		}
+	}
+	if newServeMux != 1 || stripPrefix != 1 {
+		t.Fatalf("want 1 NewServeMux and 1 Handle restriction, got %d and %d: %+v", newServeMux, stripPrefix, result.Restricted)
+	}
+	var uploads bool
+	for _, r := range result.Routes {
+		if r.Module == "cmd/server" && r.Pattern == "/uploads/" {
+			uploads = true
+		}
+	}
+	if !uploads {
+		t.Fatalf("the allow listed /uploads/ mount must still be listed, got %+v", result.Routes)
+	}
+}
+
 // diffRoutes compares two rendered censuses by route key and returns one
 // human line per added and removed route.
 func diffRoutes(oldRender, newRender string) (added, removed []string) {
