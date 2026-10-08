@@ -41,39 +41,40 @@ export interface DoorTile {
 }
 
 /**
- * Catalog key → entry path. Keys without an entry (platform libraries,
- * apps whose UI lives inside another app's pages) simply render no tile,
- * exactly like the desk's launcher.
+ * Catalog key → entry path under the desk bundle's /app/ mount.
+ * Keys without an entry (platform libraries, apps whose UI lives inside
+ * another app's pages) simply render no tile, exactly like the desk's
+ * launcher.
  */
 export const DESK_ENTRIES: Readonly<Record<string, string>> = {
   // Catalog & Inventory
-  inventory: '/inventory',
-  location: '/admin/branches',
+  inventory: '/app/inventory',
+  location: '/app/admin/branches',
   // Sales
-  quote: '/quotes',
-  order: '/orders',
-  pricing: '/pricing',
+  quote: '/app/quotes',
+  order: '/app/orders',
+  pricing: '/app/pricing',
   // Finance
-  invoice: '/invoices',
-  gl: '/accounting/chart-of-accounts',
+  invoice: '/app/invoices',
+  gl: '/app/accounting/chart-of-accounts',
   // Purchasing
-  purchase_order: '/purchasing',
-  vendor: '/purchasing/vendors',
+  purchase_order: '/app/purchasing',
+  vendor: '/app/purchasing/vendors',
   // Logistics
-  delivery: '/dispatch',
+  delivery: '/app/dispatch',
   // Front of House
-  pos: '/pos',
-  dashboard: '/dashboard',
-  reporting: '/reports/saved',
+  pos: '/app/pos',
+  dashboard: '/app/dashboard',
+  reporting: '/app/reports/saved',
   // CRM & People
-  customer: '/accounts',
+  customer: '/app/accounts',
   // External Surfaces
-  portal: '/portal',
+  portal: '/app/portal',
   // Converted apps (their manifests live in core/internal/<module>)
-  millwork: '/millwork/configurator',
-  governance: '/governance',
+  millwork: '/app/millwork/configurator',
+  governance: '/app/governance',
   // Platform
-  techadmin: '/admin',
+  techadmin: '/app/admin',
 };
 
 /** The whole-workspace tile: the desk is the one micro-app bundle today. */
@@ -82,7 +83,7 @@ export const DESK_HOME_TILE: DoorTile = {
   name: 'Gable Desk',
   summary: 'The full ERP workspace: every module under one roof.',
   category: 'Workspace',
-  path: '/home',
+  path: '/app/home',
 };
 
 /**
