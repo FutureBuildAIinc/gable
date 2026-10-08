@@ -67,9 +67,44 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// publicAPIPaths are the paths the auth layer skips: health and metrics, the
+// portal's public endpoints, the integration seam (which keeps its own
+// X-Integration-Key authentication) and the a2a JWS seam. Both auth mounts
+// (the JWT middleware and the standalone machine-key mount) share the list,
+// so a machine key is never consulted on a seam that does not know it.
+var publicAPIPaths = []string{
+	"/health",
+	"/healthz/live",
+	"/healthz/ready",
+	"/metrics",
+	"/api/portal/v1/login",
+	"/api/portal/v1/config",
+	"/api/portal/v1/",
+	"/api/integration/",
+	"/api/v1/a2a/",
+}
+
+// machineKeyValidator adapts the techadmin service to the machine-key auth
+// core's KeyValidator seam: a credential failure (unknown, revoked or
+// malformed key) crosses as middleware.ErrInvalidMachineKey, anything else as
+// an infrastructure fault.
+type machineKeyValidator struct {
+	svc *techadmin.Service
+}
+
+func (v machineKeyValidator) ValidateKey(ctx context.Context, rawKey string) (middleware.KeyPrincipal, error) {
+	k, err := v.svc.ValidateKey(ctx, rawKey)
+	if err != nil {
+		if errors.Is(err, techadmin.ErrInvalidKey) {
+			return middleware.KeyPrincipal{}, middleware.ErrInvalidMachineKey
+		}
+		return middleware.KeyPrincipal{}, err
+	}
+	return middleware.KeyPrincipal{ID: k.ID, Scopes: k.Scopes}, nil
+}
+
 func main() {
 	startTime := time.Now()
-
 	// 1. Setup Structured Logging (JSON) with configurable level
 	logLevel := new(slog.LevelVar)
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
@@ -127,6 +162,20 @@ func main() {
 	auditLog := audit.NewLogger(db)
 	logger.Info("Audit logger initialized")
 
+	// 3d. Machine-key auth core (R1-13). Scoped machine keys authenticate in
+	// both auth modes: the JWT middleware dispatches to this core on a
+	// machine-key-shaped Bearer token, and AUTH_MODE=dev mounts it standalone,
+	// so a key grants the same reach in dev as in production and a keyed
+	// integration is developed against the dev stack without a JWKS. The
+	// service is shared with the tech admin handler wired further down.
+	techAdminSvc := techadmin.NewService(techadmin.NewRepository(db))
+	machineKeyAuth := middleware.NewMachineKeyAuth(
+		machineKeyValidator{svc: techAdminSvc},
+		auditLog,
+		publicAPIPaths,
+		logger,
+	)
+
 	// 4. Initialize Auth Middleware
 	// Fail-closed: JWKS_URL is required unless AUTH_MODE=dev is explicitly set.
 	var authMw *middleware.AuthMiddleware
@@ -135,7 +184,8 @@ func main() {
 		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
 			JWKSURL:     cfg.JWKSURL,
 			Issuer:      cfg.AuthIssuer,
-			PublicPaths: []string{"/health", "/healthz/live", "/healthz/ready", "/metrics", "/api/portal/v1/login", "/api/portal/v1/config", "/api/portal/v1/", "/api/integration/", "/api/v1/a2a/"},
+			PublicPaths: publicAPIPaths,
+			MachineKeys: machineKeyAuth,
 		}, logger)
 		if err != nil {
 			logger.Error("Failed to initialize Auth Middleware", "error", err)
@@ -599,9 +649,8 @@ func main() {
 	dashboardHandler := dashboard.NewHandler(dashboardSvc)
 	dashboardHandler.RegisterRoutes(mux, scoped("admin", "owner", "finance"))
 
-	// Tech Admin Module
-	techAdminRepo := techadmin.NewRepository(db)
-	techAdminSvc := techadmin.NewService(techAdminRepo)
+	// Tech Admin Module (the service was built at startup, shared with the
+	// machine-key validator)
 	techAdminHandler := techadmin.NewHandler(techAdminSvc)
 	techAdminHandler.WithAIKeyStore(aiKeyStore)
 	techAdminHandler.WithAIBaseURLStore(aiBaseURLStore)
@@ -821,9 +870,13 @@ func main() {
 	// Request size limit (10MB default)
 	finalHandler = middleware.MaxRequestSize(10 << 20)(finalHandler)
 
-	// Auth (JWT verification)
+	// Auth (JWT verification; a Bearer machine key dispatches to the
+	// machine-key core inside it). In AUTH_MODE=dev the JWT layer is off but
+	// machine keys still authenticate and scope check exactly as behind it.
 	if authMw != nil {
 		finalHandler = authMw.Handler(finalHandler)
+	} else {
+		finalHandler = machineKeyAuth.Handler(finalHandler)
 	}
 
 	// Actor identity (agent headers → context for audit attribution).
