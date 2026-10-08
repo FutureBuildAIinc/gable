@@ -647,6 +647,7 @@
               "is_active": true,
               "margin_floor_pct": "6",
               "priority": 3,
+              "revision": 2,
               "rule_type": "markup",
               "tier": "CONTRACTOR",
               "value_pct": "15"
@@ -655,6 +656,7 @@
               "is_active": true,
               "margin_floor_pct": "5",
               "priority": 3,
+              "revision": 1,
               "rule_type": "markup",
               "tier": "CONTRACTOR",
               "value_pct": "12.5"
@@ -673,6 +675,7 @@
               "is_active": true,
               "margin_floor_pct": "5",
               "priority": 3,
+              "revision": 1,
               "rule_type": "markup",
               "tier": "CONTRACTOR",
               "value_pct": "12.5"

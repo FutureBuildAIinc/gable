@@ -307,10 +307,27 @@ func (s *CategoryPricingService) ListAuditEntries(ctx context.Context, ruleID uu
 // entry that cannot, refuses the whole batch. An element that replaces a rule
 // (it names an id that exists) must carry the revision it read, checked under
 // the row's lock, and may not change the rule's scope (the target and the
-// category are fixed at create, as on the single update). The rows are locked
-// in id order, so two batches naming the same rules never wait on each other
-// in opposite orders.
+// category are fixed at create, as on the single update). The same rule twice
+// in one batch is a 400 naming the second element's id: the revision check
+// exists to refuse the second write, and the audit would hold two entries
+// with the same old values. The rows are locked in id order, so two batches
+// naming the same rules never wait on each other in opposite orders. The
+// audit entries' new values come from the stored rows after the write, so
+// they carry what the batch really left, the moved revision included, never
+// the element the client sent.
 func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []CategoryPricingRule, pres []Precondition) error {
+	seen := make(map[uuid.UUID]bool, len(rules))
+	for i := range rules {
+		if rules[i].ID == uuid.Nil {
+			continue
+		}
+		if seen[rules[i].ID] {
+			return httpx.BadRequest("a batch lists a rule once",
+				httpx.FieldError{Field: fmt.Sprintf("[%d].id", i),
+					Message: "names a rule this batch already carries"})
+		}
+		seen[rules[i].ID] = true
+	}
 	return s.inTx(ctx, func(ctx context.Context) error {
 		order := make([]int, 0, len(rules))
 		for i := range rules {
@@ -352,7 +369,11 @@ func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []Ca
 			if old != nil {
 				action = "UPDATE"
 			}
-			if err := s.logAudit(ctx, rules[i].ID, action, old, &rules[i]); err != nil {
+			stored, err := s.catRepo.GetCategoryRule(ctx, rules[i].ID)
+			if err != nil {
+				return err
+			}
+			if err := s.logAudit(ctx, rules[i].ID, action, old, stored); err != nil {
 				return err
 			}
 		}
@@ -426,6 +447,7 @@ func ruleToMap(r *CategoryPricingRule) map[string]any {
 		"rule_type": strings.ToLower(string(r.RuleType)),
 		"is_active": r.IsActive,
 		"priority":  r.Priority,
+		"revision":  r.Revision,
 	}
 	if r.ValuePrice != nil {
 		m["value_ten_thousandths"] = int64(*r.ValuePrice)

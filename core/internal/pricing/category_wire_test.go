@@ -388,6 +388,64 @@ func TestCategoryRuleBulk(t *testing.T) {
 	}
 }
 
+// TestCategoryRuleBulkRepeatedID: the same rule twice in one batch is a 400
+// naming the second element's id (the revision check is meant to refuse the
+// second write, and the audit would hold two entries with the same old
+// values), and a successful bulk update's audit entry carries the STORED
+// row's values, revision included, never the element the client sent.
+func TestCategoryRuleBulkRepeatedID(t *testing.T) {
+	f, cat := newCategoryFixture(t)
+	rule := f.tierRule(cat, "WIREREPID", nil)
+	id := rule.body["id"].(string)
+	el := func(rev int) map[string]any {
+		return map[string]any{"id": id, "target_type": "tier", "tier": "WIREREPID",
+			"category_id": cat, "rule_type": "markup", "value_pct": "20", "revision": rev}
+	}
+
+	repeated := f.do("POST", "/api/v1/pricing/category-rules/bulk",
+		[]map[string]any{el(1), el(1)}, "Idempotency-Key", uuid.NewString())
+	if repeated.status != http.StatusBadRequest {
+		t.Fatalf("a repeated id in one batch: %d %s, want 400", repeated.status, repeated.raw)
+	}
+	if !detailFields(repeated)["[1].id"] {
+		t.Errorf("a repeated id in one batch: details do not name [1].id: %s", repeated.raw)
+	}
+	// The refused batch wrote nothing: the rule stands at revision 1.
+	got := f.do("GET", "/api/v1/pricing/category-rules?category_id="+cat+"&tier=WIREREPID", nil)
+	items := got.body["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["revision"] != json.Number("1") {
+		t.Fatalf("the refused batch moved the rule: %s", got.raw)
+	}
+
+	// A good bulk update: the audit's new values are the stored row's (its
+	// revision is 2, the write's), never the element the client sent (1).
+	ok := f.do("POST", "/api/v1/pricing/category-rules/bulk", []map[string]any{el(1)},
+		"Idempotency-Key", uuid.NewString())
+	if ok.status != http.StatusOK {
+		t.Fatalf("bulk update: %d %s", ok.status, ok.raw)
+	}
+	audit := f.do("GET", "/api/v1/pricing/category-rules/"+id+"/audit", nil)
+	entries, _ := audit.body["items"].([]any)
+	var update map[string]any
+	for _, e := range entries {
+		m := e.(map[string]any)
+		if m["action"] == "UPDATE" {
+			update = m
+		}
+	}
+	if update == nil {
+		t.Fatalf("no UPDATE audit entry for the bulk write: %s", audit.raw)
+	}
+	newValues, _ := update["new_values"].(map[string]any)
+	if rev, _ := newValues["revision"].(json.Number); rev != json.Number("2") {
+		t.Errorf("the bulk audit's new revision = %v, want the stored row's 2 (the client sent 1): %s",
+			newValues["revision"], audit.raw)
+	}
+	if pct, _ := newValues["value_pct"].(string); pct != "20" {
+		t.Errorf("the bulk audit's new value_pct = %q, want 20 from the stored row", pct)
+	}
+}
+
 // TestRuleBounds: a 100 percent discount and a 150 percent markup fit (the
 // base columns overflowed to a 500, migration 093 widens them) and an
 // impossible percentage or price is a 400.
