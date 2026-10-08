@@ -360,9 +360,6 @@ var errRequestGone = errors.New("order: the fulfilment request is gone")
 // the order row).
 func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, req FulfilRequest, priced *providerTax,
 	claim func(ctx context.Context) (bool, error)) (*Fulfilment, error) {
-	if s.invoices == nil {
-		return nil, errors.New("the invoice writer is not wired")
-	}
 	var out *Fulfilment
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if claim != nil {
@@ -385,6 +382,9 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			if err := s.checkOrderBranch(ctx, cur); err != nil {
 				return err
 			}
+		}
+		if s.invoices == nil {
+			return errors.New("the invoice writer is not wired")
 		}
 		if pre != nil {
 			if err := pre.check(cur.Revision); err != nil {
