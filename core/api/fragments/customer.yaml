@@ -192,7 +192,8 @@ paths:
       summary: List customer activities
       description: >-
         Returns activities for a customer, ordered by activity_date descending.
-        Returns a bare array that is null when the customer has no activities.
+        The handler guarantees a bare array: an empty array, never null, when the
+        customer has no activities.
       parameters:
         - name: customerId
           in: path
@@ -203,11 +204,13 @@ paths:
         - $ref: "#/components/parameters/XBranchId"
       responses:
         "200":
-          description: Activities, a bare array that is null when none exist.
+          description: Activities, a bare array that is empty when none exist.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CustomerActivityList"
+                type: array
+                items:
+                  $ref: "#/components/schemas/Activity"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -241,7 +244,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CustomerActivity"
+                $ref: "#/components/schemas/Activity"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -564,54 +567,24 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/Contact"
-    CustomerActivity:
+    CustomerActivityCreate:
       type: object
-      required: [id, customer_id, activity_type, description, activity_date, created_at, updated_at]
+      required: [activity_type]
+      description: >-
+        The Activity decoded from the body; customer_id comes from the path and
+        created_at and updated_at are set by the server. A supplied id is kept.
+        A missing or unknown activity_type answers 400.
       properties:
-        id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
         contact_id:
           type: string
           format: uuid
-          nullable: true
         activity_type:
-          type: string
-          enum: [CALL, MEETING, EMAIL, NOTE]
+          $ref: "#/components/schemas/ActivityType"
         description:
           type: string
         logged_by:
           type: string
           format: uuid
-          nullable: true
-        activity_date:
-          type: string
-          format: date-time
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-    CustomerActivityList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/CustomerActivity"
-    CustomerActivityCreate:
-      type: object
-      required: [activity_type, description]
-      properties:
-        contact_id:
-          type: string
-          format: uuid
-        activity_type:
-          type: string
-          enum: [CALL, MEETING, EMAIL, NOTE]
-        description:
-          type: string
         activity_date:
           type: string
           format: date-time

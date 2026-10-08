@@ -148,7 +148,7 @@ export interface paths {
         };
         /**
          * List customer activities
-         * @description Returns activities for a customer, ordered by activity_date descending. Returns a bare array that is null when the customer has no activities.
+         * @description Returns activities for a customer, ordered by activity_date descending. The handler guarantees a bare array: an empty array, never null, when the customer has no activities.
          */
         get: operations["customerListActivities"];
         put?: never;
@@ -1796,7 +1796,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get product detail */
+        /**
+         * Get product detail
+         * @description A missing product answers 500, not 404.
+         */
         get: operations["productDetail"];
         put?: never;
         post?: never;
@@ -1815,7 +1818,10 @@ export interface paths {
         };
         /** Get PIM content for a product */
         get: operations["productPimContentGet"];
-        /** Update PIM content for a product */
+        /**
+         * Update PIM content for a product
+         * @description Only the fields present in the body are changed.
+         */
         put: operations["productPimContentUpdate"];
         post?: never;
         delete?: never;
@@ -1918,7 +1924,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Generate PIM collateral */
+        /**
+         * Generate PIM collateral
+         * @description Answers 500 when no AI client is configured.
+         */
         post: operations["productPimGenerateCollateral"];
         delete?: never;
         options?: never;
@@ -1935,7 +1944,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Generate PIM descriptions */
+        /**
+         * Generate PIM descriptions
+         * @description Answers 500 when no AI client is configured.
+         */
         post: operations["productPimGenerateDescriptions"];
         delete?: never;
         options?: never;
@@ -1969,7 +1981,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Generate PIM SEO content */
+        /**
+         * Generate PIM SEO content
+         * @description Answers 500 when no AI client is configured.
+         */
         post: operations["productPimGenerateSeo"];
         delete?: never;
         options?: never;
@@ -2532,32 +2547,14 @@ export interface components {
             updated_at: string;
         };
         ContactList: components["schemas"]["Contact"][] | null;
-        CustomerActivity: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            customer_id: string;
-            /** Format: uuid */
-            contact_id?: string | null;
-            /** @enum {string} */
-            activity_type: "CALL" | "MEETING" | "EMAIL" | "NOTE";
-            description: string;
-            /** Format: uuid */
-            logged_by?: string | null;
-            /** Format: date-time */
-            activity_date: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CustomerActivityList: components["schemas"]["CustomerActivity"][] | null;
+        /** @description The Activity decoded from the body; customer_id comes from the path and created_at and updated_at are set by the server. A supplied id is kept. A missing or unknown activity_type answers 400. */
         CustomerActivityCreate: {
             /** Format: uuid */
             contact_id?: string;
-            /** @enum {string} */
-            activity_type: "CALL" | "MEETING" | "EMAIL" | "NOTE";
-            description: string;
+            activity_type: components["schemas"]["ActivityType"];
+            description?: string;
+            /** Format: uuid */
+            logged_by?: string;
             /** Format: date-time */
             activity_date?: string;
         };
@@ -4029,69 +4026,134 @@ export interface components {
             /** @description Days; null clears to unpublished, zero asserts same day. */
             lead_time_days: number | null;
         };
+        /** @description pim.PIMContent. The handler always sends all fifteen fields. A product with no content yet answers a record with a zero id and zero timestamps. */
         PimContent: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             product_id: string;
-            short_description?: string;
-            long_description?: string;
-            marketing_copy?: string;
-            seo_title?: string;
-            seo_description?: string;
-            seo_keywords?: string[] | null;
-            seo_slug?: string;
-            attributes?: {
-                [key: string]: unknown;
-            };
+            short_description: string;
+            long_description: string;
+            marketing_copy: string;
+            attributes: {
+                [key: string]: string;
+            } | null;
+            seo_title: string;
+            seo_description: string;
+            seo_keywords: string[] | null;
+            seo_slug: string;
+            last_gen_model: string;
+            last_gen_prompt: string;
             /** Format: date-time */
-            last_gen_at?: string | null;
-            last_gen_model?: string;
-            last_gen_prompt?: string;
+            last_gen_at: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        PimContentUpdate: {
-            short_description?: string;
-            long_description?: string;
-            marketing_copy?: string;
-            seo_title?: string;
-            seo_description?: string;
-            seo_keywords?: string[];
-            seo_slug?: string;
-            attributes?: {
-                [key: string]: unknown;
-            };
-        };
+        /** @description pim.PIMMedia. */
         PimMedia: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             product_id: string;
+            /** @description hero for generated images. */
+            media_type: string;
             url: string;
-            /** @enum {string} */
-            media_type: "IMAGE" | "VIDEO" | "DOCUMENT";
+            alt_text: string;
+            sort_order: number;
             is_primary: boolean;
+            /** @enum {string} */
+            status: "generating" | "ready" | "failed";
+            gen_model: string;
+            gen_prompt: string;
+            gen_style: string;
+            /** Format: date-time */
+            generated_at: string | null;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
+        /** @description pim.PIMCollateral. */
         PimCollateral: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             product_id: string;
-            name: string;
-            url: string;
-            /** @enum {string} */
-            collateral_type: "BROCHURE" | "DATASHEET" | "CERTIFICATE" | "OTHER";
+            /** @description sell_sheet, facebook, instagram, linkedin or email_blast; anything else generates a generic piece. */
+            collateral_type: string;
+            title: string;
+            content: string;
+            tone: string;
+            audience: string;
+            gen_model: string;
+            gen_prompt: string;
+            /** Format: date-time */
+            generated_at: string | null;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
-        PimGenerateResponse: {
-            /** @enum {string} */
-            status?: "queued";
+        /** @description pim.ProductDetail. content is null when the product has none. */
+        ProductDetail: {
+            /** Format: uuid */
+            id: string;
+            sku: string;
+            description: string;
+            uom_primary: string;
+            /** @description Float dollars today. */
+            base_price: number;
+            vendor: string | null;
+            upc: string | null;
+            weight_lbs: number;
+            reorder_point: number;
+            reorder_qty: number;
+            total_quantity: number;
+            total_allocated: number;
+            average_unit_cost: number;
+            target_margin: number;
+            commission_rate: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            content: components["schemas"]["PimContent"] | null;
+            media: components["schemas"]["PimMedia"][];
+            collateral: components["schemas"]["PimCollateral"][];
+        };
+        /** @description UpdateContentRequest: every field optional, absent means unchanged. */
+        PimContentUpdate: {
+            short_description?: string;
+            long_description?: string;
+            marketing_copy?: string;
+            attributes?: {
+                [key: string]: string;
+            };
+            seo_title?: string;
+            seo_description?: string;
+            seo_keywords?: string[];
+            seo_slug?: string;
+        };
+        PimGenerateDescriptionsRequest: {
+            /** @description Defaults to professional. */
+            tone?: string;
+            /** @description Defaults to contractors and builders. */
+            audience?: string;
+        };
+        PimGenerateSeoRequest: {
+            target_keywords?: string[];
+        };
+        PimGenerateImageRequest: {
+            style?: string;
+            prompt?: string;
+        };
+        PimGenerateCollateralRequest: {
+            /** @description sell_sheet, facebook, instagram, linkedin or email_blast; anything else generates a generic piece. */
+            type?: string;
+            tone?: string;
+            audience?: string;
         };
         /**
          * @description Today's lifecycle vocabulary: the field is named state and the values are UPPERCASE.
@@ -4868,13 +4930,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Activities, a bare array that is null when none exist. */
+            /** @description Activities, a bare array that is empty when none exist. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CustomerActivityList"];
+                    "application/json": components["schemas"]["Activity"][];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -4909,7 +4971,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CustomerActivity"];
+                    "application/json": components["schemas"]["Activity"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -8197,19 +8259,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Product detail. */
+            /** @description The product with its PIM content, media and collateral. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Product"];
+                    "application/json": components["schemas"]["ProductDetail"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8227,7 +8288,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description PIM content. */
+            /** @description PIM content; an empty record (zero id, empty text, no keywords) when the product has none yet. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8239,7 +8300,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8263,7 +8323,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated PIM content. */
+            /** @description The merged PIM content. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8275,7 +8335,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8293,7 +8352,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of PIM media. */
+            /** @description Media; an empty array when none. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8305,7 +8364,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8334,7 +8392,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8344,6 +8401,8 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
@@ -8353,19 +8412,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Media updated. */
+            /** @description Primary media set; the body is empty. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["PimMedia"][];
-                };
+                content?: never;
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8383,7 +8439,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of PIM collateral. */
+            /** @description Collateral; an empty array when none. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8395,7 +8451,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8424,7 +8479,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8434,27 +8488,32 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateCollateralRequest"];
+            };
+        };
         responses: {
-            /** @description Generation queued. */
-            202: {
+            /** @description The generated collateral, already stored. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PimGenerateResponse"];
+                    "application/json": components["schemas"]["PimCollateral"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8464,27 +8523,32 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateDescriptionsRequest"];
+            };
+        };
         responses: {
-            /** @description Generation queued. */
-            202: {
+            /** @description The PIM content with the generated descriptions and attributes, already stored. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PimGenerateResponse"];
+                    "application/json": components["schemas"]["PimContent"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8494,27 +8558,32 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateImageRequest"];
+            };
+        };
         responses: {
-            /** @description Generation queued. */
+            /** @description Generation runs in the background; the placeholder media row (status generating) is returned for polling the media list. */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PimGenerateResponse"];
+                    "application/json": components["schemas"]["PimMedia"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -8524,27 +8593,32 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateSeoRequest"];
+            };
+        };
         responses: {
-            /** @description Generation queued. */
-            202: {
+            /** @description The PIM content with the generated SEO fields, already stored. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PimGenerateResponse"];
+                    "application/json": components["schemas"]["PimContent"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };

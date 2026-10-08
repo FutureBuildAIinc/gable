@@ -21,6 +21,7 @@ import (
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
@@ -65,6 +66,10 @@ var modelBoundSchemas = []struct {
 	{"Product", product.Product{}},
 	{"Geometry", product.Geometry{}},
 	{"ReorderAlert", product.ReorderAlert{}},
+	{"PimContent", pim.PIMContent{}},
+	{"PimMedia", pim.PIMMedia{}},
+	{"PimCollateral", pim.PIMCollateral{}},
+	{"ProductDetail", pim.ProductDetail{}},
 	{"ProductLeadTimeUpdate", product.LeadTimeRequest{}},
 	// location
 	{"Location", location.Location{}},
@@ -148,7 +153,10 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			Schemas map[string]struct {
 				Required   []string `yaml:"required"`
 				Properties map[string]struct {
-					Type any `yaml:"type"`
+					Type  any `yaml:"type"`
+					OneOf []struct {
+						Type any `yaml:"type"`
+					} `yaml:"oneOf"`
 				} `yaml:"properties"`
 			} `yaml:"schemas"`
 		} `yaml:"components"`
@@ -188,7 +196,7 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			if omitempty && required[name] {
 				problems = append(problems, where+": omitted when empty (omitempty) but listed in required")
 			}
-			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type) {
+			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type) && !oneOfCarriesNull(prop.OneOf) {
 				problems = append(problems, where+": a nil pointer serializes as null today but the type carries no null leg")
 			}
 		}
@@ -240,6 +248,19 @@ func carriesNullLeg(typ any) bool {
 	}
 	for _, item := range list {
 		if s, ok := item.(string); ok && s == "null" {
+			return true
+		}
+	}
+	return false
+}
+
+// oneOfCarriesNull reports whether a oneOf list has a leg typed "null": the
+// 3.1 spelling of a nullable $ref, which cannot take a type array beside it.
+func oneOfCarriesNull(legs []struct {
+	Type any `yaml:"type"`
+}) bool {
+	for _, leg := range legs {
+		if s, ok := leg.Type.(string); ok && s == "null" {
 			return true
 		}
 	}
