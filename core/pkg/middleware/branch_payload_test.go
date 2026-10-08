@@ -62,3 +62,41 @@ func TestCheckPayloadBranch(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckPayloadLocation(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	guard := middleware.NewBranchGuard(db)
+
+	own, other, yard := uuid.New(), uuid.New(), uuid.New()
+	for _, r := range []struct {
+		id     uuid.UUID
+		typ    string
+		parent any
+	}{{own, "BRANCH", nil}, {other, "BRANCH", nil}, {yard, "WAREHOUSE", other}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id) VALUES ($1, $2, $3, $4)`,
+			r.id, r.typ, "pl-"+r.id.String()[:8], r.parent); err != nil {
+			t.Fatalf("seed location: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2, $3)`, yard, own, other)
+	})
+
+	bound := branchctx.With(ctx, &branchctx.Context{UserSub: "u", BranchID: &own})
+	for _, c := range []struct {
+		name    string
+		loc     uuid.UUID
+		refused bool
+	}{
+		{"own branch row", own, false},
+		{"other branch row", other, true},
+		{"yard of the other branch", yard, true},
+		{"unknown location", uuid.New(), false},
+	} {
+		err := guard.CheckPayloadLocation(bound, c.loc)
+		if got := errors.Is(err, middleware.ErrPayloadBranchRefused); got != c.refused || (!c.refused && err != nil) {
+			t.Errorf("%s: refused=%v err=%v, want refused=%v", c.name, got, err, c.refused)
+		}
+	}
+}

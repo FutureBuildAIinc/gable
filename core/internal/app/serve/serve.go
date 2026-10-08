@@ -294,7 +294,7 @@ func Run() {
 	// Inventory Service needs to be shared to Order Service
 	inventoryRepo := inventory.NewRepository(db)
 	inventorySvc := inventory.NewService(inventoryRepo)
-	inventoryHandler := inventory.NewHandler(inventorySvc)
+	inventoryHandler := inventory.NewHandler(inventorySvc).WithBranchGuard(branchGuard)
 	inventoryHandler.RegisterRoutes(mux, scoped("admin", "owner", "warehouse"))
 
 	customerRepo := customer.NewRepository(db)
@@ -411,7 +411,7 @@ func Run() {
 	poSvc.WithVelocityRepo(velocityRepo)
 	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc).
 		WithVelocityRepo(velocityRepo)
-	poHandler := purchase_order.NewHandler(poSvc, poRecSvc)
+	poHandler := purchase_order.NewHandler(poSvc, poRecSvc).WithBranchGuard(branchGuard)
 	poHandler.RegisterRoutes(mux, scoped("admin", "owner", "purchasing"))
 
 	// Auto-reorder scheduler. Disabled by default; an operator activates it

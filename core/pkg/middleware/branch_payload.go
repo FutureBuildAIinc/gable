@@ -10,6 +10,7 @@ import (
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // ErrPayloadBranchRefused is the verdict CheckPayloadBranch returns when a
@@ -66,4 +67,30 @@ func (g *BranchGuard) CheckPayloadBranch(ctx context.Context, payload uuid.UUID)
 		return ErrPayloadBranchRefused
 	}
 	return nil
+}
+
+// CheckPayloadLocation applies the same rule to a location id a body names
+// where the location stands for a branch (stock moves, receiving): the
+// location's own branch (its branch_id, or itself when it is a branch) must be
+// one the caller may target. A location that does not exist or belongs to no
+// branch is not a crossing of the wall and passes; the module's own lookup
+// answers for an unknown id.
+func (g *BranchGuard) CheckPayloadLocation(ctx context.Context, locationID uuid.UUID) error {
+	if BranchFromContext(ctx) == nil {
+		return nil
+	}
+	var branch *uuid.UUID
+	err := g.m.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT CASE WHEN type = 'BRANCH' THEN COALESCE(branch_id, id) ELSE branch_id END
+		   FROM locations WHERE id = $1`, locationID).Scan(&branch)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("location branch lookup: %w", err)
+	}
+	if branch == nil {
+		return nil
+	}
+	return g.CheckPayloadBranch(ctx, *branch)
 }
