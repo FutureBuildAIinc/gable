@@ -8,7 +8,7 @@
         "code": "GOLD-T-FROM",
         "name": "Golden Transfer From",
         "parent_id": "<id-1>",
-        "type": "YARD"
+        "type": "yard"
       }
     },
     "response": {
@@ -16,16 +16,25 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "address": null,
         "branch_id": "<id-1>",
+        "city": null,
         "code": "GOLD-T-FROM",
         "created_at": "<ts+0d>",
+        "default_tax_rate": null,
+        "description": null,
         "id": "<id-2>",
         "name": "Golden Transfer From",
         "parent_id": "<id-1>",
         "path": "",
+        "phone": null,
+        "revision": 1,
+        "state": null,
+        "tax_jurisdiction_code": null,
         "timezone": "America/New_York",
-        "type": "YARD",
-        "updated_at": "<ts+0d>"
+        "type": "yard",
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },
@@ -38,7 +47,7 @@
         "code": "GOLD-T-TO",
         "name": "Golden Transfer To",
         "parent_id": "<id-1>",
-        "type": "YARD"
+        "type": "yard"
       }
     },
     "response": {
@@ -46,16 +55,25 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "address": null,
         "branch_id": "<id-1>",
+        "city": null,
         "code": "GOLD-T-TO",
         "created_at": "<ts+0d>",
+        "default_tax_rate": null,
+        "description": null,
         "id": "<id-3>",
         "name": "Golden Transfer To",
         "parent_id": "<id-1>",
         "path": "",
+        "phone": null,
+        "revision": 1,
+        "state": null,
+        "tax_jurisdiction_code": null,
         "timezone": "America/New_York",
-        "type": "YARD",
-        "updated_at": "<ts+0d>"
+        "type": "yard",
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },

@@ -9,10 +9,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "average_unit_cost": 3.5,
-        "base_price": 5.5,
         "collateral": [],
-        "commission_rate": 0,
         "content": {
           "attributes": {},
           "created_at": "<ts+0d>",
@@ -30,21 +27,35 @@
           "short_description": "Golden 2x4 premium stud",
           "updated_at": "<ts+0d>"
         },
-        "created_at": "<ts+0d>",
-        "description": "2x4x8 SPF Premium",
-        "id": "<id-1>",
         "media": [],
-        "reorder_point": 200,
-        "reorder_qty": 500,
-        "sku": "LUM-248-PREM",
-        "target_margin": 0,
-        "total_allocated": 0,
-        "total_quantity": 433,
-        "uom_primary": "PCS",
-        "upc": null,
-        "updated_at": "<ts+0d>",
-        "vendor": "Gable Lumber & Supply",
-        "weight_lbs": 9
+        "product": {
+          "allocated": "14",
+          "available": "413",
+          "average_unit_cost_ten_thousandths": 35000,
+          "base_price_ten_thousandths": 55000,
+          "commission_rate": 0,
+          "created_at": "<ts+0d>",
+          "description": "2x4x8 SPF Premium",
+          "geometry_source": "parametric",
+          "height_in": 1.5,
+          "id": "<id-1>",
+          "lead_time_days": null,
+          "length_in": 96,
+          "on_hand": "427",
+          "reorder_point": "200",
+          "reorder_qty": "500",
+          "revision": 1,
+          "sku": "LUM-248-PREM",
+          "stackable": true,
+          "stock_uom": "PCS",
+          "target_margin": 0,
+          "upc": null,
+          "updated_at": "<ts+0d>",
+          "vendor": "Gable Lumber & Supply",
+          "vendor_id": null,
+          "weight_lbs": 9,
+          "width_in": 3.5
+        }
       }
     }
   },
@@ -55,12 +66,12 @@
       "path": "/api/v1/products/<id-3>/detail"
     },
     "response": {
-      "status": 500,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "not_found",
+          "message": "no such product"
         },
         "meta": {
           "request_id": "<id-4>"
@@ -79,8 +90,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
           "request_id": "<id-5>"

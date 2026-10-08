@@ -8,10 +8,9 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ClipboardCheck, MapPin, ChevronRight, Check, AlertTriangle, Loader2, ScanLine } from 'lucide';
 import type { Product } from '../../types/product';
 import { InventoryService } from '../../services/InventoryService';
-import { fetchWithAuth } from '../../services/fetchClient';
+import { ProductService } from '../../services/product.service';
 import '../../components/BarcodeScanner.ts';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 interface CountItem {
     product: Product;
@@ -51,14 +50,14 @@ export class CycleCount extends LitElement {
         this.loading = true;
         this.submitted = false;
         try {
-            const r = await fetchWithAuth(`${API_URL}/api/v1/products`);
-            if (!r.ok) throw new Error('Failed to fetch products');
-            const data: Product[] = await r.json();
+            // Zones slice the catalog, so every page through the cursor is needed (capped at 2000 products).
+            const data: Product[] = await ProductService.listAllProducts();
             const zoneIndex = ZONES.findIndex(z => z.code === this.selectedZone);
             const subset = data.slice(zoneIndex * 7, zoneIndex * 7 + 7);
             this.items = subset.map(p => ({
                 product: p,
-                expected: p.total_quantity ?? 0,
+                // The inventory adjust route is not converted and counts in numbers, so the on-hand string is read once, here.
+                expected: Number(p.on_hand),
                 counted: '',
                 submitted: false,
             }));

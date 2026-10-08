@@ -17,6 +17,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
@@ -196,19 +197,22 @@ type poRecorder struct {
 	err   error
 }
 
-func (p *poRecorder) CreatePOFromSpecialOrderLine(_ context.Context, _ uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID) error {
+func (p *poRecorder) CreatePOFromSpecialOrderLine(_ context.Context, _ *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID) error {
 	p.calls = append(p.calls, lineID)
 	p.qty = append(p.qty, qty)
 	p.cost = append(p.cost, unitCost)
 	return p.err
 }
 
-// RULE: the convert creates the automatic purchase orders for the quote's
-// special order lines, as the accept it replaced did (best effort, after the
-// transaction commits: ADR 0005 5.8 is silent, and a purchase order the
-// convert's own rollback could not take back would be orphaned). A failure
-// is logged and never blocks the convert; a refused convert creates none.
-func TestConvert_CreatesTheAutomaticPurchaseOrders(t *testing.T) {
+// RULE (PR 43 review round 1, P3-3; PR 40 round 2 P3-2): only special order
+// lines create draft purchase order lines. An ordinary stocked quote line is
+// served from the stock it allocated, and a product carrying draft purchase
+// order line for it would put its receipt on hand and re-average the cost of
+// stock the dealer already holds. A converted quote line is never a special
+// order line (the conversion carries no such flag), so the convert creates
+// none, whatever its cost snapshot; a refused convert creates none all the
+// same. A failure of the auto-PO path never blocks the convert.
+func TestConvert_OrdinaryStockedLinesCreateNoPurchaseOrder(t *testing.T) {
 	db := testutil.RequireDB(t)
 	w := newConvertWorld(t, db)
 	ctx := context.Background()
@@ -227,12 +231,11 @@ func TestConvert_CreatesTheAutomaticPurchaseOrders(t *testing.T) {
 		t.Fatalf("a refused convert made %d purchase orders", len(po.calls))
 	}
 
-	o, err := w.svc.Convert(branchctx.WithSystem(ctx), q.ID, quote.Precondition{Revision: &q.Revision})
-	if err != nil {
+	if _, err := w.svc.Convert(branchctx.WithSystem(ctx), q.ID, quote.Precondition{Revision: &q.Revision}); err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if len(po.calls) != 1 || po.calls[0] != *o.Lines[0].QuoteLineID || po.qty[0] != 10 || po.cost[0] != 3.25 {
-		t.Fatalf("purchase orders asked for = lines %v qty %v cost %v, want the quote line once at 10 and 3.25", po.calls, po.qty, po.cost)
+	if len(po.calls) != 0 {
+		t.Fatalf("an ordinary stocked line made %d purchase orders, want none", len(po.calls))
 	}
 
 	// The seam's convert does the same, and a failing purchase order never
@@ -242,8 +245,8 @@ func TestConvert_CreatesTheAutomaticPurchaseOrders(t *testing.T) {
 	if _, err := w.svc.ConvertInProcess(branchctx.WithSystem(ctx), q2.ID); err != nil {
 		t.Fatalf("convert with a failing purchase order: %v", err)
 	}
-	if len(po.calls) != 2 {
-		t.Fatalf("the seam's convert asked %d times, want 2 in all", len(po.calls))
+	if len(po.calls) != 0 {
+		t.Fatalf("the seam's convert asked for %d purchase orders, want none", len(po.calls))
 	}
 }
 
@@ -452,4 +455,50 @@ func TestConvert_FailedOrderEventRollsBackTheAcceptance(t *testing.T) {
 	if ev := eventsForEntity(t, db, "quote", q.ID.String()); fmt.Sprint(ev) != "[quote.created]" {
 		t.Errorf("quote events = %v, want only quote.created (quote.accepted rolled back)", ev)
 	}
+}
+
+// RULE (review round 2 P3-2): a special order line's purchase order links to
+// the ORDER line, through the real purchase order service: the line exists,
+// names the product and links to order_lines (its foreign key), and no empty
+// header is left behind. The quote gate (the test above) decides WHICH lines
+// reach this path; this test drives it as a special order line does.
+func TestCreateFromSOLineLinksToTheOrderLine(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := context.Background()
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET average_unit_cost = 3.25 WHERE id = $1`, w.f.productID); err != nil {
+		t.Fatal(err)
+	}
+	poSvc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil)
+	var headersBefore int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM purchase_orders WHERE source = 'SPECIAL_ORDER'`).Scan(&headersBefore); err != nil {
+		t.Fatal(err)
+	}
+	q := w.otherBranchQuote(t)
+	o, err := w.svc.Convert(branchctx.WithSystem(ctx), q.ID, quote.Precondition{Revision: &q.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A special order line's call, as the auto PO path makes it.
+	soProduct := w.f.productID
+	if err := poSvc.CreateFromSOLine(ctx, o.Lines[0].ID, &soProduct, nil, "2x4x8 SPF", 10, 3.25); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE linked_so_line_id = $1`, o.Lines[0].ID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE source = 'SPECIAL_ORDER' AND id NOT IN (SELECT po_id FROM purchase_order_lines)`)
+	})
+	var linked, product string
+	var qty string
+	if err := db.Pool.QueryRow(ctx, `SELECT linked_so_line_id::text, product_id::text, quantity::text FROM purchase_order_lines WHERE linked_so_line_id = $1`, o.Lines[0].ID).Scan(&linked, &product, &qty); err != nil {
+		t.Fatalf("no purchase order line links to the order line: %v", err)
+	}
+	if product != w.f.productID.String() || qty != "10.0000" {
+		t.Errorf("purchase order line = product %s qty %s, want the product and 10", product, qty)
+	}
+	var empty int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM purchase_orders p WHERE p.source = 'SPECIAL_ORDER' AND NOT EXISTS (SELECT 1 FROM purchase_order_lines l WHERE l.po_id = p.id) AND p.created_at > now() - interval '1 minute'`).Scan(&empty); err != nil || empty != 0 {
+		t.Errorf("%d empty special order headers left behind (%v)", empty, err)
+	}
+	_ = headersBefore
 }

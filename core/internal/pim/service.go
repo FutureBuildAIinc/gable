@@ -55,25 +55,7 @@ func (s *Service) GetProductDetail(ctx context.Context, productID uuid.UUID) (*P
 		return nil, fmt.Errorf("get product: %w", err)
 	}
 
-	detail := &ProductDetail{
-		ID:              p.ID,
-		SKU:             p.SKU,
-		Description:     p.Description,
-		UOMPrimary:      string(p.UOMPrimary),
-		BasePrice:       p.BasePrice,
-		Vendor:          p.Vendor,
-		UPC:             p.UPC,
-		WeightLbs:       p.WeightLbs,
-		ReorderPoint:    p.ReorderPoint,
-		ReorderQty:      p.ReorderQty,
-		TotalQuantity:   p.TotalQuantity,
-		TotalAllocated:  p.TotalAllocated,
-		AverageUnitCost: p.AverageUnitCost,
-		TargetMargin:    p.TargetMargin,
-		CommissionRate:  p.CommissionRate,
-		CreatedAt:       p.CreatedAt,
-		UpdatedAt:       p.UpdatedAt,
-	}
+	detail := &ProductDetail{Product: product.ViewOf(p)}
 
 	content, _ := s.repo.GetContent(ctx, productID)
 	detail.Content = content

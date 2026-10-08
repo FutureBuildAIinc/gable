@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/google/uuid"
 )
@@ -22,8 +23,8 @@ func (f *fakeProductRepo) CreateProduct(_ context.Context, p *Product) error {
 		p.ID = uuid.New()
 	}
 	now := time.Now()
-	p.CreatedAt = now
-	p.UpdatedAt = now
+	p.CreatedAt = httpx.TimestampOf(now)
+	p.UpdatedAt = httpx.TimestampOf(now)
 	f.created = append(f.created, p)
 	return nil
 }
@@ -33,8 +34,11 @@ func (f *fakeProductRepo) GetProduct(_ context.Context, _ uuid.UUID) (*Product, 
 func (f *fakeProductRepo) ListProducts(_ context.Context) ([]Product, error) {
 	return nil, nil
 }
-func (f *fakeProductRepo) ListProductsPaginated(_ context.Context, _, _ int) ([]Product, int, error) {
-	return nil, 0, nil
+func (f *fakeProductRepo) ListProductsPage(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]Product, error) {
+	return nil, nil
+}
+func (f *fakeProductRepo) CountProducts(_ context.Context) (int64, error) {
+	return 0, nil
 }
 func (f *fakeProductRepo) ListBelowReorder(_ context.Context) ([]ReorderAlert, error) {
 	return nil, nil
@@ -42,8 +46,8 @@ func (f *fakeProductRepo) ListBelowReorder(_ context.Context) ([]ReorderAlert, e
 func (f *fakeProductRepo) UpdateAverageCost(_ context.Context, _ uuid.UUID, _ float64) error {
 	return nil
 }
-func (f *fakeProductRepo) UpdateMarginRules(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
-	return nil
+func (f *fakeProductRepo) UpdateMarginRules(_ context.Context, _ uuid.UUID, _ float64, _ float64, _ int64) (int64, error) {
+	return 0, nil
 }
 func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
 	return nil
@@ -51,11 +55,11 @@ func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _
 func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }
-func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ Geometry) error {
-	return nil
+func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ Geometry, _ int64) (int64, error) {
+	return 0, nil
 }
-func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int) error {
-	return nil
+func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {
+	return 0, nil
 }
 
 // fakeVendorRepo is an in-memory vendor.Repository.

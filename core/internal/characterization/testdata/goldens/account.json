@@ -9,8 +9,8 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "available_credit": 10001500,
-        "balance_due": -1500,
+        "available_credit": 9998358,
+        "balance_due": 1642,
         "credit_limit": 10000000,
         "customer_id": "<id-1>"
       }
@@ -28,7 +28,7 @@
       "body": [
         {
           "amount": -1000,
-          "balance_after": -1500,
+          "balance_after": 1642,
           "created_at": "<ts+0d>",
           "customer_id": "<id-1>",
           "description": "Payment GOLD-PAY-1",
@@ -38,13 +38,23 @@
         },
         {
           "amount": -500,
-          "balance_after": -500,
+          "balance_after": 2642,
           "created_at": "<ts+0d>",
           "customer_id": "<id-1>",
           "description": "Credit Memo: golden characterisation",
           "id": "<id-4>",
           "reference_id": "<id-5>",
           "type": "REFUND"
+        },
+        {
+          "amount": 3142,
+          "balance_after": 3142,
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-1>",
+          "description": "Invoice #<id-6>",
+          "id": "<id-7>",
+          "reference_id": "<id-6>",
+          "type": "INVOICE"
         }
       ]
     }

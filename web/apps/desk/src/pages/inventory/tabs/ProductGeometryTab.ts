@@ -7,6 +7,8 @@ import { icon } from '../../../lib/icons.ts';
 import { Save, Loader2, Box, Eraser } from 'lucide';
 import { ProductService } from '../../../services/product.service.ts';
 import type { ProductGeometry } from '../../../services/product.service.ts';
+import { ApiError, apiErrorMessage } from '../../../services/apiError.ts';
+import type { Product } from '../../../types/product.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 
 /**
@@ -38,6 +40,8 @@ export class GableProductGeometryTab extends LitElement {
     @state() private geometrySource: string | null = null;
     @state() private loading = true;
     @state() private saving = false;
+    /** The revision of the product as loaded; the save names it (If-Match) and takes the next one from the answer. */
+    private revision: number | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -57,20 +61,24 @@ export class GableProductGeometryTab extends LitElement {
             return;
         }
         try {
-            const product = await ProductService.getProduct(this.productId);
-            this._apply({
-                length_in: product.length_in ?? null,
-                width_in: product.width_in ?? null,
-                height_in: product.height_in ?? null,
-                stackable: product.stackable ?? null,
-                geometry_source: product.geometry_source ?? null,
-            });
+            this._applyProduct(await ProductService.getProduct(this.productId));
         } catch (err) {
             console.error('Failed to load product geometry:', err);
-            ToastService.show('Failed to load product geometry', 'error');
+            ToastService.show(apiErrorMessage(err, 'Failed to load product geometry'), 'error');
         } finally {
             this.loading = false;
         }
+    }
+
+    private _applyProduct(product: Product) {
+        this.revision = product.revision;
+        this._apply({
+            length_in: product.length_in ?? null,
+            width_in: product.width_in ?? null,
+            height_in: product.height_in ?? null,
+            stackable: product.stackable ?? null,
+            geometry_source: product.geometry_source ?? null,
+        });
     }
 
     private _apply(g: ProductGeometry) {
@@ -112,11 +120,11 @@ export class GableProductGeometryTab extends LitElement {
     }
 
     private async _handleSave() {
-        if (!this.productId) return;
+        if (!this.productId || this.revision === null) return;
         this.saving = true;
         try {
-            const saved = await ProductService.updateDimensions(this.productId, this._payload());
-            this._apply(saved);
+            const saved = await ProductService.updateDimensions(this.productId, this._payload(), this.revision);
+            this._applyProduct(saved);
             ToastService.show(
                 this._hasDimensions() ? 'Dimensions saved' : 'Geometry cleared',
                 'success',
@@ -124,7 +132,14 @@ export class GableProductGeometryTab extends LitElement {
             this.dispatchEvent(new CustomEvent('dimensions-update', { bubbles: true, composed: true }));
         } catch (err) {
             console.error('Save dimensions failed:', err);
-            ToastService.show('Failed to save dimensions', 'error');
+            if (err instanceof ApiError && err.isStaleRevision) {
+                // Another session moved the product: show the server's message and read it again.
+                ToastService.show(`${err.message} The product was reloaded.`, 'error');
+                await this._loadGeometry();
+                this.dispatchEvent(new CustomEvent('dimensions-update', { bubbles: true, composed: true }));
+            } else {
+                ToastService.show(apiErrorMessage(err, 'Failed to save dimensions'), 'error');
+            }
         } finally {
             this.saving = false;
         }

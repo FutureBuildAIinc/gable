@@ -28,7 +28,7 @@ async function signIn(page: Page, name: string) {
 
 interface Seeded {
   customer: { id: string; name: string };
-  product: { id: string; sku: string; uom_primary: string };
+  product: { id: string; sku: string; stock_uom: string };
 }
 
 let seeded: Seeded | undefined;
@@ -37,8 +37,9 @@ async function firstCustomerAndProduct(request: import('@playwright/test').APIRe
   if (seeded) return seeded;
   const customers = (await (await request.get('/api/v1/customers?limit=200')).json()) as { items: { id: string; name: string; account_number: string }[] };
   const customer = customers.items.find((c) => !c.account_number.startsWith('E2E-'))!;
-  const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string; uom_primary: string }[] | { data: { id: string; sku: string; uom_primary: string }[] };
-  const product = (Array.isArray(products) ? products : products.data)[0];
+  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string }[] };
+  // The product list is the cursor envelope, newest first; the product spec adds E2E- SKUs.
+  const product = products.items.find((p) => !p.sku.startsWith('E2E-') && p.stock_uom === 'EA')!;
   seeded = { customer, product };
   return seeded;
 }
@@ -95,9 +96,9 @@ test.describe('Order flow on the new contract', () => {
     // A confirm over the customer's credit limit lands the hold instead: both
     // are committed states with their events, so accept either and assert the
     // page agrees with the server.
-    expect(['confirmed', 'on_hold']).toContain(confirmed.status);
+    expect(['confirmed', 'on_hold', 'backordered']).toContain(confirmed.status);
     expect(confirmed.revision).toBe(2);
-    await expect(page.getByText(confirmed.status === 'on_hold' ? 'On Hold' : 'Confirmed', { exact: true })).toBeVisible();
+    await expect(page.getByText({ on_hold: 'On Hold', backordered: 'Backordered', confirmed: 'Confirmed' }[confirmed.status as string]!, { exact: true })).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'order-after-confirm.png') });
 
     // The list: the envelope's items carry the order, and the status filter
@@ -113,9 +114,10 @@ test.describe('Order flow on the new contract', () => {
     await expect(row).toHaveCount(0);
     // Click the filter for the status the order actually landed in: the buttons
     // render On Hold before Confirmed, so a pattern matching both picked On Hold
-    // and lost a confirmed order whenever the customer had credit to spare.
+    // and lost a confirmed order whenever the customer had credit to spare. A
+    // short stock lands it back ordered (C2-2b).
     const filtered = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/orders' && new URL(r.url()).searchParams.get('status') === confirmed.status);
-    await page.getByRole('button', { name: confirmed.status === 'on_hold' ? 'On Hold' : 'Confirmed', exact: true }).click();
+    await page.getByRole('button', { name: { on_hold: 'On Hold', backordered: 'Backordered', confirmed: 'Confirmed' }[confirmed.status as string]!, exact: true }).click();
     await filtered;
     await expect(page.locator('tr', { hasText: order.number })).toBeVisible();
 

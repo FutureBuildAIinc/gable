@@ -7,8 +7,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
@@ -16,8 +18,10 @@ type Service struct {
 	repo         Repository
 	routing      *ORSClient // nil if OpenRouteService not configured (keyless dev/demo)
 	notifier     DeliveryNotifierInterface
-	invoiceSvc   InvoiceServiceInterface // nil if invoice service not wired
-	exposureGate ExposureGate            // nil if lumber-index gating not wired
+	fulfilment   FulfilmentQueue // nil if the order module is not wired
+	orders       OrderReader     // nil if the order module is not wired
+	tx           TxRunner        // nil runs each write unwrapped (unit tests)
+	exposureGate ExposureGate    // nil if lumber-index gating not wired
 	logger       *slog.Logger
 }
 
@@ -29,9 +33,24 @@ type ExposureGate interface {
 	RequireClearForOrder(ctx context.Context, orderID uuid.UUID) error
 }
 
-// InvoiceServiceInterface auto-creates invoices from orders on delivery completion.
-type InvoiceServiceInterface interface {
-	CreateFromOrder(ctx context.Context, orderID uuid.UUID) error
+// FulfilmentQueue queues a completed delivery for billing (ADR 0005 5.5). The
+// order module implements it; the call runs inside the transaction that writes
+// the delivered status, so a completed delivery always has its request and
+// delivery completion never builds an invoice itself.
+type FulfilmentQueue interface {
+	EnqueueFulfilment(ctx context.Context, deliveryID, orderID uuid.UUID) error
+}
+
+// OrderReader answers what the delivery module needs to know of an order.
+type OrderReader interface {
+	// OrderDeliveryType is "PICKUP" or "DELIVERY".
+	OrderDeliveryType(ctx context.Context, orderID uuid.UUID) (string, error)
+}
+
+// TxRunner runs fn inside one transaction, joining the caller's when ctx
+// already carries one. *database.DB satisfies it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 // DeliveryNotifierInterface allows injecting the notification system.
@@ -75,9 +94,17 @@ func (s *Service) WithNotifier(n DeliveryNotifierInterface) {
 	s.notifier = n
 }
 
-// WithInvoiceService sets the invoice service for auto-invoicing on delivery completion.
-func (s *Service) WithInvoiceService(invoiceSvc InvoiceServiceInterface) {
-	s.invoiceSvc = invoiceSvc
+// WithFulfilment wires the order module: a completed delivery queues its
+// fulfilment request (ADR 0005 5.5), and a pickup order is refused a stop.
+func (s *Service) WithFulfilment(q FulfilmentQueue, orders OrderReader) {
+	s.fulfilment = q
+	s.orders = orders
+}
+
+// WithTxRunner makes delivery completion one transaction: the delivered status
+// and the fulfilment request commit together or not at all.
+func (s *Service) WithTxRunner(tx TxRunner) {
+	s.tx = tx
 }
 
 // WithExposureGate wires the lumber-index pre-ship gate. Optional: nil
@@ -309,6 +336,10 @@ func (s *Service) DispatchRoute(ctx context.Context, id uuid.UUID) error {
 // Delivery Management
 
 func (s *Service) AssignOrderToRoute(ctx context.Context, req AssignOrderRequest) (*Delivery, *CapacityWarning, error) {
+	// A pickup (will-call) order is never routed (ADR 0005 5.5).
+	if err := s.refusePickup(ctx, req.OrderID); err != nil {
+		return nil, nil, err
+	}
 	// Pre-ship exposure gate: block assigning an order to a route when its
 	// source quote has unresolved lumber-index exposure (ACK_REQUIRED /
 	// BLOCKED). Cleared via acknowledgment or owner override on the order.
@@ -397,24 +428,46 @@ func (s *Service) CompleteDelivery(ctx context.Context, id uuid.UUID, req Update
 		}
 	}
 
-	if err := s.repo.UpdateDeliveryStatus(ctx, id, req.Status, pod); err != nil {
-		return err
+	// The delivered status and the order's fulfilment request are one write
+	// (ADR 0005 5.5): delivery completion never builds an invoice itself and
+	// never drops a failed billing; the order module's worker serves the
+	// request, retries it and parks it after ten failures.
+	run := func(ctx context.Context, fn func(ctx context.Context) error) error { return fn(ctx) }
+	if s.tx != nil {
+		run = s.tx.RunInTx
 	}
-
-	// Auto-invoice: when delivery is completed, create invoice from order
-	if req.Status == DeliveryStatusDelivered && s.invoiceSvc != nil {
-		delivery, err := s.repo.GetDelivery(ctx, id)
-		if err != nil {
-			s.logger.Error("auto-invoice: failed to get delivery", "delivery_id", id, "error", err)
-		} else {
-			if err := s.invoiceSvc.CreateFromOrder(ctx, delivery.OrderID); err != nil {
-				s.logger.Error("auto-invoice: failed to create invoice", "order_id", delivery.OrderID, "error", err)
-			} else {
-				s.logger.Info("auto-invoice: invoice created on POD completion", "delivery_id", id, "order_id", delivery.OrderID)
+	return run(ctx, func(ctx context.Context) error {
+		if err := s.repo.UpdateDeliveryStatus(ctx, id, req.Status, pod); err != nil {
+			return err
+		}
+		if req.Status == DeliveryStatusDelivered && s.fulfilment != nil {
+			d, err := s.repo.GetDelivery(ctx, id)
+			if err != nil {
+				return fmt.Errorf("read the delivery for its fulfilment request: %w", err)
+			}
+			if err := s.fulfilment.EnqueueFulfilment(ctx, id, d.OrderID); err != nil {
+				return err
 			}
 		}
-	}
+		return nil
+	})
+}
 
+// refusePickup is the pickup order refusal (ADR 0005 5.5): 409 with the
+// blocker pickup_order where a stop would be created for a will-call order.
+func (s *Service) refusePickup(ctx context.Context, orderID uuid.UUID) error {
+	if s.orders == nil {
+		return nil
+	}
+	dt, err := s.orders.OrderDeliveryType(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	if dt == "PICKUP" {
+		return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+			Message: "a pickup order is never routed",
+			Details: []httpx.FieldError{httpx.Blocker("pickup_order", "this is a will-call order: the customer collects it at the branch, so it takes no route or stop")}}
+	}
 	return nil
 }
 

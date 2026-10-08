@@ -8,127 +8,137 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-1>",
-          "is_active": true,
-          "name": "Concrete",
-          "path": "concrete",
-          "slug": "concrete",
-          "sort_order": 5,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "is_active": true,
-          "name": "General",
-          "path": "general",
-          "slug": "general",
-          "sort_order": 99,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "children": [
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-3>",
-              "is_active": true,
-              "name": "Connectors",
-              "parent_id": "<id-4>",
-              "path": "hardware.connectors",
-              "slug": "connectors",
-              "sort_order": 2,
-              "updated_at": "<ts+0d>"
-            },
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-5>",
-              "is_active": true,
-              "name": "Fasteners",
-              "parent_id": "<id-4>",
-              "path": "hardware.fasteners",
-              "slug": "fasteners",
-              "sort_order": 1,
-              "updated_at": "<ts+0d>"
-            }
-          ],
-          "created_at": "<ts+0d>",
-          "id": "<id-4>",
-          "is_active": true,
-          "name": "Hardware",
-          "path": "hardware",
-          "slug": "hardware",
-          "sort_order": 2,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-6>",
-          "is_active": true,
-          "name": "Insulation",
-          "path": "insulation",
-          "slug": "insulation",
-          "sort_order": 4,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "children": [
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-7>",
-              "is_active": true,
-              "name": "Engineered Wood",
-              "parent_id": "<id-8>",
-              "path": "lumber.engineered",
-              "slug": "engineered_wood",
-              "sort_order": 3,
-              "updated_at": "<ts+0d>"
-            },
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-9>",
-              "is_active": true,
-              "name": "Framing Lumber",
-              "parent_id": "<id-8>",
-              "path": "lumber.framing",
-              "slug": "framing_lumber",
-              "sort_order": 1,
-              "updated_at": "<ts+0d>"
-            },
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-10>",
-              "is_active": true,
-              "name": "Sheathing",
-              "parent_id": "<id-8>",
-              "path": "lumber.sheathing",
-              "slug": "sheathing",
-              "sort_order": 2,
-              "updated_at": "<ts+0d>"
-            }
-          ],
-          "created_at": "<ts+0d>",
-          "id": "<id-8>",
-          "is_active": true,
-          "name": "Lumber",
-          "path": "lumber",
-          "slug": "lumber",
-          "sort_order": 1,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-11>",
-          "is_active": true,
-          "name": "Roofing",
-          "path": "roofing",
-          "slug": "roofing",
-          "sort_order": 3,
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-1>",
+            "is_active": true,
+            "name": "Concrete",
+            "parent_id": null,
+            "path": "concrete",
+            "slug": "concrete",
+            "sort_order": 5,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-2>",
+            "is_active": true,
+            "name": "General",
+            "parent_id": null,
+            "path": "general",
+            "slug": "general",
+            "sort_order": 99,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "children": [
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-3>",
+                "is_active": true,
+                "name": "Connectors",
+                "parent_id": "<id-4>",
+                "path": "hardware.connectors",
+                "slug": "connectors",
+                "sort_order": 2,
+                "updated_at": "<ts+0d>"
+              },
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-5>",
+                "is_active": true,
+                "name": "Fasteners",
+                "parent_id": "<id-4>",
+                "path": "hardware.fasteners",
+                "slug": "fasteners",
+                "sort_order": 1,
+                "updated_at": "<ts+0d>"
+              }
+            ],
+            "created_at": "<ts+0d>",
+            "id": "<id-4>",
+            "is_active": true,
+            "name": "Hardware",
+            "parent_id": null,
+            "path": "hardware",
+            "slug": "hardware",
+            "sort_order": 2,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-6>",
+            "is_active": true,
+            "name": "Insulation",
+            "parent_id": null,
+            "path": "insulation",
+            "slug": "insulation",
+            "sort_order": 4,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "children": [
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-7>",
+                "is_active": true,
+                "name": "Engineered Wood",
+                "parent_id": "<id-8>",
+                "path": "lumber.engineered",
+                "slug": "engineered_wood",
+                "sort_order": 3,
+                "updated_at": "<ts+0d>"
+              },
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-9>",
+                "is_active": true,
+                "name": "Framing Lumber",
+                "parent_id": "<id-8>",
+                "path": "lumber.framing",
+                "slug": "framing_lumber",
+                "sort_order": 1,
+                "updated_at": "<ts+0d>"
+              },
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-10>",
+                "is_active": true,
+                "name": "Sheathing",
+                "parent_id": "<id-8>",
+                "path": "lumber.sheathing",
+                "slug": "sheathing",
+                "sort_order": 2,
+                "updated_at": "<ts+0d>"
+              }
+            ],
+            "created_at": "<ts+0d>",
+            "id": "<id-8>",
+            "is_active": true,
+            "name": "Lumber",
+            "parent_id": null,
+            "path": "lumber",
+            "slug": "lumber",
+            "sort_order": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-11>",
+            "is_active": true,
+            "name": "Roofing",
+            "parent_id": null,
+            "path": "roofing",
+            "slug": "roofing",
+            "sort_order": 3,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 0,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -140,123 +150,133 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-1>",
-          "is_active": true,
-          "name": "Concrete",
-          "path": "concrete",
-          "slug": "concrete",
-          "sort_order": 5,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "is_active": true,
-          "name": "General",
-          "path": "general",
-          "slug": "general",
-          "sort_order": 99,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-4>",
-          "is_active": true,
-          "name": "Hardware",
-          "path": "hardware",
-          "slug": "hardware",
-          "sort_order": 2,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-3>",
-          "is_active": true,
-          "name": "Connectors",
-          "parent_id": "<id-4>",
-          "path": "hardware.connectors",
-          "slug": "connectors",
-          "sort_order": 2,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-5>",
-          "is_active": true,
-          "name": "Fasteners",
-          "parent_id": "<id-4>",
-          "path": "hardware.fasteners",
-          "slug": "fasteners",
-          "sort_order": 1,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-6>",
-          "is_active": true,
-          "name": "Insulation",
-          "path": "insulation",
-          "slug": "insulation",
-          "sort_order": 4,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-8>",
-          "is_active": true,
-          "name": "Lumber",
-          "path": "lumber",
-          "slug": "lumber",
-          "sort_order": 1,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-7>",
-          "is_active": true,
-          "name": "Engineered Wood",
-          "parent_id": "<id-8>",
-          "path": "lumber.engineered",
-          "slug": "engineered_wood",
-          "sort_order": 3,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-9>",
-          "is_active": true,
-          "name": "Framing Lumber",
-          "parent_id": "<id-8>",
-          "path": "lumber.framing",
-          "slug": "framing_lumber",
-          "sort_order": 1,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-10>",
-          "is_active": true,
-          "name": "Sheathing",
-          "parent_id": "<id-8>",
-          "path": "lumber.sheathing",
-          "slug": "sheathing",
-          "sort_order": 2,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-11>",
-          "is_active": true,
-          "name": "Roofing",
-          "path": "roofing",
-          "slug": "roofing",
-          "sort_order": 3,
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-1>",
+            "is_active": true,
+            "name": "Concrete",
+            "parent_id": null,
+            "path": "concrete",
+            "slug": "concrete",
+            "sort_order": 5,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-2>",
+            "is_active": true,
+            "name": "General",
+            "parent_id": null,
+            "path": "general",
+            "slug": "general",
+            "sort_order": 99,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-4>",
+            "is_active": true,
+            "name": "Hardware",
+            "parent_id": null,
+            "path": "hardware",
+            "slug": "hardware",
+            "sort_order": 2,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-3>",
+            "is_active": true,
+            "name": "Connectors",
+            "parent_id": "<id-4>",
+            "path": "hardware.connectors",
+            "slug": "connectors",
+            "sort_order": 2,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-5>",
+            "is_active": true,
+            "name": "Fasteners",
+            "parent_id": "<id-4>",
+            "path": "hardware.fasteners",
+            "slug": "fasteners",
+            "sort_order": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-6>",
+            "is_active": true,
+            "name": "Insulation",
+            "parent_id": null,
+            "path": "insulation",
+            "slug": "insulation",
+            "sort_order": 4,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-8>",
+            "is_active": true,
+            "name": "Lumber",
+            "parent_id": null,
+            "path": "lumber",
+            "slug": "lumber",
+            "sort_order": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-7>",
+            "is_active": true,
+            "name": "Engineered Wood",
+            "parent_id": "<id-8>",
+            "path": "lumber.engineered",
+            "slug": "engineered_wood",
+            "sort_order": 3,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-9>",
+            "is_active": true,
+            "name": "Framing Lumber",
+            "parent_id": "<id-8>",
+            "path": "lumber.framing",
+            "slug": "framing_lumber",
+            "sort_order": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-10>",
+            "is_active": true,
+            "name": "Sheathing",
+            "parent_id": "<id-8>",
+            "path": "lumber.sheathing",
+            "slug": "sheathing",
+            "sort_order": 2,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-11>",
+            "is_active": true,
+            "name": "Roofing",
+            "parent_id": null,
+            "path": "roofing",
+            "slug": "roofing",
+            "sort_order": 3,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 0,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -280,6 +300,7 @@
         "id": "<id-12>",
         "is_active": true,
         "name": "Golden D Root",
+        "parent_id": null,
         "path": "golden_d_root",
         "slug": "golden-d-root",
         "sort_order": 7,
@@ -331,8 +352,18 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "slug",
+              "message": "is required"
+            },
+            {
+              "field": "path",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-14>"
@@ -352,8 +383,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
           "request_id": "<id-15>"
@@ -403,12 +434,12 @@
       }
     },
     "response": {
-      "status": 500,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "duplicate",
+          "message": "a category with this slug or path already exists"
         },
         "meta": {
           "request_id": "<id-16>"
@@ -428,17 +459,16 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 404,
       "content_type": "application/json",
       "body": {
-        "created_at": "<ts-106751d>",
-        "id": "<id-17>",
-        "is_active": false,
-        "name": "Ghost",
-        "path": "golden_d_ghost",
-        "slug": "golden-d-ghost",
-        "sort_order": 0,
-        "updated_at": "<ts+0d>"
+        "error": {
+          "code": "not_found",
+          "message": "no such category"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
       }
     }
   },
@@ -456,11 +486,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -474,150 +510,161 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-1>",
-          "is_active": true,
-          "name": "Concrete",
-          "path": "concrete",
-          "slug": "concrete",
-          "sort_order": 5,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "is_active": true,
-          "name": "General",
-          "path": "general",
-          "slug": "general",
-          "sort_order": 99,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "children": [
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-13>",
-              "is_active": true,
-              "name": "Golden D Child Renamed",
-              "parent_id": "<id-12>",
-              "path": "golden_d_root.golden_d_child",
-              "slug": "golden-d-child",
-              "sort_order": 2,
-              "updated_at": "<ts+0d>"
-            }
-          ],
-          "created_at": "<ts+0d>",
-          "id": "<id-12>",
-          "is_active": true,
-          "name": "Golden D Root",
-          "path": "golden_d_root",
-          "slug": "golden-d-root",
-          "sort_order": 7,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "children": [
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-3>",
-              "is_active": true,
-              "name": "Connectors",
-              "parent_id": "<id-4>",
-              "path": "hardware.connectors",
-              "slug": "connectors",
-              "sort_order": 2,
-              "updated_at": "<ts+0d>"
-            },
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-5>",
-              "is_active": true,
-              "name": "Fasteners",
-              "parent_id": "<id-4>",
-              "path": "hardware.fasteners",
-              "slug": "fasteners",
-              "sort_order": 1,
-              "updated_at": "<ts+0d>"
-            }
-          ],
-          "created_at": "<ts+0d>",
-          "id": "<id-4>",
-          "is_active": true,
-          "name": "Hardware",
-          "path": "hardware",
-          "slug": "hardware",
-          "sort_order": 2,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-6>",
-          "is_active": true,
-          "name": "Insulation",
-          "path": "insulation",
-          "slug": "insulation",
-          "sort_order": 4,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "children": [
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-7>",
-              "is_active": true,
-              "name": "Engineered Wood",
-              "parent_id": "<id-8>",
-              "path": "lumber.engineered",
-              "slug": "engineered_wood",
-              "sort_order": 3,
-              "updated_at": "<ts+0d>"
-            },
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-9>",
-              "is_active": true,
-              "name": "Framing Lumber",
-              "parent_id": "<id-8>",
-              "path": "lumber.framing",
-              "slug": "framing_lumber",
-              "sort_order": 1,
-              "updated_at": "<ts+0d>"
-            },
-            {
-              "created_at": "<ts+0d>",
-              "id": "<id-10>",
-              "is_active": true,
-              "name": "Sheathing",
-              "parent_id": "<id-8>",
-              "path": "lumber.sheathing",
-              "slug": "sheathing",
-              "sort_order": 2,
-              "updated_at": "<ts+0d>"
-            }
-          ],
-          "created_at": "<ts+0d>",
-          "id": "<id-8>",
-          "is_active": true,
-          "name": "Lumber",
-          "path": "lumber",
-          "slug": "lumber",
-          "sort_order": 1,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-11>",
-          "is_active": true,
-          "name": "Roofing",
-          "path": "roofing",
-          "slug": "roofing",
-          "sort_order": 3,
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-1>",
+            "is_active": true,
+            "name": "Concrete",
+            "parent_id": null,
+            "path": "concrete",
+            "slug": "concrete",
+            "sort_order": 5,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-2>",
+            "is_active": true,
+            "name": "General",
+            "parent_id": null,
+            "path": "general",
+            "slug": "general",
+            "sort_order": 99,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "children": [
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-13>",
+                "is_active": true,
+                "name": "Golden D Child Renamed",
+                "parent_id": "<id-12>",
+                "path": "golden_d_root.golden_d_child",
+                "slug": "golden-d-child",
+                "sort_order": 2,
+                "updated_at": "<ts+0d>"
+              }
+            ],
+            "created_at": "<ts+0d>",
+            "id": "<id-12>",
+            "is_active": true,
+            "name": "Golden D Root",
+            "parent_id": null,
+            "path": "golden_d_root",
+            "slug": "golden-d-root",
+            "sort_order": 7,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "children": [
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-3>",
+                "is_active": true,
+                "name": "Connectors",
+                "parent_id": "<id-4>",
+                "path": "hardware.connectors",
+                "slug": "connectors",
+                "sort_order": 2,
+                "updated_at": "<ts+0d>"
+              },
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-5>",
+                "is_active": true,
+                "name": "Fasteners",
+                "parent_id": "<id-4>",
+                "path": "hardware.fasteners",
+                "slug": "fasteners",
+                "sort_order": 1,
+                "updated_at": "<ts+0d>"
+              }
+            ],
+            "created_at": "<ts+0d>",
+            "id": "<id-4>",
+            "is_active": true,
+            "name": "Hardware",
+            "parent_id": null,
+            "path": "hardware",
+            "slug": "hardware",
+            "sort_order": 2,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-6>",
+            "is_active": true,
+            "name": "Insulation",
+            "parent_id": null,
+            "path": "insulation",
+            "slug": "insulation",
+            "sort_order": 4,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "children": [
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-7>",
+                "is_active": true,
+                "name": "Engineered Wood",
+                "parent_id": "<id-8>",
+                "path": "lumber.engineered",
+                "slug": "engineered_wood",
+                "sort_order": 3,
+                "updated_at": "<ts+0d>"
+              },
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-9>",
+                "is_active": true,
+                "name": "Framing Lumber",
+                "parent_id": "<id-8>",
+                "path": "lumber.framing",
+                "slug": "framing_lumber",
+                "sort_order": 1,
+                "updated_at": "<ts+0d>"
+              },
+              {
+                "created_at": "<ts+0d>",
+                "id": "<id-10>",
+                "is_active": true,
+                "name": "Sheathing",
+                "parent_id": "<id-8>",
+                "path": "lumber.sheathing",
+                "slug": "sheathing",
+                "sort_order": 2,
+                "updated_at": "<ts+0d>"
+              }
+            ],
+            "created_at": "<ts+0d>",
+            "id": "<id-8>",
+            "is_active": true,
+            "name": "Lumber",
+            "parent_id": null,
+            "path": "lumber",
+            "slug": "lumber",
+            "sort_order": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-11>",
+            "is_active": true,
+            "name": "Roofing",
+            "parent_id": null,
+            "path": "roofing",
+            "slug": "roofing",
+            "sort_order": 3,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 0,
+        "next_cursor": null
+      }
     }
   }
 ]

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-export type PricingSource = "CONTRACT" | "TIER" | "RETAIL" | "QUANTITY_BREAK" | "JOB_OVERRIDE" | "PROMOTIONAL";
+// The price read comes from the generated contract (core/api/fragments/pricing.yaml through
+// @gable/api-client): unit_price_ten_thousandths is the exact scale 4 price per price_uom,
+// line_total_cents is the one rounding, and price_basis is lowercase (ADR 0006 section 7.3).
+// The market index and escalation shapes below belong to routes that are not converted.
 
-export interface CalculatedPrice {
-    product_id: string;
-    original_price: number;
-    final_price: number;
-    discount_pct: number;
-    source: PricingSource;
-    details: string;
-}
+import type { components } from '@gable/api-client';
+
+type Schemas = components['schemas'];
+
+export type PricingSource = Schemas['PricingSource'];
+export type CalculatedPrice = Schemas['PricingCalculatedPrice'];
 
 // --- Escalator Pricing Types ---
 

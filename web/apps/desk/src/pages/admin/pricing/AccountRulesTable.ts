@@ -6,22 +6,13 @@ import { customElement, property } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons';
 import { User, Pencil, Trash2 } from 'lucide';
 import type { CategoryPricingRule } from '../../../types/category-pricing';
-
-const formatRuleValue = (rule: CategoryPricingRule): string => {
-  switch (rule.rule_type) {
-    case 'MARKDOWN': return `-${rule.rule_value}%`;
-    case 'MARKUP': return `+${rule.rule_value}%`;
-    case 'MARGIN': return `M${rule.rule_value}%`;
-    case 'FIXED': return `$${rule.rule_value.toFixed(2)}`;
-    default: return `${rule.rule_value}`;
-  }
-};
+import { formatRuleValue } from '../../../services/CategoryPricingService';
 
 const RULE_TYPE_COLORS: Record<string, string> = {
-  MARKDOWN: 'bg-gable-green/10 text-gable-green border-gable-green/20',
-  MARKUP: 'bg-blueprint-blue/10 text-blueprint-blue border-blueprint-blue/20',
-  MARGIN: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  FIXED: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
+  markdown: 'bg-gable-green/10 text-gable-green border-gable-green/20',
+  markup: 'bg-blueprint-blue/10 text-blueprint-blue border-blueprint-blue/20',
+  margin: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  fixed: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
 };
 
 @customElement('gable-account-rules-table')
@@ -83,7 +74,7 @@ export class GableAccountRulesTable extends LitElement {
                 </td>
                 <td class="px-4 py-3 text-center">
                   <span class="inline-flex items-center px-2 py-1 rounded border text-xs font-mono font-medium ${RULE_TYPE_COLORS[rule.rule_type] || ''}">
-                    ${rule.rule_type} ${formatRuleValue(rule)}
+                    ${rule.rule_type.toUpperCase()} ${formatRuleValue(rule)}
                   </span>
                 </td>
                 <td class="px-4 py-3 text-right">

@@ -85,9 +85,17 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 	}
 
 	// Insert Lines
+	// The legacy writers (the counter's account charge, the seed, tests) still
+	// hand over whole cents per sale unit; the line lands in the shared shape
+	// (ADR 0005 2.2) with the unit and description from the product, the pair
+	// 1 and 1 and the extension rounded once. C2-3 and C2-5 retire this path.
 	queryLine := `
-		INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at,
+			sku, description, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total)
+		SELECT $1, $2, $3, $4::numeric, $5::numeric, $6,
+			p.sku, COALESCE(p.description, p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $5::numeric,
+			ROUND($4::numeric * $5::numeric, 2)
+		FROM products p WHERE p.id = $3
 	`
 	for i := range inv.Lines {
 		line := &inv.Lines[i]
@@ -98,11 +106,14 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 		// Convert PriceEach (Cents -> Dollars)
 		priceEachFloat := float64(line.PriceEach) / 100.0
 
-		_, err = exec.Exec(ctx, queryLine,
+		tag, err := exec.Exec(ctx, queryLine,
 			line.ID, line.InvoiceID, line.ProductID, line.Quantity, priceEachFloat, now,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert invoice line: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("failed to insert invoice line: product %s does not exist", line.ProductID)
 		}
 	}
 
@@ -193,10 +204,13 @@ func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Inv
 
 	// Get Lines with product names
 	queryLines := `
-		SELECT il.id, il.invoice_id, il.product_id, COALESCE(p.sku, ''), COALESCE(p.description, ''), il.quantity, il.price_each, il.created_at
+		SELECT il.id, il.invoice_id, COALESCE(il.product_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       COALESCE(p.sku, il.sku, ''), COALESCE(p.description, il.description, ''),
+		       COALESCE(il.quantity, 0), COALESCE(il.price_each, 0), il.created_at
 		FROM invoice_lines il
 		LEFT JOIN products p ON p.id = il.product_id
-		WHERE il.invoice_id = $1
+		WHERE il.invoice_id = $1 AND il.line_type <> 'TEXT'
+		ORDER BY il.position, il.created_at, il.id
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryLines, id)
 	if err != nil {
@@ -365,4 +379,56 @@ func (r *PostgresRepository) UpdateCreditMemo(ctx context.Context, cm *CreditMem
 	query := `UPDATE credit_memos SET status = $1, applied_at = $2 WHERE id = $3`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, cm.Status, cm.AppliedAt, cm.ID)
 	return err
+}
+
+// InsertFulfilmentInvoice writes the header and the lines of an order
+// fulfilment's invoice in the shape of ADR 0005 6.1 and 2.2, through the
+// caller's executor. Money arrives in cents and scale 4 integers and is
+// divided in SQL; price_each, kept for the readers C2-3 converts, holds the
+// effective price per sale unit (the line total over the quantity).
+func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *FulfilmentInvoice) error {
+	exec := r.db.GetExecutor(ctx)
+	_, err := exec.Exec(ctx, `
+		INSERT INTO invoices (id, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount,
+			payment_terms, due_date, branch_id, currency, delivery_type, picked_up_by, delivery_id,
+			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, created_at, updated_at)
+		VALUES ($1, $2, $3, 'UNPAID', $4::numeric / 100, $5::numeric, $6::numeric / 100, $7::numeric / 100,
+			'NET30', ($8::date + 30)::timestamptz, $9, $10, $11, $12, $13,
+			$14, $15, $16, $17, $18, $8::date, 'ORDER', NOW(), NOW())`,
+		in.ID, in.OrderID, in.CustomerID, in.SubtotalCents, in.TaxRate, in.TaxCents, in.TotalCents,
+		in.InvoiceDate, in.BranchID, in.Currency, in.DeliveryType, in.PickedUpBy, in.DeliveryID,
+		in.ShipToID, in.ShipToSnapshot, in.ProjectID, in.TaxExempt, in.TaxSource)
+	if err != nil {
+		return fmt.Errorf("failed to insert invoice: %w", err)
+	}
+	// Parents first: a component's parent_line_id references its kit line.
+	for i := range in.Lines {
+		l := &in.Lines[i]
+		_, err := exec.Exec(ctx, `
+			INSERT INTO invoice_lines (id, invoice_id, position, line_type, parent_line_id, product_id, charge_code_id,
+				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source,
+				discount_percent, discount_amount, discount_reason, line_total, taxable, revenue_account_code,
+				order_line_id, unit_cost, cost, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7,
+				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000, $15::numeric / 10000,
+				CASE WHEN $10::numeric > 0 AND $20::numeric IS NOT NULL THEN ROUND(($20::numeric / 100) / ($10::numeric / 10000), 4) ELSE $15::numeric / 10000 END,
+				$16, $17::numeric / 10000, $18::numeric / 100, $19, $20::numeric / 100, $21, $22,
+				$23, $24::numeric / 10000, $25::numeric / 100, NOW())`,
+			l.ID, in.ID, l.Position, l.LineType, l.ParentLineID, l.ProductID, l.ChargeCodeID,
+			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty, l.UnitPrice, l.PriceSource,
+			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.LineTotalCents, l.Taxable, l.RevenueAccountCode,
+			l.OrderLineID, l.UnitCost, l.CostCents)
+		if err != nil {
+			return fmt.Errorf("failed to insert invoice line: %w", err)
+		}
+	}
+	return nil
+}
+
+// SetInvoiceGLEntry records the invoice's journal entry on the invoice.
+func (r *PostgresRepository) SetInvoiceGLEntry(ctx context.Context, invoiceID, entryID uuid.UUID) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx, `UPDATE invoices SET gl_entry_id = $2 WHERE id = $1`, invoiceID, entryID); err != nil {
+		return fmt.Errorf("failed to record the invoice entry: %w", err)
+	}
+	return nil
 }

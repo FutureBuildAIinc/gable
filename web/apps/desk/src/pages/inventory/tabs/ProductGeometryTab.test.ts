@@ -30,11 +30,12 @@ function productRow(overrides: Record<string, unknown> = {}) {
     id: PRODUCT_ID,
     sku: 'LUM-248-PREM',
     description: '2x4x8 SPF Premium',
-    uom_primary: 'PCS',
-    base_price: 7.99,
-    average_unit_cost: 5,
-    target_margin: 0.3,
+    stock_uom: 'PCS',
+    base_price_ten_thousandths: 79900,
+    average_unit_cost_ten_thousandths: 50000,
+    target_margin: 30,
     commission_rate: 0,
+    revision: 3,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     length_in: 96,
@@ -54,12 +55,15 @@ let fetchMock: ReturnType<typeof vi.fn>
  */
 function stubFetch(row: Record<string, unknown>) {
   const patches: Record<string, unknown>[] = []
+  const ifMatches: (string | null)[] = []
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (init?.method === 'PATCH') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>
       patches.push(body)
-      return jsonResponse(body)
+      ifMatches.push((init.headers as Headers).get('If-Match'))
+      // The route answers the whole product at its next revision.
+      return jsonResponse({ ...row, ...body, revision: (row.revision as number) + 1 })
     }
     if (url.includes(`/api/v1/products/${PRODUCT_ID}`)) return jsonResponse(row)
     throw new Error(`unexpected fetch: ${init?.method ?? 'GET'} ${url}`)
@@ -67,6 +71,7 @@ function stubFetch(row: Record<string, unknown>) {
   vi.stubGlobal('fetch', fetchMock)
   return {
     patches,
+    ifMatches,
     last: () => patches[patches.length - 1],
   }
 }
@@ -223,6 +228,47 @@ describe('ProductGeometryTab: provenance', () => {
     await save(el)
 
     expect(stub.last().geometry_source).toBe('mesh')
+  })
+})
+
+describe('ProductGeometryTab: revision', () => {
+  it('sends the revision it loaded as the quoted If-Match, and the next save uses the revision the answer carried', async () => {
+    const { el, stub } = await mountTab()
+
+    await typeInto(el, 'Length', '100')
+    await save(el)
+    expect(stub.ifMatches).toEqual(['"3"'])
+
+    await typeInto(el, 'Length', '101')
+    await save(el)
+    expect(stub.ifMatches).toEqual(['"3"', '"4"'])
+  })
+
+  it('on a 409 stale_revision shows the server message in a toast and reloads the product', async () => {
+    const shown: string[] = []
+    const { ToastService } = await import('../../../lib/toast-service.ts')
+    vi.spyOn(ToastService, 'show').mockImplementation((message: string) => { shown.push(message) })
+
+    const { el } = await mountTab()
+    const reloaded = productRow({ revision: 9, length_in: 120 })
+    let getCalls = 0
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        return jsonResponse({ error: { code: 'stale_revision', message: 'the product changed since it was loaded', details: [] }, meta: { request_id: 'r' } }, 409)
+      }
+      getCalls++
+      expect(String(input)).toContain(`/api/v1/products/${PRODUCT_ID}`)
+      return jsonResponse(reloaded)
+    })
+
+    await typeInto(el, 'Length', '100')
+    await save(el)
+    await flush()
+    await update(el, {})
+
+    expect(shown.some((m) => m.includes('the product changed since it was loaded'))).toBe(true)
+    expect(getCalls).toBe(1)
+    expect(q<HTMLInputElement>(el, 'input[aria-label="Length"]').value).toBe('120')
   })
 })
 

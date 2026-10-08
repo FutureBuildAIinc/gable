@@ -237,10 +237,14 @@ POST	/api/v1/millwork/options	internal/millwork	h.handleCreateOption
 GET	/api/v1/millwork/options/{id}	internal/millwork	h.handleGetOption
 GET	/api/v1/orders	internal/order	h.HandleListOrders
 POST	/api/v1/orders	internal/order	h.HandleCreateOrder
+GET	/api/v1/orders/fulfillment-requests	internal/order	h.HandleListFulfilmentRequests
+POST	/api/v1/orders/fulfillment-requests/{delivery_id}/retry	internal/order	h.HandleRetryFulfilmentRequest
 GET	/api/v1/orders/{id}	internal/order	h.HandleGetOrder
 PUT	/api/v1/orders/{id}	internal/order	h.HandleUpdateOrder
+POST	/api/v1/orders/{id}/allocate	internal/order	h.HandleAllocate
 GET	/api/v1/orders/{id}/exposure-gate	internal/order	h.HandleExposureGate
 POST	/api/v1/orders/{id}/exposure-override	internal/order	h.HandleExposureOverride
+POST	/api/v1/orders/{id}/fulfillments	internal/order	h.HandleFulfil
 POST	/api/v1/orders/{id}/transitions	internal/order	h.HandleTransition
 POST	/api/v1/parsing/upload	internal/parsing	h.HandleUpload
 GET	/api/v1/payment-terms	internal/customer	h.HandleListTerms

@@ -664,8 +664,9 @@ paths:
       tags:
       - delivery
       summary: Assign an order to a route
-      description: A missing route, an order blocked by unresolved index exposure or any other failure
-        answers 500.
+      description: 'A missing route, an order blocked by unresolved index exposure or any other failure
+        answers 500. A pickup (will-call) order is never routed (ADR 0005 5.5): 409 with the blocker
+        pickup_order, in the platform error envelope.'
       parameters:
       - $ref: '#/components/parameters/XBranchId'
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -690,7 +691,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/ConflictEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':

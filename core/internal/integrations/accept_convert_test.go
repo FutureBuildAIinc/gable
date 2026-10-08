@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"encoding/json"
+	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/quote"
@@ -324,5 +325,50 @@ func TestAcceptAndConvert_UnknownQuoteIs404(t *testing.T) {
 	h.AcceptAndConvertQuote(rec, req)
 	if rec.Code != http.StatusNotFound || rec.Body.String() != `{"error":"quote not found"}`+"\n" {
 		t.Fatalf("unknown quote = %d %q, want 404 quote not found", rec.Code, rec.Body.String())
+	}
+}
+
+// RULE (ADR 0005 5.8 and 14.2): an order that lands backordered reports
+// CONFIRMED in the seam's status, the vocabulary its callers know; the order
+// itself is backordered with the rest on back order.
+func TestAcceptAndConvert_ShortOrderReportsConfirmed(t *testing.T) {
+	w := newSeamWorld(t)
+	ctx := context.Background()
+	w.orderSvc.WithInventory(inventory.NewService(inventory.NewRepository(w.db)))
+	yard := uuid.New()
+	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	if _, err := w.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+branch+`, `+branch+`)`, yard, "SH-"+yard.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Pool.Exec(ctx, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 4, 0)`, w.productID, yard); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = w.db.Pool.Exec(context.Background(), `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, w.customerID)
+		_, _ = w.db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE location_id = $1`, yard)
+		_, _ = w.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, yard)
+	})
+	// 10 PCS ordered, 4 on hand.
+	q := w.quoteAt(t, nil, 10*10000)
+	rec := w.acceptAndConvert(q)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("accept-and-convert of a short order = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "CONFIRMED" {
+		t.Errorf("seam status = %q, want CONFIRMED for a back ordered order", body.Status)
+	}
+	var status, qty string
+	if err := w.db.Pool.QueryRow(ctx, `SELECT o.status, l.quantity_allocated::text || '/' || l.quantity_backordered::text FROM orders o JOIN order_lines l ON l.order_id = o.id WHERE o.id = $1`, body.ID).Scan(&status, &qty); err != nil {
+		t.Fatal(err)
+	}
+	if status != "BACKORDERED" || qty != "4.0000/6.0000" {
+		t.Errorf("order = %s %s, want BACKORDERED 4.0000/6.0000", status, qty)
 	}
 }

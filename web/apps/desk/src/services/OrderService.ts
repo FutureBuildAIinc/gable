@@ -140,6 +140,45 @@ export const OrderService = {
         return this.transition(id, 'cancelled', revision, { reason });
     },
 
+    /**
+     * The money moment (ADR 0005 5.6): bills the allocated quantities in one
+     * act. A pickup (will-call) order names who collected it. The answer is the
+     * updated order and the invoice it created (the Location header).
+     */
+    async fulfil(
+        id: string,
+        revision: number,
+        extras: { pickedUpBy?: string; lines?: { order_line_id: string; quantity: string }[] } = {},
+    ): Promise<{ order: Order; invoiceId: string | null }> {
+        const body: Record<string, unknown> = { revision };
+        if (extras.pickedUpBy) body.picked_up_by = extras.pickedUpBy;
+        if (extras.lines) body.lines = extras.lines;
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/orders/${id}/fulfillments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'If-Match': ifMatch(revision) },
+                body: JSON.stringify(body),
+            }),
+            'Failed to fulfil order',
+        );
+        const location = response.headers.get('Location') ?? '';
+        const invoiceId = location.startsWith('/api/v1/invoices/') ? location.slice('/api/v1/invoices/'.length) : null;
+        return { order: await response.json(), invoiceId };
+    },
+
+    /** The desk's retry for a back order (ADR 0005 5.4). */
+    async allocate(id: string, revision: number): Promise<Order> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/orders/${id}/allocate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'If-Match': ifMatch(revision) },
+                body: JSON.stringify({ revision }),
+            }),
+            'Failed to allocate order',
+        );
+        return response.json();
+    },
+
     async checkExposureGate(id: string): Promise<{ blocked: boolean }> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/orders/${id}/exposure-gate`),

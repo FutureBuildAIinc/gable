@@ -55,7 +55,13 @@ export interface PIMCollateral {
     updated_at: string;
 }
 
-export interface ProductDetail extends Product {
+/**
+ * GET /products/{id}/detail: the product wire nested under `product`, then the PIM records.
+ * The generated schema leaves content, media and collateral open, so those three keep the
+ * hand written shapes above.
+ */
+export interface ProductDetail {
+    product: Product;
     content: PIMContent | null;
     media: PIMMedia[];
     collateral: PIMCollateral[];

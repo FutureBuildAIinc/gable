@@ -27,7 +27,7 @@ export class GableOmnibar extends LitElement {
 
     // Pre-fetch data
     Promise.all([
-      ProductService.getProducts(),
+      ProductService.listAllProducts(),
       CustomerService.listAllCustomers(),
     ]).then(([p, c]) => {
       this._products = p;

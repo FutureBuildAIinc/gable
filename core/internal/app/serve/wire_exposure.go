@@ -123,11 +123,9 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 		)
 	}
 
-	// Pre-ship gate: confirm/fulfill an order, or assign it to a delivery
-	// route, is blocked while the source quote sits in ACK_REQUIRED/BLOCKED.
-	if deps.OrderSvc != nil {
-		deps.OrderSvc.WithExposureGate(exposureChecker, &exposureOverriderAdapter{svc: exposureSvc})
-	}
+	// Pre-ship gate: the order service's gate is wired by its own constructor
+	// (internal/app/orderwire), which both roles share; only the delivery
+	// service's gate is wired here.
 	if deps.DeliverySvc != nil {
 		deps.DeliverySvc.WithExposureGate(exposureChecker)
 	}
@@ -205,15 +203,4 @@ func (a *exposureAuditAdapter) LogEntry(ctx context.Context, e pricing.AuditEntr
 		UserID:     e.UserID,
 		Changes:    e.Changes,
 	})
-}
-
-// exposureOverriderAdapter bridges pricing.ExposureService.OverrideForOrder
-// (which returns the created event) to order.ExposureOverrider (error-only).
-type exposureOverriderAdapter struct {
-	svc *pricing.ExposureService
-}
-
-func (a *exposureOverriderAdapter) OverrideForOrder(ctx context.Context, orderID uuid.UUID, notes, actor, role string) error {
-	_, err := a.svc.OverrideForOrder(ctx, orderID, notes, actor, role)
-	return err
 }
