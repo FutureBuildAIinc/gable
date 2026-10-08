@@ -11,7 +11,8 @@
 #   2. manifest.yaml declares shape, app, tenancy, runtimes and frontends with
 #      valid values, and every runtime and frontend path exists unless the
 #      manifest marks the entry planned (a planned entry whose path already
-#      exists fails, so a mark cannot go stale);
+#      exists fails, so a mark cannot go stale); a frontend path is relative
+#      and has no "..";
 #      database.extensions equals the set core/migrations/*.sql creates;
 #   3. CLAUDE.md imports AGENTS.md;
 #   4. every JSON file parses (tsconfig*.json are JSON with comments and
@@ -172,8 +173,10 @@ for fe in fes:
         fail("manifest.yaml frontend id %s is listed twice" % fid)
     ids.append(fid)
     p = fe.get("path")
-    if not p:
+    if not p or not isinstance(p, str):
         fail("manifest.yaml frontend %s has no path" % fid)
+    if p.startswith("/") or ".." in p.split("/"):
+        fail("manifest.yaml frontend %s: path %r must be relative and stay inside the repository" % (fid, p))
     if fe.get("planned", False) not in (True, False):
         fail("manifest.yaml frontend %s: planned must be true or false" % fid)
     if fe.get("planned") is True:
