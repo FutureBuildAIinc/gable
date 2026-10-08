@@ -11,6 +11,16 @@ outbox) and the module recipe (`docs/refactor/MODULE-RECIPE.md`, from R1-15).
 Items C2-1 to C2-5 build from this record and the recipe; where they differ
 from this record, this record is changed first, in its own pull request.
 
+This record merges after R1-15 (PR #27). It depends on what R1-15 lands: the
+module recipe, the `httpx` helpers it names (`Extend`, `CheckLineSign`,
+`NextDocumentNumber`, `DecodeJSON`, the `Validator` fields, `Timestamp`),
+`testutil.RequireDBMaxConns`, and the quote convert route whose refusal of
+pairs other than 1 and 1 section 5.8 lifts.
+
+The items land in a chain: C2-1 (which may start at once), then C2-2, then
+C2-3, then C2-4, then C2-5. Each item below names what it builds and, where a
+piece of this record arrives with a later item, says so at that piece.
+
 ## Context
 
 Cycle 2 carries customers, orders, invoices, credit memos, payments,
@@ -44,10 +54,12 @@ will-call, and what each item must build and test.
 | Units of measure | a stocked line is sold in its product's stocking unit (`products.uom_primary`); the price unit may differ through the conversion pair | cycle 3 adds unit conversions and lifts the stocking unit rule |
 | Pricing engine | wraps today's engine at the order and counter boundary, converting its result to a scale 4 price once | cycle 3 makes the engine return scaled prices |
 | Inventory cost | the cost basis is `products.average_unit_cost` (scale 4), read in the posting transaction | cycle 4 owns cost layers, lots and serials; it replaces the cost source behind one function (`costOf`, section 8.4) |
-| Tax | one rate per document, resolved from ship-to or branch, rounded once per document | cycle 5's tax engine (GC-166) replaces the resolver; the per line `taxable` flag and the document fields stay |
+| Tax | one rate per document, resolved from ship-to or branch, rounded once per document; a configured tax provider keeps answering through `tax.Service.PreviewTax` behind the resolver (section 3) | cycle 5's tax engine (GC-166) replaces the resolver; the per line `taxable` flag and the document fields stay |
+| Inventory receipts in the ledger | `1030` is debited only where an AP invoice line names it (today's `SyncVendorInvoice`); a stock receipt posts nothing, so COGS relief can drive `1030` below the receipts' value until cycle 4 | cycle 4 posts receipts to `1030` |
 | General ledger routes | GL keeps its routes; cycle 2 adds `currency` to journal entries and groups the GL reports by it | cycle 5 converts the GL module |
 | Multi company | none; the series key for numbers is the entity | cycle 5 (GC-207) may widen series keys |
 | Reporting module | the AR aging and statement move to new routes under `/api/v1/ar/` | cycle 5 retires the reporting module's aging and statement routes |
+| Batch receipts (inputs 4.5, `POST /ar/batches/{id}:post`) | none; a receipt is one payment with its applications | cycle 5's drafts and promotion endpoints (R5-2) own it, posting each row through the AR core's `RecordPayment` |
 
 ### 2. One line shape for every sales document
 
@@ -236,9 +248,11 @@ On every document:
   document, exact (the rate is NUMERIC(9,6), read as a decimal string);
 - `total_cents` = `subtotal_cents + tax_cents`.
 
-The rate is resolved once, when the document is created (an order's rate is
-refreshed on every draft edit and at confirm; an invoice's is fixed at
-create):
+The rate is resolved when the document is created: an order's is refreshed
+on every draft edit and at confirm; an invoice resolves its own rate at its
+create (it does not copy the order's, so a ship-to or branch rate changed
+since confirm applies to the bill); a credit memo that names an invoice takes
+that invoice's rate. The order:
 
 1. the customer has an active `tax_exemptions` row: rate 0, `tax_exempt`
    true;
@@ -248,6 +262,17 @@ create):
    `tax_rate_not_configured` naming the branch. Zero is a valid configured
    rate.
 
+When the tax service has a provider configured (today's Avalara path, which
+the counter calls through `tax.Service.PreviewTax`), the resolver keeps
+calling it, after the exemption check, with the document's taxable lines:
+the provider's total tax becomes `tax_cents` and the steps above are
+skipped. Each document records how its tax was found in `tax_source`
+(`EXEMPT`, `PROVIDER`, `SHIP_TO_RATE`, `BRANCH_RATE`; wire lowercase), and
+`tax_rate_percent` is null when the provider answered. A provider failure
+fails the act with 503 `unavailable`, never a silent fallback to a rate.
+Committing tax to the provider stays where it is today and moves with cycle
+5's engine.
+
 `tax_rate` columns widen to NUMERIC(9,6) (`locations.default_tax_rate`,
 `invoices.tax_rate`, the new `orders.tax_rate`, ship-to `tax_rate`):
 NUMERIC(7,4) and (5,4) cannot hold a rate such as 0.08875. The wire field is
@@ -255,8 +280,15 @@ NUMERIC(7,4) and (5,4) cannot hold a rate such as 0.08875. The wire field is
 (`"8.875"`), and `tax_exempt` beside it.
 
 The order's tax is an estimate; each invoice computes its own on the lines
-it bills. A credit memo that returns lines of one invoice uses that
-invoice's rate.
+it bills.
+
+A credit memo naming an invoice credits tax at that invoice's rate,
+`round_half_away(taxable_cents x rate)`, but never more than the invoice's
+`tax_cents` less the tax earlier credit memos (not void) already credited
+against it; the credit memo that returns the last of the invoice's taxable
+amount takes exactly that remainder, as the discount proration does (2.4).
+So partial credit memos never credit more tax than the invoice charged. With
+a provider, the same cap applies to the provider's answer.
 
 ### 4. Document numbers and currency
 
@@ -293,10 +325,28 @@ The mechanism:
   transaction.
 - The counter row stays locked from the mint to the commit, so invoice
   creating transactions serialize from their mint. The mint is therefore
-  taken late: after every other row lock of the transaction except the
-  customer row and the outbox (section 11), immediately before the invoice
-  insert.
+  taken late: after every other row lock of the transaction, the customer
+  row included, and before only the journal inserts and the outbox (section
+  11), immediately before the invoice insert. Taking the customer row first
+  means a sale waiting behind a slow payment of its customer waits without
+  holding the series.
+- A credit memo's number is minted when it is posted (`draft` to `open`),
+  not when the draft is created: drafts are edited and voided freely, and a
+  voided draft must not consume a number of the gapless series. A draft
+  carries `number` null on the wire.
 - A void keeps its number; nothing deletes an invoice or credit memo.
+- The cost, stated: every fulfilment and, from C2-5, every counter sale
+  serializes from its mint to its commit. That hold is the invoice and line
+  inserts, the journal entry, the subledger row, the deposit applications,
+  the line updates and the outbox write, a few milliseconds, which puts the
+  ceiling far above dealer volume; the outbox already serializes every event
+  writer, so the added hold costs little on top. The walk-in customer row
+  (C2-5) becomes a second hot row for counter sales.
+- The named escape, if a dealer ever reaches the ceiling: one series per
+  branch (`invoice:<branch code>`, the prefix carrying the branch code), a
+  listed contract change. Never a sequence: that would give up gaplessness.
+- The choice is confirmed for v1 by the lead and goes to the principal as a
+  decision on record.
 
 #### 4.2 Currency
 
@@ -338,22 +388,23 @@ The mechanism:
 | `number TEXT UNIQUE NOT NULL` | 4.1 | `number` |
 | `revision BIGINT NOT NULL DEFAULT 1` | ADR 0001 section 11 | `revision` |
 | `currency` | 4.2 | `currency` |
-| `delivery_type TEXT NOT NULL CHECK (DELIVERY, PICKUP)` | required on create; `pickup` is will-call | `delivery_type` |
+| `delivery_type TEXT NOT NULL DEFAULT 'DELIVERY' CHECK (DELIVERY, PICKUP)` | required on the wire create; the DEFAULT serves raw writers (the portal checkout and the seed name it explicitly from C2-2) | `delivery_type` |
 | `ship_to_id UUID NULL FK customer_ship_tos` | defaults to the customer's default ship-to on a delivery order | `ship_to_id` |
 | `ship_to_snapshot JSONB NULL` | the address at confirm | `ship_to` (object or null) |
 | `project_id` (exists) | the job (section 7.1) | `job_id` |
 | `customer_po TEXT NULL` | required at confirm when `customers.po_required` | `customer_po` |
 | `ordered_by_contact_id UUID NULL FK customer_contacts` | checked at confirm (5.3) | `ordered_by_contact_id` |
 | `hold_reason TEXT NULL CHECK (CREDIT_LIMIT, MANUAL)`, `hold_note TEXT NULL` | set only in `ON_HOLD` | `hold_reason`, `hold_note` |
-| `subtotal`, `tax_amount` NUMERIC(12,2) NOT NULL DEFAULT 0; `tax_rate` NUMERIC(9,6) NOT NULL DEFAULT 0; `tax_exempt BOOLEAN NOT NULL DEFAULT FALSE` | section 3 | `subtotal_cents`, `tax_cents`, `tax_rate_percent`, `tax_exempt` |
+| `subtotal`, `tax_amount` NUMERIC(12,2) NOT NULL DEFAULT 0; `tax_rate` NUMERIC(9,6) NULL; `tax_exempt BOOLEAN NOT NULL DEFAULT FALSE`; `tax_source TEXT NOT NULL DEFAULT 'BRANCH_RATE'` CHECK | section 3 | `subtotal_cents`, `tax_cents`, `tax_rate_percent`, `tax_exempt`, `tax_source` |
 | `total_amount` widens to NUMERIC(12,2) and now includes the tax estimate | | `total_cents` |
 | `confirmed_at TIMESTAMPTZ NULL` | first confirm | `confirmed_at` |
 | `created_at` NOT NULL | | `created_at` |
 
 Other wire fields: `id`, `branch_id`, `customer_id`, `customer_name`,
 `quote_id`, `status`, `salesperson_id`, `scheduled_delivery_date`
-(`YYYY-MM-DD`), `deposit_unapplied_cents` (the unapplied amount of payments
-taken against this order, read), `updated_at`, `lines`. The list item is
+(`YYYY-MM-DD`), `tax_source` (section 3), `invoice_ids`, `updated_at`,
+`lines`; and from C2-4 `deposit_unapplied_cents` (the unapplied amount of
+payments taken against this order, read). The list item is
 `OrderSummary` (no lines), embedded in `Order` (recipe step 4). The margin
 fields of today (`total_cost`, `total_margin`, `margin_percent`,
 `total_commission`) stay as `_cents` fields and the percentage as a decimal
@@ -398,14 +449,21 @@ Create: `POST /api/v1/orders`, status `draft`, event `order.created`.
 
 #### 5.3 Credit, PO and contact checks at confirm
 
-- Credit exposure = the customer's `balance_due` (the AR subledger, section
-  9) minus the customer's unapplied cash, plus the `total_cents` of the
-  customer's other orders in `confirmed`, `backordered` or `on_hold` not yet
-  invoiced (their unbilled remainder), plus this order's `total_cents`. Over
+- Credit exposure is read from the documents, never from
+  `customers.balance_due`, which the seed sets arbitrarily and history left
+  stale (the reconciliation read of 9.3 surfaces that drift; nothing repairs
+  it). Exposure = the customer's open receivable, plus the unbilled
+  remainder of the customer's other orders in `confirmed`, `backordered` or
+  `on_hold`, plus this order's `total_cents`. The open receivable is, in
+  C2-2 and C2-3, the sum over the customer's invoices in `UNPAID` or
+  `PARTIAL` of `total` less the payments recorded against each; from C2-4,
+  the sum of `amount_open` over the customer's invoices and credit memos
+  less the customer's unapplied cash (C2-4 adds the unapplied term). Over
   `credit_limit` lands the order on hold in the same transaction, and the
   transition answers 200 with the order in `on_hold`: the hold is a
   committed state change with its event, not an error. A null
-  `credit_limit` means no limit.
+  `credit_limit` means no limit. The integration seam keeps its own answer
+  (5.8).
 - `po_required` on the customer and no `customer_po`: 409, blocker
   `po_required`.
 - `ordered_by_contact_id` set and that contact has `can_place_orders` false,
@@ -429,17 +487,37 @@ lines and charge lines carry `quantity_fulfilled` only.
   allocate in whole kits (2.6). Lines are processed in `(product_id, line
   id)` order so two orders never lock the same inventory rows in opposite
   orders.
-- Release on receipt: C2-2 makes the purchase order receive write a
-  `purchase_order.received` outbox event (the event cycle 4 names; data:
-  the purchase order id, branch id and the received product ids). An order
-  subscriber on the drain (ADR 0003 section 4) allocates available stock of
-  those products to backordered lines, oldest `confirmed_at` first, one
-  order per savepoint, and derives each order's status. The handler is
-  idempotent by construction: it allocates only what is still backordered
-  from what is still available.
+- Release on receipt, through a request queue:
+  - C2-2 makes the purchase order receive write a `purchase_order.received`
+    outbox event (the event cycle 4 names; data: the purchase order id,
+    branch id and the received product ids).
+  - The order module's drain subscriber for that event does one thing: it
+    inserts one `order_allocation_requests (order_id UUID PRIMARY KEY,
+    requested_at TIMESTAMPTZ NOT NULL)` row, `ON CONFLICT DO NOTHING`, for
+    each order in `backordered` with a backordered line on one of those
+    products. It takes no other lock, reads through the pass's transaction,
+    and writes no event. This keeps the drain inside ADR 0003 section 2:
+    the drain's pass holds its savepoints' locks to the end of the pass, so
+    a handler that locked orders and inventory and wrote an event would hold
+    the global outbox lock while waiting on order rows a desk confirm holds,
+    a deadlock, and would stall every event writer for the window.
+  - A worker job (`internal/app/worker`, beside the drain, never in `serve`)
+    serves the queue: it claims one request with `FOR UPDATE SKIP LOCKED`
+    oldest `requested_at` first and, in its own transaction, in section
+    11's order (the order row, then inventory by `(product_id, inventory
+    id)`), allocates available stock to that order's backordered lines,
+    derives the status, deletes the request, and writes
+    `order.backorder_released` last when the back order cleared. One order
+    per transaction. Orders are served oldest request first; within a
+    request the oldest `confirmed_at` rule holds because requests are made
+    in `confirmed_at` order.
+  - Idempotent by construction: a replayed receive event re-inserts a
+    request at most once per order, and serving it allocates only what is
+    still backordered from what is still available.
 - `POST /api/v1/orders/{id}/allocate` runs the same allocation for one
-  order on demand (the desk's retry), with the revision precondition;
-  event `order.backorder_released` when it clears the back order.
+  order on demand (the desk's retry), with the revision precondition, in
+  the same transaction shape; event `order.backorder_released` when it
+  clears the back order.
 - Special order lines are stocked lines: they land backordered at confirm
   until their purchase order is received, then release like any other.
 
@@ -469,8 +547,11 @@ callers cycle 4 converts.
 `POST /api/v1/orders/{id}/fulfillments`, body `{"revision": n, "lines":
 [{"order_line_id": ..., "quantity": "..."}], "picked_up_by": ...,
 "delivery_id": ...}`. `lines` is optional: absent means every allocated
-quantity, plus every charge line not yet billed. Allowed in `confirmed` and
-`backordered`. Answers 201 with the updated order (its new revision in the
+quantity, every non stock product line's unbilled quantity, and every
+charge line not yet billed. A non stock product line (no product, so never
+allocated) bills up to `quantity - quantity_fulfilled`, and naming it in
+`lines` is checked against that, not against an allocation. Allowed in
+`confirmed` and `backordered`. Answers 201 with the updated order (its new revision in the
 body and the `ETag`) and `Location: /api/v1/invoices/{id}` naming the invoice
 created; the order body lists its invoices in `invoice_ids`.
 
@@ -479,7 +560,8 @@ One transaction, in this order (section 11 gives the lock order):
 1. lock the order row; check the revision and the status; re check the
    price exposure gate and the credit (an over limit customer is 409
    blocker `credit_limit`, no hold);
-2. lock the order's payments with an unapplied amount (deposits);
+2. lock the order's payments with an unapplied amount (deposits, from
+   C2-4; C2-2 has no payment with an order);
 3. move stock: `FulfillQty` per stocked line, in `(product_id, line id)`
    order; a quantity above the line's allocation is 409 blocker
    `exceeds_allocation`;
@@ -488,16 +570,18 @@ One transaction, in this order (section 11 gives the lock order):
    charge lines in full on the first invoice that bills them; every text
    line copied; extensions per 2.4; cost per 8.4; totals and tax per
    section 3;
-5. mint the invoice number (gapless), insert the invoice and its lines;
+5. lock the customer row, then mint the invoice number (gapless), insert
+   the invoice and its lines;
 6. post: the invoice entry with its COGS legs (section 8) and the
    subledger debit, through the AR core (section 9);
-7. apply the order's unapplied payments to the new invoice, oldest first, up
-   to its total (section 9);
+7. from C2-4: apply the order's unapplied payments to the new invoice,
+   oldest first, up to its total (section 9);
 8. update the lines' `quantity_allocated` and `quantity_fulfilled`, derive
    the order status, bump the order revision;
 9. write the events last: `invoice.created`, `payment.applied` and
-   `invoice.partial` or `invoice.paid` when step 7 applied anything, then
-   `order.partially_fulfilled` or `order.fulfilled`.
+   `invoice.partial` or `invoice.paid` when step 7 applied anything,
+   `customer.updated` (part `balance`), then `order.partially_fulfilled` or
+   `order.fulfilled`.
 
 COGS posts in the same transaction as the invoice for every fulfilment,
 will-call and delivery alike. An order may now have many invoices; the
@@ -531,6 +615,18 @@ already has an order not cancelled is 409 blocker `already_converted`.
 Events: `quote.accepted`, then `order.created`. This lifts R1-15's refusal of
 lines whose pair is not 1 and 1: the order line carries the pair.
 
+The integration seam `/api/integration/quotes/{id}/accept-and-convert`
+(`integrations/handler.go`, today `CreateOrder` then `ConfirmOrder`) is
+frozen by ADR 0001 section 10, and its golden stays byte for byte. C2-2
+adapts it inside the handler: it calls the new convert as an in process
+caller, then the confirm transition. A confirm that lands `on_hold` answers
+today's 409 with today's body ("order <id> created from quote but could not
+be confirmed: ..." in the seam's own error shape), and the order stays held
+with its `order.hold` event: the seam keeps its 409, the product keeps the
+hold. An order that lands `backordered` reports `CONFIRMED` in the seam's
+`status`, the vocabulary its callers know. Any other new outcome maps to the
+nearest answer the seam gives today, and the integration golden is the test.
+
 | Quote line | Order line | Invoice line |
 |---|---|---|
 | `product_id` (null) | `product_id`, `line_type` `product` (a non stock line when null; a kit line exploded when the product is a kit) | `product_id`, `line_type` |
@@ -554,7 +650,7 @@ lines whose pair is not 1 and 1: the order line carries the pair.
 | `currency` | C2-2 | 4.2 | `currency` |
 | `delivery_type`, `picked_up_by TEXT NULL`, `delivery_id UUID NULL` | C2-2 | from the fulfilment | `delivery_type`, `picked_up_by`, `delivery_id` |
 | `ship_to_id`, `ship_to_snapshot`, `project_id` | C2-2 | from the order | `ship_to_id`, `ship_to`, `job_id` |
-| `tax_rate` widens to NUMERIC(9,6); `tax_exempt BOOLEAN NOT NULL DEFAULT FALSE` | C2-2 | section 3 | `tax_rate_percent`, `tax_exempt` |
+| `tax_rate` widens to NUMERIC(9,6) and becomes NULL-able; `tax_exempt BOOLEAN NOT NULL DEFAULT FALSE`; `tax_source` as orders; `subtotal`, `tax_amount`, `total_amount` widen to NUMERIC(12,2) | C2-2 | section 3 | `tax_rate_percent`, `tax_exempt`, `tax_source` |
 | `gl_entry_id UUID NULL FK gl_journal_entries` | C2-2 | the invoice entry | `gl_entry_id` |
 | `invoice_date DATE NOT NULL` | C2-2 | the branch's local date at create; backfill `created_at` in the branch time zone | `invoice_date` |
 | `origin TEXT NOT NULL DEFAULT 'ORDER' CHECK (ORDER, POS)` | C2-2 | | `origin` |
@@ -586,10 +682,16 @@ replaces it.
 Status after an application is derived by the AR core from `amount_open`
 and the live applications; it is never sent by a client. `void` is
 terminal. Voiding an invoice with live applications is 409 blocker
-`has_applications` (reverse them first). Voiding an invoice reverses its
-whole entry (section 8), returns its billed stock to on hand, reduces the
-order lines' `quantity_fulfilled`, re-runs allocation for those quantities,
-and derives the order status, all in one transaction.
+`has_applications` (reverse them first); until C2-4 builds applications, the
+same blocker fires when any payment is recorded against the invoice or any
+applied credit memo names it. Voiding an invoice that a credit memo not in
+`void` names is 409 blocker `has_credit_memos` (void the credit memos
+first): a posted restocking credit memo has already returned that stock, and
+the void would return it twice. Voiding an invoice locks its order row
+first (section 11), reverses its whole entry (section 8), returns its billed
+stock to on hand, reduces the order lines' `quantity_fulfilled`, re-runs
+allocation for those quantities, and derives the order status, all in one
+transaction.
 
 #### 6.3 Credit memos
 
@@ -598,7 +700,7 @@ goods returned or a price given back; a counter return produces one.
 
 | Column | Rule | Wire |
 |---|---|---|
-| `number` (gapless, `CM`), `revision`, `currency`, `branch_id`, `project_id`, `ship_to_id` | | same names, `job_id` for `project_id` |
+| `number` (gapless, `CM`, NULL while `DRAFT`, minted at post, unique when set), `revision`, `currency`, `branch_id`, `project_id`, `ship_to_id` | 4.1 | same names, `job_id` for `project_id` |
 | `invoice_id` (exists) | the invoice it credits, optional | `invoice_id` |
 | `pos_return_id UUID NULL` | set by a counter return | `pos_return_id` |
 | `reason_code TEXT NOT NULL CHECK (RETURN, PRICE_ADJUSTMENT, DAMAGE, OTHER)`, `reason` (exists) | | `reason_code`, `reason` |
@@ -619,7 +721,7 @@ price, pair and discount come from the invoice line.
 |---|---|---|---|
 | none | `draft` | `POST /api/v1/credit-memos` | `credit_memo.created` |
 | `draft` | `draft` | `PUT /api/v1/credit-memos/{id}` | `credit_memo.updated` |
-| `draft` | `open` | transition: posts it (section 8), restocks `restock` lines; roles `admin`, `owner`, `finance` | `credit_memo.posted` |
+| `draft` | `open` | transition: mints the number, posts it (section 8), restocks `restock` lines; roles `admin`, `owner`, `finance` | `credit_memo.posted` |
 | `open`, `partial` | `partial`, `applied` | applications or refunds use the credit | `credit_memo.partial`, `credit_memo.applied` |
 | `partial`, `applied` | `open`, `partial` | an application is reversed | `credit_memo.reopened` |
 | `draft` | `void` | transition | `credit_memo.voided` |
@@ -755,18 +857,25 @@ amount are left out; an entry whose legs are all zero is not written.
 |---|---|---|---|---|
 | Invoice (order fulfilment or counter sale) | the fulfilment or sale | `INVOICE` | `1020` total; `5010` cost | each revenue account its group's line totals (8.3); `2020` tax; `1030` cost |
 | Credit memo posted | the credit memo's `draft` to `open` (or the counter return) | `CREDIT_MEMO` | each revenue account its group's line totals; `2020` tax; `1030` restocked cost | `1020` total; `5010` restocked cost |
-| Payment received | the payment create | `PAYMENT` | `1010` amount | `1020` the part applied in the same act; `2200` the rest |
-| Unapplied cash applied | the application | `PAYMENT` | `2200` amount | `1020` amount |
-| Early pay discount taken | the application | `PAYMENT` | `4050` discount | `1020` discount |
+| Payment received | the payment create | `PAYMENT` | `1010` amount | `2200` amount, always the full amount, whether or not the same act applies it |
+| Payment applied (at receipt or later), one entry per application | the act that applies it | `PAYMENT` | `2200` amount | `1020` amount |
+| Early pay discount taken, one entry per discount application | the act that applies it | `PAYMENT` | `4050` discount | `1020` discount |
 | Credit memo applied to an invoice | the application | none: both sides are in `1020` | | |
 | Write off | the write off | `WRITE_OFF` | `5040` amount | `1020` amount |
-| Application reversed | the reversal | `REVERSAL` (reverses the application's entry) | the original's credits | the original's debits |
-| Payment voided | the void | first one `REVERSAL` per live application, then `PAYMENT` | `2200` amount | `1010` amount |
+| Application reversed | the reversal | `REVERSAL` of exactly that application's own entry (`reverses_entry_id`), which carries no other leg | the original's credits | the original's debits |
+| Payment voided | the void | first one `REVERSAL` per live application (and its discount applications), then `PAYMENT` | `2200` the `amount_unapplied` left after those reversals (the amount less refunds) | `1010` the same |
 | Unapplied cash refunded | the refund | `PAYMENT` | `2200` refund | `1010` refund |
 | Credit memo refunded | the refund | `CREDIT_MEMO` | `1020` refund | `1010` refund |
 | Invoice voided | the void | `REVERSAL`, `reverses_entry_id` the invoice entry, dated the void date | the original's credits | the original's debits |
 | Credit memo voided (from `open`) | the void | `REVERSAL` of the credit memo entry | | |
 | Till over or short | unchanged (`PostTillOverShort`) | `ADJUSTMENT` | | |
+
+Every application owns its entry: `ar_applications.gl_entry_id` names it,
+and nothing else is ever in it. So one application of a payment applied to
+two invoices reverses alone, the single reversal per entry the 077 index
+allows is always enough, and `2200` equals the sum of unapplied cash at
+every moment. The cost is one more entry per receipt. Credit memo
+applications carry no entry and reverse with none.
 
 Card receipts debit `1010` like cash in v1; a card clearing account is a
 chart of accounts follow up, as today's code notes.
@@ -782,8 +891,11 @@ revenue posts net. Component and text lines post nothing.
 
 - Unit cost of a stocked line (`product` with a product, `component`) is
   `products.average_unit_cost` read inside the posting transaction
-  (`costOf`, the one function cycle 4 replaces). A special order line with
-  `special_order_cost` uses that instead.
+  (`costOf`, the one function cycle 4 replaces). A special order line uses
+  the cost of the received purchase order line linked to it
+  (`purchase_order_lines.linked_so_line_id`) when one is received, else
+  `costOf`; never the `special_order_cost` estimate, which would leave a
+  residue in `1030` against what the receipt cost.
 - `cost = round_half_away(quantity x unit_cost)` per line, in cents, stored
   on the invoice line with `unit_cost`; the entry's COGS legs are the sum.
 - A unit cost of zero or NULL posts no COGS for that line and stores 0; the
@@ -792,8 +904,8 @@ revenue posts net. Component and text lines post nothing.
 - A credit memo line that restocks takes its source invoice line's
   `unit_cost` (the cost that left), or `costOf` when it names no invoice
   line, and its restock legs reverse COGS at that cost.
-- Kit lines, charge lines, text lines and non stock lines without a special
-  order cost carry no cost.
+- Kit lines, charge lines and text lines carry no cost; a non stock line
+  carries cost only through a linked received purchase order line.
 
 ### 9. Payments and the AR subledger
 
@@ -835,7 +947,8 @@ second deposit document. `customer_deposits` and
 | `amount NUMERIC(12,2) NOT NULL CHECK (amount > 0)` | |
 | `reason TEXT NULL` | required for `WRITE_OFF` |
 | `applied_on DATE NOT NULL`, `applied_by TEXT` | |
-| `gl_entry_id UUID NULL` | none for `CREDIT_MEMO` |
+| `act_id UUID NOT NULL` | groups the applications one request made; a `DISCOUNT` shares its `PAYMENT` application's act |
+| `gl_entry_id UUID NULL` | the application's own entry (8.2); none for `CREDIT_MEMO` |
 | `reversed_at`, `reversed_by`, `reversal_reason`, `reversal_gl_entry_id` | set once; a reversed application is never deleted |
 | `created_at` | |
 
@@ -852,6 +965,9 @@ Rules, enforced by the AR core under row locks:
   on or before the invoice's `discount_due_date`, and at most
   `round_half_away(invoice total x discount_percent / 100)` less earlier
   discounts (409 `discount_not_available`);
+- reversing a `PAYMENT` application also reverses the `DISCOUNT`
+  applications of the same act on the same invoice, in the same
+  transaction: a discount stands only beside the payment that earned it;
 - `WRITE_OFF` needs roles `admin`, `owner` or `finance`.
 
 Unapplied cash is a payment whose `amount_unapplied` is above zero. It is
@@ -915,6 +1031,17 @@ package imports `gl` and nothing of invoice, payment or order:
 `account.Service.PostTransaction` becomes unexported. A test in
 `internal/account` fails when any Go file outside the package contains SQL
 writing those tables or columns (the recipe's raw writer grep, made a gate).
+Two writers exist today outside it: `customer.Repository.UpdateBalance`
+(`customer/repository.go`, a raw `balance_due` delta), which C2-4 deletes
+with its callers, and the seed (`internal/app/seed`), which the gate
+allowlists by package path and which C2-4 changes to post its invoices and
+payments through the AR core, so seeded balances agree with seeded
+documents.
+
+Every act that moves `balance_due` writes `customer.updated` with data part
+`balance` (the new `balance_cents` and `currency`) among its events: the
+inputs document asks for balance changes on the feed, so credit decisions
+stop reading stale snapshots.
 `GET /api/v1/ar/reconciliation` (roles `admin`, `owner`, `finance`) reports
 every customer whose subledger, document open amounts and ledger disagree,
 per currency, so drift in rows written before cycle 2 is visible; nothing
@@ -928,7 +1055,7 @@ repairs it silently.
 | `POST /api/v1/payments/card` | none | gateway charge outside the transaction (as today), then the same record and apply | same |
 | `POST /api/v1/payments/{id}/applications` | `posted` | applies unapplied cash | `payment.applied`, per invoice `invoice.partial` or `invoice.paid` |
 | `POST /api/v1/ar/applications/{id}/reverse` | any live application | reverses one application of any kind, `reason` required | `payment.unapplied` or `credit_memo.reopened` or none for a write off, then `invoice.reopened` |
-| `POST /api/v1/payments/{id}/transitions {"to": "voided", "reason"}` | `posted` | reverses every live application, then the receipt (8.2); refused for `CARD` (use a refund) with 409 `card_payment`; roles `admin`, `owner`, `finance` | `payment.unapplied` per reversed application, `invoice.reopened` per invoice, `payment.voided` |
+| `POST /api/v1/payments/{id}/transitions {"to": "voided", "reason"}` | `posted` | reverses every live application (with its discounts), then posts the void entry for the `amount_unapplied` left, which is the amount less refunds (8.2); a payment with refunds can be voided, and the void covers only what was not refunded (the refunded money already left and its refund entry stands); refused for `CARD` (use a refund) with 409 `card_payment`; roles `admin`, `owner`, `finance` | `payment.unapplied` per reversed application, `invoice.reopened` per invoice, `customer.updated` (balance), `payment.voided` |
 | `POST /api/v1/payments/{id}/refunds` | `posted` | refunds from `amount_unapplied` only (409 `exceeds_unapplied`); a card refund goes through the gateway before the transaction, as today | `payment.refunded` |
 | `POST /api/v1/credit-memos/{id}/applications` | `open`, `partial` | applies credit | `credit_memo.partial` or `credit_memo.applied`, per invoice `invoice.partial` or `invoice.paid` |
 | `POST /api/v1/credit-memos/{id}/refunds` | `open`, `partial` | pays the credit out (cash or card refund) | `credit_memo.refunded`, then the status event |
@@ -963,10 +1090,20 @@ client's precondition is the revision of the document named in the path.
   `days_31_60_cents`, `days_61_90_cents`, `over_90_cents`,
   `unapplied_cents` (open credit memos plus unapplied cash, negative),
   `total_cents` (the buckets plus `unapplied_cents`).
-- An invoice's open amount as of a date is its total less the applications
-  with `applied_on <= as_of` not reversed by then (the reversal's date),
-  so aging can be run for a past date. Invoices created after `as_of` and
-  void invoices are excluded.
+- Every amount is taken as of `as_of`, so aging for a past date ties to
+  `1020` and `2200` on that date. Each reversal and void records its
+  business date (`ar_applications.reversed_on`, `voided_on` on invoices,
+  credit memos and payments, `refunded_on` on refunds) for this:
+  - an invoice counts when `invoice_date <= as_of` and it was not voided on
+    or before `as_of`; its open amount is its total less its applications
+    with `applied_on <= as_of` not reversed on or before `as_of`. An invoice
+    voided after `as_of` was open then and counts;
+  - a credit memo counts when posted with `memo_date <= as_of` and not voided
+    on or before `as_of`; its open credit is its total plus its applications
+    and refunds dated on or before `as_of` and not reversed by then;
+  - unapplied cash counts per payment with `received_on <= as_of` not voided
+    on or before `as_of`: its amount less its applications and refunds dated
+    on or before `as_of` and not reversed by then.
 - Credit memos and unapplied payments fall in the row of their own job and
   ship-to (a payment carries a job, never a ship-to; its row has a null
   ship-to).
@@ -989,22 +1126,32 @@ no row, no ledger line, no audit row and no event. Locks are taken in this
 order and never against it, which is what keeps the money paths free of
 deadlocks:
 
-1. the document named in the path (order, payment, credit memo, invoice,
-   counter sale), `SELECT ... FOR UPDATE`;
-2. other existing documents the act touches: the order's deposit payments,
-   then invoices and credit memos in id order;
-3. inventory rows, in `(product_id, inventory id)` order;
-4. the gapless counter row (minting the invoice or credit memo number);
-5. the customer row (the AR core's `balance_due` lock);
-6. the journal entry inserts (no row locks; the entry number is a
-   sequence);
-7. the outbox: every event of the act, written last (ADR 0003 section 2).
+The order is by kind, whatever document the path names:
 
-No code takes a gapless number after the customer row, and no code reads or
-writes through the pool while a transaction is open (the recipe's gated
-saturation test proves it for every act). Payment, application and void acts
-take the invoice rows they touch under step 2, so two payments racing for
-one invoice serialize and the second sees the first's `amount_open`.
+1. the order row or the counter sale row the act touches (an invoice void
+   locks its order here, before the invoice);
+2. payments, in id order;
+3. credit memos, in id order;
+4. invoices, in id order;
+5. `ar_applications` rows (an application reversal locks the owning payment
+   or credit memo under 2 or 3, or the invoice under 4 for a write off, then
+   the application, then the invoice it names under 4 if not yet held);
+6. inventory rows, in `(product_id, inventory id)` order;
+7. the customer row (the AR core's `balance_due` lock);
+8. the gapless counter row (minting the invoice or credit memo number);
+9. the journal entry inserts (no row locks; the entry number is a
+   sequence);
+10. the outbox: every event of the act, written last (ADR 0003 section 2).
+
+So a counter sale void (sale, its payments, its invoice) and a payment void
+(payment, its invoices) take payments before invoices alike and cannot
+deadlock; the back order worker (order, inventory) and a confirm (order,
+inventory) agree. No code takes the customer row after a gapless number,
+and no code reads or writes through the pool while a transaction is open
+(the recipe's gated saturation test proves it for every act). Payment,
+application and void acts take the invoice rows they touch under step 4, so
+two payments racing for one invoice serialize and the second sees the
+first's `amount_open`.
 
 The card gateway is called before the transaction and its result written
 inside it, as today; a database failure after a successful charge is
@@ -1024,7 +1171,7 @@ with `entity_type` the entity and data a small summary: `number`,
 | invoice | `invoice.created`, `invoice.partial`, `invoice.paid`, `invoice.written_off`, `invoice.reopened`, `invoice.voided` |
 | credit memo | `credit_memo.created`, `credit_memo.updated`, `credit_memo.posted`, `credit_memo.partial`, `credit_memo.applied`, `credit_memo.reopened`, `credit_memo.refunded`, `credit_memo.voided` |
 | payment | `payment.recorded`, `payment.applied`, `payment.unapplied`, `payment.refunded`, `payment.voided` |
-| customer | `customer.created`, `customer.updated` |
+| customer | `customer.created`, `customer.updated` (a header, ship-to, contact or terms edit; and `balance`, written by the AR core in every act that moves `balance_due`, 9.3) |
 | counter | `pos_transaction.completed`, `pos_transaction.voided`, `pos_return.completed`, `till.opened`, `till.closed` |
 | purchase order | `purchase_order.received` (written by C2-2, consumed by the order subscriber) |
 | quote | `quote.accepted` from the convert route (exists) |
@@ -1050,14 +1197,21 @@ exist (recipe step 3).
    `currency.enabled` = the default, when absent. `customers.currency
    CHAR(3) NULL` with the format CHECK.
 3. `payment_terms` with the seed and the legacy text values (7.2);
-   `customers.payment_terms_id`, backfill by code, default and NOT NULL.
+   `customers.payment_terms_id`, backfill by code, NOT NULL, with DEFAULT
+   `payment_terms_default_id()` (a SQL function returning the `NET30` row's
+   id) so raw writers (the portal's customer paths, the seed) keep
+   inserting; C2-1 updates the seed to name it.
 4. `customer_ship_tos`; backfill `MAIN` from `customers.address`.
 5. Contacts: `can_place_orders`, `order_limit`. Customers: `po_required`;
    `credit_limit` 0 to NULL and the default dropped; `balance_due` NULL to 0,
    NOT NULL DEFAULT 0.
-6. Jobs: copy `customer_jobs` into `projects`; `quotes.project_id =
-   COALESCE(project_id, job_id)`; drop `quotes.job_id`; drop
-   `customer_jobs`.
+6. Jobs: copy `customer_jobs` rows with a `customer_id` into `projects`
+   (`projects.customer_id` is NOT NULL); a row with a null `customer_id`
+   takes the customer of a quote that names it when exactly one customer's
+   quotes do, and is otherwise not copied, its quotes keeping their own
+   `project_id` (or none); the migration reports the count not copied (a
+   `RAISE NOTICE`). Then `quotes.project_id = COALESCE(project_id, job_id)`
+   where the job was copied; drop `quotes.job_id`; drop `customer_jobs`.
 7. Keyset index `customers (created_at DESC, id DESC)` and on ship-tos.
 
 **C2-2, `orders_wire_contract`.**
@@ -1068,6 +1222,10 @@ exist (recipe step 3).
    currency.default)`, NOT NULL. `gl_journal_entries.currency`: backfill
    the default, NOT NULL, DEFAULT dropped after (every insert names it).
    The journal `source` CHECK gains `CREDIT_MEMO` and `WRITE_OFF`.
+   `customer_transactions.type` from the enum to TEXT with the CHECK of 9.3
+   (all eight values), `currency` and `source_kind` added, the enum type
+   dropped: C2-3 already writes `CREDIT_MEMO` and `REVERSAL` rows, and a value
+   added to an enum cannot be used in the transaction that adds it.
 4. `orders.delivery_type`: backfill `DELIVERY` where a `deliveries` row or
    `scheduled_delivery_date` exists, else `PICKUP`; NOT NULL.
 5. Order header columns of 5.1; `subtotal = total_amount`, `tax_amount =
@@ -1075,7 +1233,7 @@ exist (recipe step 3).
    estimate); `total_amount` widened; status CHECK adds `BACKORDERED`.
 6. `locations.default_tax_rate` widened to NUMERIC(9,6); `products.is_kit`,
    `products.taxable`; `product_kit_components`; `charge_codes` with the
-   seed; account `4030`.
+   seed; account `4030`; `order_allocation_requests` (5.4).
 7. `order_lines`: the columns of 2.2. Backfill: `line_type` `PRODUCT`;
    `position` by `(created_at, id)` within the order; `description` and
    `sku` from the product; `uom` and `price_uom` from `uom_primary`; pair 1
@@ -1085,19 +1243,35 @@ exist (recipe step 3).
    order has a `quote_id`, else `PRICE_LIST`; `line_total =
    ROUND(quantity * unit_price, 2)` (the extension today's order total used);
    `taxable` true; `quantity_allocated = quantity` on `CONFIRMED` orders
-   (today's `ON_HOLD` is set before allocating, so it holds none),
-   `quantity_fulfilled = quantity` on `FULFILLED`; `quantity` widened to NUMERIC(12,4) and made NULL-able with
+   with no invoice (today's `ON_HOLD` is set before allocating, so it holds
+   none), `quantity_fulfilled = quantity` on `FULFILLED`;
+   `product_id` DROP NOT NULL with the per type CHECKs of 2.2; `quantity` widened to NUMERIC(12,4) and made NULL-able with
    the per type CHECKs; `special_order_cost` widened to NUMERIC(12,4).
 8. `invoice_lines`: the same columns, plus `order_line_id`, `unit_cost`,
-   `cost`, `revenue_account_code`; backfill as step 7 (`cost` 0,
-   `unit_cost` NULL: historic invoices posted no COGS and this does not
-   invent it). `invoices`: the C2-2 rows of 6.1; `invoice_date` from
+   `cost`, `revenue_account_code`, and `product_id` DROP NOT NULL with the
+   per type CHECKs; backfill as step 7 (`cost` 0, `unit_cost` NULL:
+   historic invoices posted no COGS and this does not invent it);
+   `order_line_id` linked by `(order_id, product_id)`, the earliest order
+   line first when one product appears twice.
+   Orders invoiced but never fulfilled: today the delivery completion
+   adapter invoices an order and posts AR without moving stock or status, so
+   a `CONFIRMED` order can already carry an invoice. Each such order is
+   migrated as fulfilled, so the next fulfilment cannot bill it again:
+   `quantity_fulfilled = quantity`, `quantity_allocated = 0`; the
+   allocation it held is consumed in `inventory` as `FulfillOrder` would
+   have (`allocated` and `quantity` both reduced by the line's quantity at
+   the branch's rows, the one with the most allocation first); status
+   `FULFILLED`; the migration reports the count (a `RAISE NOTICE`). No
+   journal entry is written: COGS for those orders was never posted, and the
+   migration does not invent it. `invoices`: the C2-2 rows of 6.1; `invoice_date` from
    `created_at` in the branch time zone; `currency` as step 3;
    `delivery_type` from the order or `PICKUP`; `origin` `ORDER` where
    `order_id` is set, else `POS` (counter account charges are the only
    invoices without an order today).
-9. `order_lines.revenue_account_code` (charge lines); the keyset index
-   `orders (created_at DESC, id DESC)`.
+9. `order_lines.revenue_account_code` (charge lines); `tax_source` on
+   orders and invoices (backfill `BRANCH_RATE`, or `EXEMPT` where the tax is
+   zero on a taxable subtotal); the keyset index `orders (created_at DESC,
+   id DESC)`.
 
 **C2-3, `invoices_wire_contract`.**
 1. `invoices.created_at`, `credit_memos.created_at`: fill, NOT NULL;
@@ -1110,7 +1284,7 @@ exist (recipe step 3).
    sum above zero, else `UNPAID`; the new CHECK. `due_date` to DATE.
    `payment_terms_id` backfilled from the text, then `discount_due_date`
    and `discount_percent` from the terms; drop `invoices.payment_terms` and
-   `customers.payment_terms`. Void columns.
+   `customers.payment_terms`. Void columns, `voided_on DATE` included (10).
 5. `credit_memos`: the columns of 6.3. Backfill: `PENDING` to `DRAFT`;
    `VOID` stays; `APPLIED` to `APPLIED` when `invoice_id` is set (C2-4
    writes its application) and to `OPEN` when not (the old apply already
@@ -1118,34 +1292,47 @@ exist (recipe step 3).
    agreeing); `total_amount = -amount`; one `charge` line per memo (code
    `ADJUST`, quantity -1 `EA`, unit price the amount, untaxed);
    `currency`, `branch_id` from the invoice or the customer's primary
-   branch; `number` `CM-` in `(created_at, id)` order through the counter.
+   branch; `number` `CM-` in `(created_at, id)` order through the counter
+   for every memo not in `DRAFT` (drafts stay unnumbered, 4.1).
 6. `credit_memo_lines`; keyset indexes on both tables.
 
 **C2-4, `payments_and_ar`.**
 1. `payments.created_at`: fill, NOT NULL; `customer_id` backfilled from the
    invoice, NOT NULL; `invoice_id` DROP NOT NULL; `revision`, `status`,
-   `currency`, `branch_id`, `received_on`, `order_id`, `project_id`,
-   `amount_unapplied`, `gl_entry_id`; the method CHECK; number sequence and
-   backfill.
-2. `ar_applications`. Backfill, per invoice in payment `(created_at, id)`
-   order: each payment applies `min(amount, invoice total less earlier
-   applications)`; any excess becomes the payment's `amount_unapplied`. Each
-   `APPLIED` credit memo with an `invoice_id` applies its amount the same way.
+   `currency`, `branch_id`, `received_on`, `voided_on`, `order_id`,
+   `project_id`, `amount_unapplied`, `gl_entry_id`; the method CHECK; number
+   sequence and backfill.
+2. `ar_applications` (with `act_id`, `reversed_on`). Backfill, per invoice in
+   payment `(created_at, id)` order: each payment applies `min(amount,
+   invoice total less earlier applications)`, its own act, `gl_entry_id`
+   null (legacy payments posted no entry). Legacy payments were never capped
+   and lowered `balance_due` by their full amount, so their excess is AR
+   credit, not cash in `2200`: it becomes an `OPEN` credit memo (reason
+   `migrated payment excess`, no entry), and every legacy payment ends with
+   `amount_unapplied` 0. Each `APPLIED` credit memo with an `invoice_id`
+   applies its amount the same way, capped the same, any excess left as its
+   own open credit.
+   Legacy refunds (`payment_refunds` rows, posted to the subledger as a
+   positive `PAYMENT` row with the invoice untouched): each refund first
+   consumes its payment's excess credit memo (the memo's open credit
+   shrinks, recorded as a refund of the memo), and any rest reverses that
+   much of the payment's application (`reversed_on` the refund's date),
+   reopening the invoice. `payment_refunds` gains `refunded_on`.
 3. Deposits: each `customer_deposits` row becomes a payment (same id,
    method, amount, customer, branch, reference, note, `gl_entry_id`,
    `order_id` null) numbered after the payments; each
    `customer_deposit_applications` row with an `invoice_id` becomes a
-   `PAYMENT` application keeping its `gl_entry_id`; rows without one are
-   applied to the customer's open invoices oldest due first, and any amount
-   left becomes an `OPEN` credit memo (reason `migrated deposit
-   application`, no entry: the ledger already moved). A `REFUNDED` deposit
+   `PAYMENT` application keeping its `gl_entry_id`, capped at the invoice's
+   open amount like a payment, its excess going to an `OPEN` credit memo;
+   rows without one are applied to the customer's open invoices oldest due
+   first, and any amount left becomes an `OPEN` credit memo (reason
+   `migrated deposit application`, no entry: the ledger already moved). A `REFUNDED` deposit
    gets a `payment_refunds` row for its unapplied rest. Then
    `amount_unapplied` is computed; the two tables are renamed `*_legacy`.
 4. `invoices.amount_open` and `credit_memos.amount_open` computed from the
    applications; invoice and credit memo statuses re-derived.
-5. `customer_transactions.type` from the enum to TEXT with the CHECK;
-   `currency`, `source_kind`; the enum type dropped.
-6. `payment_refunds` columns; accounts `4050`, `5040`.
+5. `payment_refunds` columns; accounts `4050`, `5040`. (The subledger type
+   change moved to C2-2's step 3.)
 
 No migration writes a journal entry or a subledger row: history moves as
 data, and the reconciliation read (9.3) shows where it never agreed.
@@ -1157,11 +1344,45 @@ data, and the reconciliation read (9.3) shows where it never agreed.
    NUMERIC(12,4) in place; `uom` stays the sale unit). `pos_tenders`:
    `payment_id FK payments`.
 3. `pos_returns`: `number` (`RTN`), `credit_memo_id FK credit_memos`;
-   `pos_return_lines` widened like the lines.
+   `pos_return_lines` widened like the lines. Each historic return with
+   `refund_method` `ACCOUNT` lowered AR (its GL entry and subledger row
+   exist) with no document: it is migrated as an `OPEN` credit memo (reason
+   `migrated counter account return`, its `gl_entry_id` the return's, no new
+   entry), linked through `pos_returns.credit_memo_id`.
+   `pos_line_items.product_id` DROP NOT NULL with the per type CHECKs.
 4. The walk-in customer: a customers row (`account_number` `WALK-IN`, name
    `Walk-in`) and `system_settings` `pos.walk_in_customer_id`, when absent.
 
 ### 14. The items
+
+#### 14.1 The inputs document's order, invoice and payment requirements
+
+The refactor inputs (`principal/infra/docs/inputs/gable-refactor-inputs.md`,
+read for its requirements only) name these for the modules of this cycle.
+Each item's tests name the requirement they prove by its tag.
+
+| Tag | Requirement (inputs section) | Proved by |
+|---|---|---|
+| IN-1.1 | one `status` field, lowercase, on orders, invoices and payments (1, row 1) | C2-2 orders, C2-3 invoices and credit memos, C2-4 payments, C2-5 counter sales |
+| IN-1.2 | money as integer minor units with a suffix, never floats (1, row 2) | each item's create and read wire tests; C2-5's tenders in cents |
+| IN-1.3 | human readable document numbers on create and every read (1, row 3) | C2-2 `SO`, C2-3 `IN` and `CM`, C2-4 `PAY`, C2-5 `POS` and `RTN` |
+| IN-1.4 | one list envelope, never `null` for an empty list (1, row 4; 3.3) | every list route of every item: an empty page is `[]` in the bytes, the cursor walks every row once |
+| IN-1.8 | invoice detail embeds its lines (1, row 8) | C2-3: `GET /invoices/{id}` carries every line with id, description, quantity, unit price and line total |
+| IN-2.1 | `order.confirmed`, `order.cancelled`, `invoice.created`, `payment.recorded` (2) | C2-2, C2-3, C2-4: each read back from `GET /api/v1/events` in a golden |
+| IN-2.2 | `order.hold`, `order.hold_released` for the credit holds queue (2) | C2-2: an over limit confirm and its release, both events in order |
+| IN-2.3 | `invoice.paid`, `invoice.partial` for payment state changes (2; 3.8) | C2-4 (C2-2's deposit apply path too once C2-4 lands): a partial then a closing application |
+| IN-2.4 | `purchase_order.received` (2) | C2-2: the receive writes it and it drives the back order release |
+| IN-2.5 | `customer.updated` on credit limit and balance changes (2) | C2-1 (credit limit edit), C2-4 (every balance move, part `balance`) |
+| IN-3.2 | supported filters filter, unknown ones are a 400 (3.2) | every list route's filter tests, `overdue` and `unapplied` included |
+| IN-3.7 | one error envelope with real status codes (3.7) | every refusal named in this record, as 400, 409 with its blocker, 428 or 503 |
+| IN-3.8 | invoice status transitions readable, not only side effects (3.8) | C2-3 and C2-4: the invoice's `status` and `open_cents` on every read, plus IN-2.3 |
+| IN-5 | stable record routes for orders, invoices and customers (5) | C2-2, C2-3, C2-1: `/api/v1/orders/{id}`, `/api/v1/invoices/{id}`, `/api/v1/accounts/{id}` keep their paths |
+
+Batch receipts (4.5) belong to cycle 5 (section 1). The inputs' "emit after
+commit" is met by ADR 0003: the event row commits with the act and is
+delivered after the commit.
+
+#### 14.2 Each item
 
 Every item follows the recipe end to end (wire tests first, migration,
 model, parse, repository, service, handler, contract fragment, goldens,
@@ -1174,23 +1395,28 @@ independent reviews. Every new route is on the contract from birth.
 
 **C2-1: customers, contacts, ship-tos, payment terms (24 to 40).**
 Builds 7.1 to 7.4 and the C2-1 migration; the currency settings and their
-one-code guard. Tests: the ship-to and terms CRUD on the wire; a terms
+one-code guard. Inputs proved: IN-1.4, IN-2.5 (credit limit), IN-3.2,
+IN-3.7, IN-5. Tests: the ship-to and terms CRUD on the wire; a terms
 `DAY_OF_MONTH` due date across a short month; the customer currency change
 refused with an open order; credit limit null versus zero on the wire; the
-jobs merge (a quote's `job_id` reads the same job after the migration); the
+jobs merge (a quote's `job_id` reads the same job after the migration, and
+a job with no customer is reported and not copied); the
 contact authority and PO flags stored and read; `customer.updated` per
 part.
 
 **C2-2: orders (60 to 100).** Builds sections 2, 3 and 5, the order half of
 6.1, 8.2's invoice row with its COGS, `salesdoc`, `ExtendDiscounted`,
 `gl.PostEntry`, the inventory `Qty` functions, the receive event and its
-subscriber, the delivery adapter change and the pickup refusal, charge codes
-and kit components, and lifts R1-15's convert refusal (5.8). It updates the
+subscriber, the allocation request queue and its worker job, the delivery
+adapter change and the pickup refusal, the integration seam's adapter
+(5.8), the tax provider path behind the resolver, charge codes and kit
+components, and lifts R1-15's convert refusal (5.8). It updates the
 raw writers of `order_lines.price_each` (the portal's order create in
 `portal/repository.go`, the seed and `seed/dispatch_day.go`). Until C2-4 the
 invoice module posts the fulfilment's entry through `gl.PostEntry` and the
 subledger through today's `PostTransaction`; C2-4 moves both calls into the
-AR core. Tests:
+AR core. Inputs proved: IN-1.1, IN-1.2, IN-1.3, IN-1.4, IN-2.1 (order
+events), IN-2.2, IN-2.4, IN-3.2, IN-3.7, IN-5. Tests:
 - each line type's extension, tax and COGS treatment, one wire test per row
   of 2.1; a percent and an amount discount; an amount discount prorated
   across two partial invoices summing exactly;
@@ -1202,8 +1428,10 @@ AR core. Tests:
 - a kit explodes, allocates in whole kits, bills whole kits, and posts COGS
   from its components only;
 - confirm with short stock lands `backordered`; a purchase order receipt
-  releases it through the drain (oldest first); the replay of the receive
-  event allocates nothing twice;
+  queues it and the worker releases it (oldest first); the replay of the
+  receive event allocates nothing twice; a receipt replayed while a confirm
+  on the same order runs ends without deadlock, and the drain's pass holds
+  no order or inventory lock (the subscriber only inserts requests);
 - the credit hold lands `on_hold` with `order.hold` and the 200; the release
   needs the role; every forbidden transition is 409;
 - **exit line: a will-call order posts COGS to the GL**: a `pickup` order
@@ -1213,8 +1441,21 @@ AR core. Tests:
   rolls the entry back with it);
 - a delivery completion fulfils the remainder and never creates a second
   invoice for billed quantity;
+- the migration on a seeded order that delivery completion invoiced but
+  never fulfilled: it lands `FULFILLED` with its allocation consumed, its
+  invoice lines linked, the count reported, and a fulfilment after the
+  migration bills nothing;
+- a non stock line bills on a fulfilment with no `lines` and is checked
+  against its unbilled quantity when named;
+- the integration seam: its golden unchanged, an over limit
+  accept-and-convert still answers its 409 while the order holds with
+  `order.hold`, a short order reports `CONFIRMED`;
+- the credit check reads documents, not `balance_due` (a seeded stale
+  `balance_due` does not hold an order whose open invoices are within the
+  limit);
 - tax: ship-to rate on delivery, branch on pickup, exemption, the refusal
-  without a configured rate, a 0.08875 rate stored exactly;
+  without a configured rate, a 0.08875 rate stored exactly, the provider path
+  answering `tax_source` `provider` and a provider failure as 503;
 - concurrency: two orders confirming against the same two products in
   opposite line order finish without deadlock; three fulfilments of one
   order at pool size 4 bill each allocated unit once.
@@ -1225,11 +1466,19 @@ except the AR acts, 6.3's documents and transitions, gapless numbering
 stock and order effects, the credit memo post with restock and its entry, the
 jobs on invoices, and the invoice wire with lines. Its postings take the
 same interim path as C2-2's until C2-4, and credit memo statuses past `open`
-arrive with C2-4's applications. Tests: a rolled back
+arrive with C2-4's applications. Inputs proved: IN-1.1, IN-1.2, IN-1.3,
+IN-1.4, IN-1.8, IN-2.1 (`invoice.created`), IN-3.2, IN-3.7, IN-3.8, IN-5.
+Tests: a rolled back
 invoice create leaves no gap (the next invoice takes the number); three
 concurrent fulfilments get consecutive numbers; the seed's raw insert
 numbers through the counter; an invoice void reverses its entry, returns
-stock and re-derives the order; void refused with live applications;
+stock and re-derives the order; void refused while a payment is recorded
+against the invoice or an applied credit memo names it (C2-4 turns this into
+live applications); void refused while a credit memo names it
+(`has_credit_memos`); a credit memo draft carries no number and takes the
+next number at post, a voided draft consuming none; two partial credit memos
+never credit more tax than the invoice charged, the last taking the
+remainder;
 `OVERDUE` gone from the wire and the `overdue` filter working; a credit memo
 cannot return more than was billed; a restocking credit memo reverses COGS at
 the original cost; the portal and print readers still read invoices.
@@ -1238,17 +1487,28 @@ the original cost; the portal and print readers still read invoices.
 8.2's payment and AR rows, the AR core as single writer and its gate test,
 the deposit merge, the write off and discount, the reconciliation read, the
 GL report grouping by currency (and lifts C2-1's one-currency guard), and
-moves C2-2's and C2-3's postings into the AR core. Tests:
+moves C2-2's and C2-3's postings into the AR core, adds the deposit
+application at fulfilment (5.6 step 7), `deposit_unapplied_cents` and the
+unapplied term of the credit check (5.3), deletes
+`customer.UpdateBalance`, and changes the seed to post through the AR core.
+Inputs proved: IN-1.1, IN-1.2, IN-1.3, IN-1.4, IN-2.1 (`payment.recorded`),
+IN-2.3, IN-2.5 (balance), IN-3.2, IN-3.7, IN-3.8. Tests:
 - **exit line: an unapplied payment exists without an invoice and applies
   later**: a payment with no applications posts `1010` / `2200`, shows
-  `unapplied_cents`; later applied across two invoices partly, posting
-  `2200` / `1020` and the subledger rows, the invoices `partial` and `paid`;
+  `unapplied_cents`; later applied across two invoices partly, each
+  application posting its own `2200` / `1020` entry and subledger row, the
+  invoices `partial` and `paid`; a payment applied to two invoices at
+  receipt has one application reversed alone, the other and the cash entry
+  untouched;
 - **exit line: AR aging splits by job and ship-to**: invoices on two jobs
   and two ship-tos of one customer age into separate rows under each
-  `group_by`, unapplied cash on its job's row, and the `as_of` aging of a
-  past date ignores later applications;
-- payment void reopens its invoices and reverses the ledger; a card payment
-  void refused; a refund limited to the unapplied amount;
+  `group_by`, unapplied cash on its job's row; the `as_of` aging of a past
+  date ignores later applications, counts an invoice voided after that date,
+  and ties to the `1020` and `2200` balances on that date;
+- payment void reopens its invoices and reverses the ledger; a void after a
+  partial refund posts only the unrefunded amount; a card payment void
+  refused; a refund limited to the unapplied amount; reversing a payment
+  application reverses the discount taken in the same act;
 - write off posts `5040` / `1020` and closes the invoice `written_off`; its
   reversal reopens it;
 - cross currency application refused; over application refused;
@@ -1256,24 +1516,40 @@ moves C2-2's and C2-3's postings into the AR core. Tests:
 - concurrency: three payments applying to one invoice at pool size 4 never
   over apply; a payment void racing an application ends consistent;
 - the migration: deposits and their applications land as payments and
-  applications with the ledger untouched.
+  applications with the ledger untouched; a legacy overpayment lands as an
+  open credit memo, not unapplied cash; a legacy refund consumes that credit
+  first, then reopens the invoice; an uncapped deposit application is capped
+  with its excess as open credit; after the migration the reconciliation
+  read lists exactly the seeded drift it was given.
 
 **C2-5: POS and till (30 to 50).** Builds the counter on the recipe: lines in
 the shared shape (product, charge and text lines at the counter, typed
 override and discount with audit, kits), cents tenders, the walk-in customer,
 and a completed sale as one transaction: stock out, an invoice (`origin`
 `POS`, `pickup`) posted with tax and COGS, each cash, check or card tender a
-payment applied to it (the tendered amount less change), an `ACCOUNT` tender
-left open on the invoice (refused for the walk-in customer, and subject to the
-credit check). The post commit, best effort GL calls are removed. A void of a
-completed sale, while its till session is open, is the invoice void and the
-payment voids in one transaction; after the session closes it is a return. A
-return is a credit memo created and posted in one act with its restock lines,
-refunded in cash or card or left as account credit. Tests: a split tender sale
-posts one invoice entry and one receipt per tender; the till's expected cash
-equals the cash payments less change; a return restocks and reverses COGS;
-the offline sync completes each sale through the same path; a sale whose
-event write fails leaves no invoice, payment, stock move or entry.
+payment applied to it (stored net: the tendered amount less change, so the
+payment is the money kept), an `ACCOUNT` tender left open on the invoice
+(refused for the walk-in customer, and subject to the credit check). The post
+commit, best effort GL calls are removed. A void of a completed sale, while
+its till session is open, is one transaction in section 11's order (the sale,
+its payments, its invoice): each cash or check payment voided; each card
+payment, whose gateway void or refund is made before the transaction (as
+every gateway call is), has its application reversed and the amount recorded
+as a refund from its unapplied cash; then the invoice void. After the session
+closes it is a return. A return is a credit memo created and posted in one act
+with its restock lines, refunded in cash or card or left as account credit.
+Inputs proved: IN-1.1, IN-1.2, IN-1.3, IN-1.4, IN-3.2, IN-3.7. Tests: a split
+tender sale posts one invoice entry, one receipt per tender and one
+application entry per tender; the till's expected cash equals the sum of the
+session's cash payments (already net of change; change is never subtracted
+a second time) plus the opening float less cash refunds; a void of a sale with
+a card tender refunds through the gateway and leaves the ledger at zero for
+the sale; a return restocks and reverses COGS; the offline sync completes
+each sale through the same path; a sale whose event write fails leaves no
+invoice, payment, stock move or entry; contention: three registers completing
+sales at pool size 4 get consecutive invoice numbers with no gap and no
+deadlock against a payment for the walk-in customer; the migration turns each
+historic `ACCOUNT` return into an open credit memo.
 
 The sizes are dev hour equivalents, 202 to 334 together, against the plan's
 194 to 324 for R2-1 and R2-2.
@@ -1304,6 +1580,11 @@ The sizes are dev hour equivalents, 202 to 334 together, against the plan's
 | Payment terms are free text; a credit limit of 0 means no limit | migrations 018, 003 | C2-1 |
 | Journal entries take the server's date, not the branch's business date | every `gl.Sync*` | C2-2 (invoice), C2-4 (the rest) |
 | Deposits are a second prepayment document beside payments | `internal/deposit` | C2-4 |
+| A raw `balance_due` writer outside the subledger | `customer.Repository.UpdateBalance` (`customer/repository.go`) | C2-4 deletes it; the single writer gate allowlists only the seed package |
+| The seed inserts invoices and payments by raw SQL with arbitrary `balance_due` values | `internal/app/seed` | C2-4 posts the seed's documents through the AR core |
+| Delivery completion invoices an order without fulfilling it | `invoiceServiceAdapter.CreateFromOrder` in `serve.go` | C2-2 (the adapter calls fulfilment; the migration marks such orders fulfilled) |
+| A counter return refunded to account lowers AR with no document | `pos.Service` returns, `PostAccountReturnToLedger` | C2-5 (credit memos; the migration gives history its credit memo) |
+| A legacy payment may exceed its invoice; a refund leaves its invoice untouched | `payment.Service` | C2-4 (capped applications; the migration's excess and refund rules) |
 | `AGENTS.md` tells agents to read the AR balance live from open invoice totals and to treat `customers.balance_due` as secondary, and describes the posting of today | `AGENTS.md`, "AR balance" and "Money convention" | C2-4 rewrites both sections to this record: the subledger is the balance, written only by the AR core, and agrees with documents and ledger by the invariants of 9.3 |
 | `AGENTS.md` backlog item B proposes a will-call ticket table and a `READY_FOR_PICKUP` status | `AGENTS.md`, Tier 1 backlog | C2-2 marks it superseded by section 5.5 |
 
@@ -1339,8 +1620,10 @@ puts customer credit balances inside receivables and needs a period end
 reclassification. Holding the unapplied part in `2200` and moving it to `1020`
 on application is how today's deposit code already books prepayments, keeps
 `1020` an honest receivable, and makes a deposit a payment with an order
-rather than a second document. Adopted: `2200`. The cost is one entry per
-later application.
+rather than a second document. Adopted: `2200`, with every receipt posted
+whole to `2200` and every application, at receipt or later, in its own
+entry, so each application reverses alone. The cost is one more entry per
+application.
 
 **Deposits.** Keeping `customer_deposits` as its own document beside
 unapplied cash gives two names to one fact (money held for a customer before
@@ -1376,13 +1659,19 @@ own entry, the one moment stock leaves and revenue is earned.
 leaving the order in draft loses the fact that a person tried to release it
 and makes the hold invisible to the queue that works holds. Adopted: the
 confirm commits the hold with its event and answers 200 with the held order.
+The frozen integration seam keeps its 409 for the same outcome (5.8).
 
 **Back order release.** Allocating inside the purchase order receive
 transaction couples receiving to every open order and takes inventory locks
 before order locks, the opposite of confirm's order, inviting deadlock. A
 desk only button leaves stock idle until someone presses it. Adopted: the
-receive writes an event, an order subscriber allocates in its own
-transaction in confirm's lock order, and the desk keeps a retry route.
+receive writes an event, the event's drain subscriber only queues one
+allocation request per affected order, and a worker job serves each request
+in its own transaction in confirm's lock order, writing its event last; the
+desk keeps a retry route. Allocating inside the drain subscriber itself was
+the first draft and was rejected in review: the drain holds every
+savepoint's locks to the end of its pass, so the handler would hold the
+outbox lock while waiting on order rows, against ADR 0003 section 2.
 
 **Quote conversion.** Keeping the payload and letting the client post it
 leaves a window where the quote is accepted and no order exists, and lets a
