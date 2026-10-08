@@ -245,7 +245,7 @@ Every externally addressable document entity (quote, order, invoice,
 purchase order, and the rest as they convert) carries a human-readable
 document number minted from a database sequence dedicated to that entity,
 formatted `<PREFIX>-<zero padded>`, for example `Q-000123`. Prefixes are one
-or two uppercase letters assigned per entity when the module converts
+to four uppercase letters assigned per entity when the module converts
 (quotes `Q` first). The default pad width is 6; a sequence that outgrows the
 width simply produces longer numbers (`Q-1000000`), never truncation or
 wraparound. Numbers are minted by `nextval` through the caller's own
