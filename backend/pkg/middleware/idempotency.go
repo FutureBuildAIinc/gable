@@ -155,7 +155,7 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 			}
 			fingerprint := requestFingerprint(r.Method, r.URL.Path, canonicalQuery(r.URL.Query()), body)
 
-			claimed, holder, err := store.acquire(r.Context(), principal, clientKey, fingerprint,
+			claimed, claimID, holder, err := store.acquire(r.Context(), principal, clientKey, fingerprint,
 				time.Now().Add(idempotencyClaimLease))
 			if err != nil {
 				// Fail open: idempotency is a safety layer, not an
@@ -192,7 +192,7 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 					// The handler panicked; the Recovery middleware above us
 					// answers 500. Release so a retry can run, using a
 					// context the cancelled request cannot tear down.
-					if rerr := store.release(context.WithoutCancel(r.Context()), principal, clientKey); rerr != nil {
+					if rerr := store.release(context.WithoutCancel(r.Context()), principal, clientKey, claimID); rerr != nil {
 						logIdempotencyError("release after panic", clientKey, rerr)
 					}
 				}
@@ -205,7 +205,7 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 			// complete would leave the claim 409ing until its lease lapses.
 			bctx := context.WithoutCancel(r.Context())
 			if crw.status >= 200 && crw.status < 400 {
-				if cerr := store.complete(bctx, principal, clientKey, crw.status,
+				if cerr := store.complete(bctx, principal, clientKey, claimID, crw.status,
 					crw.Header().Get("Content-Type"), crw.Header().Get("Location"), crw.body.Bytes(),
 					time.Now().Add(idempotencyRetention)); cerr != nil {
 					logIdempotencyError("store response", clientKey, cerr)
@@ -214,7 +214,7 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 				// A 4xx is validation the client must fix and a 5xx a server
 				// fault: neither is a stored outcome, and both leave the key
 				// claimable again so the client can retry.
-				if rerr := store.release(bctx, principal, clientKey); rerr != nil {
+				if rerr := store.release(bctx, principal, clientKey, claimID); rerr != nil {
 					logIdempotencyError("release", clientKey, rerr)
 				}
 			}

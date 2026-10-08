@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -63,45 +64,51 @@ type idempotencyStore struct {
 }
 
 // claim inserts an in_progress row for (principal, key), or takes the row
-// over when its lease has lapsed. claimed=true means the caller owns the
-// claim and must run the handler, then complete or release it. claimed=false
-// comes with the current holder's row so the caller can answer 409, 422 or a
-// replay; a zero holder means the holder released between our conflict and
-// our read (errIdempotencyClaimRaced wrapped in the race sentinel contract
-// via acquire).
-func (s *idempotencyStore) claim(ctx context.Context, principal, key, fingerprint string, leaseUntil time.Time) (bool, idempotencyHolder, error) {
-	var state string
+// over when its lease has lapsed. Each claim carries a freshly minted UUID
+// (claim_id): it identifies the holder that owns the row right now, and
+// complete and release must match on it so a lapsed holder cannot touch a
+// successor's claim. claimed=true means the caller owns the claim under the
+// returned claimID and must run the handler, then complete or release it.
+// claimed=false comes with the current holder's row so the caller can answer
+// 409, 422 or a replay; a zero holder means the holder released between our
+// conflict and our read (errIdempotencyClaimRaced wrapped in the race
+// sentinel contract via acquire).
+func (s *idempotencyStore) claim(ctx context.Context, principal, key, fingerprint string, leaseUntil time.Time) (bool, string, idempotencyHolder, error) {
+	claimID := uuid.NewString()
+	var returnedID string
 	err := s.db.Pool.QueryRow(ctx, `
-		INSERT INTO idempotency_keys (principal, key, fingerprint, state, expires_at)
-		VALUES ($1, $2, $3, 'in_progress', $4)
+		INSERT INTO idempotency_keys (principal, key, fingerprint, claim_id, state, expires_at)
+		VALUES ($1, $2, $3, $4, 'in_progress', $5)
 		ON CONFLICT (principal, key) DO UPDATE
 			SET fingerprint  = EXCLUDED.fingerprint,
+			    claim_id     = EXCLUDED.claim_id,
 			    state        = 'in_progress',
 			    status_code  = NULL,
 			    content_type = NULL,
+			    location     = NULL,
 			    body         = NULL,
 			    created_at   = NOW(),
 			    expires_at   = EXCLUDED.expires_at
 			WHERE idempotency_keys.expires_at < NOW()
-		RETURNING state`,
-		principal, key, fingerprint, leaseUntil).Scan(&state)
+		RETURNING claim_id`,
+		principal, key, fingerprint, claimID, leaseUntil).Scan(&returnedID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The key is held by a live row. Read it to decide what to answer.
 		// This runs after the claim statement committed, so it sees the
 		// holder's state as of now, not as of some earlier snapshot.
 		holder, lerr := s.lookup(ctx, principal, key)
 		if lerr != nil {
-			return false, idempotencyHolder{}, fmt.Errorf("read idempotency holder for key %q: %w", key, lerr)
+			return false, "", idempotencyHolder{}, fmt.Errorf("read idempotency holder for key %q: %w", key, lerr)
 		}
 		if holder.state == "" {
-			return false, idempotencyHolder{}, errIdempotencyClaimRaced
+			return false, "", idempotencyHolder{}, errIdempotencyClaimRaced
 		}
-		return false, holder, nil
+		return false, "", holder, nil
 	}
 	if err != nil {
-		return false, idempotencyHolder{}, fmt.Errorf("claim idempotency key %q: %w", key, err)
+		return false, "", idempotencyHolder{}, fmt.Errorf("claim idempotency key %q: %w", key, err)
 	}
-	return true, idempotencyHolder{state: state}, nil
+	return true, returnedID, idempotencyHolder{state: idempotencyStateInProgress}, nil
 }
 
 // lookup reads the current row for a key we could not claim. The zero holder
@@ -123,24 +130,27 @@ func (s *idempotencyStore) lookup(ctx context.Context, principal, key string) (i
 }
 
 // acquire claims the key, retrying the rare race where the holder released
-// between our conflict and our read.
-func (s *idempotencyStore) acquire(ctx context.Context, principal, key, fingerprint string, leaseUntil time.Time) (bool, idempotencyHolder, error) {
+// between our conflict and our read. On success it returns the claim's token,
+// which the caller must hand back to complete and release.
+func (s *idempotencyStore) acquire(ctx context.Context, principal, key, fingerprint string, leaseUntil time.Time) (bool, string, idempotencyHolder, error) {
 	var claimed bool
+	var claimID string
 	var holder idempotencyHolder
 	var err error
 	for attempt := 0; attempt < idempotencyClaimAttempts; attempt++ {
-		claimed, holder, err = s.claim(ctx, principal, key, fingerprint, leaseUntil)
+		claimed, claimID, holder, err = s.claim(ctx, principal, key, fingerprint, leaseUntil)
 		if !errors.Is(err, errIdempotencyClaimRaced) {
-			return claimed, holder, err
+			return claimed, claimID, holder, err
 		}
 	}
-	return false, idempotencyHolder{}, fmt.Errorf("idempotency key %q kept racing a release after %d attempts", key, idempotencyClaimAttempts)
+	return false, "", idempotencyHolder{}, fmt.Errorf("idempotency key %q kept racing a release after %d attempts", key, idempotencyClaimAttempts)
 }
 
-// complete stores a 2xx/3xx outcome for replay. Only an in_progress row is
-// updated: a claim whose lease lapsed and was taken over must not have an
-// older handler's response written onto the new claimant's row.
-func (s *idempotencyStore) complete(ctx context.Context, principal, key string, status int, contentType, location string, body []byte, retainUntil time.Time) error {
+// complete stores a 2xx/3xx outcome for replay. Only the row still held under
+// the given claim token is updated: a claim whose lease lapsed and was taken
+// over must not have an older handler's response written onto the new
+// claimant's row.
+func (s *idempotencyStore) complete(ctx context.Context, principal, key, claimID string, status int, contentType, location string, body []byte, retainUntil time.Time) error {
 	_, err := s.db.Pool.Exec(ctx, `
 		UPDATE idempotency_keys
 		SET state = $3, status_code = $4, content_type = $5, location = $6, body = $7, expires_at = $8
@@ -150,8 +160,11 @@ func (s *idempotencyStore) complete(ctx context.Context, principal, key string, 
 }
 
 // release deletes an in_progress claim so a retry can run. Used for 4xx/5xx
-// outcomes (nothing is stored for them) and when the handler panicked.
-func (s *idempotencyStore) release(ctx context.Context, principal, key string) error {
+// outcomes (nothing is stored for them) and when the handler panicked. Only
+// the row still held under the given claim token is deleted: a lapsed holder
+// must not delete a successor's live claim (that would open the exact double
+// write this table exists to prevent).
+func (s *idempotencyStore) release(ctx context.Context, principal, key, claimID string) error {
 	_, err := s.db.Pool.Exec(ctx, `
 		DELETE FROM idempotency_keys
 		WHERE principal = $1 AND key = $2 AND state = 'in_progress'`,

@@ -18,9 +18,14 @@
 --                key can never replay another's response.
 --   key          the raw Idempotency-Key header value (X-Idempotency-Key is
 --                accepted as a legacy alias).
---   fingerprint  sha256 of method, path and request body. A key reused with a
---                different request is a client bug and gets 422, not a replay
---                of an unrelated response.
+--   fingerprint  sha256 of method, path, query string and request body. A key
+--                reused with a different request is a client bug and gets
+--                422, not a replay of an unrelated response.
+--   claim_id     a UUID minted per claim. complete and release match on it,
+--                so a holder whose lease lapsed and whose row was taken over
+--                can no longer write its outcome onto (or delete) the new
+--                holder's claim: the row belongs to whoever holds its current
+--                claim_id.
 --   state        "in_progress" (claimed, handler running elsewhere or the
 --                process died mid-handler) or "complete" (replayable).
 --   status_code / content_type / location / body
@@ -47,6 +52,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     principal    TEXT        NOT NULL,
     key          TEXT        NOT NULL,
     fingerprint  TEXT        NOT NULL,
+    claim_id     TEXT        NOT NULL,
     state        TEXT        NOT NULL DEFAULT 'in_progress'
                     CHECK (state IN ('in_progress', 'complete')),
     status_code  INT,

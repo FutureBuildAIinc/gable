@@ -913,6 +913,198 @@ func TestIdempotency_RedirectAndLocationReplay(t *testing.T) {
 	}
 }
 
+// --- a late holder cannot touch the new holder's claim -------------------------
+
+// readClaimRow reads the row's state, claim token and stored body for direct
+// assertion.
+func readClaimRow(t *testing.T, db *database.DB, principal, key string) (state, claimID string, body []byte) {
+	t.Helper()
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT state, claim_id, COALESCE(body, ''::bytea) FROM idempotency_keys WHERE principal = $1 AND key = $2`,
+		principal, key).Scan(&state, &claimID, &body)
+	if err != nil {
+		t.Fatalf("read claim row: %v", err)
+	}
+	return state, claimID, body
+}
+
+// seedLapsedClaim creates a claim whose lease has lapsed (its holder's process
+// died or stalled mid-handler) through the store itself, so the test holds the
+// original holder's claim token.
+func seedLapsedClaim(t *testing.T, db *database.DB, principal, key, fingerprint string) string {
+	t.Helper()
+	claimed, claimID, _, err := (&idempotencyStore{db: db}).claim(context.Background(),
+		principal, key, fingerprint, time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("seed lapsed claim: %v", err)
+	}
+	if !claimed {
+		t.Fatalf("seed lapsed claim: claim did not succeed")
+	}
+	return claimID
+}
+
+// A holder whose lease lapsed loses the row to a takeover. If its handler then
+// finishes and completes, the completion must leave the new holder's row
+// alone: the row stays in_progress under the new holder's token, a third
+// request still gets 409, and the new holder's own outcome is what gets
+// stored (P1-1).
+func TestIdempotency_CompleteAfterTakeoverLeavesNewHolderAlone(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+
+	body := `{"a":1}`
+	fingerprint := requestFingerprint(http.MethodPost, "/api/v1/orders", "", []byte(body))
+	lapsedToken := seedLapsedClaim(t, db, principal, key, fingerprint)
+
+	// The live request takes the claim over and holds it inside the handler.
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	var calls int32
+	h := blockingHandler(started, release, &calls, http.StatusCreated, `{"holder":"new"}`)
+	mw := Idempotency(db)
+	r1 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", body, subject)
+	r1.Header.Set(IdempotencyHeader, key)
+	firstDone := make(chan struct{})
+	firstW := httptest.NewRecorder()
+	go func() {
+		defer close(firstDone)
+		mw(h).ServeHTTP(firstW, r1)
+	}()
+	<-started
+
+	// The lapsed holder's handler finishes first and completes with its own
+	// response. This must not touch the row the new holder now owns.
+	store := &idempotencyStore{db: db}
+	if err := store.complete(context.Background(), principal, key, lapsedToken,
+		http.StatusOK, "application/json", "", []byte(`{"holder":"lapsed"}`),
+		time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("lapsed holder complete: %v", err)
+	}
+	state, claimID, stored := readClaimRow(t, db, principal, key)
+	if state != "in_progress" || claimID == lapsedToken {
+		t.Fatalf("after lapsed complete: state = %q claim = %q, want in_progress under the new holder's token", state, claimID)
+	}
+	if string(stored) != "" {
+		t.Fatalf("after lapsed complete: body = %q, want nothing stored", stored)
+	}
+
+	// The claim is still live: a third request gets 409 and no handler run.
+	r2 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", body, subject)
+	r2.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, r2); w.Code != http.StatusConflict {
+		t.Fatalf("third request after lapsed complete: status = %d, want 409", w.Code)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1 (the third request must not run)", calls)
+	}
+
+	// The new holder finishes: ITS outcome is what gets stored and replayed.
+	close(release)
+	<-firstDone
+	if firstW.Code != http.StatusCreated {
+		t.Fatalf("takeover request: status = %d, want 201", firstW.Code)
+	}
+	state, claimID, stored = readClaimRow(t, db, principal, key)
+	if state != "complete" || claimID == lapsedToken || string(stored) != `{"holder":"new"}` {
+		t.Fatalf("after new holder completes: state = %q claim = %q body = %q, want complete under the new token with its own body", state, claimID, stored)
+	}
+	r3 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", body, subject)
+	r3.Header.Set(IdempotencyHeader, key)
+	w := serve(t, mw, h, r3)
+	if w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) != "true" || w.Body.String() != `{"holder":"new"}` {
+		t.Fatalf("replay after takeover: status = %d replayed = %q body = %q, want the new holder's stored response", w.Code, w.Header().Get(IdempotencyReplayedHeader), w.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+// The same takeover, but the lapsed holder returns a 5xx and releases: the
+// release must not delete the new holder's live claim, or a third request
+// would run the handler a second time, the double write this item exists to
+// prevent (P1-2).
+func TestIdempotency_ReleaseAfterTakeoverLeavesNewClaim(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+
+	body := `{"a":1}`
+	fingerprint := requestFingerprint(http.MethodPost, "/api/v1/orders", "", []byte(body))
+	lapsedToken := seedLapsedClaim(t, db, principal, key, fingerprint)
+
+	// The live request takes over; its handler returns 500 once released.
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	var calls int32
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			started <- struct{}{}
+			<-release
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"retry":true}`)
+	})
+	mw := Idempotency(db)
+	r1 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", body, subject)
+	r1.Header.Set(IdempotencyHeader, key)
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		mw(h).ServeHTTP(httptest.NewRecorder(), r1)
+	}()
+	<-started
+
+	// The lapsed holder gives up and releases. The new holder's claim must
+	// survive it.
+	store := &idempotencyStore{db: db}
+	if err := store.release(context.Background(), principal, key, lapsedToken); err != nil {
+		t.Fatalf("lapsed holder release: %v", err)
+	}
+	state, claimID, _ := readClaimRow(t, db, principal, key)
+	if state != "in_progress" || claimID == lapsedToken {
+		t.Fatalf("after lapsed release: state = %q claim = %q, want the new holder's live claim untouched", state, claimID)
+	}
+
+	// A third request still conflicts and does not run the handler.
+	r2 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", body, subject)
+	r2.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, r2); w.Code != http.StatusConflict {
+		t.Fatalf("third request after lapsed release: status = %d, want 409", w.Code)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1 (a late release must not open a second run)", calls)
+	}
+
+	// The new holder's own 500 releases its claim, and the next retry runs.
+	close(release)
+	<-firstDone
+	var gone int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM idempotency_keys WHERE principal = $1 AND key = $2`, principal, key).Scan(&gone); err != nil {
+		t.Fatalf("count after new holder 5xx: %v", err)
+	}
+	if gone != 0 {
+		t.Fatalf("rows after the new holder's 5xx = %d, want 0 (released)", gone)
+	}
+	r3 := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", body, subject)
+	r3.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, r3); w.Code != http.StatusCreated {
+		t.Fatalf("retry after the new holder's 5xx: status = %d, want 201", w.Code)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2", calls)
+	}
+}
+
 // --- retention purge ---------------------------------------------------------
 
 func TestIdempotency_PurgeExpired(t *testing.T) {
@@ -931,9 +1123,9 @@ func TestIdempotency_PurgeExpired(t *testing.T) {
 	}
 	for _, s := range seed {
 		_, err := db.Pool.Exec(ctx,
-			`INSERT INTO idempotency_keys (principal, key, fingerprint, state, expires_at)
-			 VALUES ('purge-test', $1, 'fp', $2, now() + $3::interval)`,
-			s.key, s.state, fmt.Sprintf("%d seconds", int(s.expires.Seconds())))
+			`INSERT INTO idempotency_keys (principal, key, fingerprint, claim_id, state, expires_at)
+			 VALUES ('purge-test', $1, 'fp', $2, $3, now() + $4::interval)`,
+			s.key, uuid.NewString(), s.state, fmt.Sprintf("%d seconds", int(s.expires.Seconds())))
 		if err != nil {
 			t.Fatalf("seed row: %v", err)
 		}
@@ -990,9 +1182,9 @@ func TestIdempotency_ExpiredClaimIsTakeable(t *testing.T) {
 
 	// Simulate a process that died mid-handler: a stale in_progress row.
 	_, err := db.Pool.Exec(ctx,
-		`INSERT INTO idempotency_keys (principal, key, fingerprint, state, expires_at)
-		 VALUES ($1, $2, $3, 'in_progress', now() - interval '1 minute')`,
-		principal, key, requestFingerprint(http.MethodPost, "/api/v1/quotes", "", []byte(`{"a":1}`)))
+		`INSERT INTO idempotency_keys (principal, key, fingerprint, claim_id, state, expires_at)
+		 VALUES ($1, $2, $3, $4, 'in_progress', now() - interval '1 minute')`,
+		principal, key, requestFingerprint(http.MethodPost, "/api/v1/quotes", "", []byte(`{"a":1}`)), uuid.NewString())
 	if err != nil {
 		t.Fatalf("seed stale claim: %v", err)
 	}
