@@ -163,19 +163,40 @@ func RequiredScope(module string, method string) string {
 	return module + scopeWriteSuffix
 }
 
-// machineKeyUserOnlyPrefixes lists route prefixes a machine key may never
-// reach, whatever scope it holds, because key management is a user action: a
-// key that could mint or revoke keys would be a key that could grant itself
-// everything. The census test fails if a prefix matches no registered route.
-var machineKeyUserOnlyPrefixes = []string{
-	"/api/v1/admin/keys",
+// userOnlyRoute is a route prefix a machine key may never reach, with the
+// refusal message that says why.
+type userOnlyRoute struct {
+	prefix  string
+	message string
+}
+
+// machineKeyUserOnlyRoutes lists route prefixes a machine key may never
+// reach, whatever scope it holds, because the route resolves its actor as a
+// human user the JWT names. Key management: a key that could mint or revoke
+// keys would be a key that could grant itself everything. The me routes:
+// the caller there is the user, and a machine key has no user, so it has no
+// "me" (before this rule a keyed caller's missing claims fell into the dev
+// mode fallback and read every branch). The census test fails if a prefix
+// matches no registered route.
+var machineKeyUserOnlyRoutes = []userOnlyRoute{
+	{"/api/v1/admin/keys", "key management requires a user"},
+	{"/api/v1/me", "a machine key has no user"},
 }
 
 // MachineKeyUserOnlyPrefixes returns the user-only prefixes, for tests.
 func MachineKeyUserOnlyPrefixes() []string {
-	out := make([]string, len(machineKeyUserOnlyPrefixes))
-	copy(out, machineKeyUserOnlyPrefixes)
+	out := make([]string, len(machineKeyUserOnlyRoutes))
+	for i, route := range machineKeyUserOnlyRoutes {
+		out[i] = route.prefix
+	}
 	return out
+}
+
+// underUserOnlyPrefix reports whether a path is a user-only prefix itself or
+// sits under it at a segment boundary, so /api/v1/me refuses keys without
+// also swallowing a future /api/v1/metrics module.
+func underUserOnlyPrefix(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
 
 // --- the machine-key auth core ----------------------------------------------
@@ -363,10 +384,10 @@ func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey s
 		return
 	}
 
-	for _, prefix := range machineKeyUserOnlyPrefixes {
-		if strings.HasPrefix(r.URL.Path, prefix) {
+	for _, route := range machineKeyUserOnlyRoutes {
+		if underUserOnlyPrefix(r.URL.Path, route.prefix) {
 			a.auditRefusal(ctx, principal.ID, AuditActionKeyUserRequired, "", r)
-			respondAuthError(w, r, http.StatusForbidden, "forbidden", "key management requires a user")
+			respondAuthError(w, r, http.StatusForbidden, "forbidden", route.message)
 			return
 		}
 	}

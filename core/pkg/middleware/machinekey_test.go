@@ -288,6 +288,39 @@ func TestMachineKeyOnKeyManagementRefused(t *testing.T) {
 	}
 }
 
+// A machine key has no "me": the me routes resolve the caller as a human
+// user the JWT names, so a key is refused there whatever scope it holds,
+// and keyless dev callers keep the documented bypass.
+func TestMachineKeyOnMeRoutesRefused(t *testing.T) {
+	aud, chain, h := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: []string{"me:read", "me:write"}}, "/api/integration/")
+
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, bearerRequest(t, "GET", "/api/v1/me/branches", machineKeyShape(t)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeError(t, rec)
+	if body.Error.Code != "forbidden" {
+		t.Fatalf("code = %q, want forbidden", body.Error.Code)
+	}
+	if body.Error.Message != "a machine key has no user" {
+		t.Fatalf("message = %q, want %q", body.Error.Message, "a machine key has no user")
+	}
+	if h.reached {
+		t.Fatal("handler must not be reached with a machine key")
+	}
+	if len(aud.calls) != 1 || aud.calls[0].action != "key.user_required" || aud.calls[0].keyID != "key-1" {
+		t.Fatalf("audit calls = %+v, want one key.user_required for key-1", aud.calls)
+	}
+
+	h.reached = false
+	rec = httptest.NewRecorder()
+	chain.ServeHTTP(rec, bearerRequest(t, "GET", "/api/v1/me/branches", ""))
+	if rec.Code != http.StatusOK || !h.reached {
+		t.Fatalf("keyless GET in dev mode: status = %d, reached = %v, want 200 (the dev bypass is unchanged)", rec.Code, h.reached)
+	}
+}
+
 func TestMachineKeyOutsideModuleRoutesRefused(t *testing.T) {
 	aud, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: []string{"quotes:write", "a2a:write", "uploads:write"}}, "/api/integration/")
 

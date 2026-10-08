@@ -100,6 +100,12 @@ replaces it as the gate, and the guards stacked at route registration
   could mint or revoke keys would be a key that could grant itself
   everything, and the scope check cannot express "no key may hold this"
   because the minted key would simply hold it.
+- The `me` routes are user-only the same way (`GET /api/v1/me/branches`
+  today): the caller there is the user the JWT names, and a machine key has
+  no user, so it has no "me". A key is refused there 403 `forbidden` with
+  the message "a machine key has no user", whatever scope it holds; without
+  this rule a keyed caller's missing claims fell into the dev mode fallback
+  and read every branch. Keyless dev callers keep the documented fallback.
 - The POS routes that resolve their cashier from the request identity
   (starting a sale, opening a till, recording a return) are user-only the
   same way: the cashier is a human user the JWT names, so a machine key is
@@ -122,7 +128,7 @@ kind is `key`, or `agent` with the same `actor_id` when the agent identity
 headers rode along, and `user_id` is null either way):
 
 - `key.scope_refused`, with the refused scope, the method and the path;
-- `key.user_required`, on the key management routes;
+- `key.user_required`, on the key management routes and the `me` routes;
 - `key.path_refused`, off the module routes.
 
 A 401 writes no row: an unknown or revoked key has no attributable id. The
