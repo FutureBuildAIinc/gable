@@ -719,11 +719,14 @@ type lineCost struct {
 }
 
 // lineCosts reads the cost of every billed line that carries one (ADR 0005
-// 8.4): a stocked line (a product with a product, a component) the product's
-// average unit cost read now; a special order line the cost of the received
-// purchase order line linked to it when there is one; a non stock line only
-// through a linked received purchase order line. Kit, charge and text lines
-// carry none. A zero or missing cost posts no cost and is not an error.
+// 8.4, as PR 35 amends it and C2-2b implements ahead of that merge): a
+// stocked line (a product line with a product, a component, a special order
+// line included) the product's average unit cost read now, because its
+// receipt entered stock and moved the average, so the purchase cost would
+// leave a residue in 1030 against the stock that is left; a non stock line
+// (no product, a direct ship whose goods never enter stock) the cost of the
+// received purchase order line linked to it. Kit, charge and text lines carry
+// none. A zero or missing cost posts no cost and is not an error.
 func (s *Service) lineCosts(ctx context.Context, cur *Order, plan *fulfilPlan) (map[int]lineCost, error) {
 	var ids []uuid.UUID
 	for _, it := range plan.items {
@@ -745,7 +748,7 @@ func (s *Service) lineCosts(ctx context.Context, cur *Order, plan *fulfilPlan) (
 			continue
 		}
 		var unit httpx.Price
-		if l.IsSpecialOrder || l.ProductID == nil {
+		if l.ProductID == nil {
 			if cost, ok, err := s.repo.SpecialOrderUnitCost(ctx, l.ID); err != nil {
 				return nil, err
 			} else if ok {

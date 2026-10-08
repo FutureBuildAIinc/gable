@@ -682,3 +682,74 @@ func TestNonStockLineCostComesFromTheReceivedPurchaseOrderLine(t *testing.T) {
 		t.Errorf("received special order legs = %+v, want 5010 dr 800 and 1030 cr 800 (the purchase cost, not the 600 estimate)", legs)
 	}
 }
+
+// RULE (ADR 0005 8.4 as PR 35 amends it; C2-2b implements the amendment ahead
+// of that merge): a STOCKED special order line relieves COGS at the moving
+// average, because its receipt entered stock and moved the average; the
+// purchase cost applies only to non stock lines (no product, a direct ship
+// whose goods never enter stock). The reviewer's worked example: 10 on hand at
+// 5.00, a special order receipt of 10 at 9.00 gives 20 on hand at an average
+// of 7.00; selling the 10 special order units at the 9.00 purchase cost
+// credits 1030 with 90.00 against 70.00 of stock and leaves a 20.00 residue.
+// At the average there is none.
+func TestStockedSpecialOrderRelievesCOGSAtTheMovingAverage(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	f.serveWith(f.withStock(), f.withMoney())
+	f.cleanMoney()
+	ctx := context.Background()
+	vendor, po, poLine := uuid.New(), uuid.New(), uuid.New()
+	must := func(sql string, args ...any) {
+		if _, err := db.Pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	must(`INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "so-"+vendor.String()[:8])
+	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`, po, vendor)
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
+	})
+
+	// The order: a stocked special order line for 10 (a product, so its
+	// receipt entered stock).
+	r := f.do("POST", "/api/v1/orders", f.createBody(map[string]any{
+		"product_id": f.productID.String(), "quantity": "10",
+		"is_special_order": true, "special_order_unit_cost_ten_thousandths": 50000,
+	}))
+	if r.status != 201 {
+		t.Fatalf("create = %d: %s", r.status, r.raw)
+	}
+	orderID := str(t, r.body, "id")
+	lineID := str(t, r.body["lines"].([]any)[0].(map[string]any), "id")
+
+	// The state its receipt left: the received purchase order line (10 at
+	// 9.00) linked to the order line, 20 on hand (10 at 5.00 plus the 10
+	// received) and the average moved to 7.00.
+	must(`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost, qty_received, linked_so_line_id) VALUES ($1, $2, $3, 'special', 10, 9.00, 10, $4)`, poLine, po, f.productID, lineID)
+	f.stock(f.productID, "20")
+	f.setCost(f.productID, "7")
+
+	if r := f.transition(orderID, 1, "confirmed"); r.status != 200 {
+		t.Fatalf("confirm = %d: %s", r.status, r.raw)
+	}
+	g := f.do("GET", "/api/v1/orders/"+orderID, nil)
+	r = f.fulfil(orderID, revision(t, g), map[string]any{"picked_up_by": "Counter"})
+	if r.status != 201 {
+		t.Fatalf("fulfil = %d: %s", r.status, r.raw)
+	}
+
+	// COGS relieves at the moving average: 10 x 7.00 = 70.00, no residue in
+	// 1030 against the stock that is left (10 at 7.00).
+	if _, legs := f.entryLegs(invoiceIDOf(t, r)); legs["5010"].debit != 7000 || legs["1030"].credit != 7000 {
+		t.Errorf("stocked special order legs = %+v, want 5010 dr 7000 and 1030 cr 7000 (the 7.00 average, not the 9.00 purchase cost)", legs)
+	}
+	var cost string
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT unit_cost::text || '/' || cost::text FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id WHERE i.order_id = $1 AND l.product_id IS NOT NULL`, orderID).
+		Scan(&cost); err != nil || cost != "7.0000/70.00" {
+		t.Errorf("invoice line unit_cost/cost = %s (%v), want the 7.0000 average and 70.00", cost, err)
+	}
+}
