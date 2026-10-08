@@ -88,6 +88,24 @@ func (s *Spec) Has(method, pattern string) bool {
 	return ok
 }
 
+// Covers reports whether the contract describes a census route: the exact
+// method and pattern, or, for a wildcard (*) census method (a mount), any
+// operation on the pattern.
+func (s *Spec) Covers(method, pattern string) bool {
+	if s.Has(method, pattern) {
+		return true
+	}
+	return method == "*" && specHasAnyMethod(s, pattern)
+}
+
+// specHasAnyMethod reports whether the contract carries any operation on the
+// path, regardless of method. Used to satisfy a wildcard (*) census entry
+// (a mount) with any concrete method the fragment describes.
+func specHasAnyMethod(spec *Spec, pattern string) bool {
+	_, ok := spec.paths[pattern]
+	return ok
+}
+
 // Operations lists every operation, sorted by path then method.
 func (s *Spec) Operations() []Operation {
 	var ops []Operation

@@ -101,9 +101,24 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-6>\",\"items\":[{\"id\":\"<id-7>\",\"product_id\":\"<id-5>\",\"product_sku\":\"LUM-248-PREM\",\"product_name\":\"2x4x8 SPF Premium\",\"image_url\":\"\",\"quantity\":2,\"unit_price\":4.75,\"line_total\":9.5,\"available\":0}],\"item_count\":1,\"subtotal\":9.5}\n"
+        "id": "<id-6>",
+        "item_count": 1,
+        "items": [
+          {
+            "available": 0,
+            "id": "<id-7>",
+            "image_url": "",
+            "line_total": 9.5,
+            "product_id": "<id-5>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2,
+            "unit_price": 4.75
+          }
+        ],
+        "subtotal": 9.5
       }
     }
   },

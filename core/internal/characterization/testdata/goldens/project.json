@@ -10,9 +10,14 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"name\":\"Golden Project\",\"status\":\"Active\",\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "id": "<id-2>",
+        "name": "Golden Project",
+        "status": "Active",
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -20,7 +25,7 @@
     "name": "project.get",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/projects/<id-1>"
+      "path": "/api/portal/v1/projects/<id-2>"
     },
     "response": {
       "status": 200,
@@ -31,8 +36,8 @@
         "orders": [],
         "project": {
           "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-1>",
+          "customer_id": "<id-1>",
+          "id": "<id-2>",
           "name": "Golden Project",
           "status": "Active",
           "updated_at": "<ts+0d>"

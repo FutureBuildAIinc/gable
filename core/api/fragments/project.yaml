@@ -1,0 +1,225 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The project module (a contractor's jobs), transcribed from internal/project
+# as it behaves today. The routes live under the portal prefix and share its
+# session (the portal_token cookie or bearer JWT), not the ERP's. Quirks the
+# transcription preserves: every service failure on the create and update
+# routes is the handler's fixed 500 (an empty name or an invalid status
+# included), only the read answers 404; and total_amount on a dashboard item
+# is float dollars and omitempty (absent when zero, matching the model).
+paths:
+  /api/portal/v1/projects:
+    get:
+      operationId: projectList
+      tags: [project]
+      summary: The customer's jobs
+      description: A bare array, newest created first, no page envelope.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The projects, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: projectCreate
+      tags: [project]
+      summary: Create a job
+      description: >-
+        An empty name is a 500 today (the handler's status is fixed). The
+        project starts Active.
+      security:
+        - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateRequest"
+      responses:
+        "201":
+          description: The created project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/projects/{id}:
+    get:
+      operationId: projectGetDashboard
+      tags: [project]
+      summary: One job with its orders, deliveries and invoices
+      description: >-
+        The dashboard aggregate. Scoped to the caller; any failure,
+        including another customer's project, is the handler's fixed 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The project and its associated documents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDashboard"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: projectUpdate
+      tags: [project]
+      summary: Rename a job or change its status
+      description: >-
+        Partial update; absent fields keep their values. An empty name or a
+        status outside Active and Completed is a 500 today (the handler's
+        status is fixed), and so is a project the caller does not own.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateRequest"
+      responses:
+        "200":
+          description: The updated project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    Project:
+      type: object
+      required: [id, customer_id, name, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [Active, Completed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectDashboard:
+      type: object
+      required: [project, orders, deliveries, invoices]
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+        orders:
+          type: array
+          description: The project's orders, newest first, never null.
+          items:
+            $ref: "#/components/schemas/ProjectItem"
+        deliveries:
+          type: array
+          description: The stops of the project's orders, newest first, never null.
+          items:
+            $ref: "#/components/schemas/ProjectItem"
+        invoices:
+          type: array
+          description: The invoices of the project's orders, newest first, never null.
+          items:
+            $ref: "#/components/schemas/ProjectItem"
+    ProjectItem:
+      type: object
+      required: [id, type, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [ORDER, DELIVERY, INVOICE]
+        status:
+          type: string
+        total_amount:
+          type: number
+          description: Float dollars; omitted when zero.
+        created_at:
+          type: string
+          format: date-time
+        reference:
+          type: string
+          description: A human label such as "Order 1a2b3c4d"; omitted when empty.
+    ProjectCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    ProjectUpdateRequest:
+      type: object
+      description: "Partial: only the fields present are applied."
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [Active, Completed]

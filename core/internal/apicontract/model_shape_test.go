@@ -15,8 +15,11 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/project"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/routecensus"
 	"gopkg.in/yaml.v3"
@@ -70,6 +73,36 @@ var modelBoundSchemas = []struct {
 	{"IntegrationOrder", integrations.IntegrationOrderResponse{}},
 	{"IntegrationDeliveryRouteResponse", integrations.DeliveryRouteResponse{}},
 	{"IntegrationValidateStaffResponse", integrations.ValidateStaffResponse{}},
+	// portal (R1-7c)
+	// Health schemas (live, ready, metrics) are inline map[string]any in serve.go
+	// with no struct to bind, so they are omitted from this table.
+	{"PortalConfig", portal.PortalConfig{}},
+	{"PortalDashboard", portal.PortalDashboardDTO{}},
+	{"PortalOrder", portal.PortalOrderDTO{}},
+	{"PortalOrderLine", portal.PortalLineDTO{}},
+	{"PortalInvoice", portal.PortalInvoiceDTO{}},
+	{"PortalDelivery", portal.PortalDeliveryDTO{}},
+	{"PortalReorderResponse", portal.ReorderResponse{}},
+	{"PortalCancelOrderResponse", portal.CancelOrderResponse{}},
+	{"PortalCart", portal.CartDTO{}},
+	{"PortalCartItem", portal.CartItemDTO{}},
+	{"PortalCheckoutResponse", portal.CheckoutResponse{}},
+	{"PortalCategoryNode", portal.CategoryNodeDTO{}},
+	{"PortalVolumeBreak", portal.VolumeBreakDTO{}},
+	{"PortalCatalogProduct", portal.CatalogProductDTO{}},
+	// PortalCatalogDetail has CatalogProductDTO embedded and flattened in the
+	// schema; its fields are already covered by PortalCatalogProduct, so it
+	// is omitted to avoid false positives on the embedded struct name.
+	// {"PortalCatalogDetail", portal.CatalogDetailDTO{}},
+	{"PortalQuote", portal.PortalQuoteDTO{}},
+	{"PortalQuoteLine", portal.PortalQuoteLineDTO{}},
+	{"PortalInvite", portal.PortalInvite{}},
+	// project (R1-7c)
+	{"Project", project.Project{}},
+	{"ProjectDashboard", project.ProjectDashboardDTO{}},
+	{"ProjectItem", project.ProjectItem{}},
+	// partner (R1-7c)
+	{"PartnerDashboard", partner.DashboardDTO{}},
 }
 
 // TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md
