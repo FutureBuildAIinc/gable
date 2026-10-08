@@ -249,7 +249,7 @@ func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
 // extension is the difference of two cumulative totals (salesdoc.BilledTotal),
 // so the invoices of a line sum to the order line's total to the cent. src[i]
 // is the order line index bill[i] came from.
-func billLines(cur *Order, plan *fulfilPlan) (bill []salesdoc.Line, src []int, err error) {
+func billLines(cur *Order, plan *fulfilPlan, live map[uuid.UUID]LiveBilled) (bill []salesdoc.Line, src []int, discounts []httpx.Cents, err error) {
 	qty := map[int]httpx.Quantity{}
 	for _, it := range plan.items {
 		qty[it.idx] = it.qty
@@ -259,6 +259,7 @@ func billLines(cur *Order, plan *fulfilPlan) (bill []salesdoc.Line, src []int, e
 		if l.LineType == salesdoc.LineText {
 			bill = append(bill, l)
 			src = append(src, i)
+			discounts = append(discounts, 0)
 			continue
 		}
 		q, ok := qty[i]
@@ -267,21 +268,26 @@ func billLines(cur *Order, plan *fulfilPlan) (bill []salesdoc.Line, src []int, e
 		}
 		inv := l
 		inv.Quantity = &q
+		var discount httpx.Cents
 		switch l.LineType {
 		case salesdoc.LineComponent:
 			zero := httpx.Cents(0)
 			inv.LineTotal = &zero
 		default:
-			total, err := salesdoc.BilledTotal(&l, cur.Lines[i].QuantityFulfilled, cur.Lines[i].QuantityFulfilled+q)
+			// against what the line's live invoices already carry, so a voided
+			// piece never leaves the live pieces off the line's total by a cent
+			lv := live[cur.Lines[i].ID]
+			total, d, err := salesdoc.PieceAgainstLive(&l, cur.Lines[i].QuantityFulfilled+q, lv.TotalCents, lv.DiscountCents)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			inv.LineTotal = &total
+			inv.LineTotal, discount = &total, d
 		}
 		bill = append(bill, inv)
 		src = append(src, i)
+		discounts = append(discounts, discount)
 	}
-	return bill, src, nil
+	return bill, src, discounts, nil
 }
 
 func billFingerprint(cur *Order, bill []salesdoc.Line) string {
@@ -317,7 +323,11 @@ func (s *Service) prepareFulfilTax(ctx context.Context, id uuid.UUID, req Fulfil
 	if err != nil {
 		return nil, nil
 	}
-	bill, _, err := billLines(cur, plan)
+	live, err := s.repo.LiveBilledByLine(ctx, cur.ID)
+	if err != nil {
+		return nil, nil
+	}
+	bill, _, _, err := billLines(cur, plan, live)
 	if err != nil {
 		return nil, nil
 	}
@@ -413,7 +423,11 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 		if err != nil {
 			return err
 		}
-		bill, src, err := billLines(cur, plan)
+		live, err := s.repo.LiveBilledByLine(ctx, cur.ID)
+		if err != nil {
+			return err
+		}
+		bill, src, discounts, err := billLines(cur, plan, live)
 		if err != nil {
 			return err
 		}
@@ -544,11 +558,7 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 				if b.DiscountAmount != nil {
 					// the invoice line's share of the amount discount: its gross piece
 					// less its net, so the shares sum to the order line's discount
-					share, err := salesdoc.BilledDiscount(&ol.Line, ol.QuantityFulfilled, ol.QuantityFulfilled+*b.Quantity)
-					if err != nil {
-						return err
-					}
-					fl.DiscountCents = i64(int64(share))
+					fl.DiscountCents = i64(int64(discounts[n]))
 				}
 				fl.DiscountReason = b.DiscountReason
 				if c, ok := costs[src[n]]; ok {

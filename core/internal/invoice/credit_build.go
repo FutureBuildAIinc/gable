@@ -201,7 +201,7 @@ func creditFromInvoiceLine(path string, d *CreditLineInput, src *InvoiceLine, am
 		// The cost that comes back is the invoice line's own cost in the
 		// same proportion, never more than that line relieved and not yet
 		// reversed: COGS reverses at the original cost, not today's.
-		cost := share(int64(src.CostCents), r, whole)
+		cost := share(int64(src.CostCents), amounts.RestockQuantity+r, whole) - amounts.CostCents
 		if left := int64(src.CostCents) - amounts.CostCents; cost > left {
 			cost = left
 		}

@@ -650,7 +650,8 @@ type VoidFacts struct {
 func (r *PostgresRepository) VoidFactsFor(ctx context.Context, invoiceID uuid.UUID) (VoidFacts, error) {
 	var f VoidFacts
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT (SELECT count(*) FROM payments WHERE invoice_id = $1),
+		SELECT (SELECT count(*) FROM payments WHERE invoice_id = $1)
+		       + (SELECT count(*) FROM customer_deposit_applications WHERE invoice_id = $1),
 		       (SELECT count(*) FROM credit_memos WHERE invoice_id = $1 AND status IN ('APPLIED', 'PARTIAL')),
 		       (SELECT count(*) FROM credit_memos WHERE invoice_id = $1 AND status <> 'VOID')`, invoiceID).
 		Scan(&f.Payments, &f.AppliedMemos, &f.LiveMemos)
@@ -658,6 +659,25 @@ func (r *PostgresRepository) VoidFactsFor(ctx context.Context, invoiceID uuid.UU
 		return f, fmt.Errorf("failed to read what stands in the way of a void: %w", err)
 	}
 	return f, nil
+}
+
+// InvoiceEntryID answers the posted INVOICE entry written for the invoice when
+// its gl_entry_id was never set: every invoice before C2-2 and every counter
+// account charge (the legacy path posts through gl.SyncInvoice with the invoice
+// as the source reference). Nil when there is none.
+func (r *PostgresRepository) InvoiceEntryID(ctx context.Context, invoiceID uuid.UUID) (*uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT id FROM gl_journal_entries
+		WHERE source_ref_id = $1 AND source = 'INVOICE' AND status = 'POSTED' AND reverses_entry_id IS NULL
+		ORDER BY created_at, entry_number LIMIT 1`, invoiceID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to find the invoice's entry: %w", err)
+	}
+	return &id, nil
 }
 
 // MarkVoid ends the invoice: status VOID, the void columns, the revision.

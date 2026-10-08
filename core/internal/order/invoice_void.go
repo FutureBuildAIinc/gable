@@ -45,6 +45,17 @@ func (s *Service) ReturnBilled(ctx context.Context, orderID uuid.UUID, billed []
 	if err != nil {
 		return res, notFound(err)
 	}
+	// A closed short order (fulfilled with a line short of its quantity) keeps
+	// its closed remainder only as that shortfall: re-opening billed quantity
+	// would bring the remainder back to life. The act is refused; the order is
+	// re-opened by its own transition first.
+	if cur.Status == StatusFulfilled {
+		for i := range cur.Lines {
+			if l := &cur.Lines[i]; l.Quantity != nil && l.LineType != salesdoc.LineText && l.QuantityFulfilled < *l.Quantity {
+				return res, conflictBlocker("order_closed_short", "the invoice's order was closed short: voiding the invoice would reopen the closed remainder")
+			}
+		}
+	}
 	byID := map[uuid.UUID]int{}
 	for i := range cur.Lines {
 		byID[cur.Lines[i].ID] = i

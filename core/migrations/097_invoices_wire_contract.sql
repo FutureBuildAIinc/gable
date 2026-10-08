@@ -172,8 +172,9 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ NULL;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS voided_by TEXT NULL;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS void_reason TEXT NULL;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS voided_on DATE NULL;
-UPDATE invoices SET voided_at = COALESCE(updated_at, created_at), voided_on = invoice_date
-WHERE status = 'VOID' AND voided_at IS NULL;
+UPDATE invoices i SET voided_at = COALESCE(i.updated_at, i.created_at),
+    voided_on = (COALESCE(i.updated_at, i.created_at) AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l WHERE l.id = i.branch_id), 'UTC'))::date
+WHERE i.status = 'VOID' AND i.voided_at IS NULL;
 ALTER TABLE invoices ADD CONSTRAINT invoices_void_columns
     CHECK ((status = 'VOID') = (voided_at IS NOT NULL));
 

@@ -105,6 +105,31 @@ func BilledDiscount(l *Line, before, after httpx.Quantity) (httpx.Cents, error) 
 	return (hi - lo) - net, nil
 }
 
+// PieceAgainstLive prices the piece of a line that brings its billed quantity
+// to after, against what the line's LIVE (not void) invoices already carry
+// (ADR 0005 2.4 and 6.2). The piece's total is the cumulative total at after
+// less the live invoice totals, and its discount is the gross extension at
+// after less the live gross (live totals plus live discounts) less that total,
+// so the live pieces of a line always sum to the line's own total and discount
+// to the cent, whichever invoice of the line was voided. Without a void the live
+// totals equal the cumulative total at the quantity before, and this is exactly
+// BilledTotal and BilledDiscount.
+func PieceAgainstLive(l *Line, after httpx.Quantity, liveTotal, liveDiscount httpx.Cents) (total, discount httpx.Cents, err error) {
+	hi, err := CumulativeTotal(l, after)
+	if err != nil {
+		return 0, 0, err
+	}
+	total = hi - liveTotal
+	if l.DiscountAmount == nil {
+		return total, 0, nil
+	}
+	gross, err := httpx.Extend(after, derefQty(l.UOMQty), derefQty(l.PriceUOMQty), derefPrice(l.UnitPrice))
+	if err != nil {
+		return 0, 0, err
+	}
+	return total, (gross - (liveTotal + liveDiscount)) - total, nil
+}
+
 // RevenueAccountProduct is the account product, kit and non stock lines post
 // their totals to (ADR 0005 section 8.3).
 const RevenueAccountProduct = "4010"

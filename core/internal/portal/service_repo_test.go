@@ -524,6 +524,10 @@ func (f *fakeOrderRepo) DeliveryRequestOrder(context.Context, uuid.UUID) (uuid.U
 	return uuid.Nil, false, nil
 }
 func (f *fakeOrderRepo) LockCustomerCredit(context.Context, uuid.UUID) error { return nil }
+func (f *fakeOrderRepo) LiveBilledByLine(context.Context, uuid.UUID) (map[uuid.UUID]order.LiveBilled, error) {
+	return nil, nil
+}
+
 func (f *fakeOrderRepo) UnbilledRemainderCents(context.Context, uuid.UUID) (int64, error) {
 	return 0, nil
 }

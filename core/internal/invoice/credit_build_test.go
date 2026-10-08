@@ -106,7 +106,7 @@ func TestRestockCostComesBackAtTheOriginalCost(t *testing.T) {
 	}
 	// 9 earlier restocked at a cost of 3250 less 130: only what is left comes back
 	big := &CreditLineInput{InvoiceLineID: &src.ID, Quantity: -10000, Restock: true}
-	cl, err = creditFromInvoiceLine("lines[0]", big, &src, Credited{Quantity: 90000, TotalCents: 4950, CostCents: 3200}, Credited{Quantity: 90000})
+	cl, err = creditFromInvoiceLine("lines[0]", big, &src, Credited{Quantity: 90000, TotalCents: 4950, CostCents: 3200, RestockQuantity: 90000}, Credited{Quantity: 90000})
 	if err != nil || int64(cl.CostCents) != -50 {
 		t.Errorf("last restock = %v %v, want the remaining -50 not -325", cl.CostCents, err)
 	}

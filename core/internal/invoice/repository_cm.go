@@ -358,6 +358,9 @@ type Credited struct {
 	TotalCents    int64
 	DiscountCents int64
 	CostCents     int64
+	// RestockQuantity is the part of Quantity that went back to stock: the cost
+	// that comes back telescopes over it, never over returns without restock.
+	RestockQuantity int64
 }
 
 // CreditedAgainst is what the credit memos naming an invoice have already
@@ -375,7 +378,8 @@ func (r *PostgresRepository) CreditedAgainstInvoice(ctx context.Context, invoice
 	out := CreditedAgainst{ByLine: map[uuid.UUID]Credited{}}
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT l.invoice_line_id, -ROUND(SUM(l.quantity) * 10000)::bigint, -ROUND(SUM(l.line_total) * 100)::bigint,
-		       ROUND(SUM(COALESCE(l.discount_amount, 0)) * 100)::bigint, -ROUND(SUM(l.cost) * 100)::bigint
+		       ROUND(SUM(COALESCE(l.discount_amount, 0)) * 100)::bigint, -ROUND(SUM(l.cost) * 100)::bigint,
+		       COALESCE(-ROUND(SUM(l.quantity) FILTER (WHERE l.restock) * 10000), 0)::bigint
 		FROM credit_memo_lines l JOIN credit_memos cm ON cm.id = l.credit_memo_id
 		WHERE cm.invoice_id = $1 AND cm.id <> $2 AND cm.status <> 'VOID' AND ($3::boolean OR cm.status <> 'DRAFT')
 		  AND l.invoice_line_id IS NOT NULL AND l.quantity IS NOT NULL
@@ -387,7 +391,7 @@ func (r *PostgresRepository) CreditedAgainstInvoice(ctx context.Context, invoice
 	for rows.Next() {
 		var id uuid.UUID
 		var c Credited
-		if err := rows.Scan(&id, &c.Quantity, &c.TotalCents, &c.DiscountCents, &c.CostCents); err != nil {
+		if err := rows.Scan(&id, &c.Quantity, &c.TotalCents, &c.DiscountCents, &c.CostCents, &c.RestockQuantity); err != nil {
 			return out, fmt.Errorf("failed to scan a credited line: %w", err)
 		}
 		out.ByLine[id] = c

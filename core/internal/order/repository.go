@@ -107,6 +107,7 @@ type Repository interface {
 	// Fulfilment (ADR 0005 5.6).
 	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
 	UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error)
+	LiveBilledByLine(ctx context.Context, orderID uuid.UUID) (map[uuid.UUID]LiveBilled, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	DeliveryOrderID(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error)
 	NonStockReceiptsFor(ctx context.Context, orderLineID uuid.UUID) (NonStockReceipts, bool, error)
@@ -1075,6 +1076,36 @@ func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID 
 		return fmt.Errorf("failed to serialize the customer's credit acts: %w", err)
 	}
 	return nil
+}
+
+// LiveBilled is what an order line's invoices not in void already carry: the
+// line totals and the discounts, in cents.
+type LiveBilled struct {
+	TotalCents    httpx.Cents
+	DiscountCents httpx.Cents
+}
+
+// LiveBilledByLine reads it for every line of the order that has been billed.
+func (r *PostgresRepository) LiveBilledByLine(ctx context.Context, orderID uuid.UUID) (map[uuid.UUID]LiveBilled, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT il.order_line_id, COALESCE(SUM(ROUND(il.line_total * 100)), 0)::bigint, COALESCE(SUM(ROUND(COALESCE(il.discount_amount, 0) * 100)), 0)::bigint
+		FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id
+		WHERE i.order_id = $1 AND i.status <> 'VOID' AND il.order_line_id IS NOT NULL AND il.line_total IS NOT NULL
+		GROUP BY il.order_line_id`, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read what the order's live invoices carry: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]LiveBilled{}
+	for rows.Next() {
+		var id uuid.UUID
+		var t, d int64
+		if err := rows.Scan(&id, &t, &d); err != nil {
+			return nil, fmt.Errorf("failed to scan a live billed line: %w", err)
+		}
+		out[id] = LiveBilled{httpx.Cents(t), httpx.Cents(d)}
+	}
+	return out, rows.Err()
 }
 
 // UnbilledRemainderCents is the order's total less the totals of its invoices

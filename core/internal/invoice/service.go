@@ -121,6 +121,7 @@ type Store interface {
 	VoidFactsFor(ctx context.Context, invoiceID uuid.UUID) (VoidFacts, error)
 	MarkVoid(ctx context.Context, id uuid.UUID, actor, reason string, voidedOn time.Time) error
 	BilledLines(ctx context.Context, invoiceID uuid.UUID) ([]BilledLine, error)
+	InvoiceEntryID(ctx context.Context, invoiceID uuid.UUID) (*uuid.UUID, error)
 
 	ListCreditMemos(ctx context.Context, f CreditFilter) ([]CreditMemoSummary, error)
 	CountCreditMemos(ctx context.Context, f CreditFilter) (int64, error)
@@ -378,8 +379,21 @@ func (s *Service) VoidInvoice(ctx context.Context, id uuid.UUID, pre Preconditio
 		if err := st.LockCustomer(ctx, inv.CustomerID); err != nil {
 			return err
 		}
-		if inv.GLEntryID != nil && s.gl != nil {
-			if _, err := s.gl.PostReversal(ctx, gl.ReversalInput{EntryID: *inv.GLEntryID, EntryDate: date,
+		// The entry to reverse: the invoice's own, else the one the legacy path
+		// posted (an invoice written before C2-2, a counter account charge).
+		// An invoice with money and no entry is refused: voiding it would move
+		// the subledger and leave the ledger as it was.
+		entryID := inv.GLEntryID
+		if entryID == nil && s.gl != nil {
+			if entryID, err = st.InvoiceEntryID(ctx, id); err != nil {
+				return err
+			}
+			if entryID == nil && inv.TotalCents != 0 {
+				return conflictBlocker("no_ledger_entry", "the invoice has no journal entry to reverse: it cannot be voided here")
+			}
+		}
+		if entryID != nil && s.gl != nil {
+			if _, err := s.gl.PostReversal(ctx, gl.ReversalInput{EntryID: *entryID, EntryDate: date,
 				Currency: inv.Currency, Reason: "invoice " + inv.Number + " voided", PostedBy: body.Actor}); err != nil {
 				return mapPostingError(err)
 			}
