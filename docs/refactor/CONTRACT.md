@@ -103,17 +103,6 @@ Transcription conventions (following the models' JSON tags):
   integration seam's lists, which the handler guarantees non null, are
   not.
 
-A known deviation: the create handlers (quote, customer and its contact,
-order, product, and the location, credit memo and integration creates)
-write their JSON body without setting a Content-Type header, so the wire
-answers those 201s as `text/plain; charset=utf-8` today, and the goldens
-record them wrapped as `{"text": "<json>"}`. The fragments keep declaring
-`application/json`, because the body is JSON and `text/plain` is simply a
-missing header, not a shape; a separate item now owns fixing the handlers
-to send the header, and until it lands the conformance pass must read
-those bodies through the golden wrapper rather than trust the declared
-content type.
-
 ## Regenerating
 
 From the Go module root (`core/`):
