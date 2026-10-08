@@ -15,6 +15,9 @@ ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
 ARG VITE_DEMO_MODE
 ENV VITE_DEMO_MODE=$VITE_DEMO_MODE
+# Read by packages/auth: set to "true" only for the local stack (AUTH_MODE=dev).
+ARG VITE_AUTH_DEV_MODE
+ENV VITE_AUTH_DEV_MODE=$VITE_AUTH_DEV_MODE
 
 # Manifests first so the install layer caches until a dependency changes.
 COPY web/package.json web/package-lock.json ./

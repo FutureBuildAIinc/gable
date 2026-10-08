@@ -174,7 +174,7 @@ searched for.
 If they are on a laptop with the repo, reproduce it locally so the report is grounded:
 
 ```bash
-make up                                    # Postgres on :5434
+make db                                    # Postgres on :5434
 make migrate
 DEMO_SEED=1 make seed                      # demo dataset (gate is required)
 cd core && go run ./cmd/server          # API on :8080
