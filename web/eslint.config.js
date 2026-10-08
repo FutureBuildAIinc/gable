@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
+// One lint config for the whole web workspace (apps and packages). It moved
+// up from web/apps/desk when web/ became an npm workspace; the per-app
+// `lint` scripts still run `eslint .`, which finds this file by walking up
+// from the app directory.
+
 import js from '@eslint/js'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
@@ -10,7 +15,11 @@ export default defineConfig([
   // Build and coverage output are generated, not authored. `coverage/` in
   // particular ships vendored istanbul reporter scripts that trip
   // `no-unused-eslint-disable` on every local `npm run test:coverage`.
-  globalIgnores(['dist', 'coverage', 'node_modules']),
+  globalIgnores([
+    '**/node_modules',
+    '**/dist',
+    '**/coverage',
+  ]),
   {
     files: ['**/*.ts'],
     extends: [

@@ -1,0 +1,4 @@
+<!-- SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors -->
+<!-- The Gable mark, copied from the front door's inline favicon (web/apps/front-door/index.html). Source of the PNG and ICO icons beside it. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="8" fill="#0A0B10"/><path d="M10 38 L32 16 L54 38" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M32 22 V30" stroke="#00FFA3" stroke-width="4" stroke-linecap="round"/><path d="M24 30 C24 30 24 44 32 44 C40 44 40 30 40 30" stroke="#00FFA3" stroke-width="4" stroke-linecap="round" fill="none"/><rect x="29" y="44" width="6" height="5" rx="1" fill="#00FFA3"/></svg>

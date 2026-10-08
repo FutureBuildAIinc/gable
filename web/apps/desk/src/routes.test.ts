@@ -70,6 +70,19 @@ describe('route table shape', () => {
   })
 })
 
+describe('stable record routes (the desk is served at the origin root)', () => {
+  const STABLE = ['/home', '/quotes/:id', '/orders/:id', '/invoices/:id', '/inventory/:id', '/accounts/:id', '/pos']
+
+  it('keeps every record route and the home at its unprefixed path', () => {
+    const paths = new Set(routes.map((r) => r.path))
+    expect(STABLE.filter((p) => !paths.has(p))).toEqual([])
+  })
+
+  it('has no route under an /app/ prefix', () => {
+    expect(routes.filter((r) => r.path.startsWith('/app/')).map((r) => r.path)).toEqual([])
+  })
+})
+
 describe('route ordering (no route is shadowed by an earlier pattern)', () => {
   it('resolves every literal path to its own route', () => {
     router.init(routes)

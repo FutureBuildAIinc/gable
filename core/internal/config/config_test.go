@@ -38,3 +38,69 @@ func TestLoad_AcceptsSecureBaseURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_TrustedProxies(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+
+	t.Setenv("TRUSTED_PROXIES", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TRUSTED_PROXIES empty must trust nothing, got %v", cfg.TrustedProxies)
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8, fd00::/8")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxies) != 2 {
+		t.Errorf("want 2 trusted networks, got %v", cfg.TrustedProxies)
+	}
+
+	for _, v := range []string{"10.0.0.0/99", "not-a-network"} {
+		t.Setenv("TRUSTED_PROXIES", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load() must fail closed on TRUSTED_PROXIES=%q", v)
+		}
+	}
+}
+
+func TestLoad_OutboxRetentionDays(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutboxRetentionDays != 14 {
+		t.Errorf("default retention = %d days, want 14", cfg.OutboxRetentionDays)
+	}
+
+	t.Setenv("OUTBOX_RETENTION_DAYS", "30")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutboxRetentionDays != 30 {
+		t.Errorf("retention = %d days, want 30", cfg.OutboxRetentionDays)
+	}
+
+	// A value past the cap is clamped, so days*24h cannot overflow a Duration.
+	for _, v := range []string{"3651", "999999999", "9223372036854775807"} {
+		t.Setenv("OUTBOX_RETENTION_DAYS", v)
+		cfg, err = Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.OutboxRetentionDays != MaxOutboxRetentionDays {
+			t.Errorf("OUTBOX_RETENTION_DAYS=%s gave %d days, want the cap %d", v, cfg.OutboxRetentionDays, MaxOutboxRetentionDays)
+		}
+	}
+	t.Setenv("OUTBOX_RETENTION_DAYS", "3650")
+	if cfg, err = Load(); err != nil || cfg.OutboxRetentionDays != 3650 {
+		t.Errorf("the cap itself must pass unchanged: %d, %v", cfg.OutboxRetentionDays, err)
+	}
+}

@@ -346,6 +346,9 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 		"LOG_LEVEL":      "ERROR",
 		"EDI_OUTPUT_DIR": filepath.Join(srvDir, "edi_out"),
 		"TZ":             "Etc/UTC",
+		// The harness client is the loopback peer and rotates
+		// X-Forwarded-For (see do()), so loopback is its trusted proxy.
+		"TRUSTED_PROXIES": "127.0.0.1/32,::1/128",
 	})
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -521,9 +524,17 @@ type capturedStep struct {
 	// carries the script's own orders on top of the randomly assigned
 	// segment's count - the revenue sequence and row order are stable, that
 	// one count is not. Recorded in the golden, like the other mask flags.
-	MaskOrderCount bool             `json:"mask_order_count,omitempty"`
-	Request        capturedRequest  `json:"request"`
-	Response       capturedResponse `json:"response"`
+	MaskOrderCount bool `json:"mask_order_count,omitempty"`
+	// MaskFields names response keys whose values are replaced with
+	// "<masked>" before comparison, wherever they sit in the body. Used on the
+	// events feed, whose exposure event payloads carry two values that vary
+	// per run: quote_short_id (the first characters of a random uuid) and
+	// salesperson_name (a name drawn at seed time). Nothing else is masked;
+	// customer_name is a constant empty string in these payloads and stays
+	// pinned. Recorded in the golden, like the other mask flags.
+	MaskFields []string         `json:"mask_fields,omitempty"`
+	Request    capturedRequest  `json:"request"`
+	Response   capturedResponse `json:"response"`
 }
 
 // doStep executes one scenario step: substitute {vars}, send, capture the
@@ -591,7 +602,8 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 	// The global rate limiter is per client IP (120/min). The script is
 	// sequential and short, but rotating X-Forwarded-For keeps the count per
 	// window well clear of the limit on slow CI machines, so a 429 can never
-	// leak into a golden as a timing artefact.
+	// leak into a golden as a timing artefact. The server believes that header
+	// only because startServer trusts loopback (TRUSTED_PROXIES).
 	h.reqCount++
 	req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.43.0.%d", 1+h.reqCount/30))
 
@@ -625,6 +637,10 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 	step.MaskOrderCount = s.maskOrderCount
 	if s.maskOrderCount {
 		maskField(step.Response.Body, "order_count", "<orders>")
+	}
+	step.MaskFields = s.maskFields
+	for _, key := range s.maskFields {
+		maskField(step.Response.Body, key, "<masked>")
 	}
 	if s.sortPrimaryArray {
 		switch body := step.Response.Body.(type) {

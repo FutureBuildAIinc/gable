@@ -11,4 +11,3 @@
 # Generated file. Do not edit by hand; regenerate from the Go module root:
 #
 #	go run ./api/tools/merge && go run ./cmd/pending -write
-GET	/api/v1/events

@@ -20,6 +20,7 @@ import (
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/governance"
 	"github.com/gablelbm/gable/internal/integrations"
@@ -273,6 +274,9 @@ var modelBoundSchemas = []struct {
 	{"BankreconTransaction", bankrecon.BankTransaction{}},
 	{"BankreconSession", bankrecon.ReconciliationSession{}},
 	{"BankreconImportResult", bankrecon.ImportResult{}},
+	// events (R1-12b)
+	{"Event", events.Item{}},
+	{"EventEntity", events.EntityRef{}},
 }
 
 // TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md
