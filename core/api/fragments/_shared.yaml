@@ -28,6 +28,49 @@ components:
         constant time. When no key is configured the whole seam answers 503
         before the handler runs.
   parameters:
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      description: >-
+        Page size of a converted list, 1 to 200, default 50. Anything else is
+        a 400 naming limit (ADR 0001 section 2); it is never clamped.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        The opaque cursor of the previous page's next_cursor, passed back
+        verbatim. A malformed cursor, or one minted for another ordering, is a
+        400 naming cursor.
+      schema:
+        type: string
+    Include:
+      name: include
+      in: query
+      required: false
+      description: >-
+        A comma separated list of expansions. total adds the count of rows
+        matching the filters, which costs a second query and is therefore
+        opt in.
+      schema:
+        type: string
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: >-
+        The document revision the client read, in quotes ("3"; the weak form
+        W/"3" is accepted too). The body's revision field is the alternative;
+        a write carrying neither is 428, a stale one 409 stale_revision, and
+        * or a list of tags is a 400.
+      schema:
+        type: string
     Limit:
       name: limit
       in: query
@@ -76,6 +119,60 @@ components:
         minLength: 1
         maxLength: 255
   responses:
+    WireBadRequest:
+      description: >-
+        The request cannot be consumed or fails validation (bad_request,
+        validation_failed or unsupported_query_parameter). details names every
+        offending field.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireUnauthorized:
+      description: No or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireForbidden:
+      description: The credentials lack the role or scope the route requires.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireNotFound:
+      description: The addressed resource does not exist, or is not visible to the caller.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireConflict:
+      description: >-
+        The write conflicts with the resource's state: stale_revision,
+        invalid_state_transition, duplicate, idempotency_in_progress or
+        conflict.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireUnprocessable:
+      description: The Idempotency-Key was stored against a different request (idempotency_key_reused).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WirePreconditionRequired:
+      description: The write needs If-Match or a body revision and carries neither.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireInternalError:
+      description: An unexpected server fault. The message is the fixed string "internal error"; the cause is in the server log under the request id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     BadRequest:
       description: >-
         The request cannot be consumed. The body is the standard error
@@ -149,6 +246,45 @@ components:
           schema:
             $ref: "#/components/schemas/IntegrationError"
   schemas:
+    WireError:
+      type: object
+      required: [error, meta]
+      description: >-
+        The one error envelope of ADR 0001 section 3, written by
+        internal/platform/httpx. code is a stable lowercase snake_case machine
+        code; message is the handler's own words (fixed to "internal error"
+        for a 500); details carries one entry per field reason, or per blocker
+        (a code and message with no field).
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_request, validation_failed, unsupported_query_parameter, unauthorized, forbidden, not_found, method_not_allowed, stale_revision, duplicate, idempotency_in_progress, invalid_state_transition, conflict, precondition_failed, payload_too_large, unsupported_media_type, idempotency_key_reused, precondition_required, rate_limited, internal_error, unavailable]
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                required: [message]
+                properties:
+                  field:
+                    type: string
+                    description: The field path, for example lines[0].uom; a query parameter name; or cursor.
+                  message:
+                    type: string
+                  code:
+                    type: string
+                    description: Present on a blocker, which names no field.
+        meta:
+          type: object
+          required: [request_id]
+          properties:
+            request_id:
+              type: string
     Error:
       type: object
       required: [error, meta]

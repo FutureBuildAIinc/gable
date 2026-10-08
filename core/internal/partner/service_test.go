@@ -49,7 +49,7 @@ func (f *fakeCustomerRepo) GetCustomer(_ context.Context, id uuid.UUID) (*custom
 type fakeQuoteRepo struct {
 	quote.Repository
 	byID       map[uuid.UUID]*quote.Quote
-	byCustomer map[uuid.UUID][]quote.Quote
+	byCustomer map[uuid.UUID][]quote.QuoteSummary
 	err        error
 }
 
@@ -64,7 +64,7 @@ func (f *fakeQuoteRepo) GetQuote(_ context.Context, id uuid.UUID) (*quote.Quote,
 	return q, nil
 }
 
-func (f *fakeQuoteRepo) ListQuotesByCustomer(_ context.Context, customerID uuid.UUID) ([]quote.Quote, error) {
+func (f *fakeQuoteRepo) ListQuotesByCustomer(_ context.Context, customerID uuid.UUID) ([]quote.QuoteSummary, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -151,9 +151,9 @@ func TestGetDashboard_LoadFailureIsAnError(t *testing.T) {
 // service must pass the caller's own id and nothing else.
 func TestListQuotes_ScopedToTheCaller(t *testing.T) {
 	mine, theirs := uuid.New(), uuid.New()
-	qr := &fakeQuoteRepo{byCustomer: map[uuid.UUID][]quote.Quote{
-		mine:   {{ID: uuid.New(), CustomerID: mine, TotalAmount: 100}},
-		theirs: {{ID: uuid.New(), CustomerID: theirs, TotalAmount: 999}},
+	qr := &fakeQuoteRepo{byCustomer: map[uuid.UUID][]quote.QuoteSummary{
+		mine:   {{ID: uuid.New(), CustomerID: mine, TotalCents: 10000}},
+		theirs: {{ID: uuid.New(), CustomerID: theirs, TotalCents: 99900}},
 	}}
 	svc := NewService(&fakeCustomerRepo{}, qr, testLogger())
 
@@ -187,7 +187,7 @@ func TestGetQuote_RefusesAnotherCustomersQuote(t *testing.T) {
 	victimQuoteID := uuid.New()
 
 	qr := &fakeQuoteRepo{byID: map[uuid.UUID]*quote.Quote{
-		victimQuoteID: {ID: victimQuoteID, CustomerID: victim, TotalAmount: 128450.00, State: quote.QuoteStateSent},
+		victimQuoteID: {QuoteSummary: quote.QuoteSummary{ID: victimQuoteID, CustomerID: victim, TotalCents: 12845000, Status: quote.QuoteStateSent}},
 	}}
 	svc := NewService(&fakeCustomerRepo{}, qr, testLogger())
 
@@ -214,7 +214,7 @@ func TestGetQuote_OwnerCanRead(t *testing.T) {
 	owner := uuid.New()
 	id := uuid.New()
 	qr := &fakeQuoteRepo{byID: map[uuid.UUID]*quote.Quote{
-		id: {ID: id, CustomerID: owner, TotalAmount: 128450.00, FreightAmount: 350.00, State: quote.QuoteStateSent},
+		id: {QuoteSummary: quote.QuoteSummary{ID: id, CustomerID: owner, TotalCents: 12845000, FreightCents: 35000, Status: quote.QuoteStateSent}},
 	}}
 	svc := NewService(&fakeCustomerRepo{}, qr, testLogger())
 
@@ -225,7 +225,7 @@ func TestGetQuote_OwnerCanRead(t *testing.T) {
 	if got.ID != id {
 		t.Errorf("ID = %s, want %s", got.ID, id)
 	}
-	if got.TotalAmount != 128450.00 || got.FreightAmount != 350.00 {
+	if got.TotalCents != 12845000 || got.FreightCents != 35000 {
 		t.Errorf("money changed in transit: %+v", got)
 	}
 }
@@ -238,7 +238,7 @@ func TestGetQuote_ZeroCallerCannotReadARealCustomersQuote(t *testing.T) {
 	owner := uuid.New()
 	id := uuid.New()
 	qr := &fakeQuoteRepo{byID: map[uuid.UUID]*quote.Quote{
-		id: {ID: id, CustomerID: owner},
+		id: {QuoteSummary: quote.QuoteSummary{ID: id, CustomerID: owner}},
 	}}
 	svc := NewService(&fakeCustomerRepo{}, qr, testLogger())
 
@@ -317,7 +317,7 @@ func TestHandleGetQuote_CrossCustomerRequestIs404(t *testing.T) {
 	victimQuote := uuid.New()
 
 	qr := &fakeQuoteRepo{byID: map[uuid.UUID]*quote.Quote{
-		victimQuote: {ID: victimQuote, CustomerID: victimID, TotalAmount: 128450},
+		victimQuote: {QuoteSummary: quote.QuoteSummary{ID: victimQuote, CustomerID: victimID, TotalCents: 12845000}},
 	}}
 	mux := newTestMux(NewService(&fakeCustomerRepo{}, qr, testLogger()))
 
@@ -328,7 +328,7 @@ func TestHandleGetQuote_CrossCustomerRequestIs404(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
-	if body := rec.Body.String(); jsonContainsNumber(t, body, 128450) {
+	if body := rec.Body.String(); jsonContainsNumber(t, body, 12845000) {
 		t.Fatalf("the victim's quote total leaked into the response: %s", body)
 	}
 }
@@ -338,7 +338,7 @@ func TestHandleGetQuote_OwnerGets200(t *testing.T) {
 	owner := &customer.Customer{ID: uuid.New()}
 	id := uuid.New()
 	qr := &fakeQuoteRepo{byID: map[uuid.UUID]*quote.Quote{
-		id: {ID: id, CustomerID: owner.ID, TotalAmount: 4200.50},
+		id: {QuoteSummary: quote.QuoteSummary{ID: id, CustomerID: owner.ID, TotalCents: 420050}},
 	}}
 	mux := newTestMux(NewService(&fakeCustomerRepo{}, qr, testLogger()))
 
@@ -352,8 +352,8 @@ func TestHandleGetQuote_OwnerGets200(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.TotalAmount != 4200.50 {
-		t.Errorf("total_amount = %v, want 4200.50 dollars", got.TotalAmount)
+	if got.TotalCents != 420050 {
+		t.Errorf("total_cents = %v, want 420050 cents", got.TotalCents)
 	}
 }
 

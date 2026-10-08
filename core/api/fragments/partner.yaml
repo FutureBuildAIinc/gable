@@ -4,8 +4,11 @@
 # The partner module, transcribed from internal/partner as it behaves today.
 # These routes sit behind the ERP's JWT auth and then a second gate that
 # resolves the JWT's email to a customer: an email no customer carries (or an
-# inactive customer) is a 403. The quotes are the ERP's own quote model, the
-# same shape /api/v1/quotes serves, and the list can be null. Quirks preserved:
+# inactive customer) is a 403. The quotes are the ERP's own quote model on the
+# wire contract (R1-15): the list items are the QuoteSummary /api/v1/quotes
+# lists, the one read is the full Quote, and the list is a bare array that is
+# never null (the partner lists keep the bare array until the partner module
+# converts to the list envelope). Quirks preserved:
 # the dashboard's money fields are float dollars; a malformed UUID on the
 # one-quote read is a 400; every other failure is a 404.
 paths:
@@ -37,16 +40,16 @@ paths:
       operationId: partnerListQuotes
       tags: [partner]
       summary: The partner's quotes
-      description: The customer's quotes in the ERP's own quote shape; a bare array, or null when the customer has no quotes.
+      description: The customer's quotes as quote headers, newest first; a bare array, empty when the customer has none.
       responses:
         "200":
-          description: The quotes, a bare array, or null when the customer has no quotes.
+          description: The quotes, a bare array, never null.
           content:
             application/json:
               schema:
-                type: [array, "null"]
+                type: array
                 items:
-                  $ref: "#/components/schemas/Quote"
+                  $ref: "#/components/schemas/QuoteSummary"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -63,7 +66,7 @@ paths:
       tags: [partner]
       summary: One quote
       description: >-
-        The ERP's own quote shape. Every failure, a quote that does not
+        The full quote, as GET /api/v1/quotes/{id} serves it. Every failure, a quote that does not
         exist, one belonging to another customer, and a repository fault,
         is the handler's fixed 404. A malformed UUID is a 400.
       parameters:

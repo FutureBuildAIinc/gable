@@ -5,12 +5,14 @@ package portal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -374,7 +376,11 @@ func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID u
 	err := r.db.RunInTx(ctx, func(txCtx context.Context) error {
 		exec := r.db.GetExecutor(txCtx)
 
-		_, err := exec.Exec(txCtx, `
+		// number and revision come from their column defaults (migration 090):
+		// this raw writer mints from the same sequence the quote module does.
+		var number string
+		var branchID uuid.UUID
+		err := exec.QueryRow(txCtx, `
 			INSERT INTO quotes (
 				id, customer_id, project_id, state, total_amount, freight_amount,
 				delivery_type, source, customer_notes, margin_total,
@@ -385,7 +391,8 @@ func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID u
 				NOW(), NOW(),
 				(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')
 			)
-		`, quoteID, customerID, hdr.ProjectID, hdr.DeliveryType, hdr.Notes)
+			RETURNING number, branch_id
+		`, quoteID, customerID, hdr.ProjectID, hdr.DeliveryType, hdr.Notes).Scan(&number, &branchID)
 		if err != nil {
 			return fmt.Errorf("failed to insert quote header: %w", err)
 		}
@@ -400,6 +407,20 @@ func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID u
 			if err != nil {
 				return fmt.Errorf("failed to insert quote line: %w", err)
 			}
+		}
+
+		// quote.created, as the transaction's last statement (ADR 0003).
+		if r.events != nil {
+			raw, err := json.Marshal(map[string]any{
+				"number": number, "customer_id": customerID, "status": "draft",
+				"revision": 1, "total_cents": 0, "source": "portal",
+			})
+			if err != nil {
+				return err
+			}
+			return r.events.Write(txCtx, outbox.Event{
+				Type: quote.EventCreated, EntityType: "quote", EntityID: quoteID, BranchID: &branchID, Data: raw,
+			})
 		}
 		return nil
 	})
