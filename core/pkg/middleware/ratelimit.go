@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"net/http"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -26,10 +27,26 @@ type visitor struct {
 	windowStart time.Time
 }
 
+// limiterKey is the budget a caller draws on: the address itself for IPv4,
+// the /64 for IPv6, because one subscriber commonly holds a whole /64 and can
+// rotate addresses inside it at will. An unparseable value keys as itself.
+func limiterKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap()
+	if a.Is4() {
+		return a.String()
+	}
+	return netip.PrefixFrom(a.WithZone(""), 64).Masked().String()
+}
+
 // RateLimit returns middleware that enforces a per-IP request limit within a
 // sliding window. Requests exceeding the limit receive 429 Too Many Requests.
 // The caller is the TCP peer; X-Forwarded-For is believed only when the peer
-// is inside the trusted proxy networks (the zero value trusts none).
+// is inside the trusted proxy networks (the zero value trusts none). IPv6
+// callers are counted per /64 (see limiterKey).
 func RateLimit(requestsPerMinute int, trusted clientip.Trusted) func(http.Handler) http.Handler {
 	rl := &rateLimiter{
 		visitors: make(map[string]*visitor),
@@ -54,7 +71,7 @@ func RateLimit(requestsPerMinute int, trusted clientip.Trusted) func(http.Handle
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := trusted.Of(r)
+			ip := limiterKey(trusted.Of(r))
 
 			rl.mu.Lock()
 			now := time.Now()
