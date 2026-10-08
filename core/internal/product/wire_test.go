@@ -15,6 +15,7 @@ package product_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -115,7 +116,7 @@ func (f *fixture) createProduct(overrides map[string]any) resp {
 
 func (f *fixture) deleteProduct(id string) {
 	f.t.Helper()
-	_, _ = f.db.Pool.Exec(f.t.Context(), `DELETE FROM products WHERE id = $1`, id)
+	_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM products WHERE id = $1`, id)
 }
 
 // TestCreateShape: the create answers 201 with Location, the scaled base
@@ -273,7 +274,7 @@ func TestStockFieldsFromInventory(t *testing.T) {
 	}
 	id := str(res.body["id"])
 	defer f.deleteProduct(id)
-	if _, err := f.db.Pool.Exec(f.t.Context(),
+	if _, err := f.db.Pool.Exec(context.Background(),
 		`INSERT INTO inventory (product_id, location, quantity, allocated) VALUES ($1, 'WIRE', 120, 30)`, id); err != nil {
 		t.Fatalf("seed inventory: %v", err)
 	}

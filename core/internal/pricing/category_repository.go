@@ -68,6 +68,13 @@ type CategoryRepository interface {
 // PostgresCategoryRepository implements CategoryRepository using pgx.
 type PostgresCategoryRepository struct {
 	db *database.DB
+	tx TxRunner // optional; defaults to the database itself
+}
+
+// WithTxRunner substitutes the transaction boundary the bulk write runs in.
+func (r *PostgresCategoryRepository) WithTxRunner(runner TxRunner) *PostgresCategoryRepository {
+	r.tx = runner
+	return r
 }
 
 // NewCategoryRepository creates a new PostgresCategoryRepository.
@@ -684,11 +691,20 @@ func (r *PostgresCategoryRepository) ListAuditEntries(ctx context.Context, ruleI
 // --- Bulk Operations ---
 
 func (r *PostgresCategoryRepository) BulkUpsertRules(ctx context.Context, rules []CategoryPricingRule) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+	runner := r.tx
+	if runner == nil {
+		runner = r.db
 	}
-	defer tx.Rollback(ctx)
+	return runner.RunInTx(ctx, func(txCtx context.Context) error {
+		return r.bulkUpsertRulesInTx(txCtx, rules)
+	})
+}
+
+// bulkUpsertRulesInTx runs the upserts through the caller's transaction
+// executor, never the pool (a transaction's statements all go through that
+// transaction).
+func (r *PostgresCategoryRepository) bulkUpsertRulesInTx(ctx context.Context, rules []CategoryPricingRule) error {
+	tx := r.db.GetExecutor(ctx)
 
 	for i := range rules {
 		rule := &rules[i]
@@ -722,13 +738,11 @@ func (r *PostgresCategoryRepository) BulkUpsertRules(ctx context.Context, rules 
 		if err != nil {
 			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
 		}
-		_, err = tx.Exec(ctx, query, args...)
-		if err != nil {
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
 			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
 		}
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *PostgresCategoryRepository) BulkDeleteRules(ctx context.Context, ids []uuid.UUID) error {
