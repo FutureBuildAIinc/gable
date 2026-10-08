@@ -127,7 +127,12 @@ headers rode along, and `user_id` is null either way):
 
 A 401 writes no row: an unknown or revoked key has no attributable id. The
 refused request is answered 403 whether or not the audit write lands; a full
-audit table must not turn a refusal into a server error. The one 403 a valid
+audit table must not turn a refusal into a server error. The row stores a
+bounded copy of the caller controlled fields (512 bytes of the path, 128 of
+the refused scope, cut on a rune boundary and marked as truncated): stored
+verbatim, one refused request would write an attacker sized row, and a valid
+but scopeless key would convert cheap requests into disk exhaustion. The
+full path goes to the server log line only. The one 403 a valid
 key can be served outside the auth layer is the POS cashier rule in section
 4; the route logs it server-side and writes no row.
 
@@ -211,6 +216,5 @@ Accepted with this record, each named with the later item that narrows it:
   pays one Argon2id compare; an unknown prefix returns before any hash
   work, so response time tells a caller whether a prefix exists. The
   impact is low: the prefix is not a secret (an administrator reads it
-  from the key row), the global rate limit bounds probing, and the hash
-  compare itself is constant time. A dummy compare on the miss path would
-  close it if it ever matters.
+  from the key row), and the hash compare itself is constant time. A
+  dummy compare on the miss path would close it if it ever matters.

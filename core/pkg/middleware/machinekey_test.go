@@ -644,6 +644,36 @@ func TestRealKeyRefusalWithAgentHeadersKeepsUserIDNull(t *testing.T) {
 	}
 }
 
+// The reviewer's probe, kept as a regression test: a valid key refused on a
+// 40 KB path once wrote the path verbatim into audit_log, so a scopeless key
+// could turn cheap requests into attacker sized rows. The stored row is
+// bounded; the full path belongs to the server log line only.
+func TestRealKeyRefusalRowBoundedOnLongPath(t *testing.T) {
+	db := testutil.RequireDB(t)
+
+	raw, id := createKey(t, db, "quotes:read")
+	h := &okHandler{}
+	chain := newDBAuth(t, db).Handler(h)
+
+	long := "/api/v1/quotes/" + strings.Repeat("a", 40000)
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, bearerRequest(t, "POST", long, raw))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var stored string
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'path' FROM audit_log WHERE actor_kind = 'key' AND actor_id = $1 AND action = 'key.scope_refused'`, id,
+	).Scan(&stored)
+	if err != nil {
+		t.Fatalf("no key.scope_refused audit row for key %s: %v", id, err)
+	}
+	if len(stored) > 512 {
+		t.Fatalf("audit row stores a %d byte path, want at most 512", len(stored))
+	}
+}
+
 func TestRevokedRealKeyRefused401(t *testing.T) {
 	db := testutil.RequireDB(t)
 
