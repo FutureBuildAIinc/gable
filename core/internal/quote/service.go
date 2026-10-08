@@ -509,6 +509,7 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 	}
 
 	var created *order.Order
+	var accepted *Quote
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockQuote(ctx, id); err != nil {
 			return notFound(err)
@@ -550,11 +551,20 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 		if err := s.record(ctx, cur, EventAccepted, from.Status()); err != nil {
 			return err
 		}
+		accepted = cur
 		created, err = s.orders.CreateFromQuote(ctx, src, priced)
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Auto-PO, as the accept it replaced did: after the commit and best
+	// effort (a failure is logged and never blocks the convert). It stays
+	// outside the transaction because the purchase order service writes
+	// through its own pool connection, and a purchase order the convert's
+	// rollback could not take back would be orphaned.
+	if s.poSvc != nil {
+		s.triggerAutoPO(ctx, accepted)
 	}
 	return created, nil
 }

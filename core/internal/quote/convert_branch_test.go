@@ -185,3 +185,90 @@ func TestConvert_OrderTakesTheQuotesBranch(t *testing.T) {
 	}
 	check("ConvertInProcess", o2)
 }
+
+type poRecorder struct {
+	calls []uuid.UUID // the quote line ids it was asked about
+	qty   []float64
+	cost  []float64
+	err   error
+}
+
+func (p *poRecorder) CreatePOFromSpecialOrderLine(_ context.Context, _ uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID) error {
+	p.calls = append(p.calls, lineID)
+	p.qty = append(p.qty, qty)
+	p.cost = append(p.cost, unitCost)
+	return p.err
+}
+
+// RULE: the convert creates the automatic purchase orders for the quote's
+// special order lines, as the accept it replaced did (best effort, after the
+// transaction commits: ADR 0005 5.8 is silent, and a purchase order the
+// convert's own rollback could not take back would be orphaned). A failure
+// is logged and never blocks the convert; a refused convert creates none.
+func TestConvert_CreatesTheAutomaticPurchaseOrders(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := context.Background()
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET average_unit_cost = 3.25 WHERE id = $1`, w.f.productID); err != nil {
+		t.Fatal(err)
+	}
+	po := &poRecorder{}
+	w.svc.WithAutoPO(po)
+
+	// A refused convert (no branch context) creates none.
+	q := w.otherBranchQuote(t)
+	if _, err := w.svc.Convert(ctx, q.ID, quote.Precondition{Revision: &q.Revision}); err == nil {
+		t.Fatal("convert with no branch context succeeded")
+	}
+	if len(po.calls) != 0 {
+		t.Fatalf("a refused convert made %d purchase orders", len(po.calls))
+	}
+
+	o, err := w.svc.Convert(branchctx.WithSystem(ctx), q.ID, quote.Precondition{Revision: &q.Revision})
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if len(po.calls) != 1 || po.calls[0] != *o.Lines[0].QuoteLineID || po.qty[0] != 10 || po.cost[0] != 3.25 {
+		t.Fatalf("purchase orders asked for = lines %v qty %v cost %v, want the quote line once at 10 and 3.25", po.calls, po.qty, po.cost)
+	}
+
+	// The seam's convert does the same, and a failing purchase order never
+	// blocks it.
+	po.err = errors.New("vendor unavailable")
+	q2 := w.otherBranchQuote(t)
+	if _, err := w.svc.ConvertInProcess(branchctx.WithSystem(ctx), q2.ID); err != nil {
+		t.Fatalf("convert with a failing purchase order: %v", err)
+	}
+	if len(po.calls) != 2 {
+		t.Fatalf("the seam's convert asked %d times, want 2 in all", len(po.calls))
+	}
+}
+
+// RULE (ADR 0001 section 12): quote.accepted from the convert carries the
+// revision AFTER the accept moved it, as the transition's event does, and
+// from_status.
+func TestConvert_AcceptedEventCarriesTheNewRevision(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := branchctx.WithSystem(context.Background())
+	q := w.otherBranchQuote(t)
+	if _, err := w.svc.Convert(ctx, q.ID, quote.Precondition{Revision: &q.Revision}); err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	after, err := w.svc.GetQuote(ctx, q.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rev int64
+	var from string
+	if err := db.Pool.QueryRow(ctx, `SELECT (data->>'revision')::bigint, data->>'from_status' FROM events_outbox
+		WHERE entity_type = 'quote' AND entity_id = $1 AND type = 'quote.accepted'`, q.ID).Scan(&rev, &from); err != nil {
+		t.Fatalf("read the event: %v", err)
+	}
+	if rev != after.Revision || rev <= q.Revision {
+		t.Errorf("quote.accepted revision = %d, want the accepted quote's %d (above %d)", rev, after.Revision, q.Revision)
+	}
+	if from != "draft" {
+		t.Errorf("from_status = %q, want draft", from)
+	}
+}
