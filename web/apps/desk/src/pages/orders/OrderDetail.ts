@@ -25,6 +25,7 @@ export class GableOrderDetail extends LitElement {
     @state() private loading = true;
     @state() private error = false;
     @state() private processing = false;
+    @state() private pickedUpBy = '';
 
     connectedCallback() {
         super.connectedCallback();
@@ -92,6 +93,46 @@ export class GableOrderDetail extends LitElement {
             ToastService.show('Hold released', 'success');
         } catch (error) {
             ToastService.show('Failed to release hold: ' + (error instanceof Error ? error.message : error), 'error');
+        } finally {
+            this.processing = false;
+        }
+    }
+
+    /**
+     * The fulfilment is the money moment (ADR 0005 5.6): it bills everything
+     * allocated, moves the stock and posts the invoice. A will-call order names
+     * who collected it.
+     */
+    private async handleFulfil() {
+        if (!this.order) return;
+        const willCall = this.order.delivery_type === 'pickup';
+        if (willCall && !this.pickedUpBy.trim()) {
+            ToastService.show('Enter the name of the person collecting this order', 'error');
+            return;
+        }
+        this.processing = true;
+        try {
+            const { order, invoiceId } = await OrderService.fulfil(this.order.id, this.order.revision, {
+                pickedUpBy: willCall ? this.pickedUpBy.trim() : undefined,
+            });
+            this.order = order;
+            ToastService.show(invoiceId ? 'Order fulfilled and invoiced' : 'Order fulfilled', 'success');
+        } catch (error) {
+            ToastService.show('Failed to fulfil order: ' + (error instanceof Error ? error.message : error), 'error');
+        } finally {
+            this.processing = false;
+        }
+    }
+
+    /** The retry for a back order: allocates whatever stock has arrived. */
+    private async handleAllocate() {
+        if (!this.order) return;
+        this.processing = true;
+        try {
+            this.order = await OrderService.allocate(this.order.id, this.order.revision);
+            ToastService.show(this.order.status === 'backordered' ? 'Still on back order' : 'Back order released', 'success');
+        } catch (error) {
+            ToastService.show('Failed to allocate order: ' + (error instanceof Error ? error.message : error), 'error');
         } finally {
             this.processing = false;
         }
@@ -172,6 +213,35 @@ export class GableOrderDetail extends LitElement {
                                 ${this.processing ? 'Processing...' : html`${icon(LockOpen, 18)} Release Hold`}
                             </button>
                         ` : nothing}
+                        ${(order.status === 'confirmed' || order.status === 'backordered') ? html`
+                            ${order.delivery_type === 'pickup' ? html`
+                                <input
+                                    type="text"
+                                    aria-label="Picked up by"
+                                    placeholder="Picked up by"
+                                    maxlength="200"
+                                    .value=${this.pickedUpBy}
+                                    @input=${(e: Event) => { this.pickedUpBy = (e.target as HTMLInputElement).value; }}
+                                    class="bg-black/30 border border-white/10 rounded px-3 py-2 text-white text-sm w-48"
+                                />
+                            ` : nothing}
+                            <button
+                                @click=${() => this.handleFulfil()}
+                                ?disabled=${this.processing}
+                                class="bg-gable-green text-black font-bold px-4 py-2 rounded hover:bg-gable-green/90 transition-colors flex items-center gap-2"
+                            >
+                                ${this.processing ? 'Processing...' : html`${icon(Check, 18)} Fulfil Order`}
+                            </button>
+                        ` : nothing}
+                        ${order.status === 'backordered' ? html`
+                            <button
+                                @click=${() => this.handleAllocate()}
+                                ?disabled=${this.processing}
+                                class="bg-amber-500 text-black font-bold px-4 py-2 rounded hover:bg-amber-600 transition-colors flex items-center gap-2"
+                            >
+                                Allocate Stock
+                            </button>
+                        ` : nothing}
                         ${(order.status === 'draft' || order.status === 'confirmed' || order.status === 'backordered') ? html`
                             <button
                                 @click=${() => this.handleCancel()}
@@ -214,6 +284,7 @@ export class GableOrderDetail extends LitElement {
                                     <tr>
                                         <th class="p-4 text-muted-foreground font-medium">Item</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Qty</th>
+                                        <th class="p-4 text-muted-foreground font-medium text-right">Stock</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Price</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Total</th>
                                     </tr>
@@ -236,6 +307,13 @@ export class GableOrderDetail extends LitElement {
                                                 ${line.price_uom && line.uom && line.price_uom !== line.uom
                                                     ? html`<div class="text-[10px] text-zinc-500">per ${line.price_uom}</div>` : ''}
                                             </td>
+                                            <td class="p-4 font-mono text-right text-xs" data-testid="line-stock">
+                                                ${line.line_type === 'text' ? '' : html`
+                                                    <div class="text-zinc-300">${line.quantity_allocated} allocated</div>
+                                                    ${line.quantity_backordered !== '0' ? html`<div class="text-amber-400">${line.quantity_backordered} back ordered</div>` : nothing}
+                                                    ${line.quantity_fulfilled !== '0' ? html`<div class="text-gable-green">${line.quantity_fulfilled} shipped</div>` : nothing}
+                                                `}
+                                            </td>
                                             <td class="p-4 text-white font-mono text-right">
                                                 ${line.unit_price_ten_thousandths !== null
                                                     ? html`${formatPrice4(line.unit_price_ten_thousandths)}`
@@ -249,15 +327,15 @@ export class GableOrderDetail extends LitElement {
                                 </tbody>
                                 <tfoot class="bg-white/5">
                                     <tr>
-                                        <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Subtotal</td>
+                                        <td colspan="4" class="p-4 text-right font-bold text-white uppercase">Subtotal</td>
                                         <td class="p-4 text-right font-bold text-white font-mono">${formatCents(order.subtotal_cents)}</td>
                                     </tr>
                                     <tr>
-                                        <td colspan="3" class="p-4 text-right text-zinc-400">Tax</td>
+                                        <td colspan="4" class="p-4 text-right text-zinc-400">Tax</td>
                                         <td class="p-4 text-right text-zinc-400 font-mono">${formatCents(order.tax_cents)}</td>
                                     </tr>
                                     <tr>
-                                        <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Total</td>
+                                        <td colspan="4" class="p-4 text-right font-bold text-white uppercase">Total</td>
                                         <td class="p-4 text-right font-bold text-gable-green font-mono text-lg">${formatCents(order.total_cents)}</td>
                                     </tr>
                                 </tfoot>

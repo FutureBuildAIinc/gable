@@ -143,4 +143,57 @@ describe('gable-order-detail - the order contract', () => {
     expect(body).toContain('$500.00')
     expect(body).toContain('$500.00')
   })
+
+  it('shows the stock side of each line and a back order with its allocate retry', async () => {
+    const short = order({ status: 'backordered' })
+    short.lines[0].quantity_allocated = '6'
+    short.lines[0].quantity_backordered = '18'
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(short)))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: short.id })
+    const body = text(el)
+    expect(body).toContain('6 allocated')
+    expect(body).toContain('18 back ordered')
+    expect(body).toContain('Allocate Stock')
+    expect(body).toContain('Fulfil Order')
+  })
+
+  it('offers the fulfilment of a confirmed order; a pickup order names who collected it', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    expect(text(el)).toContain('Fulfil Order')
+    expect(el.querySelector('input[aria-label="Picked up by"]')).not.toBeNull()
+    const delivery = order({ delivery_type: 'delivery' })
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(delivery)))
+    const el2 = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: delivery.id })
+    expect(text(el2)).toContain('Fulfil Order')
+    expect(el2.querySelector('input[aria-label="Picked up by"]')).toBeNull()
+  })
+
+  it('fulfils through the fulfilments route on the loaded revision, with picked_up_by', async () => {
+    const fulfilled = order({ status: 'fulfilled', revision: 3, invoice_ids: ['00000000-0000-4000-8000-0000000000i1'] })
+    fulfilled.lines[0].quantity_allocated = '0'
+    fulfilled.lines[0].quantity_fulfilled = '24'
+    const calls: { url: string; init?: RequestInit }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.endsWith('/fulfillments')) {
+        return new Response(JSON.stringify(fulfilled), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json', Location: '/api/v1/invoices/00000000-0000-4000-8000-0000000000i1' },
+        })
+      }
+      return jsonResponse(order())
+    }))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const input = el.querySelector('input[aria-label="Picked up by"]') as HTMLInputElement
+    input.value = 'Counter customer'
+    input.dispatchEvent(new Event('input'))
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Fulfil Order')) as HTMLButtonElement
+    button.click()
+    await new Promise((r) => setTimeout(r, 20))
+    const call = calls.find((c) => c.url.endsWith('/fulfillments'))
+    expect(call).toBeTruthy()
+    expect(JSON.parse(String(call!.init!.body))).toEqual({ revision: 2, picked_up_by: 'Counter customer' })
+    expect(new Headers(call!.init!.headers).get('If-Match')).toBe('"2"')
+    expect(text(el)).toContain('Fulfilled')
+  })
 })
