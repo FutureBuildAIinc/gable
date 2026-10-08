@@ -25,6 +25,25 @@ writes), the unit of section 5.6's fulfilment `lines[].quantity` (the
 line's `stock_uom`) with a new optional `lines[].tally` (ADR 0006 section
 4.4), and section 5.8's `unit_not_stock_unit` refusal.
 
+ADR 0008 (inventory identity and vendor intake, item C4-0) amends the first
+bullet of section 8.4 in its own pull request, on the lead's instruction:
+a stocked special order line costs at `costOf`, because its receipt entered
+stock and moved the average, and the linked received purchase line's cost
+applies only to lines whose receipt never enters stock, a non stock line
+and a direct ship line, whose billing relieves `1030` from the linked
+receipt lines' posted values, pro rata to the billed quantity, the last
+bill taking the remainder, the base the unrelieved posted value over the
+quantity received but not yet billed, so a receipt that arrives after a
+first bill enters the next bill's base (ADR 0008 3.4), never a recompute
+of one purchase line's cost, which is undefined when several purchase
+lines fill one order line and leaves cent residues in `1030`; and the
+same bullet's
+read of the average becomes
+the product row's share lock from C4-2 (ADR 0008 sections 3.5 and 9 step
+6b), so a sale racing a receipt leaves no residue in `1030`. C2-2b
+builds this bullet ahead of ADR 0008's items and follows it as amended
+here, the posted values relief included.
+
 The items land in a chain: C2-1 (which may start at once), then C2-2, then
 C2-3, then C2-4, then C2-5. Each item below names what it builds and, where a
 piece of this record arrives with a later item, says so at that piece.
@@ -978,14 +997,37 @@ revenue posts net. Component and text lines post nothing.
 #### 8.4 Cost
 
 - Unit cost of a stocked line (`product` with a product, `component`) is
-  `products.average_unit_cost` read inside the posting transaction
-  (`costOf`, the one function cycle 4 replaces). A special order line uses
-  the cost of the received purchase order line linked to it
-  (`purchase_order_lines.linked_so_line_id`) when one is received, else
-  `costOf`; never the `special_order_cost` estimate, which would leave a
-  residue in `1030` against what the receipt cost.
+  `products.average_unit_cost` read inside the posting transaction, from
+  C4-2 under the product row's share lock (`costOf`, the one function
+  cycle 4 replaces; ADR 0008 sections 3.5 and 9 step 6b set the rule: every
+  act that values a move at the average holds the product row `FOR SHARE`
+  and every act that moves the average holds it `FOR UPDATE`, so a sale
+  racing a receipt values at the average the ledger keeps and the balance
+  of `1030` equals on hand at the average). A special order line whose
+  receipt entered stock is a stocked line and costs at `costOf`: its
+  receipt moved the average, and relieving at the purchase cost would
+  strand the difference in `1030` for ever. The cost of the received
+  purchase order line linked to it
+  (`purchase_order_lines.linked_so_line_id`) applies only to lines whose
+  receipt never enters stock, a non stock line and a direct ship line,
+  else `costOf`; and on those lines the billing does not recompute the
+  purchase line's cost: it relieves `1030` from the linked receipt
+  lines' posted values, each bill relieving `unrelieved posted value x
+  billed quantity / (received quantity - quantity billed before)`, the
+  bill that brings billed quantity up to received quantity taking the
+  unrelieved remainder, so a receipt that arrives after a first bill
+  enters the next bill's base (ADR 0008 3.4; several purchase lines at
+  different costs can fill one order line, where a single linked cost is
+  undefined, and a recompute of one of them leaves cent residues in
+  `1030`);
+  never the `special_order_cost` estimate, which would
+  leave a residue in `1030` against what the receipt cost.
 - `cost = round_half_away(quantity x unit_cost)` per line, in cents, stored
   on the invoice line with `unit_cost`; the entry's COGS legs are the sum.
+  On a non stock or direct ship line with linked receipts the relieved
+  amount is the pro rata posted value above, and the `unit_cost` stored on
+  the invoice line is that amount divided by the quantity, a display
+  figure.
 - A unit cost of zero or NULL posts no COGS for that line and stores 0; the
   margin read shows it. It is not an error: a missing cost must not stop a
   sale.
@@ -993,7 +1035,7 @@ revenue posts net. Component and text lines post nothing.
   `unit_cost` (the cost that left), or `costOf` when it names no invoice
   line, and its restock legs reverse COGS at that cost.
 - Kit lines, charge lines and text lines carry no cost; a non stock line
-  carries cost only through a linked received purchase order line.
+  carries cost only through its linked receipt lines' posted values.
 
 ### 9. Payments and the AR subledger
 
