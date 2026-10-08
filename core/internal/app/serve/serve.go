@@ -147,6 +147,7 @@ func Run() {
 	}
 
 	logger.Info("Starting server...", "port", cfg.Port, "auth_mode", cfg.AuthMode, "log_level", cfg.LogLevel)
+	cfg.TrustedProxies.LogConfigured(logger)
 
 	// 3. Database Connection
 	db, err := database.Connect(cfg.DatabaseURL, database.PoolConfig{
@@ -1096,8 +1097,12 @@ func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 }
 
 // RequestLogger logs incoming requests with status code, bytes written, and request ID.
+// remote_addr is the resolved client (see clientip), and a forwarding header
+// from a peer outside the trusted proxies is reported as a warning.
 func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Handler) http.Handler {
+	watch := clientip.NewForwardingWatch(logger, trusted)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		watch.Observe(r)
 		start := time.Now()
 		sw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
