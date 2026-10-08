@@ -146,7 +146,6 @@ export interface CreateOrderLineRequest {
 
 export interface CreateOrderRequest {
     customer_id: string;
-    quote_id?: string;
     job_id?: string;
     delivery_type: OrderDeliveryType;
     ship_to_id?: string;

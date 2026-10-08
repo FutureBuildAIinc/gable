@@ -2018,7 +2018,7 @@
               "customer_id": "<id-2>",
               "from_status": "sent",
               "number": "Q-000021",
-              "revision": 3,
+              "revision": 4,
               "status": "accepted",
               "total_cents": 11000
             },
