@@ -9,6 +9,7 @@ carries a matching `SPDX-License-Identifier` header, and
 | Path prefix | SPDX license identifier | License text |
 |---|---|---|
 | `backend/internal/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
+| `backend/api/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
 | `backend/pkg/` *(except `backend/pkg/apps/`)* | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
 | `backend/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
 | `backend/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
