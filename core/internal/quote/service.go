@@ -295,6 +295,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		if err != nil {
 			return notFound(err)
 		}
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
+			return err
+		}
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
@@ -326,6 +329,9 @@ func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
 	q, err := s.repo.GetQuote(ctx, id)
 	if err != nil {
 		return nil, notFound(err)
+	}
+	if err := s.checkQuoteBranch(ctx, q); err != nil {
+		return nil, err
 	}
 	return q, nil
 }
@@ -389,6 +395,9 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 		cur, err := s.repo.GetQuote(ctx, id)
 		if err != nil {
 			return notFound(err)
+		}
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
+			return err
 		}
 		if pre != nil {
 			if err := pre.check(cur.Revision); err != nil {
@@ -549,6 +558,11 @@ func (s *Service) GetAnalytics(ctx context.Context) (*QuoteAnalytics, error) {
 
 // GetOriginalFile returns the stored upload; a missing quote is a 404.
 func (s *Service) GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error) {
+	// The record branch rule rides on the read: a quote the caller may not
+	// target is refused before any byte of its file leaves.
+	if _, err := s.GetQuote(ctx, id); err != nil {
+		return nil, "", "", err
+	}
 	data, name, ctype, err := s.repo.GetOriginalFile(ctx, id)
 	return data, name, ctype, notFound(err)
 }
@@ -587,6 +601,25 @@ func (s *Service) checkPayloadBranch(ctx context.Context, d *Draft) error {
 		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
 			Message: "branch_id is outside the branches this caller may target",
 			Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
+}
+
+// checkQuoteBranch is the record branch rule (ADR 0007 section 2.3) for a
+// quote a path id addresses: the quote's branch must be one the caller may
+// target, the same rule the create applies to the body's branch_id, else 403
+// forbidden naming id. A caller with no branch context passes: the portal and
+// the integration seam call these methods without the branch middleware, and
+// every HTTP route that reaches them has had one settled.
+func (s *Service) checkQuoteBranch(ctx context.Context, q *Quote) error {
+	if s.branches == nil || middleware.BranchFromContext(ctx) == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, q.BranchID)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "quote is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
 	}
 	return err
 }

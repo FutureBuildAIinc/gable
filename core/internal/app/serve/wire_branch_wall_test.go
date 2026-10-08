@@ -407,7 +407,9 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 		{"read foreign quote, no header", "GET", "/api/v1/quotes/" + quoteB, "", "sales", "u-a", "", no},
 		{"read own quote", "GET", "/api/v1/quotes/" + quoteA, "", "sales", "u-a", A, ok},
 		{"file of foreign quote, no header", "GET", "/api/v1/quotes/" + quoteB + "/file", "", "sales", "u-a", "", no},
-		{"edit foreign quote, no header", "PUT", "/api/v1/quotes/" + quoteB, `{"revision":1}`, "sales", "u-a", "", no},
+		{"edit foreign quote, no header", "PUT", "/api/v1/quotes/" + quoteB,
+			fmt.Sprintf(`{"revision":1,"customer_id":%q,"delivery_type":"pickup","lines":[{"product_id":%q,"sku":"wall","description":"x","quantity":"1","uom":"PCS","unit_price_ten_thousandths":100}]}`, custA, f.productID),
+			"sales", "u-a", "", no},
 		{"transition foreign quote, no header", "POST", "/api/v1/quotes/" + quoteB + "/transitions", `{"to":"sent","revision":1}`, "sales", "u-a", "", no},
 	} {
 		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
