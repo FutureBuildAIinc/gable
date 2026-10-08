@@ -63,13 +63,13 @@ func ParseCategoryRuleType(name string) (CategoryRuleType, bool) {
 
 // ProductCategory represents a node in the hierarchical product category tree.
 type ProductCategory struct {
-	ID        uuid.UUID  `json:"id"`
-	Name      string     `json:"name"`
-	Slug      string     `json:"slug"`
-	Path      string     `json:"path"` // ltree path, e.g. "lumber.framing"
-	ParentID  *uuid.UUID `json:"parent_id"`
-	SortOrder int        `json:"sort_order"`
-	IsActive  bool       `json:"is_active"`
+	ID        uuid.UUID       `json:"id"`
+	Name      string          `json:"name"`
+	Slug      string          `json:"slug"`
+	Path      string          `json:"path"` // ltree path, e.g. "lumber.framing"
+	ParentID  *uuid.UUID      `json:"parent_id"`
+	SortOrder int             `json:"sort_order"`
+	IsActive  bool            `json:"is_active"`
 	CreatedAt httpx.Timestamp `json:"created_at"`
 	UpdatedAt httpx.Timestamp `json:"updated_at"`
 
@@ -82,23 +82,23 @@ type ProductCategory struct {
 // otherwise, so the wire carries the one that applies and null for the
 // other.
 type CategoryPricingRule struct {
-	ID             uuid.UUID         `json:"id"`
-	TargetType     TargetType        `json:"target_type"`
-	CustomerID     *uuid.UUID        `json:"customer_id"`
-	Tier           string            `json:"tier"`
-	CategoryID     uuid.UUID         `json:"category_id"`
-	RuleType       CategoryRuleType  `json:"rule_type"`
-	ValuePrice     *httpx.Price      `json:"value_ten_thousandths"`
-	ValuePct       *httpx.Quantity   `json:"value_pct"`
-	MarginFloorPct *httpx.Quantity   `json:"margin_floor_pct"`
-	StartsAt       *httpx.Timestamp  `json:"starts_at"`
-	ExpiresAt      *httpx.Timestamp  `json:"expires_at"`
-	IsActive       bool              `json:"is_active"`
-	Priority       int               `json:"priority"`
-	CreatedBy      string            `json:"created_by"`
-	Revision       int64             `json:"revision"`
-	CreatedAt      httpx.Timestamp   `json:"created_at"`
-	UpdatedAt      httpx.Timestamp   `json:"updated_at"`
+	ID             uuid.UUID        `json:"id"`
+	TargetType     TargetType       `json:"target_type"`
+	CustomerID     *uuid.UUID       `json:"customer_id"`
+	Tier           string           `json:"tier"`
+	CategoryID     uuid.UUID        `json:"category_id"`
+	RuleType       CategoryRuleType `json:"rule_type"`
+	ValuePrice     *httpx.Price     `json:"value_ten_thousandths"`
+	ValuePct       *httpx.Quantity  `json:"value_pct"`
+	MarginFloorPct *httpx.Quantity  `json:"margin_floor_pct"`
+	StartsAt       *httpx.Timestamp `json:"starts_at"`
+	ExpiresAt      *httpx.Timestamp `json:"expires_at"`
+	IsActive       bool             `json:"is_active"`
+	Priority       int              `json:"priority"`
+	CreatedBy      string           `json:"created_by"`
+	Revision       int64            `json:"revision"`
+	CreatedAt      httpx.Timestamp  `json:"created_at"`
+	UpdatedAt      httpx.Timestamp  `json:"updated_at"`
 
 	// Joined fields for API responses
 	CategoryName string `json:"category_name,omitempty"`
@@ -155,25 +155,15 @@ type CategoryRuleFilter struct {
 
 // CategoryPricingAudit represents a row in the audit trail table.
 type CategoryPricingAudit struct {
-	ID          uuid.UUID      `json:"id"`
-	RuleID      uuid.UUID      `json:"rule_id"`
-	Action      string         `json:"action"`
-	OldValues   map[string]any `json:"old_values,omitempty"`
-	NewValues   map[string]any `json:"new_values,omitempty"`
-	PerformedBy string         `json:"performed_by"`
+	ID          uuid.UUID       `json:"id"`
+	RuleID      uuid.UUID       `json:"rule_id"`
+	Action      string          `json:"action"`
+	OldValues   map[string]any  `json:"old_values,omitempty"`
+	NewValues   map[string]any  `json:"new_values,omitempty"`
+	PerformedBy string          `json:"performed_by"`
 	PerformedAt httpx.Timestamp `json:"performed_at"`
-	CategoryID  *uuid.UUID     `json:"category_id,omitempty"`
-	TargetType  string         `json:"target_type,omitempty"`
-	Tier        string         `json:"tier,omitempty"`
-	CustomerID  *uuid.UUID     `json:"customer_id,omitempty"`
-}
-
-// PaginatedRulesResponse is the legacy offset envelope the category rules
-// list served before its conversion onto the recipe; it leaves with that
-// conversion.
-type PaginatedRulesResponse struct {
-	Data   []CategoryPricingRule `json:"data"`
-	Total  int                   `json:"total"`
-	Limit  int                   `json:"limit"`
-	Offset int                   `json:"offset"`
+	CategoryID  *uuid.UUID      `json:"category_id,omitempty"`
+	TargetType  string          `json:"target_type,omitempty"`
+	Tier        string          `json:"tier,omitempty"`
+	CustomerID  *uuid.UUID      `json:"customer_id,omitempty"`
 }

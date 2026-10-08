@@ -42,24 +42,40 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pricing/rules", guard(h.HandleListRules))
 }
 
-// calculatedPriceView is the price read's answer on the wire (ADR 0006 7.3):
+// CalculatedPriceView is the price read's answer on the wire (ADR 0006 7.3):
 // the scaled price with its unit, the pair (1 and 1 until the unit sets of
 // C3-2A: every price is in the product's stocking unit), the extension by
 // Extend, and the source lowercased as price_basis.
-type calculatedPriceView struct {
-	CustomerID uuid.UUID       `json:"customer_id"`
-	ProductID  uuid.UUID       `json:"product_id"`
-	Quantity   httpx.Quantity  `json:"quantity"`
-	UOM        product.UOM     `json:"uom"`
+type CalculatedPriceView struct {
+	CustomerID uuid.UUID      `json:"customer_id"`
+	ProductID  uuid.UUID      `json:"product_id"`
+	Quantity   httpx.Quantity `json:"quantity"`
+	UOM        product.UOM    `json:"uom"`
 
-	UnitPrice  httpx.Price     `json:"unit_price_ten_thousandths"`
-	PriceUOM   string          `json:"price_uom"`
-	UOMQty     httpx.Quantity  `json:"uom_qty"`
+	UnitPrice   httpx.Price    `json:"unit_price_ten_thousandths"`
+	PriceUOM    string         `json:"price_uom"`
+	UOMQty      httpx.Quantity `json:"uom_qty"`
 	PriceUOMQty httpx.Quantity `json:"price_uom_qty"`
-	LineTotal  httpx.Cents     `json:"line_total_cents"`
+	LineTotal   httpx.Cents    `json:"line_total_cents"`
 
-	PriceBasis PricingSource   `json:"price_basis"`
-	Details    string          `json:"details"`
+	PriceBasis PricingSource `json:"price_basis"`
+	Details    string        `json:"details"`
+}
+
+// checkPrice refuses a unit price the NUMERIC(12,4) columns cannot hold or
+// that is negative: a price past the bound is a 400, never a database fault.
+func checkPrice(v *httpx.Validator, field string, p httpx.Price) {
+	v.Check(p >= 0, field, "a unit price is never negative")
+	v.Check(int64(p) <= int64(httpx.QuantityMax), field, "is larger than a price can be (99999999.9999)")
+}
+
+// checkPercent refuses a percentage that is negative or, for a discount or a
+// floor, past 100 (a price below zero).
+func checkPercent(v *httpx.Validator, field string, q httpx.Quantity, atMost100 bool) {
+	v.Check(q >= 0, field, "a percentage is never negative")
+	if atMost100 {
+		v.Check(q <= 1_000_000, field, "a percentage is at most 100")
+	}
 }
 
 func writePricingJSON(w http.ResponseWriter, status int, body any) {
@@ -136,18 +152,18 @@ func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	writePricingJSON(w, http.StatusOK, calculatedPriceView{
-		CustomerID: customerID,
-		ProductID:  productID,
-		Quantity:   quantity,
-		UOM:        prod.UOMPrimary,
-		UnitPrice:  scaled.Price,
-		PriceUOM:   string(prod.UOMPrimary),
-		UOMQty:     pair,
+	writePricingJSON(w, http.StatusOK, CalculatedPriceView{
+		CustomerID:  customerID,
+		ProductID:   productID,
+		Quantity:    quantity,
+		UOM:         prod.UOMPrimary,
+		UnitPrice:   scaled.Price,
+		PriceUOM:    string(prod.UOMPrimary),
+		UOMQty:      pair,
 		PriceUOMQty: pair,
-		LineTotal:  total,
-		PriceBasis: scaled.Source,
-		Details:    scaled.Details,
+		LineTotal:   total,
+		PriceBasis:  scaled.Source,
+		Details:     scaled.Details,
 	})
 }
 
@@ -199,17 +215,19 @@ func (req *ruleCreateRequest) parse() (*PricingRule, error) {
 		if n, ok := v.Int("fixed_price_ten_thousandths", *req.FixedPrice, true); ok {
 			p := httpx.Price(n)
 			rule.FixedPrice = &p
-			v.Check(p >= 0, "fixed_price_ten_thousandths", "a unit price is never negative")
+			checkPrice(v, "fixed_price_ten_thousandths", p)
 		}
 	}
 	if req.DiscountPct != nil {
 		if q, ok := v.Quantity("discount_pct", *req.DiscountPct, true); ok {
 			rule.DiscountPct = &q
+			checkPercent(v, "discount_pct", q, true)
 		}
 	}
 	if req.MarkupPct != nil {
 		if q, ok := v.Quantity("markup_pct", *req.MarkupPct, true); ok {
 			rule.MarkupPct = &q
+			checkPercent(v, "markup_pct", q, false)
 		}
 	}
 	if req.MinQuantity != nil {
@@ -227,6 +245,7 @@ func (req *ruleCreateRequest) parse() (*PricingRule, error) {
 	if req.MarginFloorPct != nil {
 		if q, ok := v.Quantity("margin_floor_pct", *req.MarginFloorPct, true); ok {
 			rule.MarginFloorPct = &q
+			checkPercent(v, "margin_floor_pct", q, true)
 		}
 	}
 	if req.StartsAt != nil {
@@ -319,7 +338,11 @@ func (h *Handler) HandleListRules(w http.ResponseWriter, r *http.Request) {
 		after = &RuleCursor{CreatedAt: at, ID: id}
 	}
 
-	rules := h.service.ListRulesPage(r.Context(), after, page.Limit+1)
+	rules, err := h.service.ListRulesPage(r.Context(), after, page.Limit+1)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	opts := []httpx.ListOption{}
 	if wantTotal {
 		total, terr := h.service.CountRules(r.Context())

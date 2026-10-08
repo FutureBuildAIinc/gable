@@ -8,7 +8,7 @@
 --
 -- What does not come back: every revision column and every keyset index go,
 -- and created_at stays NOT NULL (a column the up migration filled is never
--- un-filled). The two quantity columns narrow back to DECIMAL(10,4) only
+-- un-filled). The quantity columns and the percentage columns narrow back to DECIMAL(10,4) only
 -- when no row holds a value DECIMAL(10,4) cannot; a row that does is named
 -- and stops the rollback, because narrowing it would silently round stock
 -- and reorder points, which the wire contract refuses everywhere else too.
@@ -41,7 +41,31 @@ BEGIN
     IF FOUND THEN
         RAISE EXCEPTION 'inventory row % holds an allocation beyond DECIMAL(10,4) (%)', offender.id, offender.allocated;
     END IF;
+    SELECT r.id::text AS id, GREATEST(COALESCE(r.discount_pct, 0), COALESCE(r.markup_pct, 0), COALESCE(r.margin_floor_pct, 0))::text AS pct
+      INTO offender
+      FROM pricing_rules r
+     WHERE r.discount_pct >= 100 OR r.markup_pct >= 100 OR r.margin_floor_pct >= 100
+        OR r.discount_pct < 0 OR r.markup_pct < 0 OR r.margin_floor_pct < 0
+     LIMIT 1;
+    IF FOUND THEN
+        RAISE EXCEPTION 'pricing rule % holds a percentage beyond NUMERIC(6,4) (%)', offender.id, offender.pct;
+    END IF;
+    SELECT c.id::text AS id, c.margin_floor_pct::text AS pct
+      INTO offender
+      FROM category_pricing_rules c
+     WHERE c.margin_floor_pct >= 100 OR c.margin_floor_pct < 0
+     LIMIT 1;
+    IF FOUND THEN
+        RAISE EXCEPTION 'category pricing rule % holds a margin floor beyond NUMERIC(6,4) (%)', offender.id, offender.pct;
+    END IF;
 END $$;
+
+ALTER TABLE pricing_rules
+    ALTER COLUMN discount_pct TYPE NUMERIC(6,4),
+    ALTER COLUMN markup_pct TYPE NUMERIC(6,4),
+    ALTER COLUMN margin_floor_pct TYPE NUMERIC(6,4);
+ALTER TABLE category_pricing_rules
+    ALTER COLUMN margin_floor_pct TYPE NUMERIC(6,4);
 
 DROP VIEW IF EXISTS v_inventory_with_branch;
 ALTER TABLE products

@@ -176,8 +176,8 @@ func TestCalculateRejectsBadInputs(t *testing.T) {
 	base := "/api/v1/pricing/calculate?customer_id=" + f.customerID.String() + "&product_id=" + f.productID.String()
 
 	for _, tc := range []struct {
-		query  string
-		field  string
+		query string
+		field string
 	}{
 		{base + "&quantity=abc", "quantity"},
 		{base + "&quantity=1.23456", "quantity"},
@@ -216,8 +216,8 @@ func TestRulesListAndCreate(t *testing.T) {
 	}
 
 	bad := f.do("POST", "/api/v1/pricing/rules", map[string]any{
-		"name":     "",
-		"rule_type": "mega_discount",
+		"name":         "",
+		"rule_type":    "mega_discount",
 		"min_quantity": "12.5",
 	}, "Idempotency-Key", uuid.NewString())
 	if bad.status != http.StatusBadRequest {
@@ -234,8 +234,8 @@ func TestRulesListAndCreate(t *testing.T) {
 	}
 
 	good := f.do("POST", "/api/v1/pricing/rules", map[string]any{
-		"name":        f.sku + " rule",
-		"rule_type":   "quantity_break",
+		"name":         f.sku + " rule",
+		"rule_type":    "quantity_break",
 		"discount_pct": "12.345",
 		"min_quantity": "10",
 	}, "Idempotency-Key", uuid.NewString())

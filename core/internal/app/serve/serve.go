@@ -235,7 +235,7 @@ func Run() {
 	productRepo := product.NewRepository(db)
 	productSvc := product.NewService(productRepo)
 	productHandler := product.NewHandler(productSvc)
-	productHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "warehouse"))
+	productHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales", "warehouse"))
 
 	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
 	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
@@ -268,7 +268,7 @@ func Run() {
 	pimSvc.WithAI(aiClient)
 
 	pimHandler := pim.NewHandler(pimSvc)
-	pimHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	pimHandler.RegisterRoutes(mux, scoped("admin", "owner"))
 
 	locationSvc := location.NewService(location.NewRepository(db))
 	locationUserRepo := location.NewUserRepository(db)
@@ -351,7 +351,7 @@ func Run() {
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
 		catPricingRepo := pricing.NewCategoryRepository(db)
-		catPricingSvc := pricing.NewCategoryPricingService(catPricingRepo)
+		catPricingSvc := pricing.NewCategoryPricingService(catPricingRepo).WithTxRunner(db)
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
 		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)

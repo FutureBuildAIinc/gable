@@ -5,8 +5,8 @@ package seed
 
 import (
 	"context"
-	"strconv"
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"

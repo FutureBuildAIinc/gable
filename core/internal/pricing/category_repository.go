@@ -38,6 +38,9 @@ type CategoryRepository interface {
 	UpdateCategoryRule(ctx context.Context, r *CategoryPricingRule, revision int64) error
 	DeleteCategoryRule(ctx context.Context, id uuid.UUID) error
 	GetCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error)
+	// LockCategoryRule reads the rule and holds its row until the transaction
+	// ends, so a read-modify-write sees the row it writes.
+	LockCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error)
 	ListCategoryRules(ctx context.Context, filter CategoryRuleFilter) ([]CategoryPricingRule, error)
 
 	// Resolution: 5-step algorithm queries
@@ -147,7 +150,7 @@ func (r *PostgresCategoryRepository) CreateCategory(ctx context.Context, c *Prod
 		c.ID, c.Name, c.Slug, c.Path, c.ParentID, c.SortOrder, c.IsActive, c.CreatedAt.Time, c.UpdatedAt.Time,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create category: %w", err)
+		return mapCategoryWriteError("category", err)
 	}
 	return nil
 }
@@ -160,13 +163,41 @@ func (r *PostgresCategoryRepository) UpdateCategory(ctx context.Context, c *Prod
 		SET name = $2, slug = $3, sort_order = $4, is_active = $5, updated_at = $6
 		WHERE id = $1`
 
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		c.ID, c.Name, c.Slug, c.SortOrder, c.IsActive, c.UpdatedAt.Time,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update category: %w", err)
+		return mapCategoryWriteError("category", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return httpx.NotFound("no such category")
 	}
 	return nil
+}
+
+// mapCategoryWriteError turns a database refusal of a category or category
+// rule write into the boundary error: a unique violation is a 409 duplicate,
+// a foreign key violation a 400 naming the reference that does not exist
+// (the recipe's rule: a bad reference is never a 500).
+func mapCategoryWriteError(what string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			if what == "category rule" {
+				return httpx.Duplicate("an active rule already exists for this target and category")
+			}
+			return httpx.Duplicate("a category with this slug or path already exists")
+		case "23503":
+			for _, field := range []string{"category_id", "customer_id", "parent_id"} {
+				if strings.Contains(pgErr.ConstraintName, field) {
+					return httpx.BadRequest(field+" does not name an existing row",
+						httpx.FieldError{Field: field, Message: "no such row"})
+				}
+			}
+		}
+	}
+	return fmt.Errorf("failed to write %s: %w", what, err)
 }
 
 // --- Category Pricing Rules ---
@@ -195,11 +226,7 @@ func (r *PostgresCategoryRepository) CreateCategoryRule(ctx context.Context, rul
 	_, err = r.db.GetExecutor(ctx).Exec(ctx, query,
 		append(args[:13], rule.Revision, rule.CreatedAt.Time, rule.UpdatedAt.Time)...)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return fmt.Errorf("an active rule already exists for this target and category")
-		}
-		return fmt.Errorf("failed to create category rule: %w", err)
+		return mapCategoryWriteError("category rule", err)
 	}
 	return nil
 }
@@ -251,6 +278,14 @@ func (r *PostgresCategoryRepository) DeleteCategoryRule(ctx context.Context, id 
 }
 
 func (r *PostgresCategoryRepository) GetCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error) {
+	return r.getCategoryRule(ctx, id, "")
+}
+
+func (r *PostgresCategoryRepository) LockCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error) {
+	return r.getCategoryRule(ctx, id, " FOR UPDATE OF cpr")
+}
+
+func (r *PostgresCategoryRepository) getCategoryRule(ctx context.Context, id uuid.UUID, lock string) (*CategoryPricingRule, error) {
 	query := `
 		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
@@ -259,7 +294,7 @@ func (r *PostgresCategoryRepository) GetCategoryRule(ctx context.Context, id uui
 		       pc.name, pc.path::text
 		FROM category_pricing_rules cpr
 		JOIN product_categories pc ON pc.id = cpr.category_id
-		WHERE cpr.id = $1`
+		WHERE cpr.id = $1` + lock
 
 	raw, err := scanRawRule(r.db.GetExecutor(ctx).QueryRow(ctx, query, id))
 	if err != nil {
@@ -502,19 +537,19 @@ func scanCategoryRules(rows pgx.Rows) ([]CategoryPricingRule, error) {
 // rawCategoryRule holds one scanned row before its scaled columns are
 // parsed, so the row scan and the exact parsing stay separate steps.
 type rawCategoryRule struct {
-	id, categoryID                                  uuid.UUID
-	targetType                                      TargetType
-	customerID                                      *uuid.UUID
-	tier                                            *string
-	ruleType                                        CategoryRuleType
-	value, floor                                    *string
-	startsAt, expiresAt                             *time.Time
-	createdAt, updatedAt                            time.Time
-	isActive                                        bool
-	priority                                        int
-	createdBy                                       string
-	revision                                        int64
-	categoryName, categoryPath                      string
+	id, categoryID             uuid.UUID
+	targetType                 TargetType
+	customerID                 *uuid.UUID
+	tier                       *string
+	ruleType                   CategoryRuleType
+	value, floor               *string
+	startsAt, expiresAt        *time.Time
+	createdAt, updatedAt       time.Time
+	isActive                   bool
+	priority                   int
+	createdBy                  string
+	revision                   int64
+	categoryName, categoryPath string
 }
 
 // scanRawRule scans the shared column list into a raw row; nil means no row.

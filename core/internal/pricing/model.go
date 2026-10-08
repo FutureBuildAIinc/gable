@@ -89,7 +89,7 @@ type CalculatedPrice struct {
 // scale 4 price with its source. Until C3-2A-pricing every price is in the
 // product's stocking unit.
 type ScaledPrice struct {
-	Price   httpx.Price    `json:"unit_price_ten_thousandths"`
+	Price   httpx.Price   `json:"unit_price_ten_thousandths"`
 	Source  PricingSource `json:"price_basis"`
 	Details string        `json:"details"`
 }
@@ -104,10 +104,10 @@ func (s ScaledPrice) Float64() float64 {
 // price is a fixed price at scale 4, returned as stored and never rounded
 // (ADR 0006 R4.2).
 type CustomerContract struct {
-	ID            uuid.UUID      `json:"id"`
-	CustomerID    uuid.UUID      `json:"customer_id"`
-	ProductID     uuid.UUID      `json:"product_id"`
-	ContractPrice httpx.Price    `json:"contract_price_ten_thousandths"`
+	ID            uuid.UUID       `json:"id"`
+	CustomerID    uuid.UUID       `json:"customer_id"`
+	ProductID     uuid.UUID       `json:"product_id"`
+	ContractPrice httpx.Price     `json:"contract_price_ten_thousandths"`
 	CreatedAt     httpx.Timestamp `json:"created_at"`
 	UpdatedAt     httpx.Timestamp `json:"updated_at"`
 }
@@ -128,20 +128,20 @@ type PricingRule struct {
 	// repository COALESCEs NULL to "", so NULL and "" are the same thing here.
 	// See categoryScopePredicate in repository.go for how a non-empty value is
 	// matched (flat products.category string, or the ltree node/ancestor).
-	Category       string          `json:"category"`
-	FixedPrice     *httpx.Price    `json:"fixed_price_ten_thousandths"`
-	DiscountPct    *httpx.Quantity `json:"discount_pct"`
-	MarkupPct      *httpx.Quantity `json:"markup_pct"`
-	MinQuantity    httpx.Quantity  `json:"min_quantity"`
-	MaxQuantity    *httpx.Quantity `json:"max_quantity"`
-	MarginFloorPct *httpx.Quantity `json:"margin_floor_pct"`
+	Category       string           `json:"category"`
+	FixedPrice     *httpx.Price     `json:"fixed_price_ten_thousandths"`
+	DiscountPct    *httpx.Quantity  `json:"discount_pct"`
+	MarkupPct      *httpx.Quantity  `json:"markup_pct"`
+	MinQuantity    httpx.Quantity   `json:"min_quantity"`
+	MaxQuantity    *httpx.Quantity  `json:"max_quantity"`
+	MarginFloorPct *httpx.Quantity  `json:"margin_floor_pct"`
 	StartsAt       *httpx.Timestamp `json:"starts_at"`
 	ExpiresAt      *httpx.Timestamp `json:"expires_at"`
-	IsActive       bool            `json:"is_active"`
-	Priority       int             `json:"priority"`
-	Revision       int64           `json:"revision"`
-	CreatedAt      httpx.Timestamp `json:"created_at"`
-	UpdatedAt      httpx.Timestamp `json:"updated_at"`
+	IsActive       bool             `json:"is_active"`
+	Priority       int              `json:"priority"`
+	Revision       int64            `json:"revision"`
+	CreatedAt      httpx.Timestamp  `json:"created_at"`
+	UpdatedAt      httpx.Timestamp  `json:"updated_at"`
 }
 
 // timeOf is the time.Time behind a timestamp field, for the repository

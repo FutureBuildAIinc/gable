@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -112,12 +111,12 @@ func (h *CategoryHandler) HandleListCategories(w http.ResponseWriter, r *http.Re
 
 // categoryWriteRequest is the categories create and update body.
 type categoryWriteRequest struct {
-	Name      string `json:"name"`
-	Slug      string `json:"slug"`
-	Path      string `json:"path"`
+	Name      string  `json:"name"`
+	Slug      string  `json:"slug"`
+	Path      string  `json:"path"`
 	ParentID  *string `json:"parent_id"`
-	SortOrder *int   `json:"sort_order"`
-	IsActive  *bool  `json:"is_active"`
+	SortOrder *int    `json:"sort_order"`
+	IsActive  *bool   `json:"is_active"`
 }
 
 func (req *categoryWriteRequest) parse(v *httpx.Validator) ProductCategory {
@@ -289,14 +288,11 @@ func (h *CategoryHandler) HandleListCategoryRules(w http.ResponseWriter, r *http
 	httpx.WriteList(w, rules, next, page.Limit, opts...)
 }
 
-// categoryRuleWriteRequest is the create and update body of a category rule,
-// with the rule's value in the one reading its type gives it: a scale 4
-// price for FIXED (value_ten_thousandths), a percentage otherwise (value_pct).
-type categoryRuleWriteRequest struct {
-	TargetType     string           `json:"target_type"`
-	CustomerID     *string          `json:"customer_id"`
-	Tier           *string          `json:"tier"`
-	CategoryID     string           `json:"category_id"`
+// categoryRuleValues is what a category rule write sets after the rule's
+// target is fixed: the rule's value in the one reading its type gives it (a
+// scale 4 price for a fixed rule, value_ten_thousandths, a percentage
+// otherwise, value_pct), its window and its standing.
+type categoryRuleValues struct {
 	RuleType       string           `json:"rule_type"`
 	ValuePrice     *json.RawMessage `json:"value_ten_thousandths"`
 	ValuePct       *json.RawMessage `json:"value_pct"`
@@ -305,51 +301,51 @@ type categoryRuleWriteRequest struct {
 	ExpiresAt      *json.RawMessage `json:"expires_at"`
 	IsActive       *bool            `json:"is_active"`
 	Priority       *int             `json:"priority"`
-	Revision       *int64           `json:"revision"`
 }
 
-func (req *categoryRuleWriteRequest) parse(v *httpx.Validator) CategoryPricingRule {
-	rule := CategoryPricingRule{}
-	if t, ok := ParseTargetType(req.TargetType); ok {
-		rule.TargetType = t
-	} else {
-		v.Check(false, "target_type", "must be one of: account, tier")
-	}
+// categoryRuleWriteRequest is the create body of a category rule (and one
+// element of the bulk body, which may also carry the id of the rule it
+// replaces).
+type categoryRuleWriteRequest struct {
+	ID         *string `json:"id,omitempty"`
+	TargetType string  `json:"target_type"`
+	CustomerID *string `json:"customer_id"`
+	Tier       *string `json:"tier"`
+	CategoryID string  `json:"category_id"`
+	categoryRuleValues
+}
+
+// categoryRuleUpdateRequest is the update body: the values and the
+// revision. The target (account or tier, customer, category) is fixed at
+// create, and a body that names one is a 400 naming it.
+type categoryRuleUpdateRequest struct {
+	categoryRuleValues
+	Revision *int64 `json:"revision"`
+}
+
+func (req *categoryRuleValues) parseValues(v *httpx.Validator, rule *CategoryPricingRule) {
 	if t, ok := ParseCategoryRuleType(req.RuleType); ok {
 		rule.RuleType = t
 	} else {
 		v.Check(false, "rule_type", "must be one of: markup, markdown, fixed, margin")
 	}
-	if req.CustomerID != nil && *req.CustomerID != "" {
-		if id, ok := v.UUID("customer_id", req.CustomerID, true); ok {
-			rule.CustomerID = &id
-		}
-	}
-	if req.Tier != nil {
-		rule.Tier = *req.Tier
-	}
-	if req.CategoryID != "" {
-		if id, ok := v.UUID("category_id", &req.CategoryID, true); ok {
-			rule.CategoryID = id
-		}
-	} else {
-		v.Check(false, "category_id", "is required")
-	}
 	if req.ValuePrice != nil {
 		if n, ok := v.Int("value_ten_thousandths", *req.ValuePrice, true); ok {
 			p := httpx.Price(n)
 			rule.ValuePrice = &p
-			v.Check(p >= 0, "value_ten_thousandths", "a unit price is never negative")
+			checkPrice(v, "value_ten_thousandths", p)
 		}
 	}
 	if req.ValuePct != nil {
 		if q, ok := v.Quantity("value_pct", *req.ValuePct, true); ok {
 			rule.ValuePct = &q
+			checkPercent(v, "value_pct", q, rule.RuleType == CategoryRuleMarkdown)
 		}
 	}
 	if req.MarginFloorPct != nil {
 		if q, ok := v.Quantity("margin_floor_pct", *req.MarginFloorPct, true); ok {
 			rule.MarginFloorPct = &q
+			checkPercent(v, "margin_floor_pct", q, true)
 		}
 	}
 	if req.StartsAt != nil {
@@ -373,9 +369,39 @@ func (req *categoryRuleWriteRequest) parse(v *httpx.Validator) CategoryPricingRu
 		"a rule carries either value_ten_thousandths or value_pct, never both")
 	if rule.RuleType == CategoryRuleFixed {
 		v.Check(rule.ValuePrice != nil, "value_ten_thousandths", "is required on a fixed rule")
-	} else {
+	} else if rule.RuleType != "" {
 		v.Check(rule.ValuePct != nil, "value_pct", "is required on a percent rule")
 	}
+}
+
+func (req *categoryRuleWriteRequest) parse(v *httpx.Validator) CategoryPricingRule {
+	rule := CategoryPricingRule{}
+	if t, ok := ParseTargetType(req.TargetType); ok {
+		rule.TargetType = t
+	} else {
+		v.Check(false, "target_type", "must be one of: account, tier")
+	}
+	if req.CustomerID != nil && *req.CustomerID != "" {
+		if id, ok := v.UUID("customer_id", req.CustomerID, true); ok {
+			rule.CustomerID = &id
+		}
+	}
+	if req.Tier != nil {
+		rule.Tier = *req.Tier
+	}
+	if req.CategoryID != "" {
+		if id, ok := v.UUID("category_id", &req.CategoryID, true); ok {
+			rule.CategoryID = id
+		}
+	} else {
+		v.Check(false, "category_id", "is required")
+	}
+	if req.ID != nil && *req.ID != "" {
+		if id, ok := v.UUID("id", req.ID, true); ok {
+			rule.ID = id
+		}
+	}
+	req.categoryRuleValues.parseValues(v, &rule)
 	if rule.TargetType == TargetTypeAccount {
 		v.Check(rule.CustomerID != nil, "customer_id", "is required on an account rule")
 	} else {
@@ -392,15 +418,12 @@ func (h *CategoryHandler) HandleCreateCategoryRule(w http.ResponseWriter, r *htt
 	}
 	v := &httpx.Validator{}
 	rule := req.parse(v)
+	v.Check(req.ID == nil, "id", "the server assigns the id of a new rule")
 	if err := v.Err(); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	if err := h.service.CreateCategoryRule(r.Context(), &rule); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			httpx.WriteError(w, r, httpx.Duplicate("an active rule already exists for this target and category"))
-			return
-		}
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -416,38 +439,30 @@ func (h *CategoryHandler) HandleUpdateCategoryRule(w http.ResponseWriter, r *htt
 			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
-	var req categoryRuleWriteRequest
+	var req categoryRuleUpdateRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	v := &httpx.Validator{}
-	rule := req.parse(v)
+	rule := CategoryPricingRule{}
+	req.parseValues(v, &rule)
 	if err := v.Err(); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	rule.ID = id
-	current, err := h.service.GetCategoryRule(r.Context(), id)
-	if err != nil {
+	if err := h.service.UpdateCategoryRule(r.Context(), &rule, Precondition{IfMatch: r.Header.Get("If-Match"), Revision: req.Revision}); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if current == nil {
-		httpx.WriteError(w, r, httpx.NotFound("no such category rule"))
-		return
-	}
-	if err := httpx.CheckRevision(current.Revision, r.Header.Get("If-Match"), req.Revision); err != nil {
+	updated, err := h.service.GetCategoryRule(r.Context(), id)
+	if err != nil || updated == nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	rule.TargetType, rule.CustomerID, rule.Tier, rule.CategoryID = current.TargetType, current.CustomerID, current.Tier, current.CategoryID
-	if err := h.service.UpdateCategoryRule(r.Context(), &rule, current.Revision); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteRevisionETag(w, rule.Revision)
-	writeCatJSON(w, http.StatusOK, rule)
+	httpx.WriteRevisionETag(w, updated.Revision)
+	writeCatJSON(w, http.StatusOK, updated)
 }
 
 func (h *CategoryHandler) HandleDeleteCategoryRule(w http.ResponseWriter, r *http.Request) {
@@ -469,20 +484,7 @@ func (h *CategoryHandler) HandleDeleteCategoryRule(w http.ResponseWriter, r *htt
 		}
 		bodyRevision = body.Revision
 	}
-	current, err := h.service.GetCategoryRule(r.Context(), id)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	if current == nil {
-		httpx.WriteError(w, r, httpx.NotFound("no such category rule"))
-		return
-	}
-	if err := httpx.CheckRevision(current.Revision, r.Header.Get("If-Match"), bodyRevision); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	if err := h.service.DeleteCategoryRule(r.Context(), id); err != nil {
+	if err := h.service.DeleteCategoryRule(r.Context(), id, Precondition{IfMatch: r.Header.Get("If-Match"), Revision: bodyRevision}); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}

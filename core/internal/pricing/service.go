@@ -345,16 +345,10 @@ func (s *Service) ListRules(ctx context.Context) ([]PricingRule, error) {
 	return s.repo.ListRules(ctx)
 }
 
-// ListRulesPage is the rules list's keyset page; a repository fault answers
-// an empty page, as the rules screen always has (the base commit's handler
-// answered 500; the list is a read of dealer configuration and the page is
-// still useful beside a log line).
-func (s *Service) ListRulesPage(ctx context.Context, after *RuleCursor, limit int) []PricingRule {
-	rules, err := s.repo.ListRulesPage(ctx, after, limit)
-	if err != nil {
-		return nil
-	}
-	return rules
+// ListRulesPage is the rules list's keyset page: limit rows after the
+// cursor, `created_at DESC, id DESC`. A repository fault is the caller's 500.
+func (s *Service) ListRulesPage(ctx context.Context, after *RuleCursor, limit int) ([]PricingRule, error) {
+	return s.repo.ListRulesPage(ctx, after, limit)
 }
 
 func (s *Service) CountRules(ctx context.Context) (int64, error) {

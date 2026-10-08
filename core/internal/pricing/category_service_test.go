@@ -5,10 +5,10 @@ package pricing
 
 import (
 	"context"
-	"time"
 	"math"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -59,6 +59,10 @@ func (m *mockCategoryRepo) UpdateCategoryRule(_ context.Context, _ *CategoryPric
 
 func (m *mockCategoryRepo) DeleteCategoryRule(_ context.Context, _ uuid.UUID) error {
 	return nil
+}
+
+func (m *mockCategoryRepo) LockCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error) {
+	return m.GetCategoryRule(ctx, id)
 }
 
 func (m *mockCategoryRepo) GetCategoryRule(_ context.Context, id uuid.UUID) (*CategoryPricingRule, error) {

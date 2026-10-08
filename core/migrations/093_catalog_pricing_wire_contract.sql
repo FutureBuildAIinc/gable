@@ -14,6 +14,10 @@
 --      quantity the wire accepts is one the column holds: products.reorder_point
 --      and reorder_qty, and inventory.allocated (DECIMAL(10,4) since migration
 --      004; stocking in the finest unit, LF or EA, makes a million plausible).
+--      The percentage columns of pricing_rules and category_pricing_rules
+--      (NUMERIC(6,4) since migrations 016 and 050, so 100 or 150 overflowed
+--      with a 500) widen to the same bound, because the wire reads a
+--      percentage as a decimal string at scale 4.
 --   3  the keyset indexes for the converted lists, each ordering on
 --      (created_at DESC, id DESC).
 --
@@ -59,6 +63,13 @@ CREATE VIEW v_inventory_with_branch AS
 SELECT i.*, l.branch_id AS branch_id
   FROM inventory i
   JOIN locations l ON l.id = i.location_id;
+
+ALTER TABLE pricing_rules
+    ALTER COLUMN discount_pct TYPE NUMERIC(12,4),
+    ALTER COLUMN markup_pct TYPE NUMERIC(12,4),
+    ALTER COLUMN margin_floor_pct TYPE NUMERIC(12,4);
+ALTER TABLE category_pricing_rules
+    ALTER COLUMN margin_floor_pct TYPE NUMERIC(12,4);
 
 -- 3. Keyset indexes for the converted lists.
 CREATE INDEX IF NOT EXISTS idx_products_created_at_id ON products (created_at DESC, id DESC);

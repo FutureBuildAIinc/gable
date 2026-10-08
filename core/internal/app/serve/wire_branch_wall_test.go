@@ -290,7 +290,7 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 		if id, ok := parent.(uuid.UUID); ok {
 			p = fmt.Sprintf("%q", id)
 		}
-		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s}`, typ, uuid.NewString()[:8], p)
+		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s}`, strings.ToLower(typ), uuid.NewString()[:8], p)
 	}
 	const ok = http.StatusOK
 	const no = http.StatusForbidden
