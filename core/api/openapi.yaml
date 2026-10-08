@@ -17,13 +17,18 @@ security:
   - BearerJWT: []
 tags:
   - name: customer
+  - name: health
   - name: integration
   - name: invoice
   - name: location
   - name: order
+  - name: partner
   - name: payment
+  - name: portal
   - name: product
+  - name: project
   - name: quote
+  - name: uploads
 paths:
   /api/v1/customers:
     get:
@@ -369,6 +374,78 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /healthz/live:
+    get:
+      operationId: healthLive
+      tags: [health]
+      summary: Liveness probe
+      description: >-
+        Always 200 if the process is running. Used by Kubernetes liveness; no dependency checks.
+      security: []
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+  /healthz/ready:
+    get:
+      operationId: healthReady
+      tags: [health]
+      summary: Readiness probe
+      description: >-
+        Checks the database connection pool. Returns 200 when the pool is healthy; 503 Service Unavailable when Ping fails, with the same JSON body and status degraded.
+      security: []
+      responses:
+        "200":
+          description: The service is ready; db pool is connected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyOK"
+        "503":
+          description: The service is degraded; db pool is disconnected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyDegraded"
+  /health:
+    get:
+      operationId: healthLegacy
+      tags: [health]
+      summary: Legacy health check
+      description: >-
+        Backward-compatible health endpoint. Checks the database pool Ping and returns the connectivity status. No request ID is generated.
+      security: []
+      responses:
+        "200":
+          description: The health with db status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthLegacy"
+  /metrics:
+    get:
+      operationId: metricsPrometheus
+      tags: [health]
+      summary: Prometheus metrics
+      description: >-
+        The Prometheus scrape endpoint. Serves all registered metrics in Prometheus text exposition format (text/plain; charset=utf-8). Public: listed in the auth middleware PublicPaths so the scrape target can reach it without a token.
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Prometheus text exposition format; see https://prometheus.io/docs/instrumenting/exposition_formats/.
   /api/integration/products:
     get:
       operationId: integrationListProducts
@@ -1505,6 +1582,87 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/partner/v1/dashboard:
+    get:
+      operationId: partnerDashboard
+      tags: [partner]
+      summary: The partner's balance snapshot
+      description: Balance due and credit limit for the customer the caller's email resolves to.
+      responses:
+        "200":
+          description: The AR snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PartnerDashboard"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller's email resolves to no customer, or to an inactive one; the standard error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/partner/v1/quotes:
+    get:
+      operationId: partnerListQuotes
+      tags: [partner]
+      summary: The partner's quotes
+      description: The customer's quotes in the ERP's own quote shape; a bare array, never null.
+      responses:
+        "200":
+          description: The quotes, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Quote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller's email resolves to no customer, or to an inactive one; the standard error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/partner/v1/quotes/{id}:
+    get:
+      operationId: partnerGetQuote
+      tags: [partner]
+      summary: One quote
+      description: >-
+        The ERP's own quote shape. Every failure, a quote that does not exist, one belonging to another customer, and a repository fault, is the handler's fixed 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller's email resolves to no customer, or to an inactive one; the standard error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/payments:
     post:
       operationId: paymentCreate
@@ -1641,6 +1799,1005 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/login:
+    post:
+      operationId: portalLogin
+      tags: [portal]
+      summary: Log a contractor in
+      description: >-
+        Public. Answers the portal_token cookie (HttpOnly, Strict, 24 hours) and the user plus branding config; the JWT itself is never in the body. Every failure, unknown email or wrong password, is the same 401. Wrapped in a strict per-IP rate limit of 10 per minute; the 11th call within the window is a 429.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalLoginRequest"
+      responses:
+        "200":
+          description: The logged in user and the portal branding config; the session token rides the Set-Cookie header.
+          headers:
+            Set-Cookie:
+              description: portal_token=<jwt>; Path=/api/portal; Max-Age=86400; HttpOnly; SameSite=Strict.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalLoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: The per-IP strict limit (10 per minute) is exhausted; the standard error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/portal/v1/logout:
+    post:
+      operationId: portalLogout
+      tags: [portal]
+      summary: Clear the portal session cookie
+      description: "Public and unconditional: no token is read, the cookie is cleared, and the body is empty."
+      security: []
+      responses:
+        "200":
+          description: The cookie is expired; no body.
+          headers:
+            Set-Cookie:
+              description: portal_token=; Path=/api/portal; Max-Age=0; HttpOnly; SameSite=Strict.
+              schema:
+                type: string
+  /api/portal/v1/config:
+    get:
+      operationId: portalGetConfig
+      tags: [portal]
+      summary: The dealer branding config
+      description: Public. The one row of white-label branding the login page renders before any session exists.
+      security: []
+      responses:
+        "200":
+          description: The branding config.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalConfig"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/dashboard:
+    get:
+      operationId: portalDashboard
+      tags: [portal]
+      summary: The contractor dashboard
+      description: AR summary plus the five most recent orders.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The dashboard aggregate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalDashboard"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/orders:
+    get:
+      operationId: portalListOrders
+      tags: [portal]
+      summary: The customer's order history
+      description: >-
+        A bare array, newest created first, capped at 50 with no page envelope. Two additive filters: project_id (a project the caller does not own is a 404) and since (strictly newer updated_at, the change-feed cursor; a since page is ordered updated_at ascending and tie-completed so the cursor cannot lose a row). ETag and X-Portal-Latest-Change make a 30 second poll cheap: If-None-Match matching (weak comparison, list or star) answers 304 with no body.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: project_id
+          in: query
+          description: Only orders on this project; a project the caller does not own is a 404, not an empty list.
+          schema:
+            type: string
+            format: uuid
+        - name: since
+          in: query
+          description: Only orders with updated_at strictly newer; RFC3339. An unparseable value is a 400.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: The orders, a bare array, never null.
+          headers:
+            ETag:
+              description: A strong validator over (customer, filters, count, newest updated_at).
+              schema:
+                type: string
+            X-Portal-Latest-Change:
+              description: The newest updated_at in this result; send it back as since next time. Absent when the list is empty.
+              schema:
+                type: string
+                format: date-time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalOrder"
+        "304":
+          description: If-None-Match matched the ETag; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/orders/{id}:
+    get:
+      operationId: portalGetOrder
+      tags: [portal]
+      summary: One order
+      description: Scoped to the caller; another customer's order and a nonexistent one are the same 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The order with its lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrder"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/portal/v1/orders/reorder:
+    post:
+      operationId: portalReorder
+      tags: [portal]
+      summary: Duplicate a historical order as a new draft
+      description: >-
+        Creates a new DRAFT order from the source order's lines. Every service failure, including a source order the caller does not own, is the handler's fixed 500 today.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalReorderRequest"
+      responses:
+        "201":
+          description: The new draft's id; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalReorderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/orders/{id}/cancel:
+    post:
+      operationId: portalCancelOrder
+      tags: [portal]
+      summary: Cancel an order
+      description: >-
+        The body is optional (an empty body is a cancellation without a reason). Ownership first (someone else's order is a 404), then the goods-in-motion gate (a stop already delivered or on a dispatched route is a 409), then the ERP state machine (already cancelled and fulfilled are 409s). A 409 carries the refusal envelope with a customer-safe reason string.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCancelOrderRequest"
+      responses:
+        "200":
+          description: What was cancelled and what it changed from.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalCancelOrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRefusal"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/orders/{id}/project:
+    put:
+      operationId: portalSetOrderProject
+      tags: [portal]
+      summary: Attach or detach an order's project
+      description: >-
+        A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalSetOrderProjectRequest"
+      responses:
+        "200":
+          description: The updated order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrder"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/invoices:
+    get:
+      operationId: portalListInvoices
+      tags: [portal]
+      summary: The customer's invoices
+      description: A bare array with no page envelope; every money field is float dollars.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The invoices, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalInvoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/invoices/{id}:
+    get:
+      operationId: portalGetInvoice
+      tags: [portal]
+      summary: One invoice
+      description: Scoped to the caller; any failure is the handler's fixed 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice with its lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/portal/v1/deliveries:
+    get:
+      operationId: portalListDeliveries
+      tags: [portal]
+      summary: The customer's deliveries
+      description: A bare array of stops with POD, driver and route fields; no page envelope.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The deliveries, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalDelivery"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/deliveries/{id}:
+    get:
+      operationId: portalGetDelivery
+      tags: [portal]
+      summary: One delivery
+      description: Scoped to the caller; any failure is the handler's fixed 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalDelivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/portal/v1/deliveries/{id}/reschedule:
+    get:
+      operationId: portalGetReschedule
+      tags: [portal]
+      summary: The newest reschedule request for a delivery
+      description: >-
+        204 with no body when the caller's delivery has never been asked about; a delivery that is not the caller's is a 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The newest recorded ask.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalDeliveryReschedule"
+        "204":
+          description: No request has ever been filed for this delivery; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: portalRequestReschedule
+      tags: [portal]
+      summary: Ask for a different delivery day
+      description: >-
+        202 Accepted, not 200 or 201: the ask is recorded as PENDING, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope. The 202 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalRescheduleRequest"
+      responses:
+        "202":
+          description: The recorded ask, applied false.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalDeliveryReschedule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The stop is history or the truck is rolling; the refusal envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRefusal"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/catalog:
+    get:
+      operationId: portalListCatalog
+      tags: [portal]
+      summary: Browse the catalog with customer pricing
+      description: >-
+        A bare array with customer-specific pricing and availability. Five filters apply (q, category, category_id matching the subtree, species, grade); every other query parameter is silently ignored and no filter is ever refused.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: q
+          in: query
+          description: Free text search.
+          schema:
+            type: string
+        - name: category
+          in: query
+          description: The legacy flat category display string.
+          schema:
+            type: string
+        - name: category_id
+          in: query
+          description: "The tree filter: the category and every descendant of it."
+          schema:
+            type: string
+            format: uuid
+        - name: species
+          in: query
+          schema:
+            type: string
+        - name: grade
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The products, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalCatalogProduct"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/catalog/categories:
+    get:
+      operationId: portalListCategories
+      tags: [portal]
+      summary: The browsable category tree
+      description: >-
+        Active categories as a forest; product_count is the subtree count (what clicking the node will show), and children is never null (a leaf carries an empty array).
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The category roots, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalCategoryNode"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/catalog/{id}:
+    get:
+      operationId: portalGetCatalogProduct
+      tags: [portal]
+      summary: One product with customer pricing and its volume ladder
+      description: The detail view; every failure, missing product included, is the handler's fixed 404 today.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The product detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalCatalogDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/portal/v1/catalog/{id}/volume-breaks:
+    get:
+      operationId: portalVolumeBreaks
+      tags: [portal]
+      summary: The customer's quantity ladder for a product
+      description: Every rung is derived from the same pricing waterfall that prices the line; every failure is the handler's fixed 404 today.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The ladder, a bare array, never null; empty when no rung beats the single-unit price.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalVolumeBreak"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/portal/v1/quotes:
+    get:
+      operationId: portalListQuotes
+      tags: [portal]
+      summary: The customer's quotes
+      description: A bare array, newest first, capped at 100, no page envelope. Status is the portal vocabulary (REQUESTED, PRICED, ...), erp_state the raw ERP state.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The quotes, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalQuote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: portalCreateQuote
+      tags: [portal]
+      summary: Send a scope for the dealer to price
+      description: >-
+        A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400. The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCreateQuoteRequest"
+      responses:
+        "201":
+          description: The created quote request, unpriced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalQuote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/portal/v1/quotes/{id}:
+    get:
+      operationId: portalGetQuote
+      tags: [portal]
+      summary: One quote
+      description: Scoped to the caller; another customer's quote and a nonexistent one are the same 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The quote with its lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalQuote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/portal/v1/quotes/{id}/accept:
+    post:
+      operationId: portalAcceptQuote
+      tags: [portal]
+      summary: Accept a priced quote
+      description: >-
+        Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The accepted quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalQuote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The quote is not in a decidable state; the refusal envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRefusal"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/quotes/{id}/decline:
+    post:
+      operationId: portalDeclineQuote
+      tags: [portal]
+      summary: Decline a priced quote
+      description: Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The declined quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalQuote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The quote is not in a decidable state; the refusal envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRefusal"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/cart:
+    get:
+      operationId: portalGetCart
+      tags: [portal]
+      summary: The current cart
+      description: Creates an empty cart when the customer has none, so the answer is never 404.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The cart.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalCart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/cart/items:
+    post:
+      operationId: portalAddToCart
+      tags: [portal]
+      summary: Add an item to the cart
+      description: >-
+        Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalAddToCartRequest"
+      responses:
+        "201":
+          description: The cart after the add.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalCart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/cart/items/{id}:
+    put:
+      operationId: portalUpdateCartItem
+      tags: [portal]
+      summary: Change a cart item's quantity
+      description: A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalUpdateCartItemRequest"
+      responses:
+        "200":
+          description: The cart after the update.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalCart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: portalRemoveCartItem
+      tags: [portal]
+      summary: Remove an item from the cart
+      description: Every repository failure is a 500 today; the cart is returned after the removal.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The cart after the removal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalCart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/checkout:
+    post:
+      operationId: portalCheckout
+      tags: [portal]
+      summary: Place an order from the cart
+      description: >-
+        Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCheckoutRequest"
+      responses:
+        "201":
+          description: The placed order's id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalCheckoutResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/users:
+    get:
+      operationId: portalListUsers
+      tags: [portal]
+      summary: The customer's portal users
+      description: Admin only; a non-admin session is a 403 before anything is read.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The users, a bare array, never null. No password material is serialized.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalCustomerUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/invites:
+    get:
+      operationId: portalListInvites
+      tags: [portal]
+      summary: The customer's outstanding invites
+      description: Admin only; a non-admin session is a 403. The invite token is never serialized.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The invites, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalInvite"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: portalInviteUser
+      tags: [portal]
+      summary: Invite a team member
+      description: >-
+        Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalInviteUserRequest"
+      responses:
+        "201":
+          description: The recorded invite (no token).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalInvite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/users/{id}/role:
+    put:
+      operationId: portalUpdateUserRole
+      tags: [portal]
+      summary: Change a portal user's role
+      description: >-
+        Admin only. A role outside the three known ones is a 500 today (the handler's status is fixed). Success is a bodiless 200.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalUpdateUserRoleRequest"
+      responses:
+        "200":
+          description: Changed; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/users/{id}/status:
+    put:
+      operationId: portalUpdateUserStatus
+      tags: [portal]
+      summary: Activate or deactivate a portal user
+      description: >-
+        Admin only. A status outside Active and Inactive is a 500 today (the handler's status is fixed). Success is a bodiless 200.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalUpdateUserStatusRequest"
+      responses:
+        "200":
+          description: Changed; no body.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1845,6 +3002,117 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/portal/v1/projects:
+    get:
+      operationId: projectList
+      tags: [project]
+      summary: The customer's jobs
+      description: A bare array, newest created first, no page envelope.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The projects, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: projectCreate
+      tags: [project]
+      summary: Create a job
+      description: >-
+        An empty name is a 500 today (the handler's status is fixed). The project starts Active.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateRequest"
+      responses:
+        "201":
+          description: The created project; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/projects/{id}:
+    get:
+      operationId: projectGetDashboard
+      tags: [project]
+      summary: One job with its orders, deliveries and invoices
+      description: >-
+        The dashboard aggregate. Scoped to the caller; any failure, including another customer's project, is the handler's fixed 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The project and its associated documents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDashboard"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: projectUpdate
+      tags: [project]
+      summary: Rename a job or change its status
+      description: >-
+        Partial update; absent fields keep their values. An empty name or a status outside Active and Completed is a 500 today (the handler's status is fixed), and so is a project the caller does not own.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateRequest"
+      responses:
+        "200":
+          description: The updated project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/quotes:
     get:
       operationId: quoteList
@@ -2084,6 +3352,27 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /uploads/:
+    get:
+      operationId: uploadsFile
+      tags: [uploads]
+      summary: Serve an uploaded file
+      description: >-
+        Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404; a missing role is a 403.
+      security:
+        - RequireRole: [admin, owner, user]
+      responses:
+        "200":
+          description: The file bytes; Content-Type is derived from the file extension.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     BearerJWT:
@@ -2098,6 +3387,18 @@ components:
       name: X-Integration-Key
       description: >-
         The shared integration key of the AI load management seam, compared in constant time. When no key is configured the whole seam answers 503 before the handler runs.
+    PortalSession:
+      type: apiKey
+      in: cookie
+      name: portal_token
+      description: >-
+        The portal JWT issued by POST /api/portal/v1/login, presented as the portal_token cookie (HttpOnly) or as an Authorization: Bearer header; the middleware accepts either, cookie first. Verified against PORTAL_JWT_SECRET (HS256). AUTH_MODE=dev bypasses the check and injects the demo customer's claims instead.
+    RequireRole:
+      type: apiKey
+      in: cookie
+      name: portal_token
+      description: >-
+        The portal JWT cookie. Requires one of the roles admin, owner, or user (as set by RequireRole middleware on this route). The same portal_token cookie the portal routes use.
   parameters:
     Limit:
       name: limit
@@ -2438,6 +3739,63 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/Contact"
+    HealthReadyOK:
+      type: object
+      required: [status, uptime, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        uptime:
+          type: string
+          description: "Go time.Duration string: the time since server start."
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              $ref: "#/components/schemas/HealthReadyDBPool"
+    HealthReadyDegraded:
+      type: object
+      required: [status, uptime, checks]
+      description: The same shape as OK; status is degraded and db pool is disconnected.
+      properties:
+        status:
+          type: string
+          enum: [degraded]
+        uptime:
+          type: string
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              $ref: "#/components/schemas/HealthReadyDBPool"
+    HealthReadyDBPool:
+      type: object
+      required: [status, pool_total, pool_idle, pool_in_use, pool_max]
+      properties:
+        status:
+          type: string
+          enum: [connected, disconnected]
+        pool_total:
+          type: integer
+        pool_idle:
+          type: integer
+        pool_in_use:
+          type: integer
+        pool_max:
+          type: integer
+    HealthLegacy:
+      type: object
+      required: [status, db]
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        db:
+          type: string
+          enum: [connected, disconnected]
     IntegrationProduct:
       type: object
       required: [id, sku, name, category, uom, price, weight_lbs, length_in, width_in, height_in, stackable, geometry_source]
@@ -3232,6 +4590,16 @@ components:
           type: integer
         offset:
           type: integer
+    PartnerDashboard:
+      type: object
+      required: [balance_due, credit_limit]
+      properties:
+        balance_due:
+          type: number
+          description: Float dollars.
+        credit_limit:
+          type: number
+          description: Float dollars.
     PaymentMethod:
       type: string
       enum: [CASH, CARD, CHECK, ACCOUNT]
@@ -3365,6 +4733,739 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/Payment"
+    PortalLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    PortalLoginResponse:
+      type: object
+      required: [user, config]
+      description: The session token is never in this body; it rides the Set-Cookie header.
+      properties:
+        user:
+          $ref: "#/components/schemas/PortalCustomerUser"
+        config:
+          $ref: "#/components/schemas/PortalConfig"
+    PortalCustomerUser:
+      type: object
+      required: [id, customer_id, email, name, role, status, created_at, updated_at]
+      description: A contractor's portal account. The password hash is never serialized.
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [Admin, Buyer, View-Only]
+        status:
+          type: string
+          enum: [Active, Inactive]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PortalConfig:
+      type: object
+      required: [id, dealer_name, logo_url, primary_color, support_email, support_phone, created_at, updated_at]
+      description: The white-label branding row.
+      properties:
+        id:
+          type: string
+          format: uuid
+        dealer_name:
+          type: string
+        logo_url:
+          type: string
+        primary_color:
+          type: string
+        support_email:
+          type: string
+        support_phone:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PortalDashboard:
+      type: object
+      required: [balance_due, credit_limit, past_due, recent_orders]
+      properties:
+        balance_due:
+          type: number
+          description: Float dollars.
+        credit_limit:
+          type: number
+          description: Float dollars.
+        past_due:
+          type: number
+          description: Float dollars.
+        recent_orders:
+          type: array
+          description: The five most recent orders, never null.
+          items:
+            $ref: "#/components/schemas/PortalOrder"
+    PortalOrder:
+      type: object
+      required: [id, status, total_amount, created_at, lines, project_id, project_name, updated_at]
+      description: >-
+        A customer-facing order summary. Status is the ERP's UPPERCASE vocabulary (PENDING, CONFIRMED, CANCELLED, FULFILLED and neighbours).
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        total_amount:
+          type: number
+          description: Float dollars.
+        created_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          description: Never null; an order with no lines carries an empty array.
+          items:
+            $ref: "#/components/schemas/PortalOrderLine"
+        project_id:
+          type: [string, "null"]
+          format: uuid
+          description: The job this order belongs to, or null when it was placed without one.
+        project_name:
+          type: [string, "null"]
+        updated_at:
+          type: string
+          format: date-time
+          description: The change-feed cursor; moves on every ERP status write.
+    PortalOrderLine:
+      type: object
+      required: [product_id, product_sku, product_name, quantity, price_each]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        product_sku:
+          type: string
+        product_name:
+          type: string
+        quantity:
+          type: number
+        price_each:
+          type: number
+          description: Float dollars.
+    PortalInvoice:
+      type: object
+      required: [id, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        total_amount:
+          type: number
+          description: Float dollars.
+        subtotal:
+          type: number
+          description: Float dollars.
+        tax_amount:
+          type: number
+          description: Float dollars.
+        payment_terms:
+          type: string
+        due_date:
+          type: [string, "null"]
+          format: date-time
+        paid_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          description: Never null.
+          items:
+            $ref: "#/components/schemas/PortalOrderLine"
+    PortalDelivery:
+      type: object
+      required: [id, order_id, status, pod_proof_url, pod_signed_by, pod_timestamp, created_at, order_number, driver_name, driver_phone, driver_photo_url, vehicle_name, vehicle_photo_url, scheduled_date, estimated_arrival, delivery_address, stop_sequence, total_stops, delivery_instructions]
+      description: A customer-facing delivery stop; the optional fields are null rather than absent.
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        pod_proof_url:
+          type: [string, "null"]
+        pod_signed_by:
+          type: [string, "null"]
+        pod_timestamp:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        order_number:
+          type: [string, "null"]
+        driver_name:
+          type: [string, "null"]
+        driver_phone:
+          type: [string, "null"]
+        driver_photo_url:
+          type: [string, "null"]
+        vehicle_name:
+          type: [string, "null"]
+        vehicle_photo_url:
+          type: [string, "null"]
+        scheduled_date:
+          type: [string, "null"]
+          format: date-time
+        estimated_arrival:
+          type: [string, "null"]
+          format: date-time
+        delivery_address:
+          type: [string, "null"]
+        stop_sequence:
+          type: [integer, "null"]
+        total_stops:
+          type: [integer, "null"]
+        delivery_instructions:
+          type: [string, "null"]
+    PortalReorderRequest:
+      type: object
+      required: [order_id]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+    PortalReorderResponse:
+      type: object
+      required: [order_id, message]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+    PortalCancelOrderRequest:
+      type: object
+      description: The whole body is optional; the reason is recorded on the dealer's audit trail.
+      properties:
+        reason:
+          type: string
+    PortalCancelOrderResponse:
+      type: object
+      required: [order_id, status, previous_status, message]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          description: CANCELLED.
+        previous_status:
+          type: string
+          description: What the order was before the cancellation, so a consumer can show what changed.
+        message:
+          type: string
+    PortalSetOrderProjectRequest:
+      type: object
+      description: A null project_id detaches the order from its project.
+      properties:
+        project_id:
+          type: [string, "null"]
+          format: uuid
+    PortalRefusal:
+      type: object
+      required: [error, meta]
+      description: >-
+        The 409 the portal writes for a recognised refusal: the standard error envelope's shape plus a hand-written, customer-safe reason under error.reason. Codes seen today: QUOTE_NOT_PRICED, DELIVERY_COMMITTED, ORDER_IN_MOTION, ORDER_ALREADY_CANCELLED, ORDER_NOT_CANCELLABLE.
+      properties:
+        error:
+          type: object
+          required: [code, message, reason]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+              description: Always the generic status text (Conflict).
+            reason:
+              type: string
+              description: A sentence a contractor can act on; no ids, no table names.
+        meta:
+          type: object
+          required: [request_id]
+          properties:
+            request_id:
+              type: string
+    PortalCategoryNode:
+      type: object
+      required: [id, name, slug, path, depth, sort_order, product_count, children]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        path:
+          type: string
+          description: The raw ltree path, such as lumber.framing.
+        depth:
+          type: integer
+        sort_order:
+          type: integer
+        product_count:
+          type: integer
+          description: The subtree count, not the direct count.
+        children:
+          type: array
+          description: Never null; a leaf carries an empty array.
+          items:
+            $ref: "#/components/schemas/PortalCategoryNode"
+    PortalVolumeBreak:
+      type: object
+      required: [min_quantity, unit_price, price_source, details, saves_per_unit]
+      properties:
+        min_quantity:
+          type: number
+        unit_price:
+          type: number
+          description: Float dollars at this rung.
+        price_source:
+          type: string
+        details:
+          type: string
+        saves_per_unit:
+          type: number
+          description: Float dollars saved per unit versus the single-unit price.
+    PortalCatalogProduct:
+      type: object
+      required: [id, sku, name, category, species, grade, image_url, uom, base_price, customer_price, price_source, available, in_stock, lead_time_days, category_id, category_slug, category_path]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          description: The legacy flat display string.
+        species:
+          type: string
+        grade:
+          type: string
+        image_url:
+          type: string
+        uom:
+          type: string
+        base_price:
+          type: number
+          description: Float dollars.
+        customer_price:
+          type: number
+          description: Float dollars after the customer's pricing waterfall.
+        price_source:
+          type: string
+          description: Which waterfall step won (CONTRACT, retail, and neighbours).
+        available:
+          type: number
+          description: Units available across locations (quantity minus allocated).
+        in_stock:
+          type: boolean
+        lead_time_days:
+          type: [integer, "null"]
+          description: The dealer's published lead time; null means none was published and must not be read as zero.
+        category_id:
+          type: [string, "null"]
+          format: uuid
+        category_slug:
+          type: string
+        category_path:
+          type: string
+    PortalCatalogDetail:
+      type: object
+      required: [id, sku, name, category, species, grade, image_url, uom, base_price, customer_price, price_source, available, in_stock, lead_time_days, category_id, category_slug, category_path, weight_lbs, upc, vendor, volume_breaks]
+      description: The list shape plus the detail-only fields; spelled out flat because the properties are what the client types against.
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        species:
+          type: string
+        grade:
+          type: string
+        image_url:
+          type: string
+        uom:
+          type: string
+        base_price:
+          type: number
+          description: Float dollars.
+        customer_price:
+          type: number
+          description: Float dollars after the customer's pricing waterfall.
+        price_source:
+          type: string
+        available:
+          type: number
+        in_stock:
+          type: boolean
+        lead_time_days:
+          type: [integer, "null"]
+        category_id:
+          type: [string, "null"]
+          format: uuid
+        category_slug:
+          type: string
+        category_path:
+          type: string
+        weight_lbs:
+          type: number
+        upc:
+          type: string
+        vendor:
+          type: string
+        volume_breaks:
+          type: array
+          description: This customer's ladder; empty when no rung beats the single-unit price. Never null.
+          items:
+            $ref: "#/components/schemas/PortalVolumeBreak"
+    PortalCart:
+      type: object
+      required: [id, items, item_count, subtotal]
+      properties:
+        id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          description: Never null.
+          items:
+            $ref: "#/components/schemas/PortalCartItem"
+        item_count:
+          type: integer
+        subtotal:
+          type: number
+          description: Float dollars.
+    PortalCartItem:
+      type: object
+      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        product_sku:
+          type: string
+        product_name:
+          type: string
+        image_url:
+          type: string
+        quantity:
+          type: number
+        unit_price:
+          type: number
+          description: Float dollars, snapshotted when the item was added.
+        line_total:
+          type: number
+          description: Float dollars.
+        available:
+          type: number
+    PortalAddToCartRequest:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+    PortalUpdateCartItemRequest:
+      type: object
+      required: [quantity]
+      properties:
+        quantity:
+          type: number
+    PortalCheckoutRequest:
+      type: object
+      description: >-
+        Only project_id is read today; delivery_method, delivery_address, payment_method and notes decode but influence nothing, and an unknown project_id is a 500 (the handler's status is fixed).
+      properties:
+        delivery_method:
+          type: string
+          description: DELIVERY or PICKUP; not read today.
+        delivery_address:
+          type: string
+          description: Not read today.
+        payment_method:
+          type: string
+          description: ACCOUNT or CARD; not read today.
+        notes:
+          type: string
+          description: Not read today.
+        project_id:
+          type: [string, "null"]
+          format: uuid
+          description: Optional; when set it must be the caller's own project.
+    PortalCheckoutResponse:
+      type: object
+      required: [order_id, message]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+    PortalQuote:
+      type: object
+      required: [id, status, erp_state, project_id, project_name, notes, priced, total_amount, freight_amount, delivery_type, expires_at, sent_at, accepted_at, rejected_at, created_at, updated_at, lines]
+      description: >-
+        A customer-facing quote. Status is the portal vocabulary and erp_state the raw ERP state, so a consumer can de-dup on what the dealer actually said.
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [REQUESTED, PRICED, ACCEPTED, DECLINED, EXPIRED]
+          description: The portal projection of erp_state; an unrecognised ERP state passes through verbatim.
+        erp_state:
+          type: string
+          enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]
+        project_id:
+          type: [string, "null"]
+          format: uuid
+        project_name:
+          type: [string, "null"]
+        notes:
+          type: string
+        priced:
+          type: boolean
+          description: False until the dealer sends the quote back; derived from the lifecycle, never from the total.
+        total_amount:
+          type: number
+          description: Float dollars; 0.00 while priced is false and not a quotation.
+        freight_amount:
+          type: number
+          description: Float dollars.
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        sent_at:
+          type: [string, "null"]
+          format: date-time
+        accepted_at:
+          type: [string, "null"]
+          format: date-time
+        rejected_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          description: Never null.
+          items:
+            $ref: "#/components/schemas/PortalQuoteLine"
+    PortalQuoteLine:
+      type: object
+      required: [id, product_id, product_sku, description, customer_note, quantity, uom, unit_price, line_total, is_special_order]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: [string, "null"]
+          format: uuid
+          description: Null for a special-order line (a thing the dealer does not stock).
+        product_sku:
+          type: string
+          description: SPECIAL-ORDER for a line with no product behind it.
+        description:
+          type: string
+        customer_note:
+          type: string
+          description: What the contractor wrote when asking; never overwritten by the dealer's pricing pass.
+        quantity:
+          type: number
+        uom:
+          type: string
+        unit_price:
+          type: number
+          description: Float dollars; 0 until the dealer prices the line.
+        line_total:
+          type: number
+          description: Float dollars; 0 until the dealer prices the line.
+        is_special_order:
+          type: boolean
+    PortalCreateQuoteRequest:
+      type: object
+      required: [lines]
+      description: >-
+        A scope, never a price: there is no money field. At least one line, at most 200; delivery_type defaults to PICKUP when absent.
+      properties:
+        project_id:
+          type: [string, "null"]
+          format: uuid
+          description: Optional; when set it must be the caller's own project.
+        notes:
+          type: string
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalQuoteRequestLine"
+    PortalQuoteRequestLine:
+      type: object
+      required: [quantity]
+      description: A catalog line (product_id set, dealer SKU and UOM snapshotted) or a special-order line (product_id null, description and uom required).
+      properties:
+        product_id:
+          type: [string, "null"]
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: number
+        uom:
+          type: string
+          description: One of the uom_type values; uppercased and validated, unknown values are a 400.
+        note:
+          type: string
+    PortalRescheduleRequest:
+      type: object
+      required: [requested_date]
+      properties:
+        requested_date:
+          type: string
+          description: YYYY-MM-DD, a calendar day; today or later, at most 365 days out.
+        reason:
+          type: string
+    PortalDeliveryReschedule:
+      type: object
+      required: [id, delivery_id, order_id, requested_date, reason, status, applied, current_scheduled_date, resolution_note, created_at, updated_at]
+      description: A recorded ask; the schedule itself is never changed by the portal.
+      properties:
+        id:
+          type: string
+          format: uuid
+        delivery_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        requested_date:
+          type: string
+          description: The asked-for day, YYYY-MM-DD.
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPLIED, DECLINED, SUPERSEDED]
+        applied:
+          type: boolean
+          description: False for a PENDING request; the field to branch on.
+        current_scheduled_date:
+          type: [string, "null"]
+          description: The dealer board's day, YYYY-MM-DD, or null when the stop is on no route.
+        resolution_note:
+          type: [string, "null"]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PortalInvite:
+      type: object
+      required: [id, customer_id, email, role, expires_at, created_at]
+      description: A recorded invite; the token is never serialized.
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          type: string
+          enum: [Admin, Buyer, View-Only]
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    PortalInviteUserRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+        role:
+          type: string
+          enum: [Admin, Buyer, View-Only]
+    PortalUpdateUserRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [Admin, Buyer, View-Only]
+    PortalUpdateUserStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [Active, Inactive]
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.
@@ -3501,6 +5602,84 @@ components:
         lead_time_days:
           type: [integer, "null"]
           description: Days; null clears to unpublished, zero asserts same day.
+    Project:
+      type: object
+      required: [id, customer_id, name, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [Active, Completed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectDashboard:
+      type: object
+      required: [project, orders, deliveries, invoices]
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+        orders:
+          type: array
+          description: The project's orders, newest first, never null.
+          items:
+            $ref: "#/components/schemas/ProjectItem"
+        deliveries:
+          type: array
+          description: The stops of the project's orders, newest first, never null.
+          items:
+            $ref: "#/components/schemas/ProjectItem"
+        invoices:
+          type: array
+          description: The invoices of the project's orders, newest first, never null.
+          items:
+            $ref: "#/components/schemas/ProjectItem"
+    ProjectItem:
+      type: object
+      required: [id, type, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [ORDER, DELIVERY, INVOICE]
+        status:
+          type: string
+        total_amount:
+          type: number
+          description: Float dollars; omitted on delivery items, which carry no money column.
+        created_at:
+          type: string
+          format: date-time
+        reference:
+          type: string
+          description: A human label such as "Order 1a2b3c4d"; omitted when empty.
+    ProjectCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    ProjectUpdateRequest:
+      type: object
+      description: "Partial: only the fields present are applied."
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [Active, Completed]
     QuoteState:
       type: string
       enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]

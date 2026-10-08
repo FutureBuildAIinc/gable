@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The /uploads/ file server, transcribed from internal/app/serve/serve.go as
+# it behaves today. A static file server from the "uploads" directory,
+# protected by the RequireRole middleware (admin, owner, user). The
+# Content-Disposition header is always set to attachment and
+# X-Content-Type-Options to nosniff; the Content-Type is derived from the
+# file extension by go's http.DetectContentType. The pattern in ROUTES.txt
+# is the literal /uploads/; the path after it is passed to the underlying
+# http.FileServer via StripPrefix, so a request to /uploads/pod/photo.jpg
+# serves the file uploads/pod/photo.jpg.
+paths:
+  /uploads/:
+    get:
+      operationId: uploadsFile
+      tags: [uploads]
+      summary: Serve an uploaded file
+      description: >-
+        Authenticated access to the dealer file store under the uploads
+        directory. The path after /uploads/ is the file path within the
+        uploads directory. Content-Type is derived from the file extension;
+        Content-Disposition is always attachment; X-Content-Type-Options
+        is nosniff. A nonexistent file is a 404; a missing role is a 403.
+      security:
+        - RequireRole: [admin, owner, user]
+      responses:
+        "200":
+          description: The file bytes; Content-Type is derived from the file extension.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    RequireRole:
+      type: apiKey
+      in: cookie
+      name: portal_token
+      description: >-
+        The portal JWT cookie. Requires one of the roles admin, owner, or
+        user (as set by RequireRole middleware on this route). The same
+        portal_token cookie the portal routes use.
