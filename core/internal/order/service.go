@@ -1315,6 +1315,7 @@ type QuoteSourceLine struct {
 // section 5.8).
 type QuoteSource struct {
 	QuoteID      uuid.UUID
+	BranchID     uuid.UUID // the quote's branch: the order's branch, and so its tax rate
 	CustomerID   uuid.UUID
 	JobID        *uuid.UUID
 	DeliveryType DeliveryType
@@ -1353,11 +1354,7 @@ func (s *Service) PrepareQuoteTax(ctx context.Context, src *QuoteSource) (*Provi
 	if exempt {
 		return nil, nil
 	}
-	branchID, err := s.branchFor(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	b, err := s.buildFromQuote(ctx, src, branchID)
+	b, err := s.buildFromQuote(ctx, src, src.BranchID)
 	if err != nil {
 		return nil, err
 	}
@@ -1375,15 +1372,12 @@ func (s *Service) PrepareQuoteTax(ctx context.Context, src *QuoteSource) (*Provi
 // order.created as its last statement: the convert writes quote.accepted
 // first, then this writes order.created (ADR 0005 section 5.8).
 func (s *Service) CreateFromQuote(ctx context.Context, src *QuoteSource, priced *ProviderTax) (*Order, error) {
-	// The converted order takes the caller's branch context, else the
-	// deployment default (the same fallback the insert always gave).
-	branchID, err := s.branchFor(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
+	// The converted order takes the QUOTE's branch (ADR 0005 section 5.8's
+	// table), never the caller's context or the deployment default: the
+	// branch decides the tax rate and, in C2-2b, the stock the order reads.
 	var out *Order
-	err = s.inTx(ctx, func(ctx context.Context) error {
-		b, err := s.buildFromQuote(ctx, src, branchID)
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		b, err := s.buildFromQuote(ctx, src, src.BranchID)
 		if err != nil {
 			return err
 		}

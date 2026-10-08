@@ -475,19 +475,34 @@ func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
 	}
+	return s.convert(ctx, id, &pre)
+}
+
+// ConvertInProcess is the convert for in process callers (the frozen
+// integration seam): the same rules and events, no client revision to
+// precondition on. The caller marks itself branchctx.WithSystem, as the
+// seam does (ADR 0007 section 5.5): the record branch rule fails closed for
+// a context with no branch.
+func (s *Service) ConvertInProcess(ctx context.Context, id uuid.UUID) (*order.Order, error) {
+	return s.convert(ctx, id, nil)
+}
+
+func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) (*order.Order, error) {
 	if s.orders == nil {
 		return nil, fmt.Errorf("the order service is not wired")
 	}
 	// The provider, when one is configured, prices the conversion's tax
 	// BEFORE the transaction opens: it is an HTTP call (ADR 0005 section 3).
+	// The record branch rule runs first, so a quote the caller may not
+	// target never reaches the provider.
 	current, err := s.repo.GetQuote(ctx, id)
 	if err != nil {
 		return nil, notFound(err)
 	}
-	src, err := quoteSourceFor(current, nil)
-	if err != nil {
+	if err := s.checkQuoteBranch(ctx, current); err != nil {
 		return nil, err
 	}
+	src := quoteSourceFor(current)
 	priced, err := s.orders.PrepareQuoteTax(ctx, src)
 	if err != nil {
 		return nil, err
@@ -502,8 +517,13 @@ func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (
 		if err != nil {
 			return notFound(err)
 		}
-		if err := pre.check(cur.Revision); err != nil {
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
 			return err
+		}
+		if pre != nil {
+			if err := pre.check(cur.Revision); err != nil {
+				return err
+			}
 		}
 		if err := validateStateTransition(cur.Status, QuoteStateAccepted); err != nil {
 			return err
@@ -516,10 +536,7 @@ func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (
 				Details: []httpx.FieldError{httpx.Blocker("already_converted",
 					"the quote already has an order that is not cancelled")}}
 		}
-		src, err := quoteSourceFor(cur, nil)
-		if err != nil {
-			return err
-		}
+		src := quoteSourceFor(cur)
 		from := cur.Status
 		now := httpx.TimestampOf(s.now().UTC())
 		cur.Status = QuoteStateAccepted
@@ -527,66 +544,7 @@ func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (
 		if err := s.repo.SetStatus(ctx, cur); err != nil {
 			return err
 		}
-		if err := s.record(ctx, cur, EventAccepted, from.Status()); err != nil {
-			return err
-		}
-		created, err = s.orders.CreateFromQuote(ctx, src, priced)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return created, nil
-}
-
-// ConvertInProcess is the convert for in process callers (the frozen
-// integration seam): the same rules and events, no client revision to
-// precondition on.
-func (s *Service) ConvertInProcess(ctx context.Context, id uuid.UUID) (*order.Order, error) {
-	if s.orders == nil {
-		return nil, fmt.Errorf("the order service is not wired")
-	}
-	current, err := s.repo.GetQuote(ctx, id)
-	if err != nil {
-		return nil, notFound(err)
-	}
-	src, err := quoteSourceFor(current, nil)
-	if err != nil {
-		return nil, err
-	}
-	priced, err := s.orders.PrepareQuoteTax(ctx, src)
-	if err != nil {
-		return nil, err
-	}
-	var created *order.Order
-	err = s.inTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.LockQuote(ctx, id); err != nil {
-			return notFound(err)
-		}
-		cur, err := s.repo.GetQuote(ctx, id)
-		if err != nil {
-			return notFound(err)
-		}
-		if err := validateStateTransition(cur.Status, QuoteStateAccepted); err != nil {
-			return err
-		}
-		if has, err := s.orders.QuoteHasOrder(ctx, id); err != nil {
-			return err
-		} else if has {
-			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
-				Message: "this quote already has an order",
-				Details: []httpx.FieldError{httpx.Blocker("already_converted",
-					"the quote already has an order that is not cancelled")}}
-		}
-		src, err := quoteSourceFor(cur, nil)
-		if err != nil {
-			return err
-		}
-		from := cur.Status
-		now := httpx.TimestampOf(s.now().UTC())
-		cur.Status = QuoteStateAccepted
-		cur.AcceptedAt = &now
-		if err := s.repo.SetStatus(ctx, cur); err != nil {
+		if cur, err = s.repo.GetQuote(ctx, id); err != nil {
 			return err
 		}
 		if err := s.record(ctx, cur, EventAccepted, from.Status()); err != nil {
@@ -610,12 +568,10 @@ func (s *Service) WithOrderCreator(orders OrderCreator) *Service {
 // quoteSourceFor maps a quote onto what the order copies (ADR 0005 5.8's
 // table): the lines with their pair and price exactly, the header's job,
 // delivery type and freight.
-func quoteSourceFor(q *Quote, err error) (*order.QuoteSource, error) {
-	if err != nil {
-		return nil, err
-	}
+func quoteSourceFor(q *Quote) *order.QuoteSource {
 	src := &order.QuoteSource{
 		QuoteID:      q.ID,
+		BranchID:     q.BranchID,
 		CustomerID:   q.CustomerID,
 		JobID:        q.JobID,
 		FreightCents: q.FreightCents,
@@ -633,7 +589,7 @@ func quoteSourceFor(q *Quote, err error) (*order.QuoteSource, error) {
 			UOMQty: l.UOMQty, PriceUOMQty: l.PriceUOMQty, UnitPrice: l.UnitPrice,
 		})
 	}
-	return src, nil
+	return src
 }
 
 // record writes the quote's event into the outbox through the transaction's
