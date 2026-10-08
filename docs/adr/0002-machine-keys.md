@@ -115,6 +115,11 @@ A 401 writes no row: an unknown or revoked key has no attributable id. The
 refused request is answered 403 whether or not the audit write lands; a full
 audit table must not turn a refusal into a server error.
 
+A machine key is a principal for idempotency too (the R1-11 layers): the
+ERP layer keys an `Idempotency-Key` claim on `key:<id>` in every auth mode,
+so a keyed caller's retries share its own namespace instead of passing
+uncached outside dev or joining the shared dev principal inside it.
+
 ### 6. Branch scoping
 
 The branch wall (`user_locations` grants behind `X-Branch-Id`) is a user
