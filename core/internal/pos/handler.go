@@ -5,6 +5,7 @@ package pos
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -65,8 +66,61 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))
 }
 
+// cashierRefusalBody is the wire ADR's error envelope for the one refusal
+// this package writes. The shared writer lands with the platform packages;
+// pkg/actor and pkg/middleware write the same shape for theirs.
+type cashierRefusalBody struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Meta struct {
+		RequestID string `json:"request_id"`
+	} `json:"meta"`
+}
+
+// refuseMachineKeyCashier answers the request with 403 when the caller
+// authenticated with a machine key, reporting whether it answered. The
+// cashier on a POS mutation is a human user whose JWT names them; a machine
+// key is not a user, so a route that would otherwise resolve its cashier
+// from the request identity refuses the key outright rather than fabricate
+// the stand-in UUID the dev-mode fallback mints for keyless demo callers. A
+// body-supplied cashier does not help a key either: it names a user the key
+// asserts, not one the request authenticated.
+func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
+	keyID, isKey := middleware.KeyIDFromContext(r.Context())
+	if !isKey {
+		return false
+	}
+
+	reqID := w.Header().Get("X-Request-ID")
+	if reqID == "" {
+		reqID = r.Header.Get("X-Request-ID")
+	}
+
+	var body cashierRefusalBody
+	body.Error.Code = "forbidden"
+	body.Error.Message = "a cashier must be a user"
+	body.Meta.RequestID = reqID
+
+	slog.Warn("machine key refused on a POS cashier route",
+		"key_id", keyID,
+		"status", http.StatusForbidden,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"request_id", reqID,
+	)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(body)
+	return true
+}
+
 // CreateReturn records a merchandise return and issues the refund.
 func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKeyCashier(w, r) {
+		return
+	}
 	var req ReturnRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
@@ -162,6 +216,9 @@ func (h *Handler) ListZReports(w http.ResponseWriter, r *http.Request) {
 // --- Till handlers ---
 
 func (h *Handler) OpenTill(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKeyCashier(w, r) {
+		return
+	}
 	var req OpenTillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
@@ -254,6 +311,9 @@ type completeTransactionRequest struct {
 // --- Handlers ---
 
 func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKeyCashier(w, r) {
+		return
+	}
 	var req startTransactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)

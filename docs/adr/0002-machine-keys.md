@@ -100,12 +100,26 @@ replaces it as the gate, and the guards stacked at route registration
   could mint or revoke keys would be a key that could grant itself
   everything, and the scope check cannot express "no key may hold this"
   because the minted key would simply hold it.
+- The POS routes that resolve their cashier from the request identity
+  (starting a sale, opening a till, recording a return) are user-only the
+  same way: the cashier is a human user the JWT names, so a machine key is
+  refused 403 `forbidden` with the message "a cashier must be a user", in
+  the wire ADR's envelope, rather than being handed the fabricated stand-in
+  cashier the dev-mode fallback mints for keyless demo callers. A
+  body-supplied cashier id does not help a key: it names a user the key
+  asserts, not one the request authenticated. The refusal is served by the
+  route itself, after the scope check admitted the key, and is logged
+  server-side rather than audited; the routes that carry no cashier
+  identity of their own (catalog, search, item changes, completion, void,
+  reports) stay reachable with `pos` scopes.
 
 ### 5. Refusals and the audit trail
 
-Every 403 refusal of a valid key writes one audit row through `pkg/audit`,
-with the key as the actor (kind `key`, `actor_id` the key's id, `user_id`
-null: a key is never a user, per the R1-14 attribution rule):
+Every 403 the auth layer serves a valid key writes one audit row through
+`pkg/audit`, with the key as the actor (`actor_id` the key's id, and
+`user_id` null: a key is never a user, per the R1-14 attribution rule; the
+kind is `key`, or `agent` with the same `actor_id` when the agent identity
+headers rode along, and `user_id` is null either way):
 
 - `key.scope_refused`, with the refused scope, the method and the path;
 - `key.user_required`, on the key management routes;
@@ -113,7 +127,9 @@ null: a key is never a user, per the R1-14 attribution rule):
 
 A 401 writes no row: an unknown or revoked key has no attributable id. The
 refused request is answered 403 whether or not the audit write lands; a full
-audit table must not turn a refusal into a server error.
+audit table must not turn a refusal into a server error. The one 403 a valid
+key can be served outside the auth layer is the POS cashier rule in section
+4; the route logs it server-side and writes no row.
 
 A machine key is a principal for idempotency too (the R1-11 layers): the
 ERP layer keys an `Idempotency-Key` claim on `key:<id>` in every auth mode,
