@@ -17,6 +17,25 @@ services:
       timeout: 5s
       retries: 5
 
+  # Nginx serves the two frontend bundles (front door at /, desk at /app/)
+  # and proxies API/health calls to the Go core running on the host at 8080.
+  # Build both bundles first: `make fe-build` from the repo root.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: gable_nginx
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./web/apps/front-door/dist:/usr/share/nginx/html/front-door:ro
+      - ./web/apps/desk/dist:/usr/share/nginx/html/desk:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/ || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 # NOTE: a NATS container used to live here, but no Go code imports a NATS
 # client — the event bus is a future consideration (see
 # docs/modularization-blueprint.md, Phase 2+). Re-add the container when the
