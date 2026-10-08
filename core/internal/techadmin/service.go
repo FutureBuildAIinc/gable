@@ -9,10 +9,17 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"time"
 
 	"golang.org/x/crypto/argon2"
 )
+
+// ErrInvalidKey is the credential verdict from ValidateKey: the presented
+// key is unknown, revoked, or malformed. Callers that map errors onto HTTP
+// verdicts (the machine-key auth core) distinguish it from infrastructure
+// faults, which carry different status codes.
+var ErrInvalidKey = errors.New("invalid api key")
 
 type Service struct {
 	repo Repository
@@ -62,10 +69,12 @@ func (s *Service) GenerateKey(ctx context.Context, name string, scopes []string)
 
 // ValidateKey checks if a raw key matches a stored hash.
 // If valid, returns the APIKey object and updates LastUsedAt.
+// A key that is malformed, unknown, or revoked fails with ErrInvalidKey;
+// anything else is an infrastructure fault.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (*APIKey, error) {
 	// Basic format check
 	if len(rawKey) < 12 {
-		return nil, errors.New("invalid key format")
+		return nil, fmt.Errorf("%w: key shorter than the stored prefix length", ErrInvalidKey)
 	}
 
 	prefix := rawKey[:12]
@@ -100,7 +109,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (*APIKey, erro
 		}
 	}
 
-	return nil, errors.New("invalid api key")
+	return nil, ErrInvalidKey
 }
 
 func (s *Service) ListKeys(ctx context.Context) ([]APIKey, error) {

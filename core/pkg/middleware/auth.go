@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gablelbm/gable/pkg/httputil"
-
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -20,6 +18,10 @@ type AuthConfig struct {
 	JWKSURL     string
 	Issuer      string
 	PublicPaths []string
+	// MachineKeys, when set, validates Bearer machine keys (the sk_live_
+	// shape). When nil a machine-key Bearer is refused 401 fail closed
+	// rather than reaching the JWT parser.
+	MachineKeys *MachineKeyAuth
 }
 
 type AuthMiddleware struct {
@@ -27,6 +29,7 @@ type AuthMiddleware struct {
 	issuer      string
 	publicPaths []string
 	logger      *slog.Logger
+	machineKeys *MachineKeyAuth
 }
 
 // UserClaims holds standard OIDC claims and FB Brain custom claims.
@@ -61,6 +64,7 @@ func NewAuthMiddleware(ctx context.Context, cfg AuthConfig, logger *slog.Logger)
 		issuer:      cfg.Issuer,
 		publicPaths: cfg.PublicPaths,
 		logger:      logger,
+		machineKeys: cfg.MachineKeys,
 	}, nil
 }
 
@@ -70,53 +74,59 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		// 0. Check Public Paths
 		// Paths ending with "/" are treated as prefixes (e.g. "/api/portal/v1/").
 		// All other paths require an exact match.
-		for _, path := range m.publicPaths {
-			if strings.HasSuffix(path, "/") {
-				if strings.HasPrefix(r.URL.Path, path) {
-					next.ServeHTTP(w, r)
-					return
-				}
-			} else if r.URL.Path == path {
-				next.ServeHTTP(w, r)
-				return
-			}
+		if isPublicPath(m.publicPaths, r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		// 1. Extract Token
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			m.logger.Warn("Missing Authorization header", "path", r.URL.Path)
-			httputil.RespondError(w, r, "Unauthorized: No token provided", http.StatusUnauthorized, nil)
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "no token provided")
 			return
 		}
 
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			m.logger.Warn("Invalid Authorization header format", "path", r.URL.Path)
-			httputil.RespondError(w, r, "Unauthorized: Invalid token format", http.StatusUnauthorized, nil)
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid Authorization header format")
 			return
 		}
 		tokenString := parts[1]
+
+		// 1b. A Bearer machine key is not a JWT: dispatch by shape before
+		// the JWT parser sees it. With no machine-key core wired the token
+		// is refused fail closed; it must never fall into JWT parsing, which
+		// would only produce a misleading parse error.
+		if IsMachineKey(tokenString) {
+			if m.machineKeys == nil {
+				respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "machine keys are not accepted")
+				return
+			}
+			m.machineKeys.handle(w, r, tokenString, next)
+			return
+		}
 
 		// 2. Parse and Validate Token
 		token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, m.jwks.Keyfunc)
 		if err != nil {
 			m.logger.Warn("Token validation failed", "error", err, "path", r.URL.Path)
-			httputil.RespondError(w, r, "Unauthorized: Invalid token", http.StatusUnauthorized, nil)
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
 
 		// 3. Verify Claims (Issuer)
 		if !token.Valid {
 			m.logger.Warn("Token is invalid", "path", r.URL.Path)
-			httputil.RespondError(w, r, "Unauthorized: Invalid token", http.StatusUnauthorized, nil)
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
 
 		claims, ok := token.Claims.(*UserClaims)
 		if !ok {
 			m.logger.Error("Failed to cast claims", "path", r.URL.Path)
-			httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, nil)
+			respondAuthError(w, r, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 
@@ -124,7 +134,7 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		// Note: keyfunc handles signature, but we check business logic claims here
 		if m.issuer != "" && claims.Issuer != m.issuer {
 			m.logger.Warn("Token issuer mismatch", "expected", m.issuer, "got", claims.Issuer)
-			httputil.RespondError(w, r, "Unauthorized: Invalid issuer", http.StatusUnauthorized, nil)
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid issuer")
 			return
 		}
 
@@ -135,7 +145,11 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 }
 
 // RequireRole returns middleware that restricts access to users with one of the allowed roles.
-// In dev mode (no auth configured, claims == nil), requests pass through.
+// A machine key has no roles: when the request authenticated with one, the
+// role check is skipped, because the auth layer's scope check has already
+// authorized the module (and key management routes, where a key must never
+// pass, are refused before this guard runs). In dev mode (no auth configured,
+// no key, claims == nil), requests pass through.
 func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(allowedRoles))
 	for _, r := range allowedRoles {
@@ -146,6 +160,11 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := ClaimsFromContext(r.Context())
 			if claims == nil {
+				if _, ok := KeyScopesFromContext(r.Context()); ok {
+					// A machine key: scope check already ran in the auth layer.
+					next.ServeHTTP(w, r)
+					return
+				}
 				// Dev mode: no auth configured, pass through
 				next.ServeHTTP(w, r)
 				return
@@ -165,7 +184,7 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 				}
 			}
 
-			httputil.RespondError(w, r, "Forbidden: insufficient role", http.StatusForbidden, nil)
+			respondAuthError(w, r, http.StatusForbidden, "forbidden", "insufficient role")
 		})
 	}
 }
