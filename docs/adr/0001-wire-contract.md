@@ -327,8 +327,9 @@ document line that carries an extension.
 ### 7a. Quantities, units and the extension
 
 Quantities and both sides of a conversion pair travel as JSON strings
-holding a plain decimal with at most 4 fraction digits (`"12.5"`,
-`"1000"`, `"0.1875"`), parsed with the package's fixed scale helpers,
+holding a plain decimal with at most 4 significant fraction digits
+(`"12.5"`, `"1000"`, `"0.1875"`; further trailing zeros are padding),
+parsed with the package's fixed scale helpers,
 never as JSON numbers: a float on either side of a line's arithmetic
 would make the extension unreproducible for clients and agents. One
 canonical spelling is enforced on the wire, the same posture as `limit`:
@@ -351,14 +352,22 @@ the line's sale unit, the line carries `price_uom` beside
 `unit_price_ten_thousandths`. Commodity lumber is priced per `MBF` and
 fasteners per `M` or `CWT`; a price of 3.75 per M is 0.00375 each, which
 no per-each scale 4 field could hold, so the conversion belongs to the
-line, not to the price.
+line, not to the price. Every priced line carries `quantity`, `uom`,
+`unit_price_ten_thousandths`, `price_uom`, `uom_qty`, `price_uom_qty`
+and `line_total_cents`, always present: a line whose units agree still
+carries `price_uom` (equal to `uom`) and the pair as 1 and 1, so a
+client reads one shape per line and never guesses which fields a line
+kind drops.
 
 The conversion is a pair of quantities, not a factor: the line carries
 `uom_qty` and `price_uom_qty`, meaning `uom_qty` of its `uom` is the same
 goods as `price_uom_qty` of its `price_uom`. Lumber sold by the piece and
 priced per `MBF` carries 187.5 and 1 (187.5 PCS = 1 MBF); fasteners sold
 by the piece and priced per `M` carry 1000 and 1. When the units agree
-the pair is 1 and 1. A single scale 4 factor cannot carry these: 1/187.5
+the pair is 1 and 1. Both sides of the pair are positive; a zero or
+negative side is a 400 `validation_failed` on that field, so a credit
+reaches a line through its own kind and never through its conversion. A
+single scale 4 factor cannot carry these: 1/187.5
 rounds to 0.0053, and a whole thousand board feet at 500.00 per `MBF`
 would price about 0.6 percent off; the pair holds both sides exactly.
 
@@ -366,7 +375,7 @@ The extension of a line is the quantity multiplied by the unit price and
 by `price_uom_qty`, divided by `uom_qty` (the quantity converted into the
 price unit), rounded once, to cents, half away from zero: 187.5 PCS at
 500.00 per `MBF` is exactly 50000 cents, and one piece of the same
-lumber, 2.6667 cents' worth, rounds to 267 cents. The rounding mode is
+lumber, 266.67 cents' worth, rounds to 267 cents. The rounding mode is
 named here and implemented once in the package (`Extend`), exact in big
 arithmetic until that one rounding; no module prices a line any other
 way.
@@ -614,6 +623,9 @@ template, then module by module):
    `created_at` and sets it NOT NULL, numbers existing
    rows in `(created_at, id)` order, adds the unique constraint, and moves
    `setval` past the maximum) and mint numbers in the create path.
+3a. Add `revision BIGINT NOT NULL DEFAULT 1` to each converting document
+   table, so existing rows start at revision 1 and the section 11
+   precondition has a value to check from the first write.
 4. Lowercase and rename lifecycle state to `status` at the handler
    boundary.
 5. Update every caller: search the desk (`app/`) and the portal for each
