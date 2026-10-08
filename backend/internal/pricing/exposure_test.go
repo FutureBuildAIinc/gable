@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -257,29 +258,49 @@ func (f *fakeQuoteReader) RecomputeQuoteTotal(_ context.Context, quoteID uuid.UU
 
 var _ quote.QuoteLineReader = (*fakeQuoteReader)(nil)
 
-// capturingBus records what the scanner/service published.
-type capturingBus struct {
-	mu       sync.Mutex
-	subjects []string
-	payloads []ExposureNotification
+// recordingOutbox captures what the scanner/service recorded through the
+// outbox seam, standing in for *outbox.Writer in tests.
+type recordingOutbox struct {
+	mu     sync.Mutex
+	events []outbox.Event
 }
 
-func (b *capturingBus) Publish(_ context.Context, subject string, payload json.RawMessage) error {
-	var n ExposureNotification
-	_ = json.Unmarshal(payload, &n)
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.subjects = append(b.subjects, subject)
-	b.payloads = append(b.payloads, n)
+func (o *recordingOutbox) Write(_ context.Context, ev outbox.Event) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.events = append(o.events, ev)
 	return nil
 }
 
-func (b *capturingBus) snapshot() ([]string, []ExposureNotification) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	s := append([]string(nil), b.subjects...)
-	p := append([]ExposureNotification(nil), b.payloads...)
-	return s, p
+// snapshot returns the recorded events in order.
+func (o *recordingOutbox) snapshot() []outbox.Event {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]outbox.Event(nil), o.events...)
+}
+
+// subjects lists the recorded event types (the bus subjects they drain to).
+func (o *recordingOutbox) subjects() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	s := make([]string, len(o.events))
+	for i, ev := range o.events {
+		s[i] = ev.Type
+	}
+	return s
+}
+
+// notifications unmarshals the recorded payloads.
+func (o *recordingOutbox) notifications() []ExposureNotification {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	ns := make([]ExposureNotification, 0, len(o.events))
+	for _, ev := range o.events {
+		var n ExposureNotification
+		_ = json.Unmarshal(ev.Data, &n)
+		ns = append(ns, n)
+	}
+	return ns
 }
 
 type recordingAudit struct {
@@ -306,7 +327,7 @@ type scannerFixture struct {
 	exposure *fakeExposureRepo
 	escal    *MockEscalatorRepository
 	quotes   *fakeQuoteReader
-	bus      *capturingBus
+	outboxRec *recordingOutbox
 	audit    *recordingAudit
 
 	indexID     uuid.UUID
@@ -332,7 +353,7 @@ func newScannerFixture(t *testing.T, o fixtureOpts) *scannerFixture {
 	exposure := newFakeExposureRepo()
 	escal := newMockEscalatorRepo()
 	quotes := newFakeQuoteReader()
-	bus := &capturingBus{}
+	rec := &recordingOutbox{}
 	audit := &recordingAudit{}
 
 	indexID := uuid.New()
@@ -385,11 +406,11 @@ func newScannerFixture(t *testing.T, o fixtureOpts) *scannerFixture {
 		CustomerAgreementSignedAt: signedAt,
 	}}
 
-	scanner := NewExposureScanner(exposure, escal, quotes, audit, nil, quietLogger()).WithEventBus(bus)
+	scanner := NewExposureScanner(exposure, escal, quotes, audit, nil, quietLogger()).WithOutbox(rec)
 
 	return &scannerFixture{
 		scanner: scanner, exposure: exposure, escal: escal, quotes: quotes,
-		bus: bus, audit: audit,
+		outboxRec: rec, audit: audit,
 		indexID: indexID, quoteID: quoteID, lineID: lineID, escalatorID: escalatorID,
 	}
 }
@@ -515,7 +536,7 @@ func TestScanner_BelowThresholdOnHealthyQuoteWritesNoEvent(t *testing.T) {
 	if got := f.exposure.escalators[f.escalatorID].CurrentState; got != string(ExposureStateOK) {
 		t.Errorf("escalator state = %s, want OK", got)
 	}
-	if subjects, _ := f.bus.snapshot(); len(subjects) != 0 {
+	if subjects := f.outboxRec.subjects(); len(subjects) != 0 {
 		t.Errorf("published %v for a sub-threshold move, want nothing", subjects)
 	}
 }
@@ -542,7 +563,7 @@ func TestScanner_RecoveryEmitsCleared(t *testing.T) {
 	if got := f.exposure.escalators[f.escalatorID].CurrentState; got != string(ExposureStateOK) {
 		t.Errorf("escalator state = %s, want OK", got)
 	}
-	subjects, _ := f.bus.snapshot()
+	subjects := f.outboxRec.subjects()
 	if len(subjects) != 1 || subjects[0] != "quote.exposure.cleared" {
 		t.Errorf("published %v, want [quote.exposure.cleared]", subjects)
 	}
@@ -599,7 +620,7 @@ func TestScanner_ReplayingTheSameHistoryRowIsANoop(t *testing.T) {
 	if n := f.eventCount(); n != 1 {
 		t.Errorf("wrote %d events across three identical scans, want 1", n)
 	}
-	if subjects, _ := f.bus.snapshot(); len(subjects) != 1 {
+	if subjects := f.outboxRec.subjects(); len(subjects) != 1 {
 		t.Errorf("published %d notifications, want 1 — a deduped event must not re-notify", len(subjects))
 	}
 	if got := f.audit.count(); got != 1 {
@@ -689,9 +710,9 @@ func TestScanner_ZeroSnapshotThresholdFallsBackToFivePercent(t *testing.T) {
 	}
 }
 
-// CORRECTNESS: the published notification must carry the fields the notifier
-// renders, on the subject mapped from the event type.
-func TestScanner_PublishesNotificationOnMappedSubject(t *testing.T) {
+// CORRECTNESS: the recorded outbox event must carry the subject mapped from
+// the event type and the payload fields the notifier renders.
+func TestScanner_RecordsOutboxEventOnMappedSubject(t *testing.T) {
 	f := newScannerFixture(t, fixtureOpts{
 		baseIndex: 400, currentIndex: 440,
 		basePrice: 100, quantity: 10,
@@ -701,11 +722,12 @@ func TestScanner_PublishesNotificationOnMappedSubject(t *testing.T) {
 		t.Fatalf("OnMarketIndexUpdated: %v", err)
 	}
 
-	subjects, payloads := f.bus.snapshot()
+	subjects := f.outboxRec.subjects()
+	notifications := f.outboxRec.notifications()
 	if len(subjects) != 1 || subjects[0] != "quote.exposure.ack_required" {
 		t.Fatalf("subjects = %v, want [quote.exposure.ack_required]", subjects)
 	}
-	p := payloads[0]
+	p := notifications[0]
 	if p.EventType != EventAckRequired {
 		t.Errorf("payload event_type = %s, want ACK_REQUIRED", p.EventType)
 	}
@@ -720,21 +742,21 @@ func TestScanner_PublishesNotificationOnMappedSubject(t *testing.T) {
 	}
 }
 
-// CORRECTNESS: a nil bus must not break the scan. Notifications are a
-// side-effect; the durable ledger is the product.
-func TestScanner_NilBusDoesNotBreakScan(t *testing.T) {
+// CORRECTNESS: a nil outbox recorder must not break the scan.
+// Notifications are a side-effect; the durable ledger is the product.
+func TestScanner_NilOutboxDoesNotBreakScan(t *testing.T) {
 	f := newScannerFixture(t, fixtureOpts{
 		baseIndex: 400, currentIndex: 440,
 		basePrice: 100, quantity: 10,
 		thresholdPct: 5, policy: PolicyFlagForRequote,
 	})
-	f.scanner.bus = nil
+	f.scanner.events = nil
 
 	if err := f.scanner.OnMarketIndexUpdated(context.Background(), f.indexID, uuid.New()); err != nil {
 		t.Fatalf("OnMarketIndexUpdated: %v", err)
 	}
 	if n := f.eventCount(); n != 1 {
-		t.Errorf("wrote %d events with no bus wired, want 1", n)
+		t.Errorf("wrote %d events with no outbox wired, want 1", n)
 	}
 }
 
@@ -861,11 +883,11 @@ func (c *fakeChecker) QuoteIDForOrder(context.Context, uuid.UUID) (*uuid.UUID, e
 
 var _ ExposureChecker = (*fakeChecker)(nil)
 
-func newExposureServiceFixture(t *testing.T, state ExposureState) (*ExposureService, *fakeExposureRepo, *fakeQuoteReader, *capturingBus, uuid.UUID, uuid.UUID) {
+func newExposureServiceFixture(t *testing.T, state ExposureState) (*ExposureService, *fakeExposureRepo, *fakeQuoteReader, *recordingOutbox, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	exposure := newFakeExposureRepo()
 	quotes := newFakeQuoteReader()
-	bus := &capturingBus{}
+	rec := &recordingOutbox{}
 	quoteID := uuid.New()
 	escalatorID := uuid.New()
 	lineID := uuid.New()
@@ -880,8 +902,8 @@ func newExposureServiceFixture(t *testing.T, state ExposureState) (*ExposureServ
 
 	checker := &fakeChecker{status: ExposureStatus{State: state, ExposureDollars: 1234.56}}
 	svc := NewExposureService(exposure, newMockEscalatorRepo(), quotes, &recordingAudit{}, checker, quietLogger()).
-		WithEventBus(bus)
-	return svc, exposure, quotes, bus, quoteID, escalatorID
+		WithOutbox(rec)
+	return svc, exposure, quotes, rec, quoteID, escalatorID
 }
 
 // CORRECTNESS: an acknowledgment is a contractual record. A one-word note or
@@ -928,7 +950,7 @@ func TestExposureService_AcknowledgeRejectsAlreadyClearedStates(t *testing.T) {
 // CORRECTNESS: a valid acknowledgment writes the ledger row, zeroes the quote
 // rollup, flips the line escalators, and notifies.
 func TestExposureService_AcknowledgeClearsTheQuote(t *testing.T) {
-	svc, exposure, quotes, bus, quoteID, escalatorID := newExposureServiceFixture(t, ExposureStateAckRequired)
+	svc, exposure, quotes, rec, quoteID, escalatorID := newExposureServiceFixture(t, ExposureStateAckRequired)
 
 	ev, err := svc.Acknowledge(context.Background(), quoteID,
 		AcknowledgmentRequest{Method: AckMethodVerbal, CustomerContact: "Dana", Notes: "confirmed on the phone"},
@@ -952,7 +974,7 @@ func TestExposureService_AcknowledgeClearsTheQuote(t *testing.T) {
 	if got := exposure.escalators[escalatorID].CurrentState; got != string(ExposureStateAcknowledged) {
 		t.Errorf("escalator state = %s, want ACKNOWLEDGED", got)
 	}
-	if subjects, _ := bus.snapshot(); len(subjects) != 1 || subjects[0] != "quote.exposure.acknowledged" {
+	if subjects := rec.subjects(); len(subjects) != 1 || subjects[0] != "quote.exposure.acknowledged" {
 		t.Errorf("subjects = %v, want [quote.exposure.acknowledged]", subjects)
 	}
 }

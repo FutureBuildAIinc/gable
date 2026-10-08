@@ -29,6 +29,7 @@ import (
 	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/governance"
 	"github.com/gablelbm/gable/internal/integrations"
@@ -532,9 +533,11 @@ func main() {
 	// Lumber index-aware quote price protection (the exposure module).
 	// Snapshots a baseline index when a quote is sent, detects moves past the
 	// per-customer threshold, applies the snapshotted policy, and gates order
-	// confirm/fulfil and delivery route assignment. Notification side-effects
-	// travel over the in-process pkg/eventbus — see cmd/server/wire_exposure.go.
-	// Must come after deliverySvc, its last dependency.
+	// confirm/fulfil and delivery route assignment. Notification events are
+	// recorded in the transactional outbox inside the mutation's transaction
+	// and the drain republishes them onto the in-process bus; see
+	// cmd/server/wire_exposure.go and pkg/outbox. Must come after
+	// deliverySvc, its last dependency.
 	exposureWiring := wireExposure(exposureDeps{
 		Mux:           mux,
 		DB:            db,
@@ -547,6 +550,14 @@ func main() {
 		DeliverySvc:   deliverySvc,
 		EmailSvc:      emailSvc,
 	})
+
+	// Outbox drain: republish committed events to the in-process bus, past
+	// each subscriber's cursor. Runs in the server for now (as the idempotency
+	// purge does); item R1-4 moves it into the worker role. Stopped by
+	// ExposureWiring.Shutdown in step 3.7, before the bus and pool close.
+	if err := exposureWiring.Drain.Start(context.Background()); err != nil {
+		logger.Error("outbox drain failed to start; bus subscribers receive no events until it runs", "error", err)
+	}
 
 	// SMS Notification Service
 	var smsSvc notification.SMSService
@@ -617,6 +628,12 @@ func main() {
 	techAdminHandler.WithAIBaseURLStore(aiBaseURLStore)
 	techAdminHandler.WithORSKeyStore(orsKeyStore)
 	techAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+
+	// Events feed: the outbox read API (item R1-12), the one cursor-paginated
+	// feed of every domain event. Role gated admin/owner like the other admin
+	// reads; agents and integrations poll it with their own cursors.
+	eventsHandler := events.NewHandler(db)
+	eventsHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Portal Module (Sovereign Dealer Portal)
 	// Resolve JWT secret: required in production, uses dev default in dev mode only.
@@ -941,10 +958,11 @@ func main() {
 	reportScheduler.Stop()
 	logger.Info("Shutdown step 3.6/4: report scheduler stopped")
 
-	// Step 3.7: Stop the exposure safety-net cron and drain the in-process
-	// event bus before the pool closes, so a queued notification handler
-	// cannot fire against a dead pool.
-	logger.Info("Shutdown step 3.7/4: stopping exposure wiring...")
+	// Step 3.7: Stop the outbox drain (no new event may be handed to the
+	// bus), then the exposure safety-net cron and the in-process event bus,
+	// before the pool closes, so a queued notification handler cannot fire
+	// against a dead pool.
+	logger.Info("Shutdown step 3.7/4: stopping exposure wiring (outbox drain, safety net, event bus)...")
 	exposureWiring.Shutdown(ctx)
 	logger.Info("Shutdown step 3.7/4: exposure wiring stopped")
 

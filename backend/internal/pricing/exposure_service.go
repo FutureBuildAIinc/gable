@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/quote"
-	"github.com/gablelbm/gable/pkg/eventbus"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -28,7 +28,7 @@ type ExposureService struct {
 	exposure   ExposureRepository
 	escalators EscalatorRepository
 	quoteRepo  quote.QuoteLineReader
-	bus        eventbus.Publisher // optional; nil disables event publishing
+	events     EventRecorder // optional; nil disables event recording
 	audit      AuditWriter
 	checker    ExposureChecker
 	logger     *slog.Logger
@@ -55,10 +55,10 @@ func NewExposureService(
 	}
 }
 
-// WithEventBus wires the publisher used for post-write notification events.
-// Optional: a nil bus disables publishing entirely.
-func (s *ExposureService) WithEventBus(bus eventbus.Publisher) *ExposureService {
-	s.bus = bus
+// WithOutbox wires the recorder used for notification events. Optional: a
+// nil recorder disables recording entirely.
+func (s *ExposureService) WithOutbox(events EventRecorder) *ExposureService {
+	s.events = events
 	return s
 }
 
@@ -123,7 +123,9 @@ func (s *ExposureService) Acknowledge(ctx context.Context, quoteID uuid.UUID, re
 	}
 
 	s.writeAudit(ctx, ev)
-	s.publishStatus(ctx, EventAcknowledged, status)
+	if err := s.recordStatus(ctx, EventAcknowledged, status); err != nil {
+		return ev, fmt.Errorf("acknowledge: record outbox event: %w", err)
+	}
 	return ev, nil
 }
 
@@ -149,9 +151,12 @@ func (s *ExposureService) RequestAck(ctx context.Context, quoteID uuid.UUID, act
 		return nil, fmt.Errorf("request-ack: insert event: %w", err)
 	}
 
-	// Notify the salesperson — best-effort. Publish as an ACK_REQUIRED subject
-	// so the notifier's per-(salesperson, index) routing engages.
-	s.publishStatus(ctx, EventAckRequired, status)
+	// Notify the salesperson: the event is recorded in the outbox and the
+	// drain republishes it on the ACK_REQUIRED subject, so the notifier's
+	// per-(salesperson, index) routing engages.
+	if err := s.recordStatus(ctx, EventAckRequired, status); err != nil {
+		return ev, fmt.Errorf("request-ack: record outbox event: %w", err)
+	}
 
 	s.writeAudit(ctx, ev)
 	return ev, nil
@@ -359,16 +364,20 @@ func (s *ExposureService) flipActiveRaisedEscalators(ctx context.Context, quoteI
 	return nil
 }
 
-// publishStatus emits an ExposureNotification derived from an ExposureStatus
-// to the subject mapped from the event type. Best-effort; no-ops when the bus
-// is unconfigured or the event has no subject.
-func (s *ExposureService) publishStatus(ctx context.Context, eventType EventType, status ExposureStatus) {
-	if s.bus == nil {
-		return
+// recordStatus writes an ExposureNotification derived from an ExposureStatus
+// into the outbox, on the subject mapped from the event type. The row
+// commits with the mutation when the caller is inside a transaction (the
+// seam resolves the caller's executor) and the drain hands it to the bus.
+// No-ops when no recorder is configured or the event has no subject; an
+// error is the caller's to propagate, so a notification that cannot be
+// recorded is not silently dropped.
+func (s *ExposureService) recordStatus(ctx context.Context, eventType EventType, status ExposureStatus) error {
+	if s.events == nil {
+		return nil
 	}
 	subject := SubjectForEvent(eventType)
 	if subject == "" {
-		return
+		return nil
 	}
 	indexCode := ""
 	if len(status.Indexes) > 0 {
@@ -385,12 +394,15 @@ func (s *ExposureService) publishStatus(ctx context.Context, eventType EventType
 	}
 	payload, err := json.Marshal(notif)
 	if err != nil {
-		s.logger.Warn("exposure-service: marshal notification", "err", err)
-		return
+		return fmt.Errorf("marshal notification: %w", err)
 	}
-	if err := s.bus.Publish(ctx, subject, payload); err != nil {
-		s.logger.Warn("exposure-service: publish notification", "subject", subject, "err", err)
-	}
+	return s.events.Write(ctx, outbox.Event{
+		Type:       subject,
+		EntityType: "quote",
+		EntityID:   status.QuoteID,
+		Data:       payload,
+		At:         time.Now().UTC(),
+	})
 }
 
 // writeAudit fires the audit log entry. The caller's context is NOT passed
