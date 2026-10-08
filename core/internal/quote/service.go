@@ -329,18 +329,21 @@ func (s *Service) Transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
 	}
-	return s.transition(ctx, id, to, &pre)
+	return s.transition(ctx, id, to, &pre, nil)
 }
 
 // UpdateState is the transition for in process callers (the portal's accept
 // and decline, the integration seam): the same lifecycle rules, the same
 // event, no client revision to precondition on.
 func (s *Service) UpdateState(ctx context.Context, id uuid.UUID, to QuoteState) error {
-	_, err := s.transition(ctx, id, to, nil)
+	_, err := s.transition(ctx, id, to, nil, nil)
 	return err
 }
 
-func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, pre *Precondition) (*Quote, error) {
+// transition runs the lifecycle change in one transaction. check, when set,
+// runs on the locked quote after the lifecycle rule and BEFORE the status
+// moves, so a refusal it returns leaves the quote exactly as it was.
+func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, pre *Precondition, check func(cur *Quote) error) (*Quote, error) {
 	var out *Quote
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockQuote(ctx, id); err != nil {
@@ -357,6 +360,11 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 		}
 		if err := validateStateTransition(cur.Status, to); err != nil {
 			return err
+		}
+		if check != nil {
+			if err := check(cur); err != nil {
+				return err
+			}
 		}
 		from := cur.Status
 		now := httpx.TimestampOf(s.now().UTC())
@@ -397,25 +405,58 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 	return out, nil
 }
 
-// Convert accepts the quote on the client's revision and returns the order
-// payload for the client to POST to /orders.
-func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (*OrderPayload, error) {
-	q, err := s.Transition(ctx, id, QuoteStateAccepted, pre)
-	if err != nil {
-		return nil, err
-	}
+// OrderPayloadFor builds the order creation payload from a quote's lines, or
+// refuses with the 409 invalid_state_transition that names every line an order
+// cannot carry. Orders hold whole cents per sale unit and no conversion pair
+// until cycle 2 (R2-1), so a line whose pair is not 1 to 1, or whose price_uom
+// differs from its uom, cannot be handed over without rounding the money
+// away: that line is a line_not_convertible blocker naming lines[i].
+func OrderPayloadFor(q *Quote) (*OrderPayload, error) {
 	payload := &OrderPayload{CustomerID: q.CustomerID, QuoteID: q.ID, Lines: make([]OrderPayloadLine, 0, len(q.Lines))}
-	for _, l := range q.Lines {
-		// The price per sale unit: the unit price converted through the
-		// line's pair, in cents.
+	var blockers []httpx.FieldError
+	for i, l := range q.Lines {
+		if l.UOMQty != one || l.PriceUOMQty != one || l.PriceUOM != string(l.UOM) {
+			blockers = append(blockers, httpx.Blocker("line_not_convertible", fmt.Sprintf(
+				"lines[%d] is priced per %s but sold in %s: orders take a price per sale unit until the order contract carries the conversion",
+				i, l.PriceUOM, l.UOM)))
+			continue
+		}
+		// The price per sale unit in whole cents, rounded once.
 		each, err := httpx.Extend(10000, l.UOMQty, l.PriceUOMQty, l.UnitPrice)
 		if err != nil {
-			return nil, fmt.Errorf("price quote line %s for the order: %w", l.ID, err)
+			blockers = append(blockers, httpx.Blocker("line_not_convertible", fmt.Sprintf(
+				"lines[%d] has a price the order cannot hold", i)))
+			continue
 		}
 		payload.Lines = append(payload.Lines, OrderPayloadLine{
 			ProductID: l.ProductID, Quantity: l.Quantity, UOM: l.UOM, PriceEachCents: each,
 		})
 	}
+	if len(blockers) > 0 {
+		return nil, httpx.InvalidStateTransition("the quote has lines an order cannot carry yet", blockers...)
+	}
+	return payload, nil
+}
+
+// Convert accepts the quote on the client's revision and returns the order
+// payload for the client to POST to /orders. The payload is built inside the
+// transition's transaction, before the status changes, so a quote with a line
+// an order cannot carry is refused and stays as it was. The payload carries
+// the accepted quote's revision.
+func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (*OrderPayload, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var payload *OrderPayload
+	q, err := s.transition(ctx, id, QuoteStateAccepted, &pre, func(cur *Quote) error {
+		p, err := OrderPayloadFor(cur)
+		payload = p
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	payload.Revision = q.Revision
 	return payload, nil
 }
 

@@ -326,6 +326,7 @@ func (h *Handler) HandleConvertToOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	httpx.WriteRevisionETag(w, payload.Revision)
 	writeJSON(w, http.StatusOK, payload)
 }
 

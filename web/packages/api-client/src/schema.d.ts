@@ -4301,7 +4301,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the quote and return the order creation payload
-         * @description A transition to accepted on the client's revision, then the body the client maps onto POST /api/v1/orders itself; no order is created here. The orders route is not converted yet and reads a numeric quantity and price_each in cents, so the client maps quantity and price_each_cents onto it.
+         * @description A transition to accepted on the client's revision, then the body the client maps onto POST /api/v1/orders itself; no order is created here. The orders route is not converted yet and reads a numeric quantity and price_each in cents, so the client maps quantity and price_each_cents onto it. Until the orders contract carries the conversion pair (cycle 2), a quote with a line whose pair is not 1 to 1, or whose price_uom differs from uom, is refused with 409 invalid_state_transition and a line_not_convertible blocker naming lines[i]; the quote is left as it was.
          */
         post: operations["quoteConvertToOrderPayload"];
         delete?: never;
@@ -8340,6 +8340,11 @@ export interface components {
             customer_id: string;
             /** Format: uuid */
             quote_id: string;
+            /**
+             * Format: int64
+             * @description The accepted quote's revision.
+             */
+            revision: number;
             lines: components["schemas"]["QuoteOrderPayloadLine"][];
         };
         QuoteOrderPayloadLine: {
@@ -17059,9 +17064,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The order creation payload. */
+            /** @description The order creation payload, with the accepted quote's revision as the ETag. */
             200: {
                 headers: {
+                    /** @description The accepted quote's revision in quotes, for example "3". */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {

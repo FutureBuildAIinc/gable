@@ -587,7 +587,8 @@
             "uom": "PCS"
           }
         ],
-        "quote_id": "<id-4>"
+        "quote_id": "<id-4>",
+        "revision": 4
       }
     }
   },

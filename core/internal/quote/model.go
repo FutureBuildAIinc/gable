@@ -192,6 +192,7 @@ type QuoteAnalyticsTrend struct {
 type OrderPayload struct {
 	CustomerID uuid.UUID          `json:"customer_id"`
 	QuoteID    uuid.UUID          `json:"quote_id"`
+	Revision   int64              `json:"revision"` // the accepted quote's revision, also the response ETag
 	Lines      []OrderPayloadLine `json:"lines"`
 }
 

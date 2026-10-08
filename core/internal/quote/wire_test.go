@@ -831,6 +831,95 @@ func TestWire_Convert(t *testing.T) {
 	}
 }
 
+// RULE (ruling on the review of R1-15): orders carry whole cents per sale unit
+// and no conversion pair until cycle 2, so convert refuses a quote with a line
+// whose pair is not 1 to 1 or whose price_uom differs from uom. The refusal is
+// a 409 invalid_state_transition with a line_not_convertible blocker naming
+// lines[i], and it leaves the quote exactly as it was.
+func TestWire_ConvertRefusesLinesOrdersCannotCarry(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	// 1500 EA at 3.75 per M: the unit price per piece is under a cent.
+	perM := f.line("1500")
+	perM["uom"] = "EA"
+	perM["price_uom"] = "M"
+	perM["uom_qty"] = "1000"
+	perM["price_uom_qty"] = "1"
+	perM["unit_price_ten_thousandths"] = 37500
+	// 1 PCS at 500.00 per MBF, 187.5 PCS to 1 MBF.
+	mbf := f.line("1")
+	mbf["price_uom"] = "MBF"
+	mbf["uom_qty"] = "187.5"
+	mbf["price_uom_qty"] = "1"
+	mbf["unit_price_ten_thousandths"] = 5000000
+
+	for name, bad := range map[string]map[string]any{"per M": perM, "per MBF": mbf} {
+		t.Run(name, func(t *testing.T) {
+			r := f.create(f.line("10"), bad)
+			id := str(t, r.body, "id")
+			c := f.do("POST", "/api/v1/quotes/"+id+"/convert", nil, "If-Match", `"1"`)
+			if c.status != 409 {
+				t.Fatalf("convert = %d, want 409: %s", c.status, c.raw)
+			}
+			code, _, details := errorOf(t, c)
+			if code != "invalid_state_transition" {
+				t.Errorf("code = %q, want invalid_state_transition", code)
+			}
+			found := false
+			for _, d := range details {
+				if d["code"] == "line_not_convertible" && strings.Contains(fmt.Sprint(d["message"]), "lines[1]") {
+					found = true
+				}
+				if strings.Contains(fmt.Sprint(d["message"]), "lines[0]") {
+					t.Errorf("the convertible line was named: %v", d)
+				}
+			}
+			if !found {
+				t.Errorf("details = %v, want a line_not_convertible blocker naming lines[1]", details)
+			}
+			g := f.do("GET", "/api/v1/quotes/"+id, nil)
+			if str(t, g.body, "status") != "draft" || num(t, g.body, "revision") != 1 || g.body["accepted_at"] != nil {
+				t.Errorf("a refused convert changed the quote: %s", g.raw)
+			}
+			if got := eventsFor(t, f.db, id); fmt.Sprint(got) != "[quote.created]" {
+				t.Errorf("events = %v, want only quote.created", got)
+			}
+			// The same quote still converts once the line is edited to a
+			// convertible one: nothing was stranded.
+			fixed := f.do("PUT", "/api/v1/quotes/"+id, f.createBody(f.line("10"), f.line("2")), "If-Match", `"1"`)
+			if fixed.status != 200 {
+				t.Fatalf("edit after refusal = %d: %s", fixed.status, fixed.raw)
+			}
+		})
+	}
+}
+
+// A line with a 1 to 1 pair in its own unit converts with exact cents: the
+// price per sale unit rounded half away from zero, once.
+func TestWire_ConvertExactCentsOnOneToOneLines(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	odd := f.line("3")
+	odd["unit_price_ten_thousandths"] = 13725 // 1.3725 rounds to 137 cents
+	half := f.line("1")
+	half["unit_price_ten_thousandths"] = 12350 // 1.2350 rounds half up to 124
+	id := str(t, f.create(odd, half).body, "id")
+
+	c := f.do("POST", "/api/v1/quotes/"+id+"/convert", nil, "If-Match", `"1"`)
+	if c.status != 200 {
+		t.Fatalf("convert = %d: %s", c.status, c.raw)
+	}
+	lines := c.body["lines"].([]any)
+	if got := num(t, lines[0].(map[string]any), "price_each_cents"); got != 137 {
+		t.Errorf("first line price_each_cents = %d, want 137", got)
+	}
+	if got := num(t, lines[1].(map[string]any), "price_each_cents"); got != 124 {
+		t.Errorf("second line price_each_cents = %d, want 124", got)
+	}
+}
+
 // Idempotency rides the existing middleware: the same create sent twice with
 // one Idempotency-Key returns the first response and makes one quote and one
 // event.

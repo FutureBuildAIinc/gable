@@ -6,8 +6,10 @@ package integrations
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -314,23 +316,34 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 
 	// 2. Convert to order. PriceEach is int64 cents: the quote line's price per
 	// sale unit, rounded to cents (half away from zero) the way an order line
-	// has always held it.
-	var orderLines []order.OrderLineRequest
-	for _, ql := range q.Lines {
-		priceEach, err := httpx.Extend(10000, ql.UOMQty, ql.PriceUOMQty, ql.UnitPrice)
-		if err != nil {
-			slog.Error("failed to price quote line for order", "error", err, "quote_id", idStr, "line_id", ql.ID)
-			writeError(w, http.StatusInternalServerError, "failed to create order")
+	// has always held it. A quote with a line an order cannot carry yet (a
+	// conversion pair that is not 1 to 1, or a price per another unit) is
+	// refused before anything is created: 409 with the lines named.
+	payload, err := quote.OrderPayloadFor(q)
+	if err != nil {
+		var herr *httpx.Error
+		if errors.As(err, &herr) {
+			msgs := make([]string, 0, len(herr.Details))
+			for _, d := range herr.Details {
+				msgs = append(msgs, d.Message)
+			}
+			writeError(w, http.StatusConflict, "quote cannot be converted: "+strings.Join(msgs, "; "))
 			return
 		}
+		slog.Error("failed to price quote for order", "error", err, "quote_id", idStr)
+		writeError(w, http.StatusInternalServerError, "failed to create order")
+		return
+	}
+	var orderLines []order.OrderLineRequest
+	for _, pl := range payload.Lines {
 		var productID uuid.UUID
-		if ql.ProductID != nil {
-			productID = *ql.ProductID
+		if pl.ProductID != nil {
+			productID = *pl.ProductID
 		}
 		orderLines = append(orderLines, order.OrderLineRequest{
 			ProductID: productID,
-			Quantity:  float64(ql.Quantity) / 10000,
-			PriceEach: int64(priceEach),
+			Quantity:  float64(pl.Quantity) / 10000,
+			PriceEach: int64(pl.PriceEachCents),
 		})
 	}
 

@@ -534,8 +534,8 @@ func TestConvert_ReturnsTheOrderPayload(t *testing.T) {
 	svc, repo, _ := newTestService()
 	pid := uuid.New()
 	line := QuoteLine{
-		ID: uuid.New(), ProductID: &pid, Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "MBF",
-		UOMQty: 1875000, PriceUOMQty: one, UnitPrice: 5000000,
+		ID: uuid.New(), ProductID: &pid, Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "PCS",
+		UOMQty: one, PriceUOMQty: one, UnitPrice: 26667,
 	}
 	q := repo.seed(QuoteStateSent, line)
 	rev := int64(1)
@@ -543,9 +543,34 @@ func TestConvert_ReturnsTheOrderPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 500.00 per MBF with 187.5 PCS per MBF is 2.6667 per piece: 267 cents.
+	// 2.6667 per piece is 267 cents.
 	if payload.QuoteID != q.ID || len(payload.Lines) != 1 || payload.Lines[0].PriceEachCents != 267 || payload.Lines[0].Quantity != 100000 {
 		t.Errorf("payload = %+v", payload)
+	}
+	if payload.Revision != 2 {
+		t.Errorf("payload revision = %d, want the accepted quote's 2", payload.Revision)
+	}
+}
+
+// Orders carry no conversion pair yet: a line priced per another unit is
+// refused before the status moves.
+func TestConvert_RefusesALineOrdersCannotCarry(t *testing.T) {
+	svc, repo, _ := newTestService()
+	pid := uuid.New()
+	line := QuoteLine{
+		ID: uuid.New(), ProductID: &pid, Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "MBF",
+		UOMQty: 1875000, PriceUOMQty: one, UnitPrice: 5000000,
+	}
+	q := repo.seed(QuoteStateSent, line)
+	rev := int64(1)
+	_, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev})
+	var herr *httpx.Error
+	if !errors.As(err, &herr) || herr.Code != httpx.CodeInvalidStateTransition || len(herr.Details) != 1 || herr.Details[0].Code != "line_not_convertible" {
+		t.Fatalf("err = %v, want invalid_state_transition with a line_not_convertible blocker", err)
+	}
+	got, gerr := svc.GetQuote(context.Background(), q.ID)
+	if gerr != nil || got.Status != QuoteStateSent {
+		t.Errorf("status after a refused convert = %v (%v), want sent", got.Status, gerr)
 	}
 }
 
