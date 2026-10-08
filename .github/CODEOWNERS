@@ -29,7 +29,7 @@
 # Components (mirrors LICENSE-MAP.md)
 # ---------------------------------------------------------------------------
 /core/                       @FutureBuildAIinc/backend
-/web/apps/desk/               @FutureBuildAIinc/frontend
+/web/                       @FutureBuildAIinc/frontend
 /docs/                      @FutureBuildAIinc/docs
 
 # The connector seam is the third-party integration boundary and is licensed
@@ -47,7 +47,8 @@
 /docker-compose.yml         @FutureBuildAIinc/infra
 /Makefile                   @FutureBuildAIinc/maintainers
 /core/Dockerfile             @FutureBuildAIinc/infra
-/web/apps/desk/Dockerfile     @FutureBuildAIinc/infra
+/web/Dockerfile               @FutureBuildAIinc/infra
+/web/nginx*.conf            @FutureBuildAIinc/infra
 
 # ---------------------------------------------------------------------------
 # Licensing and legal — maintainer approval always required.

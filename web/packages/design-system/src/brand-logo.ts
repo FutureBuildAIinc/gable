@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
+// The Gable brand lockup (mark / text / full), MOVED from
+// web/apps/desk/src/components/ui/brand-logo.ts when web/ became one
+// workspace: the front door's header needs the same lockup as the desk's.
+
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import { cn } from '../../lib/utils.ts';
+import { cn } from './cn.ts';
 
 @customElement('gable-brand-logo')
 export class GableBrandLogo extends LitElement {

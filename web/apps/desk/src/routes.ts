@@ -92,16 +92,15 @@ export const routes: RouteConfig[] = [
   { path: '/home', load: () => import('./pages/Home.ts'), layout: 'erp' },
   // Direct dashboard deep-link (also lives in Home's Dashboard tab).
   { path: '/dashboard', load: () => import('./pages/Dashboard.ts'), layout: 'erp' },
-  // Surface picker — mounted at `/` for:
+  // `/` is the front door in every deployed layout (nginx serves it at exactly `/`),
+  // so the desk's own home is `/home`. Surface picker — mounted at `/` for:
   //   - local dev (`vite dev`)                          → import.meta.env.DEV
   //   - the public demo build (the public demo build)        → VITE_DEMO_MODE=true
-  // Staging and master keep `/` on the ERP dashboard.
+  // Deployed builds mount nothing at `/`.
   ...(import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true'
     ? [
         { path: '/local-test', load: () => import('./pages/LocalTestHub.ts'), layout: 'none' as const },
         { path: '/', load: () => import('./pages/LocalTestHub.ts'), layout: 'none' as const },
       ]
-    : [
-        { path: '/', load: () => import('./pages/Home.ts'), layout: 'erp' as const },
-      ]),
+    : []),
 ];

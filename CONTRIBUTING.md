@@ -41,10 +41,10 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database:
 make reset-db
 ```
 
-For stack details, code conventions, and gotchas, see [`CLAUDE.md`](./CLAUDE.md)
+For stack details, code conventions, and gotchas, see [`AGENTS.md`](./AGENTS.md)
 and the [`docs/`](./docs/) directory (architecture, design system, database
 ERD). When conventions and this file disagree about the stack, trust
-`CLAUDE.md`.
+`AGENTS.md`.
 
 ## Branch model
 
@@ -144,7 +144,7 @@ make test
 
 Database changes: new columns should follow the repo conventions — UUID primary
 keys, `DECIMAL(19,4)` for physical quantities, money-as-cents in application
-code, and every quantity paired with a UOM ID. See `CLAUDE.md` for details.
+code, and every quantity paired with a UOM ID. See `AGENTS.md` for details.
 
 Licensing: every source file carries an SPDX header, and `make license-check`
 enforces that the whole tree is accounted for. If you add a new file, copy the

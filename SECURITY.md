@@ -103,6 +103,9 @@ every visitor full administrative access.
    to be set.
 3. Set a strong `PORTAL_JWT_SECRET` in production; the dev default is used only
    under `AUTH_MODE=dev`.
+4. Rate limits trust `X-Forwarded-For` only from proxies you list in
+   `TRUSTED_PROXIES` (empty by default: the TCP peer is the client). Behind a
+   load balancer, set it, or all callers share the balancer's budget.
 
 If you find any reachable environment running `AUTH_MODE=dev`, treat it as a
 disclosable vulnerability and report it through the channels above.

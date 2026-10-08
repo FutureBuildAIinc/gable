@@ -2,34 +2,9 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 /**
- * Icon helper — renders lucide icons as SVG strings for use in Lit templates.
- * Usage:
- *   import { icon } from '../../lib/icons';
- *   import { Package } from 'lucide';
- *   html`${icon(Package)}`
+ * The icon helper MOVED to @gable/design-system when web/ became one
+ * workspace (the front door's tiles render the same lucide icons). This
+ * module remains as the desk's import seam so the desk's imports keep
+ * working; new code should import @gable/design-system directly.
  */
-import { html } from 'lit';
-import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { createElement } from 'lucide';
-
-/**
- * Render a lucide icon into a Lit template.
- * @param iconData  The icon import from 'lucide' (e.g. `Package`, `Truck`)
- * @param size      Pixel size (default 20)
- * @param cls       Extra CSS classes
- *
- * Returns a TemplateResult so the value is safe to pass through property
- * bindings (e.g. `.iconHtml=${icon(...)}`) — `unsafeHTML()` alone may only
- * be used in child bindings.
- */
-export function icon(
-  iconData: Parameters<typeof createElement>[0],
-  size: number = 20,
-  cls: string = ''
-) {
-  const el = createElement(iconData);
-  el.setAttribute('width', String(size));
-  el.setAttribute('height', String(size));
-  if (cls) el.setAttribute('class', cls);
-  return html`${unsafeHTML(el.outerHTML)}`;
-}
+export { icon } from '@gable/design-system';

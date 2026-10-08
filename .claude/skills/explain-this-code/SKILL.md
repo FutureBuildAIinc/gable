@@ -180,7 +180,7 @@ Conversion recipe and phases: [`docs/modularization-blueprint.md`](../../../docs
 - **Default Postgres port is 5434**, matching `docker-compose.yml` — not 5432.
 - **Money conventions are not uniform.** ERP orders/invoices and the `account` module use
   `int64` cents; portal, quotes, and DailyTill use `float64` dollars — on some of the same
-  columns. `CLAUDE.md` § "Money convention is not uniform across modules" has the table. Read
+  columns. `AGENTS.md` § "Money convention is not uniform across modules" has the table. Read
   it before touching anything financial.
 - **AR balance is derived, not read.** Compute from open invoices
   (`invoice.OpenInvoiceStatuses`), not from `customers.balance_due` — that column is a
@@ -216,7 +216,7 @@ still have none, and adding one is a real, welcome contribution.
 
 ## Deeper reading, in the order that actually helps
 
-1. [`CLAUDE.md`](../../../CLAUDE.md) — conventions, gotchas, and the current backlog. The
+1. [`AGENTS.md`](../../../AGENTS.md) — conventions, gotchas, and the current backlog. The
    highest-value file in the repo.
 2. [`docs/architecture.md`](../../../docs/architecture.md) — module boundaries as built,
    API strategy, hosting. Forward-looking sections are explicitly labelled.

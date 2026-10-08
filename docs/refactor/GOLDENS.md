@@ -309,6 +309,9 @@ naming what changed and why.
 - The rate limiter is per client IP (120 per minute). The script is sequential
   and short, but the harness rotates `X-Forwarded-For` every 30 requests so a
   429 can never leak into a golden as a timing artefact on slow machines. The
+  server only believes that header from a trusted proxy, so the harness starts
+  it with `TRUSTED_PROXIES` set to loopback, the address the harness client
+  connects from; without that the rotation would be ignored. The
   portal login's own strict limit is not reached (two logins).
 - The harness sends no `Idempotency-Key` header except in the `idempotency`
   group, which pins the replay itself, so the idempotency cache never

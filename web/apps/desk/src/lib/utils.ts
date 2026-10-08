@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { type ClassValue, clsx } from "clsx"
-import { twMerge } from "tailwind-merge"
+// cn MOVED to @gable/design-system when web/ became one workspace (the
+// shared components and the front door use the same copy); it is re-exported
+// here so the desk's `import { cn } from './utils'` keeps working.
 
-export function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs))
-}
+export { cn } from '@gable/design-system';
 
 // Money values from the ERP API are int64 cents (see core/internal/order/model.go
 // and the "Money: stored in cents (integer) in application code" convention in
