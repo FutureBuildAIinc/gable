@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
@@ -188,5 +189,83 @@ func TestCalculateScaledMatchesCompatibilityEntry(t *testing.T) {
 				t.Fatalf("the two entry points disagree: %+v vs %+v", compat, scaled)
 			}
 		})
+	}
+}
+
+// TestCentsOfRoundsHalfAwayInIntegers: a price ending in 5 at the third
+// decimal has no exact float form (20.025 is 2002.4999... cents), so the
+// conversion for callers that hold cents must not go through a float.
+func TestCentsOfRoundsHalfAwayInIntegers(t *testing.T) {
+	for _, c := range []struct {
+		price httpx.Price
+		cents int64
+	}{
+		{200250, 2003}, {80082, 801}, {80049, 800}, {80050, 801}, {0, 0}, {49, 0}, {50, 1}, {-50, -1}, {-49, 0}, {-200250, -2003},
+	} {
+		if got := CentsOf(c.price); got != c.cents {
+			t.Errorf("CentsOf(%d) = %d, want %d", c.price, got, c.cents)
+		}
+	}
+}
+
+// TestContractReturnedAsStoredSubCent: a contract price is a fixed price and
+// comes back exactly as stored, never rounded (ADR 0006 R4.2).
+func TestContractReturnedAsStoredSubCent(t *testing.T) {
+	cust := &customer.Customer{ID: uuid.New()}
+	prod := uuid.New()
+	repo := &MockRepository{contracts: map[string]CustomerContract{
+		cust.ID.String() + ":" + prod.String(): {ID: uuid.New(), CustomerID: cust.ID, ProductID: prod, ContractPrice: priceOf(1.2345)},
+	}}
+	got, err := NewService(repo).CalculateScaled(context.Background(), cust, prod, 10, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Price != priceOf(1.2345) || got.Source != SourceContract {
+		t.Fatalf("contract = %v from %s, want 1.2345 as stored from the contract", got.Price, got.Source)
+	}
+}
+
+// TestCategoryFixedReturnedAsStored: a category FIXED rule's value is a fixed
+// price, exact; a margin floor compares exactly (30 percent off 1.3725 with a
+// 20 percent floor is exactly 1.0980).
+func TestCategoryFixedReturnedAsStored(t *testing.T) {
+	svc := NewCategoryPricingService(nil)
+	fixed := &CategoryPricingRule{RuleType: CategoryRuleFixed, ValuePrice: pricePtrOf(4.1235)}
+	if got := priceOfRat(svc.ApplyRule(fixed, rat(subCentBase), rat(0))); got != priceOf(4.1235) {
+		t.Fatalf("a FIXED 4.1235 rule answered %v", got)
+	}
+	repo := &MockRepository{contracts: map[string]CustomerContract{}, rules: []PricingRule{{
+		ID: uuid.New(), Name: "Thirty off", RuleType: RuleTypePromotional,
+		DiscountPct: pctQtyPtr(30), MarginFloorPct: pctQtyPtr(20), IsActive: true,
+	}}}
+	got, err := NewService(repo).CalculateScaled(context.Background(), &customer.Customer{ID: uuid.New()}, uuid.New(), subCentBase, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Price != priceOf(1.0980) {
+		t.Fatalf("30 percent off with a 20 percent floor on 1.3725 = %v, want exactly 1.0980", got.Price)
+	}
+}
+
+// TestNonNumericQuantityIsAnErrorNotZero: a NaN quantity used to price as
+// quantity 0; an infinite or out of bound one is refused the same way.
+func TestNonNumericQuantityIsAnErrorNotZero(t *testing.T) {
+	svc := NewService(&MockRepository{contracts: map[string]CustomerContract{}})
+	cust := &customer.Customer{ID: uuid.New()}
+	for _, q := range []float64{math.NaN(), math.Inf(1), 1e9} {
+		if _, err := svc.CalculateScaled(context.Background(), cust, uuid.New(), 10, q, nil); err == nil {
+			t.Errorf("quantity %v priced without an error", q)
+		}
+	}
+}
+
+// TestPriceBeyondTheBoundIsRefused: a derived price past what a NUMERIC(12,4)
+// column holds (ADR 0006 R2.4) is an error, never a wrapped or oversized value.
+func TestPriceBeyondTheBoundIsRefused(t *testing.T) {
+	repo := &MockRepository{contracts: map[string]CustomerContract{}, rules: []PricingRule{{
+		ID: uuid.New(), Name: "Huge", RuleType: RuleTypePromotional, MarkupPct: pctQtyPtr(99999999), IsActive: true,
+	}}}
+	if _, err := NewService(repo).CalculateScaled(context.Background(), &customer.Customer{ID: uuid.New()}, uuid.New(), 99999999.9999, 1, nil); err == nil {
+		t.Fatal("a price past 99999999.9999 was answered")
 	}
 }

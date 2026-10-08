@@ -101,3 +101,12 @@ func applyMarkdown(base *big.Rat, pct *big.Rat) *big.Rat {
 	f.Sub(big.NewRat(1, 1), f)
 	return new(big.Rat).Mul(base, f)
 }
+
+// CentsOf rounds a scale 4 unit price to whole cents, half away from zero,
+// in integers. It is the one conversion for a caller that must hand a cent
+// value to a module that still holds cents (the counter, the integration
+// seam): the same rounding the line extension applies, never a float
+// multiply that would turn 20.025 into 2002.4999.
+func CentsOf(p httpx.Price) int64 {
+	return roundHalfAway(big.NewInt(int64(p)), big.NewInt(100)).Int64()
+}

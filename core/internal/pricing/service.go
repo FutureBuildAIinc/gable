@@ -85,7 +85,11 @@ func (s *Service) resolve(ctx context.Context, cust *customer.Customer, productI
 	if err != nil {
 		return ScaledPrice{}, nil, err
 	}
-	qty, err := quantityOfRat(mustRat(quantity))
+	qrat, err := ratOfFloat(quantity)
+	if err != nil {
+		return ScaledPrice{}, nil, fmt.Errorf("the quantity is not a number: %w", err)
+	}
+	qty, err := quantityOfRat(qrat)
 	if err != nil {
 		return ScaledPrice{}, nil, err
 	}
@@ -122,7 +126,7 @@ func (s *Service) resolve(ctx context.Context, cust *customer.Customer, productI
 		case RuleTypeQuantityBreak:
 			source = SourceQuantityBreak
 		}
-		return ScaledPrice{Price: priceOfRat(price), Source: source, Details: details}, base, nil
+		return scaledResult(price, source, details, base)
 	}
 
 	// 5a. Check Category-Based Pricing (if enabled)
@@ -144,11 +148,7 @@ func (s *Service) resolve(ctx context.Context, cust *customer.Customer, productI
 				catSource = SourceCategoryAccount
 			}
 
-			return ScaledPrice{
-				Price:   priceOfRat(final),
-				Source:  catSource,
-				Details: fmt.Sprintf("%s (%s)", resolved.Rule.CategoryName, resolved.MatchType),
-			}, base, nil
+			return scaledResult(final, catSource, fmt.Sprintf("%s (%s)", resolved.Rule.CategoryName, resolved.MatchType), base)
 		}
 	}
 
@@ -182,29 +182,22 @@ func (s *Service) resolve(ctx context.Context, cust *customer.Customer, productI
 	}
 
 	if source == SourceTier {
-		return ScaledPrice{
-			Price:   priceOfRat(new(big.Rat).Mul(base, multiplier)),
-			Source:  SourceTier,
-			Details: details,
-		}, base, nil
+		return scaledResult(new(big.Rat).Mul(base, multiplier), SourceTier, details, base)
 	}
 
 	// 6. Retail
-	return ScaledPrice{
-		Price:   priceOfRat(base),
-		Source:  SourceRetail,
-		Details: "Base Retail Price",
-	}, base, nil
+	return scaledResult(base, SourceRetail, "Base Retail Price", base)
 }
 
-// mustRat is ratOfFloat for the engine's own quantity input, where a value
-// that is not a number is a caller bug this package reports as an error.
-func mustRat(f float64) *big.Rat {
-	r, err := ratOfFloat(f)
-	if err != nil {
-		return big.NewRat(0, 1)
+// scaledResult rounds a derived price once to scale 4 and refuses one past
+// what a NUMERIC(12,4) column holds (ADR 0006 R2.4), where a bare conversion
+// would wrap through int64.
+func scaledResult(price *big.Rat, source PricingSource, details string, base *big.Rat) (ScaledPrice, *big.Rat, error) {
+	scaled := roundHalfAway(new(big.Int).Mul(price.Num(), wireScaleFactor), price.Denom())
+	if !scaled.IsInt64() || scaled.Int64() > int64(httpx.QuantityMax) || scaled.Int64() < -int64(httpx.QuantityMax) {
+		return ScaledPrice{}, nil, fmt.Errorf("a price beyond 99999999.9999 cannot be answered")
 	}
-	return r
+	return ScaledPrice{Price: httpx.Price(scaled.Int64()), Source: source, Details: details}, base, nil
 }
 
 // discountPct is the compatibility answer's display percentage: the exact
