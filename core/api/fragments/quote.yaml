@@ -227,230 +227,242 @@ paths:
   /api/v1/quotes/exposure:
     get:
       operationId: exposureList
-      tags: [quote]
-      summary: List at-risk quotes for the current user
+      tags:
+      - quote
+      summary: List at-risk quotes
+      description: 403 when owner=me and the caller has no salesperson id and is not owner or admin, when
+        owner=all and the caller is not owner or admin, or when a sales role names another salesperson.
+        An unparseable owner, customer_id or min_dollars answers 400.
       parameters:
-        - name: owner
-          in: query
-          required: false
-          schema:
-            type: string
-            default: me
-        - name: summary
-          in: query
-          required: false
-          schema:
-            type: boolean
-            default: false
-        - $ref: "#/components/parameters/XBranchId"
+      - name: owner
+        in: query
+        description: me (the default) scopes to the caller's book, all needs the owner or admin role,
+          or a salesperson UUID (a sales role may only name itself).
+        schema:
+          type: string
+      - name: state
+        in: query
+        description: Comma separated exposure states.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: Page size, 50 when absent or non positive.
+        schema:
+          type: integer
+      - name: offset
+        in: query
+        schema:
+          type: integer
+      - name: index_code
+        in: query
+        schema:
+          type: string
+      - name: customer_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: min_dollars
+        in: query
+        description: A non negative dollar floor.
+        schema:
+          type: number
+      - name: summary
+        in: query
+        description: Only the literal true selects the summary body.
+        schema:
+          type: boolean
+      - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
-          description: At-risk quotes or portfolio summary.
+        '200':
+          description: The rows, or the summary when summary=true.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/ExposureRow"
-                  total:
-                    type: integer
-                  count:
-                    type: integer
-                  total_dollars:
-                    type: number
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                oneOf:
+                - $ref: '#/components/schemas/ExposureList'
+                - $ref: '#/components/schemas/ExposureSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure:
     get:
       operationId: exposureGet
-      tags: [quote]
+      tags:
+      - quote
       summary: Get exposure status for one quote
+      description: A missing quote answers 500, not 404.
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
-          description: The exposure status.
+        '200':
+          description: The exposure status with the quote's event ledger.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExposureStatus"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/QuoteExposureDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/request-ack:
     post:
       operationId: exposureRequestAck
-      tags: [quote]
+      tags:
+      - quote
       summary: Request customer acknowledgment of exposure
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "200":
+        '200':
           description: Acknowledgment requested.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExposureRequestAckResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: Quote is not in a state that requires acknowledgment.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ExposureRequestAckResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/acknowledge:
     post:
       operationId: exposureAcknowledge
-      tags: [quote]
-      summary: Acknowledge exposure on behalf of customer
+      tags:
+      - quote
+      summary: Acknowledge exposure on behalf of the customer
+      description: Notes under ten characters or an unknown method answer 400; a quote whose exposure
+        is already cleared answers 409.
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AcknowledgmentRequest"
+              $ref: '#/components/schemas/AcknowledgmentRequest'
       responses:
-        "200":
+        '200':
           description: Acknowledgment recorded.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExposureStatus"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: Quote is not in a state that requires acknowledgment.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ExposureAcknowledgeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/override:
     post:
       operationId: exposureOverride
-      tags: [quote]
-      summary: Override exposure (owner only)
+      tags:
+      - quote
+      summary: Override exposure (owner or admin only)
+      description: A caller without the owner or admin role answers 403. Notes under ten characters answer
+        400; a quote whose exposure is already cleared answers 409.
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OverrideRequest"
+              $ref: '#/components/schemas/OverrideRequest'
       responses:
-        "200":
+        '200':
           description: Override recorded.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExposureStatus"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: Quote is not in a state that allows override.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ExposureOverrideResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/escalate-now:
     post:
       operationId: exposureEscalateNow
-      tags: [quote]
-      summary: Trigger immediate escalation check
+      tags:
+      - quote
+      summary: Preview re-quoting at market prices
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "200":
-          description: Escalation triggered.
+        '200':
+          description: 'The dry run: suggested per line prices. Nothing is persisted.'
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExposureStatus"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/EscalateNowResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/file:
     get:
       operationId: quoteDownloadOriginalFile
@@ -770,45 +782,26 @@ components:
           type: number
         accepted_value:
           type: number
-    ExposureStatus:
-      type: object
-      required: [quote_id, exposure_state, exposure_dollars, indexes]
-      properties:
-        quote_id:
-          type: string
-          format: uuid
-        quote_short_id:
-          type: string
-          nullable: true
-        exposure_state:
-          type: string
-          description: One of OK, FLAGGED, ESCALATED, ACK_REQUIRED, ACKNOWLEDGED, BLOCKED, OVERRIDDEN.
-        exposure_dollars:
-          type: number
-        indexes:
-          type: array
-          items:
-            type: string
-        salesperson_id:
-          type: string
-          format: uuid
-          nullable: true
-        salesperson_name:
-          type: string
-          nullable: true
-        required_action:
-          type: string
-        last_checked_at:
-          type: string
-          format: date-time
-          nullable: true
-        events:
-          type: array
-          items:
-            $ref: "#/components/schemas/QuoteExposureEvent"
+    ExposureState:
+      type: string
+      enum:
+      - OK
+      - FLAGGED
+      - ESCALATED
+      - ACK_REQUIRED
+      - ACKNOWLEDGED
+      - BLOCKED
+      - OVERRIDDEN
     QuoteExposureEvent:
       type: object
-      required: [id, quote_id, event_type, idempotency_key, created_at]
+      description: pricing.QuoteExposureEvent. Everything but the five required fields is omitted when
+        empty.
+      required:
+      - id
+      - quote_id
+      - event_type
+      - idempotency_key
+      - created_at
       properties:
         id:
           type: string
@@ -819,48 +812,44 @@ components:
         quote_line_id:
           type: string
           format: uuid
-          nullable: true
         market_index_id:
           type: string
           format: uuid
-          nullable: true
         market_index_history_id:
           type: string
           format: uuid
-          nullable: true
         event_type:
           type: string
-          enum: [DETECTED, FLAGGED, ESCALATED, ACK_REQUIRED, ACK_REQUESTED, ACKNOWLEDGED, CLEARED, BLOCKED, OVERRIDDEN]
+          enum:
+          - DETECTED
+          - FLAGGED
+          - ESCALATED
+          - ACK_REQUIRED
+          - ACK_REQUESTED
+          - ACKNOWLEDGED
+          - CLEARED
+          - BLOCKED
+          - OVERRIDDEN
         base_index_value:
           type: number
-          nullable: true
         current_index_value:
           type: number
-          nullable: true
         delta_pct:
           type: number
-          nullable: true
         exposure_dollars:
           type: number
-          nullable: true
         threshold_pct:
           type: number
-          nullable: true
         policy:
           type: string
-          nullable: true
         actor_user_id:
           type: string
-          nullable: true
         actor_role:
           type: string
-          nullable: true
         method:
           type: string
-          nullable: true
         notes:
           type: string
-          nullable: true
         idempotency_key:
           type: string
         created_at:
@@ -868,7 +857,19 @@ components:
           format: date-time
     ExposureRow:
       type: object
-      required: [quote_id, short_id, customer_id, customer_name, days_open, indexes, max_delta_pct, exposure_dollars, policy, exposure_state, available_actions]
+      description: pricing.ExposureRow. The salesperson fields are omitted when empty.
+      required:
+      - quote_id
+      - short_id
+      - customer_id
+      - customer_name
+      - days_open
+      - indexes
+      - max_delta_pct
+      - exposure_dollars
+      - policy
+      - exposure_state
+      - available_actions
       properties:
         quote_id:
           type: string
@@ -883,20 +884,21 @@ components:
         salesperson_id:
           type: string
           format: uuid
-          nullable: true
         salesperson_name:
           type: string
-          nullable: true
         days_open:
           type: integer
         indexes:
-          type: array
+          type:
+          - array
+          - 'null'
           items:
             type: string
         max_delta_pct:
           type: number
         exposure_dollars:
           type: number
+          description: Float dollars.
         policy:
           type: string
         exposure_state:
@@ -905,29 +907,171 @@ components:
           type: array
           items:
             type: string
+    ExposureList:
+      type: object
+      required:
+      - items
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExposureRow'
+        total:
+          type: integer
+    ExposureSummary:
+      type: object
+      required:
+      - count
+      - total_dollars
+      properties:
+        count:
+          type: integer
+        total_dollars:
+          type: number
+          description: Float dollars rounded to cents.
+    QuoteExposureDetail:
+      type: object
+      description: 'A hand built map, not pricing.ExposureStatus: the state is named exposure_state here
+        and the events ride along.'
+      required:
+      - quote_id
+      - exposure_state
+      - exposure_dollars
+      - last_checked_at
+      - indexes
+      - required_action
+      - events
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+        exposure_state:
+          $ref: '#/components/schemas/ExposureState'
+        exposure_dollars:
+          type: number
+          description: Float dollars.
+        last_checked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        indexes:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+        required_action:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuoteExposureEvent'
     AcknowledgmentRequest:
       type: object
-      required: [method]
+      required:
+      - method
+      - notes
       properties:
         method:
           type: string
-          enum: [VERBAL, EMAIL, PORTAL]
+          enum:
+          - VERBAL
+          - EMAIL
+          - PORTAL
         customer_contact:
           type: string
         notes:
           type: string
+          minLength: 10
+          description: At least ten characters after trimming.
     OverrideRequest:
       type: object
-      required: [notes]
+      required:
+      - notes
       properties:
         notes:
           type: string
+          minLength: 10
+          description: At least ten characters after trimming.
     ExposureRequestAckResponse:
       type: object
-      required: [event_id, salesperson_notified]
+      required:
+      - event_id
+      - salesperson_notified
       properties:
         event_id:
           type: string
           format: uuid
         salesperson_notified:
           type: boolean
+    ExposureAcknowledgeResponse:
+      type: object
+      required:
+      - event_id
+      - quote_id
+      - new_exposure_state
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        new_exposure_state:
+          type: string
+          enum:
+          - ACKNOWLEDGED
+    ExposureOverrideResponse:
+      type: object
+      required:
+      - event_id
+      - new_exposure_state
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        new_exposure_state:
+          type: string
+          enum:
+          - OVERRIDDEN
+    EscalateNowLine:
+      type: object
+      required:
+      - quote_line_id
+      - current_unit_price
+      - suggested_unit_price
+      - delta_pct
+      properties:
+        quote_line_id:
+          type: string
+          format: uuid
+        current_unit_price:
+          type: number
+          description: Float dollars.
+        suggested_unit_price:
+          type: number
+          description: Float dollars.
+        delta_pct:
+          type: number
+    EscalateNowResult:
+      type: object
+      description: pricing.EscalateNowResult. lines is null when the quote is missing or has no lines.
+      required:
+      - quote_id
+      - lines
+      - estimated_new_total
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+        lines:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/EscalateNowLine'
+        estimated_new_total:
+          type: number
+          description: Float dollars.

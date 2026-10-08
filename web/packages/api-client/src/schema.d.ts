@@ -2161,7 +2161,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List at-risk quotes for the current user */
+        /**
+         * List at-risk quotes
+         * @description 403 when owner=me and the caller has no salesperson id and is not owner or admin, when owner=all and the caller is not owner or admin, or when a sales role names another salesperson. An unparseable owner, customer_id or min_dollars answers 400.
+         */
         get: operations["exposureList"];
         put?: never;
         post?: never;
@@ -2178,7 +2181,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get exposure status for one quote */
+        /**
+         * Get exposure status for one quote
+         * @description A missing quote answers 500, not 404.
+         */
         get: operations["exposureGet"];
         put?: never;
         post?: never;
@@ -2214,7 +2220,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Acknowledge exposure on behalf of customer */
+        /**
+         * Acknowledge exposure on behalf of the customer
+         * @description Notes under ten characters or an unknown method answer 400; a quote whose exposure is already cleared answers 409.
+         */
         post: operations["exposureAcknowledge"];
         delete?: never;
         options?: never;
@@ -2231,7 +2240,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Override exposure (owner only) */
+        /**
+         * Override exposure (owner or admin only)
+         * @description A caller without the owner or admin role answers 403. Notes under ten characters answer 400; a quote whose exposure is already cleared answers 409.
+         */
         post: operations["exposureOverride"];
         delete?: never;
         options?: never;
@@ -2248,7 +2260,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Trigger immediate escalation check */
+        /** Preview re-quoting at market prices */
         post: operations["exposureEscalateNow"];
         delete?: never;
         options?: never;
@@ -4316,49 +4328,37 @@ export interface components {
             total_value: number;
             accepted_value: number;
         };
-        ExposureStatus: {
-            /** Format: uuid */
-            quote_id: string;
-            quote_short_id?: string | null;
-            /** @description One of OK, FLAGGED, ESCALATED, ACK_REQUIRED, ACKNOWLEDGED, BLOCKED, OVERRIDDEN. */
-            exposure_state: string;
-            exposure_dollars: number;
-            indexes: string[];
-            /** Format: uuid */
-            salesperson_id?: string | null;
-            salesperson_name?: string | null;
-            required_action?: string;
-            /** Format: date-time */
-            last_checked_at?: string | null;
-            events?: components["schemas"]["QuoteExposureEvent"][];
-        };
+        /** @enum {string} */
+        ExposureState: "OK" | "FLAGGED" | "ESCALATED" | "ACK_REQUIRED" | "ACKNOWLEDGED" | "BLOCKED" | "OVERRIDDEN";
+        /** @description pricing.QuoteExposureEvent. Everything but the five required fields is omitted when empty. */
         QuoteExposureEvent: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             quote_id: string;
             /** Format: uuid */
-            quote_line_id?: string | null;
+            quote_line_id?: string;
             /** Format: uuid */
-            market_index_id?: string | null;
+            market_index_id?: string;
             /** Format: uuid */
-            market_index_history_id?: string | null;
+            market_index_history_id?: string;
             /** @enum {string} */
             event_type: "DETECTED" | "FLAGGED" | "ESCALATED" | "ACK_REQUIRED" | "ACK_REQUESTED" | "ACKNOWLEDGED" | "CLEARED" | "BLOCKED" | "OVERRIDDEN";
-            base_index_value?: number | null;
-            current_index_value?: number | null;
-            delta_pct?: number | null;
-            exposure_dollars?: number | null;
-            threshold_pct?: number | null;
-            policy?: string | null;
-            actor_user_id?: string | null;
-            actor_role?: string | null;
-            method?: string | null;
-            notes?: string | null;
+            base_index_value?: number;
+            current_index_value?: number;
+            delta_pct?: number;
+            exposure_dollars?: number;
+            threshold_pct?: number;
+            policy?: string;
+            actor_user_id?: string;
+            actor_role?: string;
+            method?: string;
+            notes?: string;
             idempotency_key: string;
             /** Format: date-time */
             created_at: string;
         };
+        /** @description pricing.ExposureRow. The salesperson fields are omitted when empty. */
         ExposureRow: {
             /** Format: uuid */
             quote_id: string;
@@ -4367,29 +4367,85 @@ export interface components {
             customer_id: string;
             customer_name: string;
             /** Format: uuid */
-            salesperson_id?: string | null;
-            salesperson_name?: string | null;
+            salesperson_id?: string;
+            salesperson_name?: string;
             days_open: number;
-            indexes: string[];
+            indexes: string[] | null;
             max_delta_pct: number;
+            /** @description Float dollars. */
             exposure_dollars: number;
             policy: string;
             exposure_state: string;
             available_actions: string[];
         };
+        ExposureList: {
+            items: components["schemas"]["ExposureRow"][];
+            total: number;
+        };
+        ExposureSummary: {
+            count: number;
+            /** @description Float dollars rounded to cents. */
+            total_dollars: number;
+        };
+        /** @description A hand built map, not pricing.ExposureStatus: the state is named exposure_state here and the events ride along. */
+        QuoteExposureDetail: {
+            /** Format: uuid */
+            quote_id: string;
+            exposure_state: components["schemas"]["ExposureState"];
+            /** @description Float dollars. */
+            exposure_dollars: number;
+            /** Format: date-time */
+            last_checked_at: string | null;
+            indexes: string[] | null;
+            required_action: string;
+            events: components["schemas"]["QuoteExposureEvent"][];
+        };
         AcknowledgmentRequest: {
             /** @enum {string} */
             method: "VERBAL" | "EMAIL" | "PORTAL";
             customer_contact?: string;
-            notes?: string;
+            /** @description At least ten characters after trimming. */
+            notes: string;
         };
         OverrideRequest: {
+            /** @description At least ten characters after trimming. */
             notes: string;
         };
         ExposureRequestAckResponse: {
             /** Format: uuid */
             event_id: string;
             salesperson_notified: boolean;
+        };
+        ExposureAcknowledgeResponse: {
+            /** Format: uuid */
+            event_id: string;
+            /** Format: uuid */
+            quote_id: string;
+            /** @enum {string} */
+            new_exposure_state: "ACKNOWLEDGED";
+        };
+        ExposureOverrideResponse: {
+            /** Format: uuid */
+            event_id: string;
+            /** @enum {string} */
+            new_exposure_state: "OVERRIDDEN";
+        };
+        EscalateNowLine: {
+            /** Format: uuid */
+            quote_line_id: string;
+            /** @description Float dollars. */
+            current_unit_price: number;
+            /** @description Float dollars. */
+            suggested_unit_price: number;
+            delta_pct: number;
+        };
+        /** @description pricing.EscalateNowResult. lines is null when the quote is missing or has no lines. */
+        EscalateNowResult: {
+            /** Format: uuid */
+            quote_id: string;
+            lines: components["schemas"]["EscalateNowLine"][] | null;
+            /** @description Float dollars. */
+            estimated_new_total: number;
         };
         SalesPerson: {
             /** Format: uuid */
@@ -8942,7 +8998,18 @@ export interface operations {
     exposureList: {
         parameters: {
             query?: {
+                /** @description me (the default) scopes to the caller's book, all needs the owner or admin role, or a salesperson UUID (a sales role may only name itself). */
                 owner?: string;
+                /** @description Comma separated exposure states. */
+                state?: string;
+                /** @description Page size, 50 when absent or non positive. */
+                limit?: number;
+                offset?: number;
+                index_code?: string;
+                customer_id?: string;
+                /** @description A non negative dollar floor. */
+                min_dollars?: number;
+                /** @description Only the literal true selects the summary body. */
                 summary?: boolean;
             };
             header?: {
@@ -8954,20 +9021,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description At-risk quotes or portfolio summary. */
+            /** @description The rows, or the summary when summary=true. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        items?: components["schemas"]["ExposureRow"][];
-                        total?: number;
-                        count?: number;
-                        total_dollars?: number;
-                    };
+                    "application/json": components["schemas"]["ExposureList"] | components["schemas"]["ExposureSummary"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -8987,19 +9050,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The exposure status. */
+            /** @description The exposure status with the quote's event ledger. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExposureStatus"];
+                    "application/json": components["schemas"]["QuoteExposureDetail"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -9031,16 +9093,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Quote is not in a state that requires acknowledgment. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -9070,22 +9123,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExposureStatus"];
+                    "application/json": components["schemas"]["ExposureAcknowledgeResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Quote is not in a state that requires acknowledgment. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -9115,22 +9159,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExposureStatus"];
+                    "application/json": components["schemas"]["ExposureOverrideResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Quote is not in a state that allows override. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -9150,19 +9185,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Escalation triggered. */
+            /** @description The dry run: suggested per line prices. Nothing is persisted. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExposureStatus"];
+                    "application/json": components["schemas"]["EscalateNowResult"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
