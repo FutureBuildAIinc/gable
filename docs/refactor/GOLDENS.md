@@ -108,6 +108,20 @@ the windows read are written; the product's follow-on writes when a payment
 happens through the API (invoice status transition, GL postings) are not
 simulated, and no goldened query observes their absence.
 
+The demo seed also writes its 13 dispatch-day orders with one shared
+created_at (the dispatch date's midnight, two days back), and the dashboard's
+order-activity read is `ORDER BY created_at DESC LIMIT 10` with no tiebreak.
+Which of the 13 appeared in the ten newest, and in what order, therefore
+followed the physical row order and the plan's top-N sort, and an unlucky
+tuple layout (autovacuum timing in a loaded full run) changed a `total_amount`
+in the `clockwindow` transcript. After the clock-window rows the harness gives
+each dispatch order its own created_at, a few milliseconds after the shared
+midnight so the recorded day offset does not move, in a fixed newest-first
+order (`dispatchRecencyOrder` in `fixtures_clock_test.go`) that reproduces the
+recorded golden byte for byte, and it fails the run if any of the newest 25
+orders ever share a created_at again. The missing tiebreak in the read itself
+is product behaviour and is left as found.
+
 ### What is normalised, and why
 
 Values that legitimately vary between two runs of the same script on the same
