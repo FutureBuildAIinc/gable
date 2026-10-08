@@ -230,6 +230,18 @@ func (s *Service) GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error
 	return s.repo.GetInvoice(ctx, id)
 }
 
+// GetInvoiceRecord reads an invoice for a caller that holds the record's own
+// branch to the payload branch rule itself (the document print and email
+// routes, PR 39): only the request's context branch narrows the read.
+func (s *Service) GetInvoiceRecord(ctx context.Context, id uuid.UUID) (*Invoice, error) {
+	if r, ok := s.repo.(interface {
+		GetInvoiceRecord(ctx context.Context, id uuid.UUID) (*Invoice, error)
+	}); ok {
+		return r.GetInvoiceRecord(ctx, id)
+	}
+	return s.repo.GetInvoice(ctx, id)
+}
+
 // ListInvoices answers one page and whether another follows (the repository
 // reads limit+1), with the filtered total on request.
 func (s *Service) ListInvoices(ctx context.Context, f ListFilter, wantTotal bool) (items []InvoiceSummary, hasMore bool, total *int64, err error) {

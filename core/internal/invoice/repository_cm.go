@@ -68,7 +68,7 @@ type CreditFilter struct {
 	Limit      int
 }
 
-var creditWhere = "WHERE " + wall("cm", 1, 2) + `
+var creditWhere = "\n\tWHERE " + wall("cm", 1, 2) + `
 	  AND (cardinality($3::text[]) = 0 OR cm.status = ANY($3))
 	  AND ($4::uuid IS NULL OR cm.customer_id = $4)
 	  AND ($5::uuid IS NULL OR cm.invoice_id = $5)

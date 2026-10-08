@@ -778,14 +778,13 @@ func Run() {
 				orderCustMap[orderID] = custID
 				invID := uuid.New()
 				// A share of the invoices are paid in full, a share partly paid and a
-				// share left unpaid; some of the unpaid ones are past their due date
-				// (overdue is computed from the due date, never stored).
+				// share left unpaid; overdue is computed from the due date, never stored.
 				invStatus := "UNPAID"
 				partPaid := false
-				switch r := rand.Float32(); {
-				case r < 0.65:
+				if rand.Float32() < 0.65 {
 					invStatus = "PAID"
-				case r < 0.75:
+				} else if rand.Float32() < 0.3 {
+					// formerly stored as OVERDUE: now a partly paid invoice
 					invStatus, partPaid = "PARTIAL", true
 				}
 				dueDate := orderDate.AddDate(0, 1, 0)
@@ -1237,8 +1236,8 @@ func Run() {
 			var memoID string
 			err := db.QueryRow(`INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status,
 					number, memo_date, subtotal, tax_amount, total_amount, tax_rate)
-				SELECT i.id, i.customer_id, i.branch_id, i.currency, $2, $3, $4::numeric, $5,
-					CASE WHEN $5 = 'DRAFT' THEN NULL ELSE credit_memo_next_number() END,
+				SELECT i.id, i.customer_id, i.branch_id, i.currency, $2::text, $3::text, $4::numeric, $5::text,
+					CASE WHEN $5::text = 'DRAFT' THEN NULL ELSE credit_memo_next_number() END,
 					i.invoice_date, -$4::numeric, 0, -$4::numeric, 0
 				FROM invoices i WHERE i.id = $1 RETURNING id`, invID, m.ReasonCode, m.Reason, m.Amt, m.Status).Scan(&memoID)
 			if err != nil {

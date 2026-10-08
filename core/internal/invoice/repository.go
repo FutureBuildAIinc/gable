@@ -178,7 +178,7 @@ func statusStrings(states []InvoiceStatus) []string {
 
 // listWhere is the shared predicate of the list and its count: the branch
 // wall, then the filters that filter. The count ignores the keyset position.
-var listWhere = "WHERE " + wall("i", 1, 2) + `
+var listWhere = "\n\tWHERE " + wall("i", 1, 2) + `
 	  AND (cardinality($3::text[]) = 0 OR i.status = ANY($3))
 	  AND ($4::uuid IS NULL OR i.customer_id = $4)
 	  AND ($5::uuid IS NULL OR i.project_id = $5)
@@ -257,14 +257,35 @@ func (r *PostgresRepository) LockInvoice(ctx context.Context, id uuid.UUID) (*In
 	return r.GetInvoice(ctx, id)
 }
 
-// invoiceHead reads the invoice header; the wall applies.
-func (r *PostgresRepository) invoiceHead(ctx context.Context, id uuid.UUID, _ bool) (*Invoice, error) {
+// GetInvoiceRecord reads an invoice for a route that holds the loaded record's
+// own branch to the payload branch rule (CheckPayloadBranch: a 403 naming the
+// record), as the document print and email routes do (PR 39). It applies the
+// request's context branch only: the record check, not this read, is what
+// scopes a bound caller with no context branch to its grants.
+func (r *PostgresRepository) GetInvoiceRecord(ctx context.Context, id uuid.UUID) (*Invoice, error) {
+	inv, err := r.invoiceHead(ctx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	if inv.Lines, err = r.invoiceLines(ctx, id); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+// invoiceHead reads the invoice header; the wall applies. contextOnly drops
+// the grants half of the wall (GetInvoiceRecord).
+func (r *PostgresRepository) invoiceHead(ctx context.Context, id uuid.UUID, contextOnly bool) (*Invoice, error) {
 	var inv Invoice
 	var snapshot []byte
+	grants := middleware.GrantsSubForQuery(ctx)
+	if contextOnly {
+		grants = nil
+	}
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT `+summaryColumns+`, i.ship_to_snapshot`+summaryFrom+`
 		WHERE i.id = $1 AND `+wall("i", 2, 3),
-		id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+		id, middleware.BranchIDForQuery(ctx), grants)
 	if err := scanSummary(row, &inv.InvoiceSummary, &snapshot); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errInvoiceNotFound
