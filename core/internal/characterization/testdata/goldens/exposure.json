@@ -118,16 +118,19 @@
       "path": "/api/v1/quotes/<id-1>/exposure/escalate-now"
     },
     "response": {
-      "status": 500,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-5>"
-        }
+        "estimated_new_total": 110,
+        "lines": [
+          {
+            "current_unit_price": 5.5,
+            "delta_pct": 0,
+            "quote_line_id": "<id-5>",
+            "suggested_unit_price": 5.5
+          }
+        ],
+        "quote_id": "<id-1>"
       }
     }
   },

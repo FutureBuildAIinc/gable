@@ -65,6 +65,14 @@ type Config struct {
 	// Logging
 	LogLevel string // DEBUG, INFO, WARN, ERROR (default: INFO)
 
+	// Events
+	//
+	// EventsOrg is the org slug stamped on every events_outbox row. Gable is
+	// one database per dealer today, so the org is a deployment property:
+	// set it when one deployment serves an org with a name worth reading on
+	// the events feed. Defaults to "default".
+	EventsOrg string // EVENTS_ORG
+
 	// EDI
 	//
 	// EDIOutputDir is where generated X12 documents are written. It defaults to
@@ -140,6 +148,9 @@ func Load() (*Config, error) {
 
 		// Logging
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),
+
+		// Events
+		EventsOrg: getEnv("EVENTS_ORG", "default"),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),

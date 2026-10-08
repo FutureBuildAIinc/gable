@@ -14,9 +14,20 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/quote"
-	"github.com/gablelbm/gable/pkg/eventbus"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
+
+// EventRecorder is the transactional outbox seam: implemented by
+// *outbox.Writer (whose Write resolves the caller's executor, so inside a
+// transaction the event joins that transaction), and by a capture fake in
+// tests. The scanner records its notification events through it instead of
+// publishing to the in-process bus; a drain runner delivers committed
+// events to their subscribers, so the exposure emails survive a restart and
+// follow the commit, not the process.
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
 
 // AuditEntry mirrors pkg/audit.Entry. Re-declared in pricing to avoid the
 // pricing package depending on pkg/audit (which would risk import cycles
@@ -48,16 +59,15 @@ type TxRunner interface {
 // ExposureScanner evaluates open quote lines against an updated market index
 // and writes typed events based on the snapshotted customer policy.
 //
-// Side-effects (notifications) are decoupled via the eventbus: after a durable
-// state change commits, the scanner publishes an ExposureNotification to the
-// matching subject. The notifier subscribes to quote.exposure.> and resolves
-// recipient emails itself. Publishing is best-effort and never rolls back
-// persisted state.
+// Side-effects (notifications) are decoupled via the transactional outbox:
+// the notification event is recorded inside the same transaction as the
+// state change, and a drain runner delivers committed events to the
+// exposure notifier, which resolves recipient emails.
 type ExposureScanner struct {
 	exposure   ExposureRepository
 	escalators EscalatorRepository
 	quoteRepo  quote.QuoteLineReader
-	bus        eventbus.Publisher // optional; nil disables event publishing
+	events     EventRecorder // optional; nil disables event recording
 	audit      AuditWriter
 	tx         TxRunner // optional; nil disables tx wrapping (tests)
 	logger     *slog.Logger
@@ -84,12 +94,12 @@ func NewExposureScanner(
 	}
 }
 
-// WithEventBus wires the publisher used for post-commit notification events.
-// Optional: a nil bus (or never calling this) disables publishing entirely,
-// which keeps the scanner usable in tests and in deploys that run without a
-// notifier subscriber.
-func (s *ExposureScanner) WithEventBus(bus eventbus.Publisher) *ExposureScanner {
-	s.bus = bus
+// WithOutbox wires the recorder used for notification events. Optional: a
+// nil recorder (or never calling this) disables recording entirely, which
+// keeps the scanner usable in tests and in deploys that run without a
+// drain or a notifier subscriber.
+func (s *ExposureScanner) WithOutbox(events EventRecorder) *ExposureScanner {
+	s.events = events
 	return s
 }
 
@@ -324,11 +334,13 @@ func (s *ExposureScanner) evaluateOne(
 		IdempotencyKey:       idemKey,
 	}
 	// Wrap the entire write path — event insert, escalator state, price
-	// mutation, quote-total recompute, and quote rollup — in a single
-	// transaction so a mid-flight failure rolls back cleanly. Without this
-	// wrapping, a `RecomputeQuoteTotal` failure after `UpdateLineUnitPrice`
-	// would leave the customer contractually committed to a unit price the
-	// quote total doesn't reflect.
+	// mutation, quote-total recompute, quote rollup, and the outbox's
+	// notification event — in a single transaction so a mid-flight failure
+	// rolls back cleanly. Without this wrapping, a `RecomputeQuoteTotal`
+	// failure after `UpdateLineUnitPrice` would leave the customer
+	// contractually committed to a unit price the quote total doesn't
+	// reflect, and the notification would describe a state that never
+	// happened.
 	//
 	// Idempotency: if InsertEvent reports `inserted=false` (key collision),
 	// we commit the no-op tx and skip downstream writes. Subsequent state
@@ -363,6 +375,14 @@ func (s *ExposureScanner) evaluateOne(
 		if err := s.rollupQuote(txCtx, ewc.QuoteID, now); err != nil {
 			return fmt.Errorf("scanner: rollup quote: %w", err)
 		}
+
+		// The notification event is recorded inside the transaction, so it
+		// commits with the state it describes and a rollback leaves no
+		// notification for a state that never happened. A failed record
+		// fails the mutation: the event is part of it.
+		if err := s.record(txCtx, eventType, ewc, indexCode, exposureDollars, math.Round(deltaPct*100)/100, pe.BasePrice, newPrice, baseIndex, currentIndex); err != nil {
+			return fmt.Errorf("scanner: record outbox event: %w", err)
+		}
 		return nil
 	})
 	if err != nil {
@@ -372,29 +392,28 @@ func (s *ExposureScanner) evaluateOne(
 		return 0, nil
 	}
 
-	// Audit + publish fire AFTER commit so an external-system failure can't
-	// roll back persisted state, and a persistence-layer rollback can't leave
-	// dangling notifications. Both are best-effort.
+	// Audit fires after commit, best-effort as before; the notification is
+	// the drain's to deliver once the row is visible.
 	s.writeAudit(ctx, ev)
-	s.publish(ctx, eventType, ewc, indexCode, exposureDollars, math.Round(deltaPct*100)/100, pe.BasePrice, newPrice, baseIndex, currentIndex)
 
 	return 1, nil
 }
 
-// publish emits an ExposureNotification to the eventbus subject mapped from
-// the event type. No-ops when the bus is unconfigured or the event type has no
-// associated subject (DETECTED/BLOCKED). Best-effort: marshal/publish errors
-// are logged, never returned, so a degraded bus can't affect the scan.
-func (s *ExposureScanner) publish(
+// record writes the notification event into the outbox. No-ops when no
+// recorder is configured or the event type has no subject (DETECTED and
+// BLOCKED are ledger-only; notifying them would email the salesperson
+// twice for one detection). Inside the scanner's transaction the row joins
+// the transaction, and the error is the caller's to propagate.
+func (s *ExposureScanner) record(
 	ctx context.Context, eventType EventType, ewc *EscalatorWithContext,
 	indexCode string, exposureDollars, deltaPct, oldPrice, newPrice, baseIndex, currentIndex float64,
-) {
-	if s.bus == nil {
-		return
+) error {
+	if s.events == nil {
+		return nil
 	}
 	subject := SubjectForEvent(eventType)
 	if subject == "" {
-		return
+		return nil
 	}
 	notif := ExposureNotification{
 		EventType:       eventType,
@@ -415,12 +434,15 @@ func (s *ExposureScanner) publish(
 	}
 	payload, err := json.Marshal(notif)
 	if err != nil {
-		s.logger.Warn("scanner: marshal notification", "err", err)
-		return
+		return fmt.Errorf("marshal notification: %w", err)
 	}
-	if err := s.bus.Publish(ctx, subject, payload); err != nil {
-		s.logger.Warn("scanner: publish notification", "subject", subject, "err", err)
-	}
+	return s.events.Write(ctx, outbox.Event{
+		Type:       subject,
+		EntityType: "quote",
+		EntityID:   ewc.QuoteID,
+		Data:       payload,
+		At:         time.Now().UTC(),
+	})
 }
 
 // computeRollup is a pure function over escalator states + per-line

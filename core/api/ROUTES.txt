@@ -181,6 +181,7 @@ GET	/api/v1/edi/partners/{id}	internal/edi	h.GetPartner
 PUT	/api/v1/edi/partners/{id}	internal/edi	h.UpdatePartner
 GET	/api/v1/edi/partners/{id}/catalog	internal/edi	h.ListCatalog
 POST	/api/v1/edi/partners/{id}/import-catalog	internal/edi	h.ImportCatalog
+GET	/api/v1/events	internal/events	h.List
 GET	/api/v1/gl/accounts	internal/gl	h.HandleListAccounts
 POST	/api/v1/gl/accounts	internal/gl	h.HandleCreateAccount
 PUT	/api/v1/gl/accounts/{id}	internal/gl	h.HandleUpdateAccount
