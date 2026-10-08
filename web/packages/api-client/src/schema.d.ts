@@ -6556,6 +6556,43 @@ export interface components {
              */
             revision?: number;
         };
+        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two controls, payment_terms_id and po_required, which are required so a left out field cannot reset them. primary_branch_id is refused. */
+        CustomerUpdateRequest: {
+            account_number: string;
+            name: string;
+            email?: string | null;
+            phone?: string | null;
+            address?: string | null;
+            tier?: components["schemas"]["CustomerTier"];
+            is_active?: boolean;
+            /**
+             * Format: uuid
+             * @description Create only; fixed afterwards, and a PUT carrying it is a 400.
+             */
+            primary_branch_id?: string;
+            /** Format: uuid */
+            price_level_id?: string | null;
+            /** Format: uuid */
+            salesperson_id?: string | null;
+            /**
+             * Format: int64
+             * @description Null is no limit; zero is a limit of nothing; never negative.
+             */
+            credit_limit_cents?: number | null;
+            /** @description An enabled ISO 4217 code with a minor unit of 0 or 2 places, or null for the dealer default. */
+            currency?: string | null;
+            /**
+             * Format: uuid
+             * @description Active payment terms, or terms the customer already holds.
+             */
+            payment_terms_id: string;
+            po_required: boolean;
+            /**
+             * Format: int64
+             * @description PUT only, beside If-Match; a revision on create is a 400.
+             */
+            revision?: number;
+        };
         CustomerSalespersonRequest: {
             /**
              * Format: uuid
@@ -6706,6 +6743,29 @@ export interface components {
             can_place_orders?: boolean;
             /** Format: int64 */
             order_limit_cents?: number | null;
+            /**
+             * Format: int64
+             * @description PUT only, beside If-Match.
+             */
+            revision?: number;
+        };
+        ContactUpdateRequest: {
+            first_name: string;
+            last_name: string;
+            title?: string | null;
+            email?: string | null;
+            phone?: string | null;
+            /** @enum {string|null} */
+            role?: "Buyer" | "AP" | "Owner" | "Site Super" | null;
+            is_primary?: boolean;
+            is_active?: boolean;
+            /** @description Required on a PUT, so a left out field cannot re-grant order authority. */
+            can_place_orders: boolean;
+            /**
+             * Format: int64
+             * @description Required on a PUT; null is an explicit no limit of the contact's own.
+             */
+            order_limit_cents: number | null;
             /**
              * Format: int64
              * @description PUT only, beside If-Match.
@@ -12727,7 +12787,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CustomerRequest"];
+                "application/json": components["schemas"]["CustomerUpdateRequest"];
             };
         };
         responses: {
@@ -13377,7 +13437,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ContactRequest"];
+                "application/json": components["schemas"]["ContactUpdateRequest"];
             };
         };
         responses: {

@@ -59,7 +59,7 @@ async function _happy() {
   const shipToRevision: number = shipTo.body.revision;
   const edited = await client.put(
     "/api/v1/customers/{id}",
-    { account_number: "A-1", name: "Acme", credit_limit_cents: null, po_required: true },
+    { account_number: "A-1", name: "Acme", credit_limit_cents: null, po_required: true, payment_terms_id: "8f14e45f-ceea-467f-a830-aacd11a4" },
     { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" }, headers: { "If-Match": '"3"' } },
   );
   const customerRevision: number = edited.body.revision;
@@ -87,6 +87,12 @@ async function _wrong() {
 
   // @ts-expect-error the customer list is cursor paged and the tier is lowercase
   await client.get("/api/v1/customers", { query: { offset: 0, tier: "GOLD" } });
+
+  // @ts-expect-error a customer PUT must carry the controls it must not reset: payment_terms_id and po_required
+  await client.put("/api/v1/customers/{id}", { account_number: "A", name: "n" }, { path: { id: "x" } });
+
+  // @ts-expect-error a contact PUT must carry can_place_orders and the order limit (null for none)
+  await client.put("/api/v1/contacts/{id}", { first_name: "A", last_name: "B" }, { path: { id: "x" } });
 
   // @ts-expect-error a credit limit is integer cents, never a float dollar amount string
   await client.put("/api/v1/customers/{id}", { account_number: "A", name: "n", credit_limit_cents: "100.50" }, { path: { id: "x" } });

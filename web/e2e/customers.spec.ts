@@ -90,6 +90,7 @@ test.describe('Customer flow on the new contract', () => {
     await expect(page.locator('[data-fact="po"]')).toHaveText('Yes');
     await expect(page.locator('[data-fact="currency"]')).toContainText(customer.effective_currency);
     await expect(page.locator('[data-fact="revision"]')).toHaveText('1');
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'customer-detail-terms.png') });
 
     // Ship-to addresses: add two, the first becomes the default.
     await page.getByRole('button', { name: 'Ship-to Addresses' }).click();
@@ -177,6 +178,9 @@ test.describe('Customer flow on the new contract', () => {
     const staleRes = await stale;
     expect(staleRes.status()).toBe(409);
     expect(staleRes.request().headers()['if-match']).toBe('"2"');
+    // The header PUT carries the controls it must not reset.
+    expect(staleRes.request().postDataJSON().payment_terms_id).toBe(String(current.payment_terms_id));
+    expect(staleRes.request().postDataJSON().po_required).toBe(true);
     expect((await staleRes.json()).error.code).toBe('stale_revision');
     await expect(page.getByText(/changed after this revision was read/)).toBeVisible();
     await expect(page.getByText(/The account was reloaded/)).toBeVisible();
@@ -294,11 +298,15 @@ test.describe('Customer flow on the new contract', () => {
 
     await page.getByRole('button', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Can place orders').uncheck();
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'customer-contact-edit.png') });
     const put = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/v1/contacts/${contact.id}` && r.request().method() === 'PUT');
     await page.getByRole('button', { name: 'Save contact' }).click();
     const putRes = await put;
     expect(putRes.status(), await putRes.text()).toBe(200);
     expect(putRes.request().headers()['if-match']).toBe('"1"');
+    // A PUT carries the controls it must not reset: the authority and the limit (750 dollars stays).
+    expect(putRes.request().postDataJSON().can_place_orders).toBe(false);
+    expect(putRes.request().postDataJSON().order_limit_cents).toBe(75000);
     expect((await putRes.json()).revision).toBe(2);
     await expect(page.getByText('Cannot place orders')).toBeVisible();
 

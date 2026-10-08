@@ -10,9 +10,11 @@ import type {
     Contact,
     ContactPage,
     ContactRequest,
+    ContactUpdateRequest,
     Customer,
     CustomerPage,
     CustomerRequest,
+    CustomerUpdateRequest,
     CustomerTier,
     EscalationPolicy,
     EscalationPolicyRequest,
@@ -103,7 +105,7 @@ export function creditLimitInputText(cents: number | null | undefined): string {
 }
 
 /** The whole header of a loaded customer as a PUT body (a field left out takes its default, so send all of them). */
-export function customerRequestFromCustomer(c: Customer): CustomerRequest {
+export function customerRequestFromCustomer(c: Customer): CustomerUpdateRequest {
     return {
         account_number: c.account_number,
         name: c.name,
@@ -139,7 +141,7 @@ export function shipToRequestFromShipTo(s: ShipTo): ShipToRequest {
     };
 }
 
-export function contactRequestFromContact(c: Contact): ContactRequest {
+export function contactRequestFromContact(c: Contact): ContactUpdateRequest {
     return {
         first_name: c.first_name,
         last_name: c.last_name,
@@ -204,7 +206,7 @@ export const CustomerService = {
     },
 
     /** Replaces the header on the revision the page loaded. */
-    async updateCustomer(id: string, request: CustomerRequest, revision: number): Promise<Customer> {
+    async updateCustomer(id: string, request: CustomerUpdateRequest, revision: number): Promise<Customer> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/customers/${id}`, {
                 method: 'PUT',
@@ -310,7 +312,7 @@ export const CustomerService = {
         return response.json();
     },
 
-    async updateContact(id: string, request: ContactRequest, revision: number): Promise<Contact> {
+    async updateContact(id: string, request: ContactUpdateRequest, revision: number): Promise<Contact> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/contacts/${id}`, {
                 method: 'PUT',

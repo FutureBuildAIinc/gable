@@ -13,6 +13,7 @@ type Schemas = components['schemas'];
 export type Customer = Schemas['Customer'];
 export type CustomerPage = Schemas['CustomerPage'];
 export type CustomerRequest = Schemas['CustomerRequest'];
+export type CustomerUpdateRequest = Schemas['CustomerUpdateRequest'];
 export type CustomerTier = Schemas['CustomerTier'];
 export type PriceLevel = Schemas['PriceLevel'];
 export type PriceLevelPage = Schemas['PriceLevelPage'];
@@ -27,6 +28,7 @@ export type ShipToRequest = Schemas['ShipToRequest'];
 export type Contact = Schemas['Contact'];
 export type ContactPage = Schemas['ContactPage'];
 export type ContactRequest = Schemas['ContactRequest'];
+export type ContactUpdateRequest = Schemas['ContactUpdateRequest'];
 
 /** Every tier the wire accepts, in the order a select shows them. The Record keys must match the contract exactly. */
 const TIER_SET: Record<CustomerTier, true> = { retail: true, silver: true, gold: true, platinum: true };
