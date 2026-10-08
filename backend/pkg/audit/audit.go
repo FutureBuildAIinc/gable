@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/database"
@@ -74,7 +75,21 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 		actingAs, tool = act.ActingAs, act.Tool
 	}
 
-	_, err := l.db.GetExecutor(ctx).Exec(ctx,
+	// Cancellation discipline, per the review's P2: inside a transaction the
+	// row must live and die with that transaction's context; the transaction
+	// is the mutation's, and a cancelled request cancels the mutation too.
+	// With no transaction in ctx the mutation has already committed, so the
+	// audit row must survive a client that disconnected right after — the
+	// values ride along, but the cancellation does not, and a short timeout
+	// bounds the write on its own.
+	execCtx := ctx
+	if !database.InTx(ctx) {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+	}
+
+	_, err := l.db.GetExecutor(ctx).Exec(execCtx,
 		`INSERT INTO audit_log (action, entity_type, entity_id, user_id, changes, request_id,
 		                        actor_kind, actor_id, acting_as, tool)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,

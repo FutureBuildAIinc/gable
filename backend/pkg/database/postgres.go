@@ -128,6 +128,15 @@ func (db *DB) RunInTx(ctx context.Context, fn func(ctx context.Context) error) (
 
 type txKey struct{}
 
+// InTx reports whether ctx carries a transaction, i.e. whether GetExecutor
+// will resolve to that transaction rather than the pool. Callers that must
+// behave differently on the two paths (the audit logger's cancellation
+// discipline, for one) ask this instead of re-deriving it.
+func InTx(ctx context.Context) bool {
+	_, ok := ctx.Value(txKey{}).(pgx.Tx)
+	return ok
+}
+
 func (db *DB) GetExecutor(ctx context.Context) Executor {
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
 		return tx

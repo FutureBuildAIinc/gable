@@ -133,6 +133,39 @@ func TestLog_PoolPathIsSynchronous(t *testing.T) {
 	}
 }
 
+func TestLog_PoolPathSurvivesCancelledRequestContext(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+	entityID := uuid.New()
+
+	// The shape the review flagged: the mutation has committed, the client
+	// then disconnects, and the request context is cancelled by the time the
+	// after-commit audit write runs. With no transaction in ctx there is
+	// nothing left to roll back, so the row must still land — writing it with
+	// the dead request context would drop it and orphan the committed
+	// mutation (till close, module grant, app toggles).
+	claims := &middleware.UserClaims{}
+	claims.Subject = "user-321"
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), middleware.UserContextKey, claims))
+	cancel()
+
+	if err := logger.Log(ctx, audit.Entry{
+		Action:     "till.closed",
+		EntityType: "cancelled_ctx_test",
+		EntityID:   entityID,
+	}); err != nil {
+		t.Fatalf("Log with a cancelled request context: %v", err)
+	}
+
+	rows := fetchRows(t, db, entityID)
+	if len(rows) != 1 {
+		t.Fatalf("audit rows after Log with a cancelled context = %d, want 1 (the pool path must not inherit the request's cancellation)", len(rows))
+	}
+	if rows[0].ActorID == nil || *rows[0].ActorID != "user-321" {
+		t.Errorf("actor_id = %v, want user-321 (values must survive the WithoutCancel wrap)", rows[0].ActorID)
+	}
+}
+
 func TestLog_UserCallRecordsSubject(t *testing.T) {
 	db := testutil.RequireDB(t)
 	logger := audit.NewLogger(db)
