@@ -9,7 +9,7 @@ a reason in `docs/refactor/CONTRACT-CHANGES.md`.
 
 ## How the harness works
 
-The harness lives in `backend/internal/characterization` (all in `_test.go`
+The harness lives in `core/internal/characterization` (all in `_test.go`
 files; `doc.go` exists so the package builds). `TestMain` owns the throwaway
 database; one test, `TestCharacterisationGoldens`, does the following on every
 run:
@@ -58,7 +58,7 @@ run:
    resolves to the seed day plus N days.
 5. **Compare.** Each response's status code, content type and body is
    normalised and compared to the golden file under
-   `backend/internal/characterization/testdata/goldens/<group>.json`, which
+   `core/internal/characterization/testdata/goldens/<group>.json`, which
    also records the request (method, path, notable headers, body) so the
    golden is self-describing. A run that crosses UTC midnight between seed and
    the end of the script fails with a clear message instead of recording or
@@ -208,7 +208,7 @@ special wiring). Re-recording with `-update` is refused when `CI` is set:
 golden re-recording is a local, reviewed act.
 
 ```sh
-# from backend/, against a throwaway Postgres:
+# from core/, against a throwaway Postgres:
 DATABASE_URL='postgres://gable_user:gable_password@127.0.0.1:<port>/gable_test?sslmode=disable' \
   go test ./internal/characterization/
 
