@@ -210,17 +210,23 @@ Payload rules, enforced at create and at every `PUT`:
   past the idempotency store's 1 MiB cap on a stored response. The AI
   parse's file attaches to the quote after promotion (section 10).
 
-The branch rule, for drafts and for the module's own create alike. When
-the request's branch context names a branch (always, for a bound key,
+The branch rule, for drafts and for the module's own create alike, is the
+payload branch guard PR 37 adds (`middleware.BranchGuard.CheckPayloadBranch`).
+When the request's branch context names a branch (always, for a bound key,
 section 5.5), a payload `branch_id` must equal it, else 403 `forbidden`
-naming `payload.branch_id`. With no context branch (an administrator
-across branches, an unbound key) a payload `branch_id` must be a branch the
-caller may target (a user's `user_locations` grant, or any branch for an
-unbound key), else 403 naming it. With no payload `branch_id` the draft
-takes the context branch, or `ResolveBranchForWrite`'s default. Today the
-quote create lets the payload's branch override the context with no grant
-check (`internal/quote/service.go`); C5-2a closes that on the quote create
-path as part of this rule, a listed contract change.
+naming `payload.branch_id`. With no context branch, an administrator or
+owner may name any branch, as the `X-Branch-Id` header already lets them;
+so may every caller while the single branch kill switch is off (the
+middleware treats each as an administrator), an unbound key, and
+`AUTH_MODE=dev`. A user with no context branch may name only a branch in
+their `user_locations` grants, else the same 403. A call that carries no
+branch context at all (a route mounted without the branch middleware) is
+refused unless the caller marked itself a system caller with
+`branchctx.WithSystem`; no request path sets that mark. With no payload
+`branch_id` the draft takes the context branch, or
+`ResolveBranchForWrite`'s default. PR 37 closes this rule on `POST
+/api/v1/quotes`; C5-2a applies the same guard to every draft route and adds
+no second implementation.
 
 Drafts are shared, not owned. Any person holding the kind's role on the
 draft's branch, and any key holding the kind's `propose` or `commit` scope
@@ -452,7 +458,9 @@ saved after the person looked; that confirm is 409 `stale_revision`.
    update parsing, the same code the entity route runs). A failure is 400
    `validation_failed` with every field, each path prefixed `payload.`.
 5. Call the kind's promoter inside the transaction (4.3), with the
-   draft's `branch_id` as the branch context, whatever the committer's
+   draft's `branch_id` as the branch context (a branch context naming that
+   branch, never `branchctx.WithSystem`, so the guard still checks the
+   payload against it), whatever the committer's
    `X-Branch-Id` names: the draft's branch was checked against its writers
    at every save (2.3), and step 1 checked the committer can see it. It
    runs the module's own create or update: references checked, document priced,
@@ -464,7 +472,9 @@ saved after the person looked; that confirm is 409 `stale_revision`.
 7. Write the audit row `draft.promoted` (section 6).
 8. Insert the `draft_events` row (`op: promoted`).
 9. Write the outbox events, last: the module's own event(s) first
-   (`quote.created`, or the edit's event), then `draft.promoted`.
+   (`quote.created` for a create draft), then `draft.promoted`. The quote's
+   update writes no outbox event today, so an edit draft's promotion writes
+   `draft.promoted` only, until the module's update gains an event.
 
 Lock order: the draft row, then the module's own rows in the module's own
 order (ADR 0005 section 11 for orders), then the `draft_events` advisory
@@ -522,7 +532,9 @@ before (the goldens are the test).
   is the section 6 object: an agent consumer of `GET /api/v1/events` sees
   who proposed and who committed without reading the audit log.
 - The module's own event is unchanged (`quote.created` with its usual data),
-  so consumers of entity events need not know drafts exist.
+  so consumers of entity events need not know drafts exist. An edit draft's
+  promotion writes `draft.promoted` only, until the module's update gains an
+  event (the quote's update writes none today).
 
 #### 4.5 A failed promotion
 
@@ -631,8 +643,9 @@ role proposes, edits and promotes.
 
 An agent that acts on a person's behalf with the person's JWT and the
 R1-14 marker is held to propose authority on every confirm gated module,
-server side. The gate fires when `actor.FromContext` resolves kind `agent`
-on a session request, which is any non-empty `X-Acting-As` value (the actor
+server side. A session request is any request not authenticated by a
+machine key, so `AUTH_MODE=dev` with a marker is gated too. The gate fires
+when `actor.FromContext` resolves kind `agent` on a session request, which is any non-empty `X-Acting-As` value (the actor
 seam records any marker as an agent, so the gate must not key on the value
 `agent` alone, or `X-Acting-As: x` would be recorded as an agent and escape
 it). Keyed requests are governed by scopes alone, with or without a marker:
@@ -669,8 +682,7 @@ null branch is today's behaviour. A bound key:
   `key.branch_refused`;
 - naming another branch in a payload `branch_id` is 403 `forbidden` naming
   `payload.branch_id`, by the branch rule of section 2.3, on draft routes
-  and on the module's own create alike (`POST /api/v1/quotes` today lets a
-  payload branch override the context; C5-2a closes it).
+  and on the module's own create alike (PR 37's guard).
 
 One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A
@@ -877,7 +889,15 @@ draft from the parsed lines, and the file is attached to the quote after
 promotion through a quote file route C5-2a adds, `PUT
 /api/v1/quotes/{id}/file` (raw body with its content type, the same 5 MiB
 bound the create applies today, `quotes:write`, the revision precondition),
-by the committer. The desk gains
+by the committer. It is accepted only while the quote is in status `draft`
+(else 409 `invalid_state_transition` with blocker `quote_not_draft`),
+replaces any file already stored, moves the quote's `revision` by one and
+returns the quote with its new `ETag`, writes the audit row
+`quote.file_attached` (`filename`, `content_type`, `bytes`, `sha256`) and
+no outbox event (the quote's update writes none today), applies the branch
+wall like `GET /api/v1/quotes/{id}`, and answers 413 above 5 MiB. Being an
+entity write on a gated module, it is refused to an agent marked session by
+the confirm gate (5.4). The desk gains
 `/quotes/drafts` (open proposals) and `/quotes/drafts/:id` (the quote
 builder bound to a draft, following the feed, with a Confirm action that
 promotes), each against its visual reference, the quote builder screen, with
@@ -915,15 +935,17 @@ screens and branch bound keys, which the lead placed here.
 
 | Piece | Builds | Tests |
 |---|---|---|
-| Migration (9) | the four steps and the down file | applies on empty and seeded databases; down then up is clean |
+| Migration (9) | the five steps and the down file | applies on empty and seeded databases; down then up is clean |
 | Drafts core (2) | `internal/drafts`: repository, service, handler, kind registry; quote kind | wire tests per the recipe set: create shape, `validation`, payload refusals (`original_file`, a payload over 256 KiB, a payload `revision`), the `subject_revision` rebase bounds, list and cursor, 428, 409 `stale_revision` with strong and weak `If-Match`, `draft_not_open`, transitions, idempotent create; transaction proofs: three writers at pool size 4 on one revision have one winner; the gated saturation test for create, `PUT`, transition and promotion |
 | Feed (3) | `draft_events`, the hub, the SSE handler, the purge in the worker, the settings with their defaults | a `subject_id` filtered stream receives only that subject's drafts; a reconnect carrying both the original `?cursor=` and a newer `Last-Event-ID` resumes from `Last-Event-ID`; a revoked key's stream closes at the next heartbeat; a stream receives a `PUT` made on another connection with the right `by`; resume by `Last-Event-ID` and by `cursor` serves each row once; two transactions with the lower position committing last are both served (the ADR 0003 case); a filtered stream advances its cursor; a reader that never reads holds one batch of memory and is closed at its write deadline; `reset` after a purge; the stream ends at token `exp`; shutdown ends open streams |
 | Promotion (4) | the route, the quote kind's in transaction create and update cores, the quote file route | the promoter runs at the draft's branch whatever the committer's `X-Branch-Id`; `subject_stale` added to a subject's `stale_revision` and absent on a stale draft; one transaction: a failing outbox write leaves no quote, no number reuse, the draft unchanged; two promoters racing one draft: one 201, one 409; a `PUT` racing a promotion: exactly one wins; `already_promoted` on a keyless retry, replay on a keyed one; `payload.` paths on a 400; `subject_stale`; events in order (`quote.created`, `draft.promoted`); the `draft.promotion_refused` row after a failure; quote goldens unchanged |
-| Scopes (5) | `ScopeTarget`, `AdmittedScopes`, the census extension with classes, mint validation, the migrate report, the confirm gate, branch bound keys | the class table row by row for a propose, a commit, a read and a write key (a read key refused every draft route); an unlisted shape under `/api/v1/drafts/quotes/` refused for a key; mint refusals naming `scopes[i]`; the agent gate refuses promotion and entity writes on quotes and admits draft writes, with `X-Acting-As: agent` and with another marker value (`X-Acting-As: x`); a keyed request with a marker governed by its scopes alone; a bound key pinned and refused another branch by header, with its audit row; a bound key refused a foreign payload `branch_id` on `POST /api/v1/drafts/quotes` and on `POST /api/v1/quotes`; an unbound user refused a payload branch outside their grants; a `quotes:propose` key on `/api/integration/quotes` answered by the seam's own 401, so a key cannot route around the gate (section 5.6) |
+| Scopes (5) | `ScopeTarget`, `AdmittedScopes`, the census extension with classes, mint validation, the migrate report, the confirm gate, branch bound keys | the class table row by row for a propose, a commit, a read and a write key (a read key refused every draft route); an unlisted shape under `/api/v1/drafts/quotes/` refused for a key; mint refusals naming `scopes[i]`; the agent gate refuses promotion and entity writes on quotes and admits draft writes, with `X-Acting-As: agent` and with another marker value (`X-Acting-As: x`); a keyed request with a marker governed by its scopes alone; a bound key pinned and refused another branch by header, with its audit row; a bound key refused a foreign payload `branch_id` on `POST /api/v1/drafts/quotes` and on `POST /api/v1/quotes`; an unbound user refused a payload branch outside their grants; an
+administrator with no context branch admitted a payload branch outside
+their grants; a draft route with no branch context refused; a `quotes:propose` key on `/api/integration/quotes` answered by the seam's own 401, so a key cannot route around the gate (section 5.6) |
 | Identity (6) | actor columns on drafts and events, the audit actions | each act's audit row with its actor; `proposers` and the committer on the promotion row; outbox data's `proposed_by` and `committed_by` |
 | Numbers and links (7, 8) | number reads on quotes (orders and invoices if not done), the resolver and its registry with the `agent` slot, `links.json`, `link-paths.json` | `GET /quotes/Q-000123`; wrong prefix 400; invisible 404; the resolver for each entity; `links.agent` from the template and `null` without it |
-| Contract | fragments for every new route, `CONTRACT-CHANGES.md` rows (quote reads by number; the quotes kind registered, so agent marked session writes on quotes are refused, one row per kind as each registers; the payload branch rule on `POST /api/v1/quotes`; the scope grammar; `branch_id` on keys; the quote file route), census regenerated | `make contract` green |
-| Desk and web (C5-2b) | `/quotes/drafts`, `/quotes/drafts/:id` registered before `/quotes/:id`, the canonical number URL, the web stream helper, the door's `open` handling, the shell and door test vector rows, `proxy_buffering off` and the read timeout in `web/nginx-local-api.conf` | Playwright: a person edits a draft while an API client acting as an agent edits it, sees the agent's revision arrive, and confirms; a page opened by number writes by UUID; desk, door and shell drift tests against `links.json` and `link-paths.json`; visual review |
+| Contract | fragments for every new route, `CONTRACT-CHANGES.md` rows (quote reads by number; the quotes kind registered, so agent marked session writes on quotes are refused, one row per kind as each registers; the payload branch rule on draft routes (the quote create's row is PR 37's); the scope grammar; `branch_id` on keys; the quote file route), census regenerated | `make contract` green |
+| Desk and web (C5-2b) | `/quotes/drafts`, `/quotes/drafts/:id` registered before `/quotes/:id`, the canonical number URL, the web stream helper, the door's `open` handling, the shell and door test vector rows, `proxy_buffering off` and the read timeout in `web/nginx-local-api.conf` | When the person's quote builder holds the uploaded file (the desk's own parse flow), the Confirm action attaches it with `PUT /api/v1/quotes/{id}/file` right after a successful promotion. Playwright: a person edits a draft while an API client acting as an agent edits it, sees the agent's revision arrive, and confirms; a confirm with an uploaded file attaches it; a page opened by number writes by UUID; desk, door and shell drift tests against `links.json` and `link-paths.json`; visual review |
 
 The cycle 5 exit test lines this item answers:
 
@@ -1055,8 +1077,8 @@ write must have one fingerprint.
 - Each new confirm gated module is a kind implementation and its routes; the
   drafts package, the feed and the scopes do not change.
 - The serve role gains long lived connections: limits, write deadlines and
-  shutdown handling are part of it, and the nginx in front must not buffer
-  `text/event-stream` responses.
+  shutdown handling are part of it, and no proxy or ingress in front may
+  buffer `text/event-stream` responses.
 
 ## Known limits
 
@@ -1064,8 +1086,10 @@ write must have one fingerprint.
   token that omits the marker is that person to the server. Narrowed by a
   delegated token carrying the agent's identity inside the person's
   (an `act` claim from the bridge), at the cutover's identity work.
-- **A revoked key keeps an open stream** until `DRAFT_FEED_MAX_LIFETIME`
-  ends it (3.3); its writes are refused at once.
+- **A revoked key reads for up to one heartbeat** (3.3, 15s by default);
+  its writes are refused at once. A session's stream lasts until its
+  token's `exp` or `DRAFT_FEED_MAX_LIFETIME`, whichever is first, even if
+  the user is disabled meanwhile.
 - **Cross replica feed latency is the poll interval** (3.4), until a NOTIFY
   wake source is added behind the hub.
 - **Open drafts never expire.** An abandoned proposal stays `open` until
