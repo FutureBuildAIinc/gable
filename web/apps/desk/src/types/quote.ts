@@ -19,6 +19,7 @@ export type QuoteDeliveryType = Schemas['QuoteDeliveryType'];
 export type QuoteExposureStatus = Schemas['QuoteExposureStatus'];
 export type QuoteRequest = Schemas['QuoteRequest'];
 export type QuoteLineRequest = Schemas['QuoteLineRequest'];
+export type QuoteUom = Schemas['QuoteUom'];
 export type QuoteTransitionRequest = Schemas['QuoteTransitionRequest'];
 export type QuotePage = Schemas['QuotePage'];
 export type QuoteAnalytics = Schemas['QuoteAnalytics'];
@@ -46,3 +47,14 @@ export interface ParseMapItem {
         base_price: number;
     }[];
 }
+
+/**
+ * Every unit code the quote wire accepts, in the order a picker shows them.
+ * The Record keys must match the contract's QuoteUom exactly, so a unit the
+ * contract adds or drops fails the type check here until this list follows.
+ */
+const UOM_CODE_SET: Record<QuoteUom, true> = {
+    PCS: true, EA: true, LF: true, SF: true, BF: true, MBF: true, SQ: true, BOX: true,
+    CTN: true, RL: true, GAL: true, LBS: true, BAG: true, BUNDLE: true, PAIR: true, SET: true,
+};
+export const QUOTE_UOM_CODES = Object.keys(UOM_CODE_SET) as QuoteUom[];

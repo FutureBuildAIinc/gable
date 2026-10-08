@@ -87,6 +87,66 @@ test.describe('Quote flow on the new contract', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-accepted.png') });
   });
 
+  test('a line with no unit gets a select of the unit codes that stays while the server complains', async ({ page, request }) => {
+    const { customer, product } = await firstCustomerAndProduct(request);
+    // The catalogue answers one product with no primary unit, so the builder
+    // meets the empty-unit state the select exists for.
+    await page.route('**/api/v1/products', async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      const list = Array.isArray(body) ? body : body.data;
+      for (const p of list) if (p.id === product.id) p.uom_primary = '';
+      await route.fulfill({ response: res, json: body });
+    });
+    await signIn(page, 'Playwright Unit Select');
+
+    await page.goto('/quotes/new');
+    await page.getByPlaceholder('Select Customer...').click();
+    await page.getByText(customer.name, { exact: true }).first().click();
+    await page.getByPlaceholder('Search SKU or Desc...').fill(product.sku);
+    await page.locator('div.cursor-pointer', { hasText: product.sku }).first().click();
+    await page.locator('gable-line-item-editor input[type="number"]').first().fill('3');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+
+    // Empty unit: a select of the 16 codes, not a free text box.
+    const select = page.getByLabel('Unit of measure');
+    await expect(select).toBeVisible();
+    expect(await select.evaluate((el) => el.tagName)).toBe('SELECT');
+    expect(await select.locator('option').count()).toBe(17); // 16 codes and the prompt
+    await expect(page.getByText('Unit of measure required')).toBeVisible();
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-unit-select.png') });
+
+    // Picking a unit does not strand the line: the server answers once with a
+    // field error, and the select is still there to change the unit again.
+    await select.selectOption('BOX');
+    let refused = false;
+    await page.route('**/api/v1/quotes', async (route) => {
+      if (route.request().method() === 'POST' && !refused) {
+        refused = true;
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          json: {
+            error: { code: 'validation_failed', message: 'one or more fields failed validation', details: [{ field: 'lines[0].uom', message: 'must be one of the listed units' }] },
+            meta: { request_id: 'req-e2e-uom' },
+          },
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await expect(page.getByText(/uom: must be one of/)).toBeVisible();
+    await expect(select).toBeVisible();
+    await select.selectOption('PCS');
+
+    const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
+    await page.getByRole('button', { name: 'Create Quote' }).click();
+    const res = await created;
+    expect(res.status(), await res.text()).toBe(201);
+    expect(res.request().postDataJSON().lines[0].uom).toBe('PCS');
+  });
+
   test('the list filters by status on the server and pages by cursor', async ({ page, request }) => {
     const { customer, product } = await firstCustomerAndProduct(request);
     for (let i = 0; i < 3; i++) {

@@ -12,6 +12,7 @@ import { CustomerService } from '../services/CustomerService.ts';
 import { deliveryService } from '../services/deliveryService.ts';
 import type { Customer } from '../types/customer.ts';
 import type { Product } from '../types/product.ts';
+import { QUOTE_UOM_CODES } from '../types/quote.ts';
 import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
 import { formatCents, formatPrice4 } from '../lib/utils.ts';
 import {
@@ -655,16 +656,17 @@ export class GableQuoteBuilder extends LitElement {
                                                     </td>
                                                     <td class="px-6 py-4 text-right font-mono text-zinc-300 align-top">
                                                         ${line.quantity} <span class="text-zinc-600 text-[10px] ml-1">${line.uom}</span>
-                                                        ${line.uom === '' ? html`
-                                                            <input
-                                                                type="text"
+                                                        ${line.uom === '' || this.lineErrors[idx] ? html`
+                                                            <select
                                                                 aria-label="Unit of measure"
-                                                                placeholder="UOM"
-                                                                class="mt-1 w-20 bg-[#0A0B10] border border-rose-500/40 rounded px-2 py-1 text-white text-right font-mono text-xs outline-none"
+                                                                class="mt-1 w-24 bg-[#0A0B10] border border-rose-500/40 rounded px-2 py-1 text-white text-right font-mono text-xs outline-none"
                                                                 .value=${line.uom}
-                                                                @input=${(e: InputEvent) => this.handleUomInput(idx, (e.target as HTMLInputElement).value)}
-                                                            />
-                                                            <div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>
+                                                                @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}
+                                                            >
+                                                                <option value="" ?selected=${line.uom === ''}>Unit...</option>
+                                                                ${QUOTE_UOM_CODES.map(code => html`<option value=${code} ?selected=${line.uom === code}>${code}</option>`)}
+                                                            </select>
+                                                            ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>` : nothing}
                                                         ` : nothing}
                                                         ${this.lineErrors[idx] ? html`<div class="text-[10px] text-rose-400 mt-1">${this.lineErrors[idx]}</div>` : nothing}
                                                     </td>
