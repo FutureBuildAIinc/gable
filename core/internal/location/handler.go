@@ -26,15 +26,20 @@ type Handler struct {
 // nil; the handler will fall back to plain authenticated access in that case
 // (useful for legacy callers and tests).
 // LocationGuard applies the payload branch rule (ADR 0007 section 2.3) to a
-// location id a body names. *middleware.BranchGuard satisfies it.
+// location or branch a request names, in the body or behind a path id.
+// *middleware.BranchGuard satisfies it.
 type LocationGuard interface {
 	CheckPayloadLocation(ctx context.Context, locationID uuid.UUID) error
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
 }
 
-// WithBranchWall puts the branch wall on POST /api/v1/locations: the route runs
-// behind branchMw (after the role guard), a parent_id must sit in a branch the
-// caller may target, and a BRANCH may be created by an administrator or owner
-// only. Without it the create is unscoped, so serve always sets it.
+// WithBranchWall puts the branch wall on the routes that reach across a
+// branch's tree (ADR 0007 section 2.3): POST /api/v1/locations and the two
+// by-id reads, GET /api/v1/locations/{id} and GET /api/v1/branches/{id}/tree,
+// run behind branchMw after their role guard; a parent_id must sit in a
+// branch the caller may target; a read of a location or tree the caller may
+// not target is a 403; and a BRANCH may be created by an administrator or
+// owner only. Without it nothing is branch scoped, so serve always sets it.
 func (h *Handler) WithBranchWall(g LocationGuard, branchMw func(http.Handler) http.Handler) *Handler {
 	h.guard, h.branchMw = g, branchMw
 	return h
@@ -76,12 +81,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	// Legacy / shared location endpoints.
 	create := http.HandlerFunc(h.CreateLocation)
+	read := http.HandlerFunc(h.GetLocation)
 	if h.branchMw != nil {
 		create = h.branchMw(create).ServeHTTP
+		read = h.branchMw(read).ServeHTTP
 	}
 	mux.HandleFunc("POST /api/v1/locations", guard(create))
 	mux.HandleFunc("GET /api/v1/locations", guard(h.ListLocations))
-	mux.HandleFunc("GET /api/v1/locations/{id}", guard(h.GetLocation))
+	mux.HandleFunc("GET /api/v1/locations/{id}", guard(read))
 	mux.HandleFunc("PUT /api/v1/locations/{id}", adminGuard(h.UpdateLocation))
 	mux.HandleFunc("DELETE /api/v1/locations/{id}", adminGuard(h.DeleteLocation))
 
@@ -91,7 +98,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/branches/{id}", guard(h.GetBranch))
 	mux.HandleFunc("PUT /api/v1/branches/{id}", adminGuard(h.UpdateBranch))
 	mux.HandleFunc("DELETE /api/v1/branches/{id}", adminGuard(h.DeleteBranch))
-	mux.HandleFunc("GET /api/v1/branches/{id}/tree", guard(h.GetBranchTree))
+	tree := http.HandlerFunc(h.GetBranchTree)
+	if h.branchMw != nil {
+		tree = h.branchMw(tree).ServeHTTP
+	}
+	mux.HandleFunc("GET /api/v1/branches/{id}/tree", guard(tree))
 
 	// User-branch grants.
 	if h.userRepo != nil {
@@ -169,6 +180,21 @@ func (h *Handler) GetLocation(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
 		return
+	}
+	// The record branch rule (ADR 0007 section 2.3): a location of a branch
+	// the caller may not target is a 403, in the legacy error shape these
+	// unconverted routes carry. A location that does not exist belongs to no
+	// branch and passes; the service answers for it.
+	if h.guard != nil {
+		err := h.guard.CheckPayloadLocation(r.Context(), id)
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httputil.RespondError(w, r, "location is in a branch this caller may not target", http.StatusForbidden, err)
+			return
+		}
+		if err != nil {
+			httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+			return
+		}
 	}
 	loc, err := h.service.GetLocation(r.Context(), id)
 	if err != nil {
@@ -287,6 +313,20 @@ func (h *Handler) GetBranchTree(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
 		return
+	}
+	// The record branch rule (ADR 0007 section 2.3): the path id is the
+	// branch itself, so a tree the caller may not target is a 403, in the
+	// legacy error shape these unconverted routes carry.
+	if h.guard != nil {
+		err := h.guard.CheckPayloadBranch(r.Context(), id)
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httputil.RespondError(w, r, "branch is outside the branches this caller may target", http.StatusForbidden, err)
+			return
+		}
+		if err != nil {
+			httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+			return
+		}
 	}
 	tree, err := h.service.GetBranchTree(r.Context(), id)
 	if err != nil {
