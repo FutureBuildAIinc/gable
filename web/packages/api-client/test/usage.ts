@@ -74,6 +74,14 @@ async function _happy() {
   // price, the stock totals as decimal strings, the price read's pair and
   // lowercase basis, and a location edit at its revision.
   const products = await client.get("/api/v1/products", { query: { limit: 20, include: "total" } });
+  const kit = await client.get("/api/v1/products/{id}/kit-components", { path: { id: products.body.items[0]?.id ?? "x" } });
+  const kitRevision: number = kit.body.revision;
+  const replacedKit = await client.put(
+    "/api/v1/products/{id}/kit-components",
+    { revision: kitRevision, components: [{ component_product_id: kit.body.kit_product_id, quantity: "2" }] },
+    { path: { id: kit.body.kit_product_id } },
+  );
+  const replacedRevision: number = replacedKit.body.revision;
   const stockUom: string | undefined = products.body.items[0]?.stock_uom;
   const basePrice: number | undefined = products.body.items[0]?.base_price_ten_thousandths;
   const available: string | undefined = products.body.items[0]?.available;
@@ -129,6 +137,9 @@ async function _wrong() {
 
   // @ts-expect-error the product list is cursor paged: no offset
   await client.get("/api/v1/products", { query: { offset: 10 } });
+
+  // @ts-expect-error a component quantity is a decimal string, never a number
+  await client.put("/api/v1/products/{id}/kit-components", { components: [{ component_product_id: "x", quantity: 2 }] }, { path: { id: "x" } });
 
   // @ts-expect-error a product is created in a stocking unit (stock_uom), not uom_primary
   await client.post("/api/v1/products", { sku: "A", description: "d", uom_primary: "PCS" });
