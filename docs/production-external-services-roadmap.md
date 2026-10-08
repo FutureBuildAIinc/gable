@@ -3,8 +3,8 @@
 **Status:** Planning / decision-capture (no code — forward-looking)
 **Applies to:** a future, more production-oriented **managed core repo**, separate from
 this open commons repo
-**What this builds on:** the as-built open implementation — `backend/internal/ai/openrouter.go`
-(one OpenAI-compatible client) and `backend/internal/delivery/ors.go` (OpenRouteService),
+**What this builds on:** the as-built open implementation — `core/internal/ai/openrouter.go`
+(one OpenAI-compatible client) and `core/internal/delivery/ors.go` (OpenRouteService),
 both keyed at runtime via `system_settings`. Summarised in `CLAUDE.md` §
 "External services are OSS-migrated"; module boundaries in
 [`architecture.md`](./architecture.md).

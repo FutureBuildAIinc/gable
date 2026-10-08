@@ -57,7 +57,7 @@ pg-shell:
 # Apply SQL migrations in order. Honors DATABASE_URL if set; otherwise the
 # migrator falls back to its built-in dev default (localhost:5434).
 migrate:
-	cd backend && go run ./cmd/migrate
+	cd core && go run ./cmd/migrate
 
 # Populate the database with Kelowna / Gable Lumber & Supply demo data.
 #
@@ -73,9 +73,9 @@ migrate:
 # RESTART IDENTITY CASCADE before it writes, so an accidental run against a
 # database you care about destroys data. Reference data (products, customers,
 # vendors, locations, chart of accounts) upserts on natural keys and is safe to
-# re-run. See the gate and its reasoning in backend/cmd/seed/main.go.
+# re-run. See the gate and its reasoning in core/cmd/seed/main.go.
 seed:
-	cd backend && go run ./cmd/seed
+	cd core && go run ./cmd/seed
 
 # Nuke + repave the dev database, then migrate and seed. Requires the
 # `gable_postgres` container from docker compose to be running.
@@ -89,47 +89,47 @@ reset-db:
 # Backend gates (the `backend` job in ci.yml)
 # ---------------------------------------------------------------------------
 build:
-	cd backend && go build ./...
+	cd core && go build ./...
 
 vet:
-	cd backend && go vet ./...
+	cd core && go vet ./...
 
 # The full suite, exactly as CI runs it. Needs Postgres — `make up && make
 # migrate` first, or point DATABASE_URL at your own instance.
 test:
-	cd backend && go test -race ./...
+	cd core && go test -race ./...
 
 # The no-Postgres path. Tests that need a live database skip themselves under
 # -short, so this is what to run when you have not booted docker compose.
 test-short:
-	cd backend && go test -short ./...
+	cd core && go test -short ./...
 
 # Coverage, same invocation as CI. Reporting only — there is no threshold.
 cover:
-	cd backend && go test -race -coverprofile=coverage.out -covermode=atomic ./...
-	cd backend && go tool cover -func=coverage.out | tail -n 1
-	@echo "HTML report: cd backend && go tool cover -html=coverage.out"
+	cd core && go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	cd core && go tool cover -func=coverage.out | tail -n 1
+	@echo "HTML report: cd core && go tool cover -html=coverage.out"
 
 # ---------------------------------------------------------------------------
 # Frontend gates (the `frontend` job in ci.yml)
 # ---------------------------------------------------------------------------
 fe-install:
-	cd app && npm ci
+	cd web/apps/desk && npm ci
 
 fe-typecheck:
-	cd app && npx tsc --noEmit
+	cd web/apps/desk && npx tsc --noEmit
 
 fe-lint:
-	cd app && npm run lint
+	cd web/apps/desk && npm run lint
 
 fe-test:
-	cd app && npm run test -- --run
+	cd web/apps/desk && npm run test -- --run
 
 fe-cover:
-	cd app && npm run test:coverage
+	cd web/apps/desk && npm run test:coverage
 
 fe-build:
-	cd app && npm run build
+	cd web/apps/desk && npm run build
 
 # ---------------------------------------------------------------------------
 # Licensing gate (the `license` job in ci.yml)
@@ -145,7 +145,7 @@ license-check:
 # ---------------------------------------------------------------------------
 vuln:
 	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
-	cd backend && govulncheck ./...
+	cd core && govulncheck ./...
 
 # ---------------------------------------------------------------------------
 # Aggregates

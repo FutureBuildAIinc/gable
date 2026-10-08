@@ -9,4 +9,4 @@ Use the **licensing-check** skill.
 
 Question: $ARGUMENTS
 
-If it is a path, give the exact SPDX identifier and the header to paste, checking the file header, REUSE.toml, and LICENSE-MAP.md in that order. Remember: most specific path wins — `backend/pkg/apps/` is Connector, not Commons. If it is a "may we use this" question, explain the model in plain language and then point at the canonical Standard and counsel.
+If it is a path, give the exact SPDX identifier and the header to paste, checking the file header, REUSE.toml, and LICENSE-MAP.md in that order. Remember: most specific path wins — `core/pkg/apps/` is Connector, not Commons. If it is a "may we use this" question, explain the model in plain language and then point at the canonical Standard and counsel.

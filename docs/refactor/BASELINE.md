@@ -67,7 +67,7 @@ govulncheck result below; everything else builds, vets and tests identically.
 | Install dependencies | `npm ci` | pass |
 | Type check | `npx tsc --noEmit` | pass |
 | Lint | `npm run lint` | pass |
-| Test (with coverage) | `npm run test:coverage` | pass; `app/package.json` has the `test:coverage` script, so this is the branch the CI test step takes |
+| Test (with coverage) | `npm run test:coverage` | pass; `web/apps/desk/package.json` has the `test:coverage` script, so this is the branch the CI test step takes |
 | Build | `npm run build` | pass |
 
 ### License job
@@ -81,8 +81,8 @@ govulncheck result below; everything else builds, vets and tests identically.
 
 | CI step | Command | Result |
 |---|---|---|
-| Build backend image | `docker build -f backend/Dockerfile .` | pass |
-| Build frontend image | `docker build -f app/Dockerfile .` | pass |
+| Build backend image | `docker build -f core/Dockerfile .` | pass |
+| Build frontend image | `docker build -f web/apps/desk/Dockerfile .` | pass |
 
 ### Vulnerabilities job (advisory; not a merge gate)
 
@@ -90,6 +90,7 @@ govulncheck result below; everything else builds, vets and tests identically.
 |---|---|
 | `govulncheck v1.1.4 ./...` | tool crash: `panic: unexpected expr: *ast.KeyValueExpr`. The CI-pinned scanner does not parse under local Go 1.27.1 (CI runs it under Go 1.25). A scanner and toolchain incompatibility, not a repository finding |
 | `govulncheck v1.8.0 ./...` (newer scanner, informational) | exit 3: one called vulnerability, `GO-2026-6629` in `golang.org/x/text` v0.39.0 (fixed in v0.41.0); one imported and four required vulnerabilities are not called by this module's code. Advisory in CI either way |
+| `govulncheck v1.8.0 ./...` after the bump (item R1-deps-xtext) | exit 0: the finding `GO-2026-6629` is cleared by this item, which raises `golang.org/x/text` to v0.41.0; the one imported and four required findings are unchanged and still not called |
 
 ## Counts at the base
 

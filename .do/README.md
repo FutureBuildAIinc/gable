@@ -26,10 +26,10 @@ environments can share one cluster without stepping on each other.
 ```
 git push -> DO App Platform pulls branch
             |
-            |- builds backend/Dockerfile  -> main + migrate + seed binaries
+            |- builds core/Dockerfile  -> main + migrate + seed binaries
             |                                 (alpine, port 8080)
             |
-            |- builds app/Dockerfile      -> nginx + Vite SPA bundle
+            |- builds web/apps/desk/Dockerfile      -> nginx + Vite SPA bundle
             |                                 (VITE_API_URL baked at build time)
             |
             |- deploys backend + frontend services
@@ -39,7 +39,7 @@ git push -> DO App Platform pulls branch
 ```
 
 The same Docker image used for the backend service is reused for the post-deploy
-migrate-and-seed job — that's why `backend/Dockerfile` builds three binaries
+migrate-and-seed job — that's why `core/Dockerfile` builds three binaries
 (`main`, `migrate`, `seed`) into the runtime image. The job entrypoint is
 overridden via `run_command`.
 

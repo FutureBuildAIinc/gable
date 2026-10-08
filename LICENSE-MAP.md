@@ -8,21 +8,22 @@ carries a matching `SPDX-License-Identifier` header, and
 
 | Path prefix | SPDX license identifier | License text |
 |---|---|---|
-| `backend/internal/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
-| `backend/pkg/` *(except `backend/pkg/apps/`)* | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
-| `backend/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
-| `backend/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
-| `backend/pkg/apps/` | `LicenseRef-OpenLBM-Connector-1.0` | [LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt](LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt) |
-| `app/` | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
+| `core/internal/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
+| `core/api/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
+| `core/pkg/` *(except `core/pkg/apps/`)* | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
+| `core/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
+| `core/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
+| `core/pkg/apps/` | `LicenseRef-OpenLBM-Connector-1.0` | [LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt](LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt) |
+| `web/apps/desk/` | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
 | `docs/` | `LicenseRef-OpenLBM-Docs-1.0` | [LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt](LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt) |
 
 ## Precedence
 
-`backend/pkg/apps/` — the installable-apps **connector seam** — is carved out
-of the `backend/pkg/` Commons default and licensed under the more permissive
+`core/pkg/apps/` — the installable-apps **connector seam** — is carved out
+of the `core/pkg/` Commons default and licensed under the more permissive
 **Connector** license so third parties can plug into the commons without
 copyleft crossing the boundary. The most specific path wins: a file under
-`backend/pkg/apps/` is Connector-licensed; anything else under `backend/pkg/`
+`core/pkg/apps/` is Connector-licensed; anything else under `core/pkg/`
 is Commons-licensed.
 
 ## Also in `LICENSES/`
