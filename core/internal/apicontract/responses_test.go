@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/routecensus"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // TestOperationsCarryDeclaredResponses pins what the conformance pass reads
@@ -60,5 +61,37 @@ func TestOperationsCarryDeclaredResponses(t *testing.T) {
 
 	if spec.Document() == nil {
 		t.Fatal("the spec must keep the whole document for $ref resolution")
+	}
+}
+
+// TestPlaceholderExcusesOnlyStringTypedFields pins the placeholder excuse: a
+// normaliser placeholder is a string, so it stands in only for a field whose
+// declared type admits a string. An integer field holding a placeholder is a
+// fragment bug and must fail.
+func TestPlaceholderExcusesOnlyStringTypedFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		schema  map[string]any
+		wantErr bool
+		value   string
+	}{
+		{"string field with enum", map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "enum": []any{"a"}}}}, false, "<id-3>"},
+		{"string or null field", map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": []any{"string", "null"}, "enum": []any{"a", nil}}}}, false, "<id-3>"},
+		{"integer field", map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "integer"}}}, true, "<id-3>"},
+		{"number field", map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "number"}}}, true, "<id-3>"},
+		{"number field holding a numeric class placeholder", map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "number"}}}, false, "<days>"},
+		{"boolean field", map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "boolean"}}}, true, "<id-3>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			compiler := jsonschema.NewCompiler()
+			errs := validateBody(compiler, map[string]bool{}, tc.schema, map[string]any{"id": tc.value}, "op", "200", "application/json")
+			if tc.wantErr && len(errs) == 0 {
+				t.Fatal("a placeholder in a field whose declared type excludes strings must fail")
+			}
+			if !tc.wantErr && len(errs) != 0 {
+				t.Fatalf("a placeholder in a string typed field must be excused, got %v", errs)
+			}
+		})
 	}
 }

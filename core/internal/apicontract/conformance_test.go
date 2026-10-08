@@ -54,7 +54,9 @@ import (
 // placeholders (<id-3>, <ts+30d>, <day-2>, <days>, <customer>, <ms>, ...).
 // A placeholder stands in a field whose real value is of that field's type,
 // so a validation error located exactly at a placeholder leaf is excused
-// (every keyword: the placeholder carries no information beyond presence).
+// (every keyword: the placeholder carries no information beyond presence),
+// except a type error whose wanted types exclude string: a placeholder is a
+// string, so an integer or boolean field holding one is a fragment bug.
 // Errors anywhere else are real: a wrong type, a missing required field or
 // an undeclared enum value outside a placeholder is a fragment bug.
 //
@@ -259,7 +261,7 @@ func validateBody(compiler *jsonschema.Compiler, compiled map[string]bool, schem
 	if !ok {
 		return []string{fmt.Sprintf("body does not validate: %v", err)}
 	}
-	tokens := map[string]bool{}
+	tokens := map[string]string{}
 	collectPlaceholders(instance, nil, tokens)
 	var real []string
 	var walk func(e *jsonschema.ValidationError)
@@ -280,7 +282,22 @@ func validateBody(compiler *jsonschema.Compiler, compiled map[string]bool, schem
 			}
 			return
 		}
-		if !tokens[strings.Join(e.InstanceLocation, "\x00")] {
+		// A string class placeholder excuses an error only where the
+		// declared type admits a string: a type error whose wanted types
+		// exclude "string" (an integer field holding <id-3>) is real. The
+		// numeric class placeholders (<ms>, <poolstat>, <days>) replace a
+		// number, so they excuse a type error only where a number is wanted.
+		ph, onPlaceholder := tokens[strings.Join(e.InstanceLocation, "\x00")]
+		excused := onPlaceholder
+		if te, isType := e.ErrorKind.(*kind.Type); isType && onPlaceholder {
+			excused = false
+			for _, w := range te.Want {
+				if numericPlaceholders[ph] && (w == "integer" || w == "number") || !numericPlaceholders[ph] && w == "string" {
+					excused = true
+				}
+			}
+		}
+		if !excused {
 			real = append(real, fmt.Sprintf("at %s: %v", joinJSONPointer(e.InstanceLocation), e.ErrorKind))
 		}
 	}
@@ -384,9 +401,15 @@ func matchMediaType(declared []string, recorded string) string {
 // day offset with or without the trailing d (docs/refactor/GOLDENS.md).
 var placeholderRe = regexp.MustCompile(`^<[a-z][a-z0-9-]*>([+-][0-9]+d?)?$`)
 
-// collectPlaceholders records, as NUL joined paths, every leaf of the
-// instance whose value is exactly a normaliser placeholder.
-func collectPlaceholders(v any, path []string, into map[string]bool) {
+// numericPlaceholders are the normaliser's placeholders for volatile numeric
+// fields (volatileNumberFields in the characterisation harness): they stand
+// where a number was recorded, every other placeholder where a string was.
+var numericPlaceholders = map[string]bool{"<ms>": true, "<poolstat>": true, "<days>": true}
+
+// collectPlaceholders records, as NUL joined paths mapped to the placeholder
+// text, every leaf of the instance whose value is exactly a normaliser
+// placeholder.
+func collectPlaceholders(v any, path []string, into map[string]string) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {
@@ -398,7 +421,7 @@ func collectPlaceholders(v any, path []string, into map[string]bool) {
 		}
 	case string:
 		if placeholderRe.MatchString(t) {
-			into[strings.Join(path, "\x00")] = true
+			into[strings.Join(path, "\x00")] = t
 		}
 	}
 }
