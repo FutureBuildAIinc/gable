@@ -277,6 +277,35 @@ func TestExplode(t *testing.T) {
 	}
 }
 
+// RULE (review P3-17): a component's quantity is rounded to scale 4 once,
+// half away from zero, so a 0.3333 kit of a 0.3333 component stores 0.1111
+// (the exact product is 0.11108889). ADR 0005 2.6 is silent on a kit that
+// does not land on scale 4; the rounding is the stated behaviour.
+func TestExplodeRoundsAComponentQuantityToScale4(t *testing.T) {
+	kit, comp := uuid.New(), uuid.New()
+	refs := map[string]ProductRef{
+		kit.String():  {ID: kit, SKU: "KIT-1", Description: "a kit", UOMPrimary: "EA", IsKit: true},
+		comp.String(): {ID: comp, SKU: "C-1", Description: "a component", UOMPrimary: "PCS"},
+	}
+	kits := map[string][]KitComponent{
+		kit.String(): {{KitProductID: kit, ComponentProductID: comp, Quantity: mustQ(t, "0.3333")}},
+	}
+	qty, uq, pq := mustQ(t, "0.3333"), One, One
+	price := httpx.Price(50000)
+	ea := "EA"
+	out, err := Explode([]Line{{
+		ID: uuid.New(), LineType: LineProduct, ProductID: &kit, Description: "a kit",
+		Quantity: &qty, UOM: &ea, PriceUOM: &ea, UOMQty: &uq, PriceUOMQty: &pq,
+		UnitPrice: &price, PriceSource: PriceSourceList, Taxable: true,
+	}}, kits, refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out[1].Quantity.WireString(); got != "0.1111" {
+		t.Errorf("component quantity = %s, want 0.1111", got)
+	}
+}
+
 // RULE (ADR 0005 3): totals sum the non text lines, the taxable base, and the
 // tax is rounded once from the rate; the resolver walks exemption, ship-to
 // rate, branch rate, refusal; zero is a configured rate.

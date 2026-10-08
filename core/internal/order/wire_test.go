@@ -1092,3 +1092,42 @@ func TestOrderCreateRefusesAQuoteID(t *testing.T) {
 		t.Errorf("%d orders written by the refused create (%v)", n, err)
 	}
 }
+
+// RULE (review P3-9): a discount 400 names the line the REQUEST sent, not
+// the post-explosion position: a kit that precedes the line adds component
+// lines in front of it.
+func TestOrderDiscountErrorNamesTheRequestLine(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	ctx := context.Background()
+	kit, comp := uuid.New(), uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price, is_kit, taxable)
+		VALUES ($1, $2, 'A fence section kit', 'EA', 100.00, TRUE, TRUE)`, kit, "WIRE-KIT-"+uuid.NewString()[:6]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
+		VALUES ($1, $2, 'A fence post', 'EA', 12.50)`, comp, "WIRE-POST-"+uuid.NewString()[:6]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO product_kit_components (kit_product_id, component_product_id, quantity, position)
+		VALUES ($1, $2, 4, 0)`, kit, comp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_kit_components WHERE kit_product_id = $1`, kit)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id IN ($1, $2)`, kit, comp)
+	})
+	r := f.do("POST", "/api/v1/orders", map[string]any{
+		"customer_id": f.customerID.String(), "delivery_type": "pickup",
+		"lines": []map[string]any{
+			{"product_id": kit.String(), "quantity": "1"},
+			{"product_id": f.productID.String(), "quantity": "1", "discount_cents": 99999, "discount_reason": "too much"},
+		},
+	})
+	if r.status != 400 {
+		t.Fatalf("create = %d: %s", r.status, r.raw)
+	}
+	if _, _, details := errorOf(t, r); len(details) == 0 || details[0]["field"] != "lines[1].discount_cents" {
+		t.Errorf("details = %v, want lines[1].discount_cents (the request's index, not the exploded position 2)", details)
+	}
+}

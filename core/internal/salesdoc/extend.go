@@ -104,7 +104,9 @@ func Explode(lines []Line, kits map[string][]KitComponent, refs map[string]Produ
 			}
 			// The component's quantity is the kit's quantity times the kit's
 			// per kit quantity, at the shared scale 4, rounded once, half
-			// away from zero.
+			// away from zero. ADR 0005 2.6 is silent on a product that does
+			// not land on scale 4: a 0.3333 kit of a 0.3333 component stores
+			// 0.1111, not the exact 0.11108889. The rounding is deliberate.
 			n := new(big.Int).Mul(big.NewInt(int64(derefQty(line.Quantity))), big.NewInt(int64(comp.Quantity)))
 			div := big.NewInt(int64(One))
 			var mag big.Int

@@ -436,13 +436,23 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 	}
 	// Extend every line once; an amount discount past the extension names its
 	// line.
+	// The error names the line the REQUEST sent: a kit before it adds
+	// component lines in front, so the exploded position is not the index.
+	requestIndex := make(map[uuid.UUID]int, len(lines))
+	for i := range lines {
+		requestIndex[lines[i].ID] = i
+	}
 	for i := range outLines {
 		if err := salesdoc.ExtendLine(&outLines[i].Line); err != nil {
 			var he *httpx.Error
 			if errors.As(err, &he) {
+				at, ok := requestIndex[outLines[i].ID]
+				if !ok {
+					at = i
+				}
 				for j := range he.Details {
 					if he.Details[j].Field == "lines.discount_cents" {
-						he.Details[j].Field = fmt.Sprintf("lines[%d].discount_cents", i)
+						he.Details[j].Field = fmt.Sprintf("lines[%d].discount_cents", at)
 					}
 				}
 			}
