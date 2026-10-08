@@ -183,6 +183,8 @@ func (e parseError) Error() string { return string(e) }
 const (
 	errNotADecimal    parseError = "not a plain decimal number"
 	errBeyondScale    parseError = "carries precision beyond the fixed scale"
+	errNotCanonical   parseError = "not the canonical decimal form (no leading zeros, no negative zero)"
+	errQuantityBound  parseError = "beyond what a NUMERIC(12,4) column holds"
 	errOverflow       parseError = "beyond the range of a 64-bit integer at this scale"
 	errZeroConversion parseError = "the conversion pair has a zero side"
 	errNullIsNotZero  parseError = "the field is required and null is not zero; a field documented optional is the pointer type"

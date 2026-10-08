@@ -47,6 +47,91 @@ func TestParseQuantity(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0001 §7a): one canonical spelling on the wire, the same
+// posture as limit. Leading zeros and negative zero are refused; trailing
+// fraction zeros are the column's own padding and stay accepted, because
+// the same parser reads what the database sends back.
+func TestParseQuantityCanonicalForm(t *testing.T) {
+	for _, in := range []string{
+		"00012",  // a leading zero run
+		"0012.5", // the same, with a fraction
+		"00",     // all zeros with a run of them
+		"-0",     // negative zero
+		"-0.0000",
+		"+1", // a sign the form does not carry
+	} {
+		if _, err := ParseQuantity(in); err == nil {
+			t.Errorf("ParseQuantity(%q) succeeded, want a refusal", in)
+		}
+	}
+	for _, in := range []string{"0", "0.5", "-0.5", "12.5000", "0.0000"} {
+		if _, err := ParseQuantity(in); err != nil {
+			t.Errorf("ParseQuantity(%q): %v", in, err)
+		}
+	}
+}
+
+// RULE: a magnitude the NUMERIC(12,4) column cannot hold is refused at the
+// parse boundary (a 400 through the validator), not stored as a database
+// fault later. The bound is the column's own: 99999999.9999 either way.
+func TestParseQuantityBound(t *testing.T) {
+	if q, err := ParseQuantity("99999999.9999"); err != nil || q != QuantityMax {
+		t.Errorf(`ParseQuantity("99999999.9999") = %d, %v; want QuantityMax`, q, err)
+	}
+	if q, err := ParseQuantity("-99999999.9999"); err != nil || q != -QuantityMax {
+		t.Errorf(`ParseQuantity("-99999999.9999") = %d, %v; want -QuantityMax`, q, err)
+	}
+	for _, in := range []string{
+		"100000000", // one past the column's digits
+		"-100000000",
+		"100000000.0000",
+		strings.Repeat("9", 20),
+	} {
+		if _, err := ParseQuantity(in); err == nil {
+			t.Errorf("ParseQuantity(%q) succeeded, want a refusal past the column bound", in)
+		}
+	}
+}
+
+// RULE (ADR 0001 §7a): signs carry one meaning. A quantity is negative only
+// on a return or credit line; a unit price is never negative. Converting
+// modules enforce it from their validators through this helper, and both
+// offences on one line land in one collected 400.
+func TestCheckLineSign(t *testing.T) {
+	if err := CheckLineSign(Quantity(10000), Price(15000), false); err != nil {
+		t.Errorf("an ordinary line refused: %v", err)
+	}
+	if err := CheckLineSign(Quantity(-10000), Price(15000), true); err != nil {
+		t.Errorf("a credit line's negative quantity refused: %v", err)
+	}
+	if err := CheckLineSign(Quantity(0), Price(0), false); err != nil {
+		t.Errorf("zeros refused: %v", err)
+	}
+
+	signErr := func(t *testing.T, err error, wantFields ...string) {
+		t.Helper()
+		e, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("err is %T, want *Error", err)
+		}
+		if e.Status != 400 || e.Code != CodeValidationFailed {
+			t.Errorf("status/code = %d/%q, want 400 validation_failed", e.Status, e.Code)
+		}
+		if len(e.Details) != len(wantFields) {
+			t.Fatalf("details = %+v, want the fields %v", e.Details, wantFields)
+		}
+		for i, field := range wantFields {
+			if e.Details[i].Field != field {
+				t.Errorf("details[%d].Field = %q, want %q", i, e.Details[i].Field, field)
+			}
+		}
+	}
+	signErr(t, CheckLineSign(Quantity(-10000), Price(15000), false), "quantity")
+	signErr(t, CheckLineSign(Quantity(10000), Price(-15000), false), "unit_price_ten_thousandths")
+	signErr(t, CheckLineSign(Quantity(-10000), Price(-15000), false),
+		"quantity", "unit_price_ten_thousandths")
+}
+
 // RULE: the database form is the fixed four-digit decimal the NUMERIC(12,4)
 // column takes, exactly like the price.
 func TestQuantityDecimalString(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/big"
+	"net/http"
 	"strconv"
 	"strings"
 )
@@ -17,21 +18,45 @@ import (
 // type is fixed now).
 const QuantityScale = 4
 
-// Quantity is a quantity or a unit conversion factor on the wire: a JSON
-// string holding a plain decimal with at most QuantityScale fraction digits
-// ("12.5", "1000", "0.001"), carried internally as the scale 4 integer.
-// A JSON number never decodes into it, so no client can send a float where
-// a decimal string is the contract.
+// Quantity is a quantity or one side of a conversion pair on the wire: a
+// JSON string holding a plain decimal with at most QuantityScale fraction
+// digits ("12.5", "1000", "0.1875"), carried internally as the scale 4
+// integer. A JSON number never decodes into it, so no client can send a
+// float where a decimal string is the contract.
 type Quantity int64
+
+// QuantityMax is the largest magnitude a NUMERIC(12,4) column holds,
+// 99999999.9999: the quantity columns' own bound, enforced at the parse
+// boundary instead of surfacing as a database fault on store.
+const QuantityMax Quantity = 999_999_999_999
 
 // ParseQuantity parses a plain decimal string, from the wire or from a
 // NUMERIC(12,4) column, into a Quantity exactly. Trailing zeros beyond
 // scale 4 are padding; a nonzero fifth digit is precision this type refuses
-// rather than rounds.
+// rather than rounds. One canonical spelling is enforced, the same posture
+// as limit: no leading zeros ("0012" is refused, "0.5" is the form below
+// one) and no negative zero ("-0"), because two spellings of one value on
+// the wire is exactly the normalizer's job this contract removes. A
+// magnitude past QuantityMax is refused here, a 400 through the validator,
+// never a 500 from the column on store.
 func ParseQuantity(s string) (Quantity, error) {
 	v, err := parseFixed(s, QuantityScale)
 	if err != nil {
 		return 0, err
+	}
+	body := strings.TrimPrefix(s, "-")
+	intPart := body
+	if i := strings.IndexByte(body, '.'); i >= 0 {
+		intPart = body[:i]
+	}
+	if len(intPart) > 1 && intPart[0] == '0' {
+		return 0, errNotCanonical
+	}
+	if v == 0 && strings.HasPrefix(s, "-") {
+		return 0, errNotCanonical
+	}
+	if v > int64(QuantityMax) || v < -int64(QuantityMax) {
+		return 0, errQuantityBound
 	}
 	return Quantity(v), nil
 }
@@ -127,4 +152,27 @@ func Extend(qty, uomQty, priceUomQty Quantity, price Price) (Cents, error) {
 		cents = -cents
 	}
 	return Cents(cents), nil
+}
+
+// CheckLineSign enforces the sign rule of ADR 0001 §7a: a quantity is
+// negative only on a return or credit line, and a unit price is never
+// negative. The rule itself belongs to the converting module's validator,
+// which knows the line's kind; this helper is the one place the check is
+// written. Both offences on one line come back as a single collected 400
+// naming the standard field names, ready for WriteError.
+func CheckLineSign(qty Quantity, price Price, returnOrCredit bool) *Error {
+	var details []FieldError
+	if qty < 0 && !returnOrCredit {
+		details = append(details, FieldError{Field: "quantity",
+			Message: "a negative quantity belongs to a return or credit line"})
+	}
+	if price < 0 {
+		details = append(details, FieldError{Field: "unit_price_ten_thousandths",
+			Message: "a unit price is never negative"})
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return &Error{Status: http.StatusBadRequest, Code: CodeValidationFailed,
+		Message: "the line's signs are not valid", Details: details}
 }
