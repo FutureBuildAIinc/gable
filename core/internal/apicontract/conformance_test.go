@@ -186,6 +186,9 @@ type goldenStep struct {
 		ContentType string          `json:"content_type"`
 		Body        json.RawMessage `json:"body"`
 	} `json:"response"`
+	// MaskBody marks a step whose whole body the harness masked: status and
+	// content type are checked, the body is not.
+	MaskBody bool `json:"mask_body"`
 }
 
 // conformStep runs the three checks of one golden step against its resolved
@@ -228,6 +231,11 @@ func conformStep(compiler *jsonschema.Compiler, compiled map[string]bool, op *Op
 	if !ok {
 		problems = append(problems, fmt.Sprintf("content type %q is not declared on %s %s (declared: %s)",
 			step.Response.ContentType, op.ID, status, strings.Join(declared, ", ")))
+		return problems
+	}
+	if step.MaskBody {
+		// The body was masked as a whole; the status and content type above
+		// are all this step pins.
 		return problems
 	}
 	if bodyKind == bodyBinary || mt.Schema == nil {

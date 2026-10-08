@@ -550,9 +550,15 @@ type capturedStep struct {
 	// random per run). A null coordinate, or one outside the band, stays
 	// as it is, so a delivery that lost its coordinates or got a wrong one
 	// still changes the golden. Recorded in the golden, like the other masks.
-	MaskMockGeo bool             `json:"mask_mock_geo,omitempty"`
-	Request     capturedRequest  `json:"request"`
-	Response    capturedResponse `json:"response"`
+	MaskMockGeo bool `json:"mask_mock_geo,omitempty"`
+	// MaskBody, when true, records the whole response body as the placeholder
+	// "<body>": only the status and content type are pinned. For a read whose
+	// body is drawn from the seed inside map iteration and so differs per run,
+	// where the route still needs a step. The conformance test checks such a
+	// step's status and content type against the contract and skips its body.
+	MaskBody bool             `json:"mask_body,omitempty"`
+	Request  capturedRequest  `json:"request"`
+	Response capturedResponse `json:"response"`
 }
 
 // doStep executes one scenario step: substitute {vars}, send, capture the
@@ -677,6 +683,10 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		for key, ph := range s.maskFields {
 			maskField(step.Response.Body, key, ph)
 		}
+	}
+	step.MaskBody = s.maskBody
+	if s.maskBody {
+		step.Response.Body = "<body>"
 	}
 	step.MaskMockGeo = s.maskMockGeo
 	if s.maskMockGeo {

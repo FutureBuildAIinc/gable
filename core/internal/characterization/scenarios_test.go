@@ -98,6 +98,9 @@ type stepDef struct {
 	// maskMockGeo masks latitude and longitude values only where they lie in
 	// the mock geocoder's band (see capturedStep.MaskMockGeo).
 	maskMockGeo bool
+	// maskBody records the whole response body as a placeholder, keeping the
+	// status and content type pinned (see capturedStep.MaskBody).
+	maskBody bool
 	// setup, when set, runs before the request is built: it may insert
 	// fixture rows through the harness's own SQL (h.dbURL) and set h.vars.
 	// It is for state the API cannot create (an exposed quote), never for

@@ -50,7 +50,7 @@ run:
    runs in its own process group, stopped by that group number even when the
    test fails, and carries `Pdeathsig=SIGKILL` on Linux so a killed test
    process takes the server with it.
-4. **Script.** It replays a fixed, ordered script of 978 steps across 100
+4. **Script.** It replays a fixed, ordered script of 981 steps across 100
    groups (one golden file per group; 202 steps in the first 44 groups, the
    rest added by R1-1b). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
@@ -203,8 +203,8 @@ without a recorded step" at the end of this document, each with its reason.
 
 ## R1-1b: depth additions
 
-R1-1b added a recorded step for every route in `core/api/ROUTES.txt` but four
-(56 new groups, 776 new steps). The new groups all run after the clock group,
+R1-1b added a recorded step for every route in `core/api/ROUTES.txt` but one
+(56 new groups, 779 new steps). The new groups all run after the clock group,
 so none of their writes can move an earlier golden: the first 44 golden files
 are byte-identical to their R1-1 recording. The harness gained the following,
 each used only where a route needed it.
@@ -242,6 +242,10 @@ each used only where a route needed it.
   schema still validates); a null coordinate or one outside the band stays in the
   golden, so a delivery that loses its coordinates or gets a wrong one changes
   it. A test pins that reach.
+- **A step can mask its whole body** (`maskBody`, recorded as `mask_body`, the
+  body stored as `<body>`): only the status and content type stay pinned. Used
+  by the three portal reads named under "Routes without a recorded step"; the
+  conformance test checks those two against the contract and skips the body.
 - **A step can pin response headers** (`captureHeaders`, recorded under the
   response's `headers`): used for `Idempotency-Replayed` in the `idempotency`
   group. No other header is recorded.
@@ -394,7 +398,7 @@ last).
 | configurator app | `configurator` | GET /api/v1/configurator/options?attribute_type=; POST /api/v1/configurator/validate; POST /api/v1/configurator/build-sku; empty selections (400) |
 | governance app | `governance` | POST /api/v1/governance/rfcs; GET /api/v1/governance/rfcs/{id} |
 | partner surface | `partner` | GET /api/partner/v1/dashboard (the dev-mode 401) |
-| portal | `portal` | GET /api/portal/v1/config; POST /api/portal/v1/login; GET /api/portal/v1/catalog; POST /api/portal/v1/cart/items; GET /api/portal/v1/cart |
+| portal | `portal` | GET /api/portal/v1/config; POST /api/portal/v1/login; GET /api/portal/v1/catalog; POST /api/portal/v1/cart/items; GET /api/portal/v1/cart; GET /api/portal/v1/dashboard, /invoices, /deliveries (status and content type only, body masked) |
 | project | `project` | POST /api/portal/v1/projects; GET /api/portal/v1/projects/{id} |
 | techadmin | `techadmin` | GET /api/v1/admin/keys; POST /api/v1/admin/keys (generated key normalised) |
 | staff roster | `staff` | GET /api/v1/admin/staff; POST /api/v1/admin/staff; GET /api/v1/admin/modules; missing fields (400) |
@@ -441,21 +445,26 @@ modules that wire them.
 
 ## Routes without a recorded step
 
-Every route in `core/api/ROUTES.txt` has a recorded step except these four,
-each for a stated reason:
+Every route in `core/api/ROUTES.txt` has a recorded step except one, for a
+stated reason:
 
-- `GET /api/portal/v1/dashboard`, `GET /api/portal/v1/invoices` and
-  `GET /api/portal/v1/deliveries`: they return the demo customer's seeded
-  book, whose composition (amounts, which orders, invoices and deliveries
-  exist) is drawn from the seed inside map-iteration loops and so differs per
-  run. A shape only pin would need a placeholder that is not a string, which
-  the conformance test cannot excuse on numeric fields. They are covered
-  through their sibling reads: `GET /orders` (project filtered), `GET
-  /invoices/{id}` and `GET /deliveries/{id}` on fixtures the script creates.
 - `GET /metrics`: the body is the Prometheus exposition of Go runtime and
   process series (`go_build_info`, memory statistics, goroutines, start time)
   that differ on every run; the normaliser has no rule for them and R1-1b adds
   none.
+
+Three portal reads have a step that pins less than the rest:
+`GET /api/portal/v1/dashboard`, `GET /api/portal/v1/invoices` and
+`GET /api/portal/v1/deliveries` return the demo customer's seeded book, whose
+composition (amounts, which orders, invoices and deliveries exist) is drawn
+from the seed inside map-iteration loops and so differs per run. Their steps
+(`portal.dashboard`, `portal.invoices`, `portal.deliveries`, in the `portal`
+group) pin the status and content type and record the body as the placeholder
+`<body>` (`mask_body`). The conformance test checks the status and content type
+against the contract and skips the body of such a step. The shape of those
+bodies is covered through their sibling reads: `GET /orders` (project
+filtered), `GET /invoices/{id}` and `GET /deliveries/{id}` on fixtures the
+script creates.
 
 A route a later cycle changes needs its golden re-recorded together with an
 entry in `docs/refactor/CONTRACT-CHANGES.md`, as before.

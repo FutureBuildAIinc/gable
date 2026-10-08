@@ -150,5 +150,44 @@
         "subtotal": 9.5
       }
     }
+  },
+  {
+    "name": "portal.dashboard",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/dashboard"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
+  },
+  {
+    "name": "portal.invoices",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/invoices"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
+  },
+  {
+    "name": "portal.deliveries",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
   }
 ]
