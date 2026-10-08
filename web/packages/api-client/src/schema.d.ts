@@ -4223,7 +4223,7 @@ export interface paths {
         put?: never;
         /**
          * Create a quote
-         * @description Creates a draft quote, priced by the platform rule: each line's extension is rounded once to cents. A line must carry its unit of measure (a missing uom is a 400 naming lines[i].uom); every field problem is collected into one 400. Mints the document number and writes quote.created in the same transaction.
+         * @description Creates a draft quote, priced by the platform rule: each line's extension is rounded once to cents. A line carries its unit of measure, or names a product whose own unit it takes (a line with neither is a 400 naming lines[i].uom); every field problem is collected into one 400. Mints the document number and writes quote.created in the same transaction.
          */
         post: operations["quoteCreate"];
         delete?: never;
@@ -8312,7 +8312,7 @@ export interface components {
             revision?: number;
             lines: components["schemas"]["QuoteLineRequest"][];
         };
-        /** @description uom is required: a missing one is a 400 naming lines[i].uom. sku and description default from product_id and are required without one. price_uom defaults to uom; when it differs, uom_qty and price_uom_qty (both) are required. */
+        /** @description uom defaults from the product's own unit when the line names a product; a line with neither uom nor product_id is a 400 naming lines[i].uom. sku and description default from product_id and are required without one. price_uom defaults to uom; when it differs, uom_qty and price_uom_qty (both) are required. */
         QuoteLineRequest: {
             /** Format: uuid */
             id?: string;
@@ -8322,7 +8322,7 @@ export interface components {
             description?: string;
             customer_note?: string;
             quantity: components["schemas"]["Quantity"];
-            uom: components["schemas"]["QuoteUom"];
+            uom?: components["schemas"]["QuoteUom"];
             price_uom?: string;
             uom_qty?: components["schemas"]["Quantity"];
             price_uom_qty?: components["schemas"]["Quantity"];

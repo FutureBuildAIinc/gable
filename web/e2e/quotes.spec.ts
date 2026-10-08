@@ -119,10 +119,18 @@ test.describe('Quote flow on the new contract', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-list.png') });
   });
 
-  test('a line without a unit of measure is refused with the field named, and a stale revision is a 409', async ({ request }) => {
+  test('a line with no unit and no product is refused with the field named, a product line takes the product unit, and a stale revision is a 409', async ({ request }) => {
     const { customer, product } = await firstCustomerAndProduct(request);
-    const missing = await request.post('/api/v1/quotes', {
+    const defaulted = await request.post('/api/v1/quotes', {
       data: { customer_id: customer.id, lines: [{ product_id: product.id, quantity: '1', unit_price_ten_thousandths: 10000 }] },
+    });
+    expect(defaulted.status()).toBe(201);
+    const defaultedBody = await defaulted.json();
+    expect(defaultedBody.lines[0].uom).toBe(product.uom_primary);
+    expect(defaultedBody.lines[0].price_uom).toBe(product.uom_primary);
+
+    const missing = await request.post('/api/v1/quotes', {
+      data: { customer_id: customer.id, lines: [{ sku: 'SPECIAL-1', description: 'special order', quantity: '1', unit_price_ten_thousandths: 10000 }] },
     });
     expect(missing.status()).toBe(400);
     const body = await missing.json();

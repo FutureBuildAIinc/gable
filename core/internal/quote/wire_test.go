@@ -342,16 +342,19 @@ func TestWire_MoneyIsExact(t *testing.T) {
 }
 
 // LIVE FAILURE 1 (inputs section 3, item 1): a quote line without a unit of
-// measure was a 500 from a database enum cast. It is a 400 naming the field,
-// and every other field error rides in the same response.
+// measure was a 500 from a database enum cast. A line that names a product
+// has a unit (the product's own, the server's default); only a line with
+// neither a uom nor a product is a 400 naming lines[i].uom, and every other
+// field error rides in the same response.
 func TestWire_MissingUomIs400NamingTheField(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 
-	line := f.line("10")
-	delete(line, "uom")
+	special := map[string]any{
+		"sku": "SPECIAL-1", "description": "special order", "quantity": "2", "unit_price_ten_thousandths": 10000,
+	}
 	bad := f.line("oops")
-	r := f.do("POST", "/api/v1/quotes", f.createBody(line, bad))
+	r := f.do("POST", "/api/v1/quotes", f.createBody(special, bad))
 	if r.status != 400 {
 		t.Fatalf("status = %d, want 400: %s", r.status, r.raw)
 	}
@@ -372,6 +375,35 @@ func TestWire_MissingUomIs400NamingTheField(t *testing.T) {
 	var n int
 	if err := f.db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM quotes WHERE customer_id = $1`, f.customerID).Scan(&n); err != nil || n != 0 {
 		t.Errorf("a refused create left %d quotes (err %v)", n, err)
+	}
+
+	// A line with a product and no uom takes the product's unit, and its
+	// price_uom follows the uom.
+	line := f.line("10")
+	delete(line, "uom")
+	ok := f.do("POST", "/api/v1/quotes", f.createBody(line))
+	if ok.status != 201 {
+		t.Fatalf("a product line without uom = %d, want 201: %s", ok.status, ok.raw)
+	}
+	got := ok.body["lines"].([]any)[0].(map[string]any)
+	if str(t, got, "uom") != "PCS" || str(t, got, "price_uom") != "PCS" || str(t, got, "uom_qty") != "1" || str(t, got, "price_uom_qty") != "1" {
+		t.Errorf("defaulted unit = %v, want PCS priced per PCS at 1 to 1", got)
+	}
+	if num(t, got, "line_total_cents") != 5500 {
+		t.Errorf("line_total_cents = %d, want 5500", num(t, got, "line_total_cents"))
+	}
+
+	// A price_uom that differs from the defaulted uom still needs its pair.
+	line = f.line("10")
+	delete(line, "uom")
+	line["price_uom"] = "MBF"
+	r = f.do("POST", "/api/v1/quotes", f.createBody(line))
+	if r.status != 400 {
+		t.Fatalf("price_uom differing from the defaulted uom, no pair = %d, want 400: %s", r.status, r.raw)
+	}
+	_, _, details = errorOf(t, r)
+	if fmt.Sprint(details) == "[]" || fmt.Sprint(details[0]["field"]) != "lines[0].uom_qty" {
+		t.Errorf("details = %v, want lines[0].uom_qty", details)
 	}
 }
 

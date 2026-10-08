@@ -184,7 +184,6 @@
         "lines": [
           {
             "description": "2x4x8 SPF Premium",
-            "product_id": "<id-3>",
             "quantity": "10",
             "sku": "LUM-248-PREM",
             "unit_price_ten_thousandths": 55000
@@ -201,7 +200,7 @@
           "details": [
             {
               "field": "lines[0].uom",
-              "message": "is required: send the unit the line is sold in (the product's own unit is the usual one)"
+              "message": "is required when the line names no product"
             }
           ],
           "message": "one or more fields failed validation"

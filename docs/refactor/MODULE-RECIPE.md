@@ -158,8 +158,9 @@ path. Produce a `Draft` the service prices. See `input.go`.
 
 Rules the quotes parse made that a module reuses:
 
-- a missing unit of measure is a 400 naming `lines[i].uom`; when the line
-  names a product the message says to send the unit the line is sold in;
+- the unit of measure defaults from the product (the service fills it from
+  the product's own unit, then `price_uom` from the unit); only a line with
+  neither a `uom` nor a `product_id` is a 400 naming `lines[i].uom`;
 - the conversion is a pair: both `uom_qty` and `price_uom_qty`, or neither;
   `price_uom` defaults to `uom`; a different `price_uom` requires the pair;
 - a created document has no `status` in the request.
@@ -316,7 +317,7 @@ Then commit per step when green, push, and open the pull request into
 
 | Question | Quotes' answer |
 |---|---|
-| A line without a unit of measure | 400 naming `lines[i].uom`, always; the message names the product's unit when the line has a product. The desk pre-fills the unit from the product, so users meet the default and the API stays explicit |
+| A line without a unit of measure | The server defaults it from the product (`ProductRef.UOMPrimary`) and then `price_uom` from the unit; only a line with neither `uom` nor `product_id` is a 400 naming `lines[i].uom`. The desk still pre-fills the unit so users see it |
 | Editing a document the lifecycle has closed | 409 `conflict` with a blocker, not `invalid_state_transition` (an edit is not a transition) |
 | Creating in a status other than the first | Not possible: the request has no status |
 | A transition by an in process caller | Same rules and event, no revision precondition |

@@ -166,8 +166,8 @@ func quoteGroups() []groupDef {
 		{name: "quote.get", method: "GET", path: "/api/v1/quotes/{myQuote}"},
 		{name: "quote.list", method: "GET", path: "/api/v1/quotes?limit=1"},
 		// The four live failures the refactor inputs name for quotes, now
-		// refused or served correctly: a line without a unit of measure is a
-		// 400 naming the field, ?status filters, an unsupported status or
+		// refused or served correctly: a line with neither a unit of measure nor
+		// a product is a 400 naming the field, ?status filters, an unsupported status or
 		// parameter is a 400, and the list pages by cursor.
 		{
 			name:   "quote.create.missing_uom",
@@ -176,7 +176,7 @@ func quoteGroups() []groupDef {
 			body: map[string]any{
 				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "pickup",
 				"lines": []map[string]any{{
-					"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
+					"sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
 					"quantity": "10", "unit_price_ten_thousandths": 55000,
 				}},
 			},

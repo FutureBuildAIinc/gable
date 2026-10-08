@@ -113,10 +113,9 @@ type DraftLine struct {
 const one httpx.Quantity = 1 * 10000
 
 // Parse validates the request in one pass and returns the Draft, or the one
-// 400 carrying every offending field. unit of measure rule: a line without a
-// uom is a 400 naming lines[i].uom, never a database cast fault; when the
-// line names a product the message says which unit the product sells in, so
-// a client has the default to send.
+// 400 carrying every offending field. Unit of measure rule: a line that names
+// a product and no uom takes the product's unit (the service fills it); only a
+// line with neither is a 400 naming lines[i].uom, never a database cast fault.
 func (req *Request) Parse() (*Draft, error) {
 	v := &httpx.Validator{}
 	d := &Draft{DeliveryType: DeliveryPickup, Source: "manual"}
@@ -236,14 +235,12 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 		d.Quantity = qty
 	}
 
-	switch {
-	case l.UOM == nil || strings.TrimSpace(*l.UOM) == "":
-		msg := "is required"
-		if d.ProductID != nil {
-			msg += ": send the unit the line is sold in (the product's own unit is the usual one)"
-		}
-		v.Check(false, path+".uom", msg)
-	default:
+	// The unit the quantity is in. A line that names a product may leave it
+	// out: the service takes the product's own unit (priceDraft). A line with
+	// neither is the one 400 on lines[i].uom.
+	if l.UOM == nil || strings.TrimSpace(*l.UOM) == "" {
+		v.Check(d.ProductID != nil, path+".uom", "is required when the line names no product")
+	} else {
 		d.UOM = product.UOM(*l.UOM)
 		known := false
 		for _, u := range uomCodes {
@@ -254,6 +251,9 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 		v.Check(known, path+".uom", "must be one of: "+strings.Join(uomNames(), ", "))
 	}
 
+	// The unit the price is quoted per: the uom unless the line says otherwise.
+	// While the uom is still to default from the product, an absent price_uom
+	// stays empty and priceDraft completes both.
 	d.PriceUOM = string(d.UOM)
 	if l.PriceUOM != nil {
 		if strings.TrimSpace(*l.PriceUOM) == "" {
@@ -276,11 +276,13 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 			missing = path + ".price_uom_qty"
 		}
 		v.Check(false, missing, "is required: the conversion is a pair, uom_qty and price_uom_qty together")
-	case d.PriceUOM != string(d.UOM):
+	case d.UOM != "" && d.PriceUOM != string(d.UOM):
 		v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
-	default:
+	case d.UOM != "":
 		d.UOMQty, d.PriceUOMQty = one, one
 	}
+	// With the uom still to default and no pair sent, UOMQty stays zero:
+	// priceDraft settles it once the unit is known.
 
 	if price, ok := v.Int(path+".unit_price_ten_thousandths", l.UnitPriceTenThousandths, true); ok {
 		httpx.CheckLineSign(v, path, d.Quantity, httpx.Price(price), false)

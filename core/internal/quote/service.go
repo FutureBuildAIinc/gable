@@ -195,7 +195,25 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 				if line.Description == "" {
 					line.Description = p.Description
 				}
+				// The unit defaults from the product, then the price unit
+				// from the unit, then the pair from the two.
+				if line.UOM == "" {
+					line.UOM = productUOM(p.UOMPrimary)
+				}
 			}
+		}
+		if line.PriceUOM == "" {
+			line.PriceUOM = string(line.UOM)
+		}
+		if line.UOM == "" {
+			continue // the product was unknown (reported above): nothing to price
+		}
+		if line.UOMQty == 0 && line.PriceUOMQty == 0 {
+			if line.PriceUOM != string(line.UOM) {
+				v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
+				continue
+			}
+			line.UOMQty, line.PriceUOMQty = one, one
 		}
 		ext, err := httpx.Extend(line.Quantity, line.UOMQty, line.PriceUOMQty, line.UnitPrice)
 		if err != nil || total > math.MaxInt64-int64(ext) {
