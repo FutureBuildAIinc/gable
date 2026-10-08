@@ -972,7 +972,7 @@ func derefCentsStr(c *httpx.Cents) string {
 // allowedTransition is the from/to table of ADR 0005 section 5.2.
 func allowedTransition(from, to OrderStatus) error {
 	allowed := map[OrderStatus][]OrderStatus{
-		StatusDraft:       {StatusConfirmed, StatusOnHold, StatusCancelled},
+		StatusDraft:       {StatusConfirmed, StatusCancelled},
 		StatusOnHold:      {StatusConfirmed, StatusDraft, StatusCancelled},
 		StatusConfirmed:   {StatusOnHold, StatusDraft, StatusCancelled, StatusFulfilled},
 		StatusBackordered: {StatusOnHold, StatusDraft, StatusCancelled, StatusFulfilled},
@@ -1011,22 +1011,25 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		if err := s.refreshTax(ctx, cur, priced); err != nil {
 			return nil, err
 		}
-		wasHeld := cur.HoldReason
 		cur.Status = StatusConfirmed
 		cur.HoldReason, cur.HoldNote = nil, nil
-		if cur.ConfirmedAt == nil {
-			// a release confirms: the first confirm's timestamp is the
-			// release's, written with it
+		neverConfirmed := cur.ConfirmedAt == nil
+		if neverConfirmed {
+			// a release of a credit hold is the first confirm: its
+			// timestamp is the release's, written with it
 			now := httpx.TimestampOf(s.now().UTC())
 			cur.ConfirmedAt = &now
 		}
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
 			return nil, err
 		}
-		if wasHeld != nil {
-			if err := s.record(ctx, cur, EventHoldReleased, ""); err != nil {
-				return nil, err
-			}
+		if err := s.record(ctx, cur, EventHoldReleased, StatusOnHold.Status()); err != nil {
+			return nil, err
+		}
+		// 5.2: order.confirmed only if never confirmed before, so a
+		// consumer counting confirms counts a held order once.
+		if !neverConfirmed {
+			return cur, nil
 		}
 		return cur, s.record(ctx, cur, EventConfirmed, StatusOnHold.Status())
 
@@ -1038,23 +1041,25 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 				Details: []httpx.FieldError{{Field: "hold_note", Message: "is required to hold an order"}}}
 		}
 		reason := HoldManual
+		from := cur.Status
 		cur.Status, cur.HoldReason, cur.HoldNote = StatusOnHold, &reason, &body.HoldNote
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
 			return nil, err
 		}
-		return cur, s.record(ctx, cur, EventHold, "")
+		return cur, s.record(ctx, cur, EventHold, from.Status())
 
 	case StatusDraft:
 		// The reopen: refused once anything was billed against the order.
 		if hasInvoices {
 			return nil, conflictBlocker("has_fulfilments", "the order has been billed: reverse its invoices, do not reopen it")
 		}
+		from := cur.Status
 		cur.Status = StatusDraft
 		cur.HoldReason, cur.HoldNote = nil, nil
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
 			return nil, err
 		}
-		return cur, s.record(ctx, cur, EventReopened, "")
+		return cur, s.record(ctx, cur, EventReopened, from.Status())
 
 	case StatusCancelled:
 		if body.Reason == "" {

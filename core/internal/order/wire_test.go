@@ -803,6 +803,59 @@ func TestOrderConfirmCreditHoldAndRelease(t *testing.T) {
 	}
 }
 
+// eventsWithFrom reads an order's events in order as "type" or
+// "type<from_status".
+func eventsWithFrom(t *testing.T, db *database.DB, orderID string) []string {
+	t.Helper()
+	rows, err := db.Pool.Query(context.Background(),
+		`SELECT type, COALESCE(data->>'from_status', '') FROM events_outbox WHERE entity_type = 'order' AND entity_id = $1 ORDER BY position`, orderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var ty, from string
+		if err := rows.Scan(&ty, &from); err != nil {
+			t.Fatal(err)
+		}
+		if from != "" {
+			ty += "<" + from
+		}
+		out = append(out, ty)
+	}
+	return out
+}
+
+// RULE (ADR 0005 5.2 and section 12): a release writes order.hold_released,
+// and order.confirmed only if the order was never confirmed before; a
+// manual hold of a confirmed order and its release must not count the
+// confirm twice. Every status change event carries from_status.
+func TestOrderManualHoldReleaseEvents(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	r := f.create()
+	id := str(t, r.body, "id")
+	step := func(body map[string]any) {
+		t.Helper()
+		if r = f.do("POST", "/api/v1/orders/"+id+"/transitions", body); r.status != 200 {
+			t.Fatalf("%v = %d: %s", body, r.status, r.raw)
+		}
+	}
+	step(map[string]any{"to": "confirmed", "revision": 1})
+	step(map[string]any{"to": "on_hold", "revision": 2, "hold_note": "customer asked to wait"})
+	step(map[string]any{"to": "confirmed", "revision": 3})
+	want := "[order.created order.confirmed<draft order.hold<confirmed order.hold_released<on_hold]"
+	if got := fmt.Sprint(eventsWithFrom(t, db, id)); got != want {
+		t.Errorf("events = %s, want %s", got, want)
+	}
+	step(map[string]any{"to": "draft", "revision": 4})
+	if got := eventsWithFrom(t, db, id); got[len(got)-1] != "order.reopened<confirmed" {
+		t.Errorf("last event = %s, want order.reopened<confirmed", got[len(got)-1])
+	}
+}
+
 // RULE (ADR 0005 5.2): the PO guard, the forbidden edges of the transition
 // table, the cancel's reason, and the events each transition writes.
 func TestOrderTransitionsTable(t *testing.T) {
@@ -844,7 +897,25 @@ func TestOrderTransitionsTable(t *testing.T) {
 	}
 	// A manual hold without its note is a 400.
 	other := f.create()
-	r = f.do("POST", "/api/v1/orders/"+str(t, other.body, "id")+"/transitions", map[string]any{"to": "on_hold", "revision": 1})
+	otherID := str(t, other.body, "id")
+	// 5.2: a manual hold is allowed from confirmed or backordered only. A
+	// draft was never credit checked, and its release would confirm it
+	// unchecked.
+	r = f.do("POST", "/api/v1/orders/"+otherID+"/transitions", map[string]any{"to": "on_hold", "revision": 1, "hold_note": "x"})
+	if r.status != 409 {
+		t.Fatalf("a manual hold on a draft = %d, want 409: %s", r.status, r.raw)
+	}
+	if code, _, _ := errorOf(t, r); code != "invalid_state_transition" {
+		t.Errorf("code = %q, want invalid_state_transition", code)
+	}
+	if g := f.do("GET", "/api/v1/orders/"+otherID, nil); str(t, g.body, "status") != "draft" || revision(t, g) != 1 {
+		t.Errorf("the refused hold moved the draft: %s", g.raw)
+	}
+	r = f.do("POST", "/api/v1/orders/"+otherID+"/transitions", map[string]any{"to": "confirmed", "revision": 1})
+	if r.status != 200 {
+		t.Fatalf("confirm = %d: %s", r.status, r.raw)
+	}
+	r = f.do("POST", "/api/v1/orders/"+otherID+"/transitions", map[string]any{"to": "on_hold", "revision": 2})
 	if r.status != 400 {
 		t.Errorf("a manual hold without a note = %d, want 400", r.status)
 	}
@@ -868,9 +939,6 @@ func TestOrderTransitionsTable(t *testing.T) {
 	}
 	// The reopen is refused once the order is billed: confirm it, bill it,
 	// then try to walk it back to draft.
-	if r2 := f.do("POST", "/api/v1/orders/"+str(t, other.body, "id")+"/transitions", map[string]any{"to": "confirmed", "revision": 1}); r2.status != 200 {
-		t.Fatalf("confirm for the reopen probe = %d: %s", r2.status, r2.raw)
-	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_amount, due_date, payment_terms)
 		VALUES (gen_random_uuid(), $1, $2, (SELECT branch_id FROM orders WHERE id = $1), 'UNPAID', 100, 100, 0, CURRENT_DATE + 30, 'NET30')`,
 		str(t, other.body, "id"), f.customerID); err != nil {
