@@ -120,21 +120,25 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		after = n
 	}
 
-	// One row past the limit tells the handler a next page exists without
-	// serving it.
-	rows, err := outbox.ListEvents(r.Context(), h.db.Pool, after, types, page.Limit+1)
+	rows, err := outbox.ListEvents(r.Context(), h.db.Pool, after, types, page.Limit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > page.Limit {
-		rows = rows[:page.Limit]
-		next, err = httpx.MintCursor(cursorScope, strconv.FormatInt(rows[len(rows)-1].Position, 10))
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
+	// The feed always returns next_cursor, an explicit exception to ADR
+	// 0001's null-at-end rule (ADR 0003 section 5): a poller must be able to
+	// adopt the tail cursor without re-reading its previous page, and a
+	// first-time consumer of a feed shorter than the limit must get a cursor
+	// at all. The cursor is the last served position, or the request's
+	// cursor echoed back when the page is empty.
+	nextPos := after
+	if len(rows) > 0 {
+		nextPos = rows[len(rows)-1].Position
+	}
+	next, err := httpx.MintCursor(cursorScope, strconv.FormatInt(nextPos, 10))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
 	}
 
 	items := make([]Item, 0, len(rows))

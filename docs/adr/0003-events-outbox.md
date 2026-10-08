@@ -262,6 +262,14 @@ rules, served by `internal/events` through `core/internal/platform/httpx`:
   `events.position`: opaque, versioned, scope checked, malformed is a 400
   naming `cursor`;
 - `limit` is 1 to 200, default 50, malformed or out of range is a 400;
+- `next_cursor` is always present, an explicit exception to ADR 0001's
+  null-at-end rule: this feed is a poller's tail, and a tail cursor that
+  disappears on the last page forces every poller to re-read from its
+  previous cursor (serving the same events again every poll) and leaves a
+  first-time consumer of a feed shorter than the limit with no cursor at
+  all. The value is the last served position, or the request's cursor
+  echoed back when the page is empty; resuming from it serves exactly the
+  events that committed after the page;
 - `types` filters by exact type, comma separated, repeatable; each name must
   be a dot-delimited lowercase type or the request is a 400
   `validation_failed` naming `types`; a filter that matches nothing serves an

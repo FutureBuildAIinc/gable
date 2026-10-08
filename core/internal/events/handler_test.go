@@ -28,7 +28,7 @@ func newTestHandler(t *testing.T) (*Handler, *outbox.Writer) {
 	t.Helper()
 	db := testutil.RequireDB(t)
 	if _, err := db.Pool.Exec(context.Background(),
-		`TRUNCATE events_outbox, event_subscriber_cursors`); err != nil {
+		`TRUNCATE events_outbox, event_subscriber_cursors, event_subscriber_parked`); err != nil {
 		t.Fatalf("truncate outbox: %v", err)
 	}
 	return NewHandler(db), outbox.NewWriter(db, "test-org")
@@ -140,8 +140,38 @@ func TestList_ServesTheEnvelopeInOrder(t *testing.T) {
 	if env.Limit != 50 {
 		t.Errorf("limit = %d, want the default 50 echoed", env.Limit)
 	}
-	if env.NextCursor != nil {
-		t.Errorf("next_cursor = %v, want null on the last page", *env.NextCursor)
+	if env.NextCursor == nil {
+		t.Fatal("next_cursor = null on a short page, want the tail cursor (the feed always returns one)")
+	}
+}
+
+// The tail cursor is a resumption point, not a page marker: a feed read to
+// its tail with room to spare still returns next_cursor, and a later commit
+// is the only thing the next read with that cursor serves (the reviewer's
+// two-step probe from fix round 1).
+func TestList_TailCursorServesOnlyNewEvents(t *testing.T) {
+	h, w := newTestHandler(t)
+
+	for i := 0; i < 3; i++ {
+		writeEvent(t, w, "test.tail", fmt.Sprintf(`{"i":%d}`, i))
+	}
+
+	_, env := get(t, h, "?limit=50")
+	if len(env.Items) != 3 {
+		t.Fatalf("first read served %d items, want 3", len(env.Items))
+	}
+	if env.NextCursor == nil {
+		t.Fatal("next_cursor = null on a page shorter than the limit, want the tail cursor")
+	}
+
+	fresh := writeEvent(t, w, "test.tail", `{"i":3}`)
+	_, env = get(t, h, "?limit=50&cursor="+*env.NextCursor)
+	items := decodeItems(t, env)
+	if len(items) != 1 || items[0].EventID != fresh.ID.String() {
+		t.Fatalf("read from the tail cursor served %v, want exactly the one new event %s", items, fresh.ID)
+	}
+	if env.NextCursor == nil {
+		t.Fatal("next_cursor = null on the second page, want the new tail cursor")
 	}
 }
 
@@ -165,13 +195,18 @@ func TestList_PagesWithCursorsExactlyOnce(t *testing.T) {
 			t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 		}
 		items := decodeItems(t, env)
+		if len(items) == 0 {
+			// The empty page after the tail: the walk ends on what it
+			// served, not on a null cursor (the feed always returns one).
+			break
+		}
+		if env.NextCursor == nil {
+			t.Fatal("next_cursor = null on a non-empty page")
+		}
 		for _, it := range items {
 			served[it.EventID]++
 		}
 		pages++
-		if env.NextCursor == nil {
-			break
-		}
 		query = "?limit=2&cursor=" + *env.NextCursor
 	}
 	if pages != 3 {
@@ -200,7 +235,9 @@ func TestList_PagesWithCursorsExactlyOnce(t *testing.T) {
 	}
 }
 
-// An empty feed is an empty page: items is [], never null.
+// An empty feed is an empty page: items is [], never null, and the page
+// still carries next_cursor (the request's cursor echoed back, position 0
+// for a first read), so a poller can adopt it without special casing.
 func TestList_EmptyFeedIsEmptyArray(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec, env := get(t, h, "")
@@ -210,8 +247,8 @@ func TestList_EmptyFeedIsEmptyArray(t *testing.T) {
 	if env.Items == nil || len(env.Items) != 0 {
 		t.Errorf("items = %v, want an empty array", env.Items)
 	}
-	if env.NextCursor != nil {
-		t.Errorf("next_cursor = %v, want null", *env.NextCursor)
+	if env.NextCursor == nil {
+		t.Error("next_cursor = null on an empty feed, want the echoed cursor")
 	}
 	if !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Errorf("body does not carry an empty items array: %s", rec.Body)
