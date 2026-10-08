@@ -49,7 +49,7 @@ run:
    own process group, stopped by that group number even when the test fails,
    and carries `Pdeathsig=SIGKILL` on Linux so a killed test process takes the
    server with it.
-4. **Script.** It replays a fixed, ordered script of 199 requests across 44
+4. **Script.** It replays a fixed, ordered script of 202 requests across 44
    groups (one golden file per group). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
    same way every run. Later steps reference values extracted from earlier
@@ -135,6 +135,30 @@ day - is invisible, because the within-day time is deliberately free. Day
 arithmetic (net terms, window edges) is what the offset pins; time-of-day is
 not.
 
+### Customer identity is masked on three per-customer reports
+
+The seed's draw sequence is fixed, but it is consumed inside map-iteration
+loops, so which customer owns which drawn amount is random per run. On the
+three per-customer reports - AR aging, top customers, order activity - the
+amounts, buckets, counts, dates and the sorted row order are stable (they
+come from the draws), and only the names on the rows vary. Those steps
+therefore mask the customer identity fields (`customer_id`, `customer_name`,
+and a customer's `name`) to the class placeholder `<customer>` before
+comparison and pin everything else, including row order: rows tied on an
+amount differ only in masked identity. The mask is recorded per step in the
+golden (`mask_customer_identity`), like `sort_primary_array`, so a reader can
+see what is and is not pinned.
+
+Top customers additionally masks `order_count` (recorded as
+`mask_order_count`), for a different reason: the script itself writes orders
+for one seeded customer - the quote and integration converts - so the count
+on a rank owned by that customer carries the script's own orders on top of
+the randomly assigned segment's count. The revenue sequence, the row order
+and the identities' class stay pinned; that one count provably varies (two
+recordings of the same code differ only there, while six fresh seeds show a
+fixed multiset of per-customer revenue and count pairs before the script's
+writes).
+
 Not normalised, because they are real behaviour: money, status strings, field
 names, null versus empty array, error codes and messages, content types
 (including the responses that serve JSON sniffed as `text/plain;
@@ -165,31 +189,14 @@ not pinned.
 
 ### Endpoints deliberately not goldened
 
-Two kinds of endpoints are left out, for different reasons.
-
-**Non-deterministic at this base.** The demo seed consumes its deterministic
-rand sequence inside map-iteration loops, so which customer owns which drawn
-order or invoice is random per run. Per-customer and per-row views over that
-data cannot be goldened; global sums over the same draws are stable and are
-goldened (the sales summary and dashboard windows below).
-
-- `GET /api/v1/reports/ar-aging` - per-customer AR buckets over randomly
-  assigned seeded invoices. The grand totals are stable; the per-customer
-  ledger is not.
-- `GET /api/v1/dashboard/top-customers` and `GET /api/v1/dashboard/order-activity`
-  - per-customer revenue ranking (and recent-order rows) whose queries order
-    by revenue or `created_at` with no tiebreak under a `LIMIT`, so even page
-  membership is random per run.
-
-Pinning these needs either seed determinism (iteration over a sorted key
-list) or a deterministic query tiebreak - both contract decisions for the
-module conversions, not harness work. The clock-window group's P and L step
-also uses an explicit 30-day window rather than the default: the default
-start is the first of the current month, a calendar boundary that makes the
-window's contents differ between a run on the 5th and one on the 25th.
+**The P and L default window.** The clock-window group's profit-and-loss step
+uses an explicit 30-day window rather than the default: the default start is
+the first of the current month, a calendar boundary that makes the window's
+contents differ between a run on the 5th and one on the 25th. The explicit
+window exercises the same code path with a stable one.
 
 **Depth deferred to R1-1b.** Every module with routes now has a golden (the
-R1-1 exit bar); the remaining 197 of the 345 census routes without one are
+R1-1 exit bar); the remaining 194 of the 345 census routes without one are
 listed at the end of this document.
 
 ## Running and re-recording
@@ -269,7 +276,7 @@ last).
 | vendor | `vendor` | POST /api/v1/vendors; GET /api/v1/vendors/{id}; GET /api/v1/vendors |
 | purchase_order | `purchase_order` | POST /api/v1/purchase-orders; GET /api/v1/purchase-orders/{id}; bad vendor_id (400) |
 | ap | `ap` | POST /api/v1/ap/invoices; GET /api/v1/ap/invoices/{id}; GET /api/v1/ap/invoices |
-| clock windows | `clockwindow` | GET /api/v1/ap/aging; GET /api/v1/reports/sales-summary (default 30-day window); GET /api/v1/dashboard/summary; GET /api/v1/dashboard/revenue-trend; GET /api/v1/gl/trial-balance; GET /api/v1/gl/profit-and-loss?start={today-30}&end={today}; GET /api/v1/gl/balance-sheet - the now-relative windows pinned through the seed-day date offsets |
+| clock windows | `clockwindow` | GET /api/v1/ap/aging; GET /api/v1/reports/ar-aging (identity-masked); GET /api/v1/reports/sales-summary (default 30-day window); GET /api/v1/dashboard/summary; GET /api/v1/dashboard/revenue-trend; GET /api/v1/dashboard/top-customers (identity-masked); GET /api/v1/dashboard/order-activity (identity-masked); GET /api/v1/gl/trial-balance; GET /api/v1/gl/profit-and-loss?start={today-30}&end={today}; GET /api/v1/gl/balance-sheet - the now-relative windows pinned through the seed-day date offsets and the harness's fixture rows on their edges |
 | edi | `edi` | POST /api/v1/edi/partners; GET /api/v1/edi/partners/{id}; missing name (400) |
 | matching | `matching` | GET /api/v1/matching/config; PUT /api/v1/matching/config |
 | bankrecon | `bankrecon` | POST /api/v1/bankrecon/accounts; GET /api/v1/bankrecon/accounts |
@@ -302,7 +309,7 @@ modules that wire them.
 
 ## Deferred to R1-1b: census routes without a golden
 
-148 of the 345 census routes carry a golden. The remaining 197, by module
+151 of the 345 census routes carry a golden. The remaining 194, by module
 (paths abbreviated; every one needs a scenario step plus a recorded golden
 before its module's conversion in R1-7):
 
@@ -326,9 +333,8 @@ before its module's conversion in R1-7):
 - purchase_order (11): list; recommendations; refresh-reorder-targets;
   reorder-check; reorder-runs; source-summary; freight GET/POST/apply;
   receive; submit.
-- reporting (11): builder export/preview; export/{entity}; saved get/PUT/
-  DELETE/run; schedules DELETE; ar-aging (non-deterministic at this base,
-  see above); customer-statement; daily-till.
+- reporting (10): builder export/preview; export/{entity}; saved get/PUT/
+  DELETE/run; schedules DELETE; customer-statement; daily-till.
 - pim (10): products/{id}/detail; collateral GET/DELETE/generate;
   generate descriptions/image/seo; media GET/DELETE/PATCH.
 - gl (9): accounts POST/PUT; fiscal-periods (list, close, reopen);
@@ -348,8 +354,6 @@ before its module's conversion in R1-7):
 - partner (2): quotes list/get (all partner routes answer the dev-mode 401;
   one 401 is pinned, the rest are the same refusal).
 - configurator (2): presets; rules.
-- dashboard (2): top-customers; order-activity (non-deterministic at this
-  base, see above).
 - deposit (2): list; apply.
 - document (2): print/invoice/{id}; invoices/{id}/email.
 - governance (2): rfcs list; PUT.

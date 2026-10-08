@@ -502,9 +502,25 @@ type capturedStep struct {
 	// see what is and is not pinned. Used only where the base's own ordering
 	// is unstable: a list whose ORDER BY tiebreaks on random row ids (the
 	// dispatch-day fixture rows all share one created_at).
-	SortPrimaryArray bool             `json:"sort_primary_array,omitempty"`
-	Request          capturedRequest  `json:"request"`
-	Response         capturedResponse `json:"response"`
+	SortPrimaryArray bool `json:"sort_primary_array,omitempty"`
+	// MaskCustomerIdentity, when true, replaces the values of the customer
+	// identity fields (customer_id, customer_name, and a customer's name)
+	// with a class placeholder before comparison. Used on the per-customer
+	// report rows the demo seed fills from rand draws consumed inside
+	// map-iteration loops: which customer owns which drawn amount is random
+	// per run, while the amounts, buckets, counts and row order are not.
+	// Recorded in the golden so a reader can see what is and is not pinned.
+	MaskCustomerIdentity bool `json:"mask_customer_identity,omitempty"`
+	// MaskOrderCount, when true, replaces the order_count field with a
+	// placeholder before comparison. Used on the top-customers step only:
+	// the script itself writes orders for one seeded customer (the quote and
+	// integration converts), so the count on a rank owned by that customer
+	// carries the script's own orders on top of the randomly assigned
+	// segment's count - the revenue sequence and row order are stable, that
+	// one count is not. Recorded in the golden, like the other mask flags.
+	MaskOrderCount bool             `json:"mask_order_count,omitempty"`
+	Request        capturedRequest  `json:"request"`
+	Response       capturedResponse `json:"response"`
 }
 
 // doStep executes one scenario step: substitute {vars}, send, capture the
@@ -599,6 +615,14 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		Body:        captureBody(resp.Header.Get("Content-Type"), raw),
 	}
 	step.SortPrimaryArray = s.sortPrimaryArray
+	step.MaskCustomerIdentity = s.maskCustomerIdentity
+	if s.maskCustomerIdentity {
+		maskCustomerIdentity(step.Response.Body)
+	}
+	step.MaskOrderCount = s.maskOrderCount
+	if s.maskOrderCount {
+		maskField(step.Response.Body, "order_count", "<orders>")
+	}
 	if s.sortPrimaryArray {
 		switch body := step.Response.Body.(type) {
 		case []any:
@@ -709,6 +733,60 @@ func substAny(v any, vars map[string]string) any {
 		return out
 	default:
 		return v
+	}
+}
+
+// customerIdentityFields are the response fields that name a customer rather
+// than describe an amount, bucket or count. On the per-customer report steps
+// (AR aging, top customers, order activity) the demo seed randomises which
+// customer owns which drawn value, so only the identity varies per run - and
+// identity is exactly what those steps do not pin.
+var customerIdentityFields = map[string]bool{
+	"customer_id":   true,
+	"customer_name": true,
+	"name":          true,
+}
+
+// maskField rewrites every value under the named key, in place, to ph. It is
+// the per-step mechanism behind MaskOrderCount; MaskCustomerIdentity has its
+// own walker because it masks a set of keys.
+func maskField(v any, key, ph string) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, vv := range x {
+			if k == key {
+				x[k] = ph
+				continue
+			}
+			maskField(vv, key, ph)
+		}
+	case []any:
+		for _, vv := range x {
+			maskField(vv, key, ph)
+		}
+	}
+}
+
+// maskCustomerIdentity rewrites the customer identity fields of a captured
+// response body, in place, to the class placeholder "<customer>". It runs
+// before normalisation, so a masked customer uuid never takes an <id-N>
+// placeholder, and it touches nothing else: amounts, buckets, counts, dates
+// and row order compare exactly as before. Two customers in one response both
+// mask to "<customer>": the step pins the ledger, not the names on it.
+func maskCustomerIdentity(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, vv := range x {
+			if customerIdentityFields[k] {
+				x[k] = "<customer>"
+				continue
+			}
+			maskCustomerIdentity(vv)
+		}
+	case []any:
+		for _, vv := range x {
+			maskCustomerIdentity(vv)
+		}
 	}
 }
 

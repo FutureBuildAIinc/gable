@@ -77,6 +77,13 @@ type stepDef struct {
 	// sortPrimaryArray marks steps whose top-level response array is sorted
 	// before comparison (see capturedStep.SortPrimaryArray).
 	sortPrimaryArray bool
+	// maskCustomerIdentity marks steps whose customer identity fields are
+	// masked to a class placeholder before comparison (see
+	// capturedStep.MaskCustomerIdentity).
+	maskCustomerIdentity bool
+	// maskOrderCount marks steps whose order_count field is masked to a
+	// placeholder before comparison (see capturedStep.MaskOrderCount).
+	maskOrderCount bool
 }
 
 type groupDef struct {
