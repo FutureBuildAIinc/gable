@@ -21,7 +21,7 @@
 // operations, duplicate component names, duplicate operationIds, a
 // non-method key under a path, an operation without exactly one tag, an
 // undeclared path parameter, templated paths that collide under different
-// parameter names, and unresolved local $refs.
+// parameter names for the same method, and unresolved local $refs.
 //
 // Modes: default writes core/api/openapi.yaml. -check (or the CHECK
 // environment variable, for places a flag is awkward) regenerates the
@@ -303,14 +303,21 @@ func assemble(apiDir string) (*yaml.Node, error) {
 
 	// Templated-path collisions: the same shape under different parameter
 	// names would be two routes the router cannot distinguish.
-	seenTemplates := map[string]string{}
+	// The router tells two spellings of one shape apart by method (GET
+	// /exemptions/{customerID} beside DELETE /exemptions/{id} is legal), so
+	// the collision is per method.
+	seenTemplates := map[string]string{} // method + shape -> path
 	for i := 0; i+1 < len(paths.Content); i += 2 {
 		path := paths.Content[i].Value
 		shape := templateShape(path)
-		if prev, ok := seenTemplates[shape]; ok && prev != path {
-			problem("templated path collision: %s vs %s", prev, path)
-		} else {
-			seenTemplates[shape] = path
+		item := paths.Content[i+1]
+		for j := 0; j+1 < len(item.Content); j += 2 {
+			key := item.Content[j].Value + " " + shape
+			if prev, ok := seenTemplates[key]; ok && prev != path {
+				problem("templated path collision: %s vs %s (%s)", prev, path, item.Content[j].Value)
+			} else {
+				seenTemplates[key] = path
+			}
 		}
 	}
 
