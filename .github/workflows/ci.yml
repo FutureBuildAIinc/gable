@@ -260,8 +260,13 @@ jobs:
       - name: Build backend image
         run: docker build -f core/Dockerfile .
 
-      - name: Build frontend image
-        run: docker build -f web/apps/desk/Dockerfile .
+      - name: Build web image (both bundles, one nginx)
+        run: docker build -f web/Dockerfile -t gable-web:routing-check .
+
+      # Runs the image just built: / is the front door, every desk route is
+      # the desk through the SPA fallback, assets of both load.
+      - name: Prove the image's routing
+        run: web/scripts/check-routing.sh gable-web:routing-check
 
   # ---------------------------------------------------------------------------
   # Advisory. NOT a merge gate.
