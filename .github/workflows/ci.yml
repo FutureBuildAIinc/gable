@@ -293,6 +293,14 @@ jobs:
         if: steps.tauri-cli.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "${TAURI_CLI_VERSION}" --locked
 
+      - name: TEMP generate lockfile
+        working-directory: tauri/gable-desk
+        run: cargo generate-lockfile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-cargo-lock
+          path: tauri/gable-desk/Cargo.lock
+
       - name: Format
         working-directory: tauri/gable-desk
         run: cargo fmt --check
