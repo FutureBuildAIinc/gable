@@ -20,7 +20,18 @@ const (
 	CodeForbidden                 = "forbidden"
 	CodeNotFound                  = "not_found"
 	CodeConflict                  = "conflict"
+	CodeStaleRevision             = "stale_revision"
+	CodeDuplicate                 = "duplicate"
+	CodeIdempotencyInProgress     = "idempotency_in_progress"
+	CodeInvalidStateTransition    = "invalid_state_transition"
+	CodePreconditionFailed        = "precondition_failed"
+	CodePreconditionRequired      = "precondition_required"
+	CodeMethodNotAllowed          = "method_not_allowed"
+	CodePayloadTooLarge           = "payload_too_large"
+	CodeUnsupportedMediaType      = "unsupported_media_type"
+	CodeIdempotencyKeyReused      = "idempotency_key_reused"
 	CodeRateLimited               = "rate_limited"
+	CodeUnavailable               = "unavailable"
 	CodeInternalError             = "internal_error"
 )
 
@@ -31,12 +42,24 @@ const (
 // message, and it exists so that rule is safe to follow everywhere else.
 const internalErrorMessage = "internal error"
 
-// FieldError is one entry of an error envelope's details: the offending
-// field's path (a JSON path for body fields, the parameter name for query
-// parameters, "cursor" for the cursor) and what is wrong with it.
+// FieldError is one entry of an error envelope's details. Most entries are
+// about a field: Field is its path (a JSON path for body fields, the
+// parameter name for query parameters, "cursor" for the cursor) and Message
+// says what is wrong with it. An entry may instead be a blocker, a business
+// reason the request failed that belongs to no one field (a credit hold, a
+// linked document): then Field is empty and Code carries the reason's own
+// stable code.
 type FieldError struct {
-	Field   string `json:"field"`
+	Field   string `json:"field,omitempty"`
 	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
+}
+
+// Blocker builds one blocker details entry: a code and a message with no
+// field, for the business reasons a request fails that are not about any
+// one field.
+func Blocker(code, msg string) FieldError {
+	return FieldError{Code: code, Message: msg}
 }
 
 // errorEnvelope is the wire shape of every error response.
@@ -91,6 +114,67 @@ func NotFound(msg string) *Error {
 // Conflict builds a 409 conflict.
 func Conflict(msg string) *Error {
 	return &Error{Status: http.StatusConflict, Code: CodeConflict, Message: msg}
+}
+
+// StaleRevision builds a 409 stale_revision: the write was built on a
+// revision the document has moved past (section 11's concurrency rule).
+func StaleRevision(msg string) *Error {
+	return &Error{Status: http.StatusConflict, Code: CodeStaleRevision, Message: msg}
+}
+
+// Duplicate builds a 409 duplicate, optionally carrying the blockers that
+// name what the new value collides with.
+func Duplicate(msg string, blockers ...FieldError) *Error {
+	return &Error{Status: http.StatusConflict, Code: CodeDuplicate, Message: msg, Details: blockers}
+}
+
+// IdempotencyInProgress builds a 409 idempotency_in_progress: the same key
+// is still executing its first request.
+func IdempotencyInProgress(msg string) *Error {
+	return &Error{Status: http.StatusConflict, Code: CodeIdempotencyInProgress, Message: msg}
+}
+
+// InvalidStateTransition builds a 409 invalid_state_transition, optionally
+// carrying the blockers that name what blocks the transition.
+func InvalidStateTransition(msg string, blockers ...FieldError) *Error {
+	return &Error{Status: http.StatusConflict, Code: CodeInvalidStateTransition, Message: msg, Details: blockers}
+}
+
+// PreconditionFailed builds a 412 precondition_failed.
+func PreconditionFailed(msg string) *Error {
+	return &Error{Status: http.StatusPreconditionFailed, Code: CodePreconditionFailed, Message: msg}
+}
+
+// PreconditionRequired builds a 428 precondition_required: the write needs
+// If-Match or a body revision and carries neither (section 11).
+func PreconditionRequired(msg string) *Error {
+	return &Error{Status: http.StatusPreconditionRequired, Code: CodePreconditionRequired, Message: msg}
+}
+
+// MethodNotAllowed builds a 405 method_not_allowed.
+func MethodNotAllowed(msg string) *Error {
+	return &Error{Status: http.StatusMethodNotAllowed, Code: CodeMethodNotAllowed, Message: msg}
+}
+
+// UnsupportedMediaType builds a 415 unsupported_media_type.
+func UnsupportedMediaType(msg string) *Error {
+	return &Error{Status: http.StatusUnsupportedMediaType, Code: CodeUnsupportedMediaType, Message: msg}
+}
+
+// PayloadTooLarge builds a 413 payload_too_large.
+func PayloadTooLarge(msg string) *Error {
+	return &Error{Status: http.StatusRequestEntityTooLarge, Code: CodePayloadTooLarge, Message: msg}
+}
+
+// IdempotencyKeyReused builds a 422 idempotency_key_reused: the key was
+// stored against a different request fingerprint (section 9).
+func IdempotencyKeyReused(msg string) *Error {
+	return &Error{Status: http.StatusUnprocessableEntity, Code: CodeIdempotencyKeyReused, Message: msg}
+}
+
+// Unavailable builds a 503 unavailable.
+func Unavailable(msg string) *Error {
+	return &Error{Status: http.StatusServiceUnavailable, Code: CodeUnavailable, Message: msg}
 }
 
 // RateLimited builds a 429 rate_limited.

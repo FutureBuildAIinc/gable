@@ -187,6 +187,17 @@ func TestErrorConstructors(t *testing.T) {
 		{NotFound("m"), http.StatusNotFound, CodeNotFound},
 		{Conflict("m"), http.StatusConflict, CodeConflict},
 		{RateLimited("m"), http.StatusTooManyRequests, CodeRateLimited},
+		{MethodNotAllowed("m"), http.StatusMethodNotAllowed, CodeMethodNotAllowed},
+		{UnsupportedMediaType("m"), http.StatusUnsupportedMediaType, CodeUnsupportedMediaType},
+		{PayloadTooLarge("m"), http.StatusRequestEntityTooLarge, CodePayloadTooLarge},
+		{PreconditionFailed("m"), http.StatusPreconditionFailed, CodePreconditionFailed},
+		{PreconditionRequired("m"), http.StatusPreconditionRequired, CodePreconditionRequired},
+		{StaleRevision("m"), http.StatusConflict, CodeStaleRevision},
+		{Duplicate("m"), http.StatusConflict, CodeDuplicate},
+		{IdempotencyInProgress("m"), http.StatusConflict, CodeIdempotencyInProgress},
+		{InvalidStateTransition("m"), http.StatusConflict, CodeInvalidStateTransition},
+		{IdempotencyKeyReused("m"), http.StatusUnprocessableEntity, CodeIdempotencyKeyReused},
+		{Unavailable("m"), http.StatusServiceUnavailable, CodeUnavailable},
 	}
 	for _, tc := range cases {
 		if tc.err.Status != tc.status {
@@ -204,5 +215,43 @@ func TestErrorImplementsError(t *testing.T) {
 	var err error = NotFound("thing 3f not found")
 	if err.Error() != "thing 3f not found" {
 		t.Errorf("Error() = %q", err.Error())
+	}
+}
+
+// RULE: a details entry may be a blocker, carrying a code and a message
+// with no field, for the business reasons a request fails that are not
+// about any one field (a credit hold, a linked document). On the wire such
+// an entry has no field key at all, never an empty one.
+func TestBlockerDetailsCarryCodeWithoutField(t *testing.T) {
+	w := httptest.NewRecorder()
+	WriteError(w, writeErrorRequest(), InvalidStateTransition(
+		"the order cannot ship", Blocker("uninvoiced_lines", "2 lines have no invoice")))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	var env struct {
+		Error struct {
+			Details []json.RawMessage `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if len(env.Error.Details) != 1 {
+		t.Fatalf("details = %s, want one entry", w.Body.String())
+	}
+	var entry map[string]json.RawMessage
+	if err := json.Unmarshal(env.Error.Details[0], &entry); err != nil {
+		t.Fatalf("entry: %v", err)
+	}
+	if _, has := entry["field"]; has {
+		t.Errorf("blocker entry carries a field key: %s", env.Error.Details[0])
+	}
+	if string(entry["code"]) != `"uninvoiced_lines"` {
+		t.Errorf("code = %s, want uninvoiced_lines", entry["code"])
+	}
+	if string(entry["message"]) != `"2 lines have no invoice"` {
+		t.Errorf("message = %s", entry["message"])
 	}
 }
