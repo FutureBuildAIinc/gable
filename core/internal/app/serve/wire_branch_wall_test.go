@@ -12,7 +12,9 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,13 +62,17 @@ type wallFixture struct {
 	branchA, branchB uuid.UUID
 	yardA, yardB     uuid.UUID
 	productID        uuid.UUID
+	vendorID         uuid.UUID
+	poA, poB         uuid.UUID
+	poLineA, poLineB uuid.UUID
 	db               *database.DB
 }
 
 func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixture {
 	t.Helper()
 	ctx := context.Background()
-	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New()}
+	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New(),
+		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New()}
 	for _, r := range []struct {
 		id     uuid.UUID
 		typ    string
@@ -81,6 +87,25 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 		f.productID, "WL-"+f.productID.String()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO vendors (id, name) VALUES ($1, $2)`, f.vendorID, "wl-vendor-"+f.vendorID.String()[:8]); err != nil {
+		t.Fatalf("seed vendor: %v", err)
+	}
+	// One sent purchase order per branch, one line each, so the path-id
+	// routes below act on real records of each branch.
+	for _, po := range []struct{ po, line, branch uuid.UUID }{
+		{f.poA, f.poLineA, f.branchA}, {f.poB, f.poLineB, f.branchB},
+	} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'SENT', 'MANUAL', $3)`,
+			po.po, f.vendorID, po.branch); err != nil {
+			t.Fatalf("seed purchase order: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost) VALUES ($1, $2, $3, 'wall', 5, 1)`,
+			po.line, po.po, f.productID); err != nil {
+			t.Fatalf("seed purchase order line: %v", err)
+		}
+	}
 	for _, sub := range []string{"u-a"} {
 		if _, err := db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, sub, f.branchA); err != nil {
 			t.Fatalf("seed grant: %v", err)
@@ -88,6 +113,9 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'u-a'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id IN ($1, $2)`, f.poA, f.poB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id IN ($1, $2)`, f.poA, f.poB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, f.vendorID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM inventory WHERE product_id = $1`, f.productID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, f.productID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE parent_id IN ($1, $2)`, f.branchA, f.branchB)
@@ -113,6 +141,14 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 // call sends one request as role/sub, with an optional X-Branch-Id.
 func (f *wallFixture) call(t *testing.T, method, path, body, role, sub, branchHeader string) int {
 	t.Helper()
+	status, _ := f.callBody(t, method, path, body, role, sub, branchHeader)
+	return status
+}
+
+// callBody sends one request as role/sub and returns the status with the
+// response body, for cases that read an id or a revision back.
+func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, branchHeader string) (int, []byte) {
+	t.Helper()
 	req, err := http.NewRequest(method, f.srv.URL+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -127,8 +163,12 @@ func (f *wallFixture) call(t *testing.T, method, path, body, role, sub, branchHe
 	if err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
-	return res.StatusCode
+	defer res.Body.Close()
+	buf, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.StatusCode, buf
 }
 
 func TestBranchWall_ServeWiring(t *testing.T) {
@@ -251,5 +291,127 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 	body := fmt.Sprintf(`{"product_id":%q,"location_id":%q,"quantity":5,"reason":"t"}`, f.productID, f.yardB)
 	if got := f.call(t, "POST", "/api/v1/inventory/adjust", body, "warehouse", "u-a", f.branchA.String()); got != http.StatusOK {
 		t.Errorf("switch off, bound warehouse caller adjusting another branch's yard: %d, want 200", got)
+	}
+
+	receive := fmt.Sprintf(`{"lines":[{"line_id":%q,"qty_received":1,"location_id":%q}]}`, f.poLineB, f.yardB)
+	for _, c := range []struct {
+		name, method, path, body, role, sub string
+	}{
+		{"receive another branch's po", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/receive", receive, "purchasing", "u-a"},
+		{"read another branch's po", "GET", "/api/v1/purchase-orders/" + f.poB.String(), "", "purchasing", "u-a"},
+		{"read another branch's yard", "GET", "/api/v1/locations/" + f.yardB.String(), "", "warehouse", "u-a"},
+		{"read another branch's tree", "GET", "/api/v1/branches/" + f.branchB.String() + "/tree", "", "sales", "u-a"},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, ""); got != http.StatusOK {
+			t.Errorf("switch off, bound caller %s: %d, want 200", c.name, got)
+		}
+	}
+}
+
+// The branch wall on records a path id addresses (ADR 0007 section 2.3): a
+// bound caller acts only on records of a branch it may target, an
+// administrator on any branch's, and a record's branch is held to the same
+// rule a request body is held to. Each case goes through serve's real mount
+// methods, the real role guards and the real BranchMiddleware; a route that
+// loses its record check fails here.
+func TestBranchWall_PathIDRecords(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	// A quote at each branch, created through the wire so number, revision
+	// and lines are real. The branch B records are created by the admin (no
+	// header, any branch); the branch A records by the granted sales user.
+	// The quote cleanup at the end of this block is registered after the
+	// customer cleanup below, so it runs before it (quotes reference
+	// customers).
+	cust := func(branch, role, sub, header string) string {
+		status, body := f.callBody(t, "POST", "/api/v1/customers",
+			fmt.Sprintf(`{"account_number":"WALL-%s","name":"wall","primary_branch_id":%q}`, uuid.NewString()[:8], branch),
+			role, sub, header)
+		if status != http.StatusCreated {
+			t.Fatalf("seed customer at %s: %d %s", branch, status, body)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("seed customer body: %v", err)
+		}
+		return out.ID
+	}
+	custA := cust(A, "sales", "u-a", A)
+	custB := cust(f.branchB.String(), "admin", "boss", "")
+	quoteID := func(branch, customer, role, sub, header string) string {
+		status, body := f.callBody(t, "POST", "/api/v1/quotes",
+			fmt.Sprintf(`{"branch_id":%q,"customer_id":%q,"delivery_type":"pickup","lines":[{"product_id":%q,"sku":"wall","description":"x","quantity":"1","uom":"PCS","unit_price_ten_thousandths":100}]}`, branch, customer, f.productID),
+			role, sub, header)
+		if status != http.StatusCreated {
+			t.Fatalf("seed quote at %s: %d %s", branch, status, body)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("seed quote body: %v", err)
+		}
+		return out.ID
+	}
+	quoteA := quoteID(A, custA, "sales", "u-a", A)
+	quoteB := quoteID(f.branchB.String(), custB, "admin", "boss", "")
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM customer_branches WHERE branch_id IN ($1, $2)`, f.branchA, f.branchB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'customer' AND branch_id IN ($1, $2)`, f.branchA, f.branchB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM customers WHERE account_number LIKE 'WALL-%'`)
+	})
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quote_lines WHERE quote_id IN (SELECT id FROM quotes WHERE branch_id IN ($1, $2))`, f.branchA, f.branchB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'quote' AND branch_id IN ($1, $2)`, f.branchA, f.branchB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quotes WHERE branch_id IN ($1, $2)`, f.branchA, f.branchB)
+	})
+
+	receive := func(line uuid.UUID, loc uuid.UUID) string {
+		return fmt.Sprintf(`{"lines":[{"line_id":%q,"qty_received":1,"location_id":%q}]}`, line, loc)
+	}
+	const ok = http.StatusOK
+	const no = http.StatusForbidden
+
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		// Purchase orders: the record's branch is held to the caller's wall.
+		// The no header row is the hole this wall closes: without a context
+		// branch the unfiltered lookup found any branch's purchase order.
+		{"receive foreign po, no header", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/receive", receive(f.poLineB, f.yardA), "purchasing", "u-a", "", no},
+		{"receive foreign po, header A", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/receive", receive(f.poLineB, f.yardA), "purchasing", "u-a", A, no},
+		{"receive own po", "POST", "/api/v1/purchase-orders/" + f.poA.String() + "/receive", receive(f.poLineA, f.yardA), "purchasing", "u-a", A, ok},
+		{"receive foreign po, admin", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/receive", receive(f.poLineB, f.yardB), "admin", "boss", "", ok},
+		{"read foreign po, no header", "GET", "/api/v1/purchase-orders/" + f.poB.String(), "", "purchasing", "u-a", "", no},
+		{"read own po", "GET", "/api/v1/purchase-orders/" + f.poA.String(), "", "purchasing", "u-a", A, ok},
+		{"submit foreign po, no header", "POST", "/api/v1/purchase-orders/" + f.poB.String() + "/submit", "", "purchasing", "u-a", "", no},
+		{"freight of foreign po, no header", "GET", "/api/v1/purchase-orders/" + f.poB.String() + "/freight", "", "purchasing", "u-a", "", no},
+
+		// Location and branch tree reads.
+		{"read foreign yard, no header", "GET", "/api/v1/locations/" + f.yardB.String(), "", "warehouse", "u-a", "", no},
+		{"read foreign yard, header A", "GET", "/api/v1/locations/" + f.yardB.String(), "", "warehouse", "u-a", A, no},
+		{"read own yard", "GET", "/api/v1/locations/" + f.yardA.String(), "", "warehouse", "u-a", A, ok},
+		{"read foreign yard, admin", "GET", "/api/v1/locations/" + f.yardB.String(), "", "admin", "boss", "", ok},
+		{"read foreign tree, no header", "GET", "/api/v1/branches/" + f.branchB.String() + "/tree", "", "sales", "u-a", "", no},
+		{"read foreign tree, header A", "GET", "/api/v1/branches/" + f.branchB.String() + "/tree", "", "sales", "u-a", A, no},
+		{"read own tree", "GET", "/api/v1/branches/" + f.branchA.String() + "/tree", "", "sales", "u-a", A, ok},
+		{"read foreign tree, admin", "GET", "/api/v1/branches/" + f.branchB.String() + "/tree", "", "admin", "boss", "", ok},
+
+		// Quotes: the record's branch is held to the caller's wall on reads
+		// and writes alike.
+		{"read foreign quote, no header", "GET", "/api/v1/quotes/" + quoteB, "", "sales", "u-a", "", no},
+		{"read own quote", "GET", "/api/v1/quotes/" + quoteA, "", "sales", "u-a", A, ok},
+		{"file of foreign quote, no header", "GET", "/api/v1/quotes/" + quoteB + "/file", "", "sales", "u-a", "", no},
+		{"edit foreign quote, no header", "PUT", "/api/v1/quotes/" + quoteB, `{"revision":1}`, "sales", "u-a", "", no},
+		{"transition foreign quote, no header", "POST", "/api/v1/quotes/" + quoteB + "/transitions", `{"to":"sent","revision":1}`, "sales", "u-a", "", no},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
 	}
 }

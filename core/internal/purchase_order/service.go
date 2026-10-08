@@ -171,6 +171,14 @@ func (s *Service) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, erro
 	return s.repo.GetPO(ctx, id)
 }
 
+// GetPOBranch returns the branch the purchase order belongs to, or nil when
+// there is no such purchase order. Unlike GetPO it never filters by the
+// caller's branch context: the branch wall needs the record's own branch to
+// hold it against.
+func (s *Service) GetPOBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	return s.repo.GetPOBranch(ctx, id)
+}
+
 // CreateManualPO creates a new PO manually (not from a sales order special item)
 func (s *Service) CreateManualPO(ctx context.Context, vendorID uuid.UUID, lines []struct {
 	ProductID   string
