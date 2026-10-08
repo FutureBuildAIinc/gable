@@ -4260,7 +4260,7 @@ export interface paths {
         get: operations["quoteGet"];
         /**
          * Replace a draft quote
-         * @description Full replace of a draft quote's header and lines, on the client's revision (If-Match or the body's revision; neither is 428, a stale one is 409 stale_revision). Only a draft is editable; any other status is a 409 conflict. A line whose id survives keeps its customer note. The lifecycle never moves here: use the transitions route.
+         * @description Full replace of a draft quote's header and lines, on the client's revision (If-Match or the body's revision; neither is 428, a stale one is 409 stale_revision). Only a draft is editable; any other status is a 409 conflict. A line whose id survives keeps its customer note. The lifecycle never moves here: use the transitions route. A PUT applies the header fields and the lines only: branch_id, source, margin_total_cents, original_file, original_filename, original_content_type and parse_map are fixed at create, and sending one is a 400 naming it.
          */
         put: operations["quoteUpdate"];
         post?: never;
@@ -8283,7 +8283,7 @@ export interface components {
          * @enum {string}
          */
         QuoteUom: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
-        /** @description The body of POST /quotes and PUT /quotes/{id}. A field the schema does not name is a 400. revision is the PUT precondition beside If-Match. */
+        /** @description The body of POST /quotes and PUT /quotes/{id}. A field the schema does not name is a 400. revision is the PUT precondition beside If-Match; a create has no revision and refuses one with a 400. A PUT refuses the create-only fields (branch_id, source, margin_total_cents, original_file, original_filename, original_content_type, parse_map). */
         QuoteRequest: {
             /** Format: uuid */
             branch_id?: string;
@@ -8325,6 +8325,7 @@ export interface components {
             customer_note?: string;
             quantity: components["schemas"]["Quantity"];
             uom?: components["schemas"]["QuoteUom"];
+            /** @description A unit code of one to six capital letters; defaults to uom. */
             price_uom?: string;
             uom_qty?: components["schemas"]["Quantity"];
             price_uom_qty?: components["schemas"]["Quantity"];

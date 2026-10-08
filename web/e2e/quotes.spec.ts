@@ -28,12 +28,18 @@ interface Seeded {
   product: { id: string; sku: string; uom_primary: string };
 }
 
+// The server limits one address to 120 requests a minute and the desk makes
+// many calls per page, so the seeded pair is looked up once per run.
+let seeded: Seeded | undefined;
+
 async function firstCustomerAndProduct(request: import('@playwright/test').APIRequestContext): Promise<Seeded> {
+  if (seeded) return seeded;
   const customers = (await (await request.get('/api/v1/customers')).json()) as { id: string; name: string }[] | { data: { id: string; name: string }[] };
   const customer = (Array.isArray(customers) ? customers : customers.data)[0];
   const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string; uom_primary: string }[] | { data: { id: string; sku: string; uom_primary: string }[] };
   const product = (Array.isArray(products) ? products : products.data)[0];
-  return { customer, product };
+  seeded = { customer, product };
+  return seeded;
 }
 
 test.describe('Quote flow on the new contract', () => {
@@ -145,6 +151,88 @@ test.describe('Quote flow on the new contract', () => {
     const res = await created;
     expect(res.status(), await res.text()).toBe(201);
     expect(res.request().postDataJSON().lines[0].uom).toBe('PCS');
+  });
+
+  test('editing a draft sends the loaded revision, and an edit made on a stale one reloads', async ({ page, request }) => {
+    const { customer, product } = await firstCustomerAndProduct(request);
+    const draft = (qty: string) => ({
+      customer_id: customer.id,
+      lines: [{ product_id: product.id, quantity: qty, uom: product.uom_primary, unit_price_ten_thousandths: 10000 }],
+    });
+    const made = await (await request.post('/api/v1/quotes', { data: draft('2') })).json();
+    await signIn(page, 'Playwright Edit');
+
+    const addProductLine = async () => {
+      await page.getByPlaceholder('Search SKU or Desc...').fill(product.sku);
+      await page.locator('div.cursor-pointer', { hasText: product.sku }).first().click();
+      await page.locator('gable-line-item-editor input[type="number"]').first().fill('5');
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+    };
+
+    // Edit at the loaded revision: the PUT carries If-Match "1" and the new line.
+    await page.goto(`/quotes/${made.id}/edit`);
+    await expect(page.getByRole('heading', { name: 'Edit Quote' })).toBeVisible();
+    await addProductLine();
+    const put = page.waitForResponse((r) => r.url().endsWith(`/api/v1/quotes/${made.id}`) && r.request().method() === 'PUT');
+    await page.getByRole('button', { name: 'Save Changes' }).click();
+    const putRes = await put;
+    expect(putRes.status(), await putRes.text()).toBe(200);
+    expect(putRes.request().headers()['if-match']).toBe('"1"');
+    const sent = putRes.request().postDataJSON();
+    expect(sent.lines).toHaveLength(2);
+    // The edit sends only what a PUT applies.
+    for (const fixedAtCreate of ['source', 'parse_map', 'original_file', 'margin_total_cents', 'branch_id']) {
+      expect(sent).not.toHaveProperty(fixedAtCreate);
+    }
+    expect((await putRes.json()).revision).toBe(2);
+
+    // Someone else edits the quote while this editor is open: the stale save is a 409 and the editor reloads.
+    await page.goto(`/quotes/${made.id}/edit`);
+    await expect(page.getByRole('heading', { name: 'Edit Quote' })).toBeVisible();
+    const elsewhere = await request.put(`/api/v1/quotes/${made.id}`, { data: draft('9'), headers: { 'If-Match': '"2"' } });
+    expect(elsewhere.status(), await elsewhere.text()).toBe(200);
+    await addProductLine();
+    const stale = page.waitForResponse((r) => r.url().endsWith(`/api/v1/quotes/${made.id}`) && r.request().method() === 'PUT');
+    await page.getByRole('button', { name: 'Save Changes' }).click();
+    expect((await stale).status()).toBe(409);
+    await expect(page.getByText(/changed elsewhere/)).toBeVisible();
+    const after = await (await request.get(`/api/v1/quotes/${made.id}`)).json();
+    expect(after.revision).toBe(3);
+    expect(after.lines).toHaveLength(1);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-stale-edit.png') });
+  });
+
+  test('convert refuses a quote with a line priced per another unit, names the line, and leaves the quote a draft', async ({ page, request }) => {
+    const { customer, product } = await firstCustomerAndProduct(request);
+    const made = await (await request.post('/api/v1/quotes', {
+      data: {
+        customer_id: customer.id,
+        lines: [
+          { product_id: product.id, quantity: '1', uom: product.uom_primary, unit_price_ten_thousandths: 10000 },
+          {
+            product_id: product.id, quantity: '1500', uom: 'EA', price_uom: 'M', uom_qty: '1000', price_uom_qty: '1',
+            unit_price_ten_thousandths: 37500,
+          },
+        ],
+      },
+    })).json();
+    await signIn(page, 'Playwright Convert');
+
+    await page.goto(`/quotes/${made.id}`);
+    await expect(page.getByRole('heading', { name: `Quote ${made.number}` })).toBeVisible();
+    const convert = page.waitForResponse((r) => r.url().endsWith(`/api/v1/quotes/${made.id}/convert`));
+    await page.getByRole('button', { name: /Convert to Order/ }).click();
+    const res = await convert;
+    expect(res.status()).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe('invalid_state_transition');
+    expect(body.error.details[0].code).toBe('line_not_convertible');
+    await expect(page.getByText(/lines\[1\] is priced per M/)).toBeVisible();
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-convert-refused.png') });
+
+    const after = await (await request.get(`/api/v1/quotes/${made.id}`)).json();
+    expect(after.status).toBe('draft');
+    expect(after.revision).toBe(1);
   });
 
   test('the list filters by status on the server and pages by cursor', async ({ page, request }) => {

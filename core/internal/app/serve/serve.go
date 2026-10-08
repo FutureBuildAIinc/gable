@@ -939,8 +939,8 @@ func Run() {
 	// CORS — must be outside auth so OPTIONS preflight is handled before auth
 	finalHandler = middleware.CORSMiddleware(finalHandler)
 
-	// Rate limiting (120 requests/minute per IP)
-	finalHandler = middleware.RateLimit(120, cfg.TrustedProxies)(finalHandler)
+	// Rate limiting (RATE_LIMIT_PER_MINUTE requests per IP, default 120)
+	finalHandler = middleware.RateLimit(cfg.RateLimitPerMinute, cfg.TrustedProxies)(finalHandler)
 
 	// Panic recovery
 	finalHandler = middleware.Recovery(logger)(finalHandler)

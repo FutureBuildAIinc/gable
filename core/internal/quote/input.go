@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -109,6 +110,11 @@ type DraftLine struct {
 	UnitPrice    httpx.Price
 }
 
+// priceUOMCode is what a price unit looks like. It is not limited to the sale
+// unit enum (a price per M or per CWT is real), but it is a code, never free
+// text.
+var priceUOMCode = regexp.MustCompile(`^[A-Z]{1,6}$`)
+
 // one is the quantity 1 at the wire scale.
 const one httpx.Quantity = 1 * 10000
 
@@ -116,11 +122,38 @@ const one httpx.Quantity = 1 * 10000
 // 400 carrying every offending field. Unit of measure rule: a line that names
 // a product and no uom takes the product's unit (the service fills it); only a
 // line with neither is a 400 naming lines[i].uom, never a database cast fault.
-func (req *Request) Parse() (*Draft, error) {
+func (req *Request) Parse() (*Draft, error) { return req.parse(false) }
+
+// ParseUpdate is Parse for PUT /quotes/{id}. A PUT replaces the header fields
+// and the lines and applies nothing else, so a field it does not apply (the
+// quote's branch, source, margin, original upload or parse map, all fixed at
+// create) is a 400 naming it rather than a silent drop.
+func (req *Request) ParseUpdate() (*Draft, error) { return req.parse(true) }
+
+func (req *Request) parse(update bool) (*Draft, error) {
 	v := &httpx.Validator{}
 	d := &Draft{DeliveryType: DeliveryPickup, Source: "manual"}
 
-	if id, ok := v.UUID("branch_id", req.BranchID, false); ok {
+	if update {
+		for _, f := range []struct {
+			name    string
+			present bool
+		}{
+			{"branch_id", req.BranchID != nil},
+			{"source", req.Source != nil},
+			{"margin_total_cents", !isAbsentRaw(req.MarginTotalCents)},
+			{"original_file", req.OriginalFile != nil},
+			{"original_filename", req.OriginalFilename != nil},
+			{"original_content_type", req.OriginalContentType != nil},
+			{"parse_map", !isAbsentRaw(req.ParseMap)},
+		} {
+			v.Check(!f.present, f.name, "cannot be changed by an edit: it is fixed when the quote is created")
+		}
+	} else {
+		v.Check(isAbsentRaw(req.Revision), "revision", "is not accepted on create: a new quote has no revision to precondition on")
+	}
+
+	if id, ok := v.UUID("branch_id", req.BranchID, false); ok && !update {
 		d.BranchID = &id
 	}
 	if id, ok := v.UUID("customer_id", req.CustomerID, true); ok {
@@ -146,7 +179,7 @@ func (req *Request) Parse() (*Draft, error) {
 			v.Check(false, "delivery_type", "must be one of: pickup, delivery")
 		}
 	}
-	if req.Source != nil {
+	if req.Source != nil && !update {
 		v.Enum("source", *req.Source, "manual", "ai")
 		d.Source = *req.Source
 	}
@@ -154,20 +187,22 @@ func (req *Request) Parse() (*Draft, error) {
 		v.Check(n >= 0, "freight_cents", "must not be negative")
 		d.FreightCents = httpx.Cents(n)
 	}
-	if n, ok := v.Int("margin_total_cents", req.MarginTotalCents, false); ok {
+	if n, ok := v.Int("margin_total_cents", req.MarginTotalCents, false); ok && !update {
 		d.MarginTotalCents = httpx.Cents(n)
 	}
-	if n, ok := v.Int("revision", req.Revision, false); ok {
-		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
-		d.Revision = &n
+	if update {
+		if n, ok := v.Int("revision", req.Revision, false); ok {
+			v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+			d.Revision = &n
+		}
 	}
-	if req.OriginalFilename != nil {
+	if req.OriginalFilename != nil && !update {
 		d.OriginalFilename = *req.OriginalFilename
 	}
-	if req.OriginalContentType != nil {
+	if req.OriginalContentType != nil && !update {
 		d.OriginalContentType = *req.OriginalContentType
 	}
-	if req.OriginalFile != nil && *req.OriginalFile != "" {
+	if req.OriginalFile != nil && *req.OriginalFile != "" && !update {
 		data, err := base64.StdEncoding.DecodeString(*req.OriginalFile)
 		switch {
 		case err != nil:
@@ -178,7 +213,7 @@ func (req *Request) Parse() (*Draft, error) {
 			d.OriginalFile = data
 		}
 	}
-	if !isAbsentRaw(req.ParseMap) {
+	if !isAbsentRaw(req.ParseMap) && !update {
 		if !json.Valid(req.ParseMap) {
 			v.Check(false, "parse_map", "must be valid JSON")
 		} else {
@@ -259,6 +294,8 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 		if strings.TrimSpace(*l.PriceUOM) == "" {
 			v.Check(false, path+".price_uom", "must not be empty")
 		} else {
+			v.Check(priceUOMCode.MatchString(*l.PriceUOM), path+".price_uom",
+				"must be a unit code of one to six capital letters, for example MBF, M or CWT")
 			d.PriceUOM = *l.PriceUOM
 		}
 	}

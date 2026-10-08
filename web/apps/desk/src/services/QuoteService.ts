@@ -43,9 +43,9 @@ export class QuoteApiError extends Error {
         return this.code === 'stale_revision';
     }
 
-    /** The message, with each field problem listed on its own line for validation_failed. */
+    /** The message, with each field problem or blocker listed on its own line for validation_failed and invalid_state_transition. */
     get displayMessage(): string {
-        if (this.code === 'validation_failed' && this.details.length > 0) {
+        if ((this.code === 'validation_failed' || this.code === 'invalid_state_transition') && this.details.length > 0) {
             const lines = this.details.map(d => (d.field ? `${d.field}: ${d.message}` : d.message));
             return `${this.message}\n${lines.join('\n')}`;
         }

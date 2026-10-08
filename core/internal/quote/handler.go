@@ -247,7 +247,7 @@ func (h *Handler) HandleUpdateQuote(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	draft, err := req.Parse()
+	draft, err := req.ParseUpdate()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

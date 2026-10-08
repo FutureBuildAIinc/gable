@@ -165,7 +165,11 @@ paths:
         revision (If-Match or the body's revision; neither is 428, a stale one
         is 409 stale_revision). Only a draft is editable; any other status is a
         409 conflict. A line whose id survives keeps its customer note. The
-        lifecycle never moves here: use the transitions route.
+        lifecycle never moves here: use the transitions route. A PUT applies
+        the header fields and the lines only: branch_id, source,
+        margin_total_cents, original_file, original_filename,
+        original_content_type and parse_map are fixed at create, and sending
+        one is a 400 naming it.
       parameters:
         - name: id
           in: path
@@ -824,7 +828,10 @@ components:
       required: [customer_id, lines]
       description: >-
         The body of POST /quotes and PUT /quotes/{id}. A field the schema does
-        not name is a 400. revision is the PUT precondition beside If-Match.
+        not name is a 400. revision is the PUT precondition beside If-Match; a
+        create has no revision and refuses one with a 400. A PUT refuses the
+        create-only fields (branch_id, source, margin_total_cents,
+        original_file, original_filename, original_content_type, parse_map).
       properties:
         branch_id:
           type: string
@@ -901,6 +908,8 @@ components:
           $ref: "#/components/schemas/QuoteUom"
         price_uom:
           type: string
+          pattern: "^[A-Z]{1,6}$"
+          description: A unit code of one to six capital letters; defaults to uom.
         uom_qty:
           $ref: "#/components/schemas/Quantity"
         price_uom_qty:

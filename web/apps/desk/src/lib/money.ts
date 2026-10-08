@@ -92,13 +92,26 @@ function scaledToQuantity(scaled: number): string {
 /**
  * The line extension in cents: quantity x unit price (ten thousandths), rounded
  * once, half away from zero, the platform rule. Both factors are scaled integers
- * multiplied as BigInt (scale 10^8, divided down to 10^2).
+ * multiplied as BigInt (scale 10^8, divided down to 10^2). A line priced per another
+ * unit passes its conversion pair (uom_qty, price_uom_qty), the same extension the
+ * server computes.
  */
-export function extensionCents(quantity: string, unitPriceTenThousandths: number): number {
+export function extensionCents(
+    quantity: string,
+    unitPriceTenThousandths: number,
+    uomQty: string = '1',
+    priceUomQty: string = '1',
+): number {
     const q = parseScaled(quantity, 4);
     if (q === null || !Number.isFinite(unitPriceTenThousandths)) return 0;
-    const product = BigInt(q) * BigInt(Math.trunc(unitPriceTenThousandths));
-    const divisor = 1000000n;
+    // The line's conversion pair: uomQty of the sale unit equals priceUomQty of
+    // the price unit. A missing, zero or unparseable pair is 1 to 1.
+    let uq = parseScaled(uomQty, 4) ?? 0;
+    let pq = parseScaled(priceUomQty, 4) ?? 0;
+    if (uq <= 0 || pq <= 0) { uq = 10000; pq = 10000; }
+    // cents = q x price x pq / uq, every factor a scaled integer.
+    const product = BigInt(q) * BigInt(Math.trunc(unitPriceTenThousandths)) * BigInt(pq);
+    const divisor = 1000000n * BigInt(uq);
     const negative = product < 0n;
     const abs = negative ? -product : product;
     let cents = abs / divisor;

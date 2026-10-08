@@ -293,9 +293,11 @@ export class GableQuoteBuilder extends LitElement {
         this.lineErrors = {};
         try {
             const delivery = this.deliveryType === 'delivery';
+            // A create also carries the fields fixed at create (source, the
+            // original upload, the parse map); an edit sends only the header
+            // fields and lines the server applies, and refuses the rest.
             const payload: QuoteRequest = {
                 customer_id: this.customer.id,
-                source: this.aiSource ? 'ai' : 'manual',
                 delivery_type: this.deliveryType,
                 freight_cents: delivery ? this.freightCents : 0,
                 lines: this.lines.map(l => this.buildLine(l)),
@@ -306,8 +308,10 @@ export class GableQuoteBuilder extends LitElement {
                 payload.expires_at = this.expiresAt;
             }
 
-            // Attach AI parse data if available
-            if (this.aiSource && this.lastParseResult) {
+            if (!this.isEditing) payload.source = this.aiSource ? 'ai' : 'manual';
+
+            // Attach AI parse data if available (a create only)
+            if (!this.isEditing && this.aiSource && this.lastParseResult) {
                 payload.parse_map = this.lastParseResult.items as unknown as QuoteRequest['parse_map'];
                 if (this.lastParseResult.source_image) {
                     const [header, data] = this.lastParseResult.source_image.split(',');
@@ -343,7 +347,7 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private lineTotalCents(line: LineWithEscalator): number {
-        return extensionCents(line.quantity, line.unit_price_ten_thousandths);
+        return extensionCents(line.quantity, line.unit_price_ten_thousandths, line.uom_qty, line.price_uom_qty);
     }
 
     private get subtotalCents() {
@@ -366,7 +370,7 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private get escalatedTotalCents() {
-        return this.lines.reduce((sum, line) => sum + extensionCents(line.quantity, this.escalatedPriceTT(line)), 0);
+        return this.lines.reduce((sum, line) => sum + extensionCents(line.quantity, this.escalatedPriceTT(line), line.uom_qty, line.price_uom_qty), 0);
     }
 
     private get hasEscalators() {
@@ -682,7 +686,7 @@ export class GableQuoteBuilder extends LitElement {
                                                         ${formatCents(this.lineTotalCents(line))}
                                                         ${line.escalator.result ? html`
                                                             <div class="text-xs text-emerald-300/70 mt-1">
-                                                                \u2192 ${formatCents(extensionCents(line.quantity, floatDollarsToTenThousandths(line.escalator.result.future_price)))}
+                                                                \u2192 ${formatCents(extensionCents(line.quantity, floatDollarsToTenThousandths(line.escalator.result.future_price), line.uom_qty, line.price_uom_qty))}
                                                             </div>
                                                         ` : nothing}
                                                     </td>

@@ -147,8 +147,9 @@ export class GableQuoteDetail extends LitElement {
     private renderDetailsTab(quote: Quote) {
         const lines = quote.lines || [];
         // All money here is integer cents. The line cost is the unit cost (ten
-        // thousandths) times the quantity, rounded once like the line total.
-        const lineCostCents = (l: Quote['lines'][number]) => extensionCents(l.quantity, l.unit_cost_ten_thousandths);
+        // thousandths) times the quantity through the line's conversion pair, rounded once
+        // like the line total.
+        const lineCostCents = (l: Quote['lines'][number]) => extensionCents(l.quantity, l.unit_cost_ten_thousandths, l.uom_qty, l.price_uom_qty);
         const totalRevenue = lines.reduce((s, l) => s + l.line_total_cents, 0);
         const baseCost = lines.reduce((s, l) => s + lineCostCents(l), 0);
         const baseMargin = totalRevenue - baseCost;

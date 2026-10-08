@@ -159,6 +159,20 @@ describe('error envelope', () => {
     expect(quoteErrorMessage(err)).toContain('The request is invalid')
   })
 
+  it('lists a refused convert\'s blockers, which carry no field', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      error: {
+        code: 'invalid_state_transition',
+        message: 'the quote has lines an order cannot carry yet',
+        details: [{ code: 'line_not_convertible', message: 'lines[1] is priced per MBF but sold in PCS' }],
+      },
+      meta: { request_id: 'req-10' },
+    }, 409))
+    const err = await QuoteService.convert('q-1', 1).catch(e => e)
+    expect(err.status).toBe(409)
+    expect(err.displayMessage).toContain('lines[1] is priced per MBF but sold in PCS')
+  })
+
   it('flags a stale revision', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'stale_revision', message: 'changed' }, meta: { request_id: 'r' } }, 409))
     const err = await QuoteService.transition('q-1', 'sent', 1).catch(e => e)

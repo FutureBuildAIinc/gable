@@ -199,7 +199,7 @@ func quoteGroups() []groupDef {
 			path:    "/api/v1/quotes/{myQuote}",
 			headers: map[string]string{"If-Match": `"1"`},
 			body: map[string]any{
-				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "pickup",
+				"customer_id": "{customer}", "delivery_type": "pickup",
 				"lines": []map[string]any{line("20")},
 			},
 		},
@@ -209,6 +209,17 @@ func quoteGroups() []groupDef {
 			path:    "/api/v1/quotes/{myQuote}",
 			headers: map[string]string{"If-Match": `"1"`},
 			body:    map[string]any{"customer_id": "{customer}", "lines": []map[string]any{line("30")}},
+		},
+		// A PUT applies the header fields and lines only: a create-only field
+		// is a 400 naming it, and the revision stays where it was.
+		{
+			name:    "quote.update.create_only_field",
+			method:  "PUT",
+			path:    "/api/v1/quotes/{myQuote}",
+			headers: map[string]string{"If-Match": `"2"`},
+			body: map[string]any{
+				"branch_id": "{branch}", "customer_id": "{customer}", "lines": []map[string]any{line("20")},
+			},
 		},
 		{name: "quote.state.draft_to_sent", method: "POST", path: "/api/v1/quotes/{myQuote}/transitions",
 			headers: map[string]string{"If-Match": `"2"`}, body: map[string]any{"to": "sent"}},

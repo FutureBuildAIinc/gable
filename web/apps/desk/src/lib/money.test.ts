@@ -121,6 +121,23 @@ describe('extensionCents', () => {
   it('is zero for an unparseable quantity', () => {
     expect(extensionCents('x', 100)).toBe(0)
   })
+
+  it('applies the conversion pair: quantity x price x price_uom_qty / uom_qty', () => {
+    // 187.5 pieces priced at 500.00 per MBF, 187.5 pieces to 1 MBF
+    expect(extensionCents('187.5', 5000000, '187.5', '1')).toBe(50000)
+    // one piece of the same lumber: 266.67 cents rounds to 267
+    expect(extensionCents('1', 5000000, '187.5', '1')).toBe(267)
+    // 1500 pieces at 3.75 per thousand
+    expect(extensionCents('1500', 37500, '1000', '1')).toBe(563)
+    // a 1 to 1 pair changes nothing
+    expect(extensionCents('10', 55000, '1', '1')).toBe(5500)
+  })
+
+  it('treats a missing or unparseable pair as 1 to 1', () => {
+    expect(extensionCents('10', 55000, undefined, undefined)).toBe(5500)
+    expect(extensionCents('10', 55000, '0', '0')).toBe(5500)
+    expect(extensionCents('10', 55000, 'x', '1')).toBe(5500)
+  })
 })
 
 describe('centsToInput', () => {

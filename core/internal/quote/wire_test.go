@@ -778,6 +778,95 @@ func TestWire_PutKeepsCustomerNotes(t *testing.T) {
 	}
 }
 
+// A create has no revision to precondition on: a body revision is refused
+// rather than accepted and ignored.
+func TestWire_CreateRefusesARevision(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	body := f.createBody()
+	body["revision"] = 1
+	r := f.do("POST", "/api/v1/quotes", body)
+	if r.status != 400 {
+		t.Fatalf("create with a revision = %d, want 400: %s", r.status, r.raw)
+	}
+	_, _, details := errorOf(t, r)
+	if len(details) != 1 || details[0]["field"] != "revision" {
+		t.Errorf("details = %v, want one entry naming revision", details)
+	}
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM quotes WHERE customer_id = $1`, f.customerID).Scan(&n); err != nil || n != 0 {
+		t.Errorf("a refused create left %d quotes (err %v)", n, err)
+	}
+}
+
+// price_uom is a unit code, not free text: one to six capital letters (a price
+// per M or per CWT is real, so it is not limited to the sale unit enum).
+func TestWire_PriceUomIsAUnitCode(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	for _, bad := range []string{"<script>", "mbf", "TOOLONGUNIT", "M BF", "M1"} {
+		line := f.line("10")
+		line["price_uom"] = bad
+		line["uom_qty"], line["price_uom_qty"] = "1000", "1"
+		r := f.do("POST", "/api/v1/quotes", f.createBody(line))
+		if r.status != 400 {
+			t.Errorf("price_uom %q = %d, want 400: %s", bad, r.status, r.raw)
+			continue
+		}
+		_, _, details := errorOf(t, r)
+		if len(details) != 1 || details[0]["field"] != "lines[0].price_uom" {
+			t.Errorf("price_uom %q: details = %v, want lines[0].price_uom", bad, details)
+		}
+	}
+	for _, good := range []string{"M", "CWT", "MBF"} {
+		line := f.line("10")
+		line["price_uom"] = good
+		line["uom_qty"], line["price_uom_qty"] = "1000", "1"
+		if r := f.do("POST", "/api/v1/quotes", f.createBody(line)); r.status != 201 {
+			t.Errorf("price_uom %q = %d, want 201: %s", good, r.status, r.raw)
+		}
+	}
+}
+
+// A PUT replaces the header and the lines; a field it does not apply is a 400
+// naming it, never a silent drop.
+func TestWire_PutRefusesFieldsItDoesNotApply(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	id := str(t, f.create().body, "id")
+
+	for field, value := range map[string]any{
+		"source": "ai", "margin_total_cents": 1200, "original_file": "aGVsbG8=", "original_filename": "list.pdf",
+		"original_content_type": "application/pdf", "parse_map": []any{}, "branch_id": uuid.NewString(),
+	} {
+		body := f.createBody()
+		body[field] = value
+		r := f.do("PUT", "/api/v1/quotes/"+id, body, "If-Match", `"1"`)
+		if r.status != 400 {
+			t.Errorf("PUT carrying %s = %d, want 400: %s", field, r.status, r.raw)
+			continue
+		}
+		_, _, details := errorOf(t, r)
+		if len(details) != 1 || details[0]["field"] != field {
+			t.Errorf("PUT carrying %s: details = %v, want one entry naming it", field, details)
+		}
+	}
+	// Nothing was applied: the revision is where it was.
+	g := f.do("GET", "/api/v1/quotes/"+id, nil)
+	if num(t, g.body, "revision") != 1 {
+		t.Errorf("a refused PUT moved the revision to %v", g.body["revision"])
+	}
+	// The create accepts the same fields.
+	body := f.createBody()
+	body["source"] = "ai"
+	body["margin_total_cents"] = 1200
+	if r := f.do("POST", "/api/v1/quotes", body); r.status != 201 {
+		t.Errorf("create with source and margin = %d: %s", r.status, r.raw)
+	}
+}
+
 // RULE (ADR 0001 section 11 and ADR 0003): a transition is a POST to
 // /transitions, each one writes its own event, the lifecycle timestamps are
 // stamped, and a transition the lifecycle forbids is 409.
