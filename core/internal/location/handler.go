@@ -101,11 +101,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Branch CRUD.
 	mux.HandleFunc("GET /api/v1/branches", guard(h.ListBranches))
 	mux.HandleFunc("POST /api/v1/branches", adminGuard(h.CreateBranch))
-	getBranch := http.HandlerFunc(h.GetBranch)
-	if h.branchMw != nil {
-		getBranch = h.branchMw(getBranch).ServeHTTP
-	}
-	mux.HandleFunc("GET /api/v1/branches/{id}", guard(getBranch))
+	mux.HandleFunc("GET /api/v1/branches/{id}", guard(h.GetBranch))
 	mux.HandleFunc("PUT /api/v1/branches/{id}", adminGuard(h.UpdateBranch))
 	mux.HandleFunc("DELETE /api/v1/branches/{id}", adminGuard(h.DeleteBranch))
 	tree := http.HandlerFunc(h.GetBranchTree)
@@ -610,19 +606,7 @@ func (h *Handler) GetBranch(w http.ResponseWriter, r *http.Request) {
 			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
-	// The record branch rule (ADR 0007 section 2.3): the path id is the
-	// branch itself, so a branch the caller may not target is a 403.
-	if h.guard != nil {
-		err := h.guard.CheckPayloadBranch(r.Context(), id)
-		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
-			httpx.WriteError(w, r, httpx.Forbidden("branch is outside the branches this caller may target"))
-			return
-		}
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-	}
+	// Reference data like the branch list, so unwalled (PR 39 decision).
 	loc, err := h.service.GetLocation(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {

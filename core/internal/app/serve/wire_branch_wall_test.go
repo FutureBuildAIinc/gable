@@ -697,14 +697,25 @@ func TestBranchWall_CatalogReads(t *testing.T) {
 		t.Errorf("an administrator in branch B sums %v, want 100/5/95", got)
 	}
 
-	if got := f.call(t, "GET", "/api/v1/branches/"+B, "", "sales", "u-a", A); got != http.StatusForbidden {
-		t.Errorf("branch B read by a branch A caller: %d, want 403", got)
+	// A branch read by id stays unwalled, as the branch list is (PR 39's
+	// decision): the desk's Branch Users page reads a branch other than the
+	// one the administrator works in.
+	for _, c := range []struct{ role, sub, header string }{
+		{"admin", "boss", A}, {"admin", "boss", ""}, {"sales", "u-a", A},
+	} {
+		if got := f.call(t, "GET", "/api/v1/branches/"+B, "", c.role, c.sub, c.header); got != http.StatusOK {
+			t.Errorf("%s with header %q reading branch B: %d, want 200", c.role, c.header, got)
+		}
 	}
-	if got := f.call(t, "GET", "/api/v1/branches/"+A, "", "sales", "u-a", A); got != http.StatusOK {
-		t.Errorf("own branch read: %d, want 200", got)
+
+	// PR 40's kit component routes sit behind the product wall: a header for
+	// a branch the caller is not granted is refused, the caller's own is not.
+	kit := "/api/v1/products/" + f.productID.String() + "/kit-components"
+	if got := f.call(t, "GET", kit, "", "sales", "u-a", B); got != http.StatusForbidden {
+		t.Errorf("kit components under an ungranted branch header: %d, want 403", got)
 	}
-	if got := f.call(t, "GET", "/api/v1/branches/"+B, "", "admin", "boss", ""); got != http.StatusOK {
-		t.Errorf("administrator branch read: %d, want 200", got)
+	if got := f.call(t, "GET", kit, "", "sales", "u-a", A); got != http.StatusOK {
+		t.Errorf("kit components under the caller's own branch: %d, want 200", got)
 	}
 	// A branch route refuses a path id that is not a branch.
 	if got := f.call(t, "PUT", "/api/v1/branches/"+f.yardA.String(), `{"code":"x","revision":1}`, "admin", "boss", ""); got != http.StatusNotFound {
