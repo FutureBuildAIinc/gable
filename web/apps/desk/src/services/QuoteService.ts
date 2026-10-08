@@ -4,12 +4,12 @@
 import type {
     Quote,
     QuoteAnalytics,
-    QuoteOrderPayload,
     QuotePage,
     QuoteRequest,
     QuoteStatus,
     QuoteTransitionRequest,
 } from '../types/quote';
+import type { Order } from '../types/order';
 import { fetchWithAuth } from './fetchClient';
 import { ifMatch, parseApiError } from './apiError';
 
@@ -106,7 +106,9 @@ export const QuoteService = {
         return response.json();
     },
 
-    async convert(id: string, revision: number): Promise<QuoteOrderPayload> {
+    /** The convert accepts the quote and creates the order in one act
+     * (ADR 0005 5.8): 201 with the order, no payload for the client to post. */
+    async convert(id: string, revision: number): Promise<Order> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/quotes/${id}/convert`, {
                 method: 'POST',
@@ -130,25 +132,3 @@ export const QuoteService = {
     },
 };
 
-/**
- * The orders route is not converted yet: it reads a numeric quantity and
- * price_each in cents. This is the one place the quote payload is mapped onto it.
- */
-export function orderRequestFromQuotePayload(payload: QuoteOrderPayload): {
-    customer_id: string;
-    quote_id: string;
-    lines: { product_id: string; quantity: number; price_each: number }[];
-} {
-    if (payload.lines.some(l => l.product_id === null)) {
-        throw new Error('The quote was accepted, but it has special order lines with no catalog product. Create those order lines by hand.');
-    }
-    return {
-        customer_id: payload.customer_id,
-        quote_id: payload.quote_id,
-        lines: payload.lines.map(l => ({
-            product_id: l.product_id as string,
-            quantity: Number(l.quantity),
-            price_each: l.price_each_cents,
-        })),
-    };
-}

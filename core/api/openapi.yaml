@@ -23,6 +23,7 @@ tags:
   - name: ap
   - name: apps
   - name: bankrecon
+  - name: charge-codes
   - name: configurator
   - name: customer
   - name: dashboard
@@ -1351,6 +1352,168 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntityEither"
+  /api/v1/charge-codes:
+    get:
+      operationId: chargeCodeList
+      tags: [charge-codes]
+      summary: List charge codes
+      description: >-
+        The whole master, ordered by code, active rows only unless include_inactive is true.
+      parameters:
+        - name: include_inactive
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["true", "false"]
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The charge codes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: chargeCodeCreate
+      tags: [charge-codes]
+      summary: Create a charge code
+      description: >-
+        The code is one to sixteen capital letters, digits or underscores and never changes once written: documents name it. The revenue account must exist in the chart of accounts.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChargeCodeRequest"
+      responses:
+        "201":
+          description: The created charge code.
+          headers:
+            Location:
+              description: /api/v1/charge-codes/{id} of the created code.
+              schema:
+                type: string
+            ETag:
+              description: The code's revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/charge-codes/{id}:
+    get:
+      operationId: chargeCodeGet
+      tags: [charge-codes]
+      summary: Get one charge code
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The charge code.
+          headers:
+            ETag:
+              description: The code's revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: chargeCodeUpdate
+      tags: [charge-codes]
+      summary: Replace a charge code
+      description: >-
+        The code itself never changes: documents name it. Deactivate through is_active; a code in use is never deleted. The revision precondition applies.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChargeCodeRequest"
+      responses:
+        "200":
+          description: The edited charge code.
+          headers:
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/configurator/rules:
     get:
       operationId: configuratorListRules
@@ -5876,65 +6039,124 @@ paths:
   /api/v1/orders:
     get:
       operationId: orderList
-      tags: [order]
+      tags:
+        - order
       summary: List orders
+      description: The cursor list envelope, newest first. status filters on the lowercase lifecycle vocabulary (a comma separated list); customer_id, job_id, ship_to_id and quote_id filter on their document; delivery_type on pickup or delivery. total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary, a malformed cursor or an out of range limit is a 400.
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/XBranchId"
+        - name: status
+          in: query
+          required: false
+          description: Comma separated lowercase statuses (draft, on_hold, confirmed, backordered, fulfilled, cancelled).
+          schema:
+            type: string
+        - name: customer_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: job_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: ship_to_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: delivery_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - pickup
+              - delivery
+        - name: quote_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The page of orders.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OrderPage"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/OrderPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '500':
+          $ref: '#/components/responses/InternalErrorEither'
     post:
       operationId: orderCreate
-      tags: [order]
-      summary: Create an order
-      description: >-
-        Money is cents on this route. A missing customer_id or an unknown product surfaces as a 500 today, not a 400.
+      tags:
+        - order
+      summary: Create a draft order
+      description: Creates the order in draft with its lines priced and its tax estimated. A line that names a product takes the pricing engine's answer (price_source price_list); a price beside the engine's is an override that names its reason (override), kept with the engine's answer beside it; a charge line names a charge code and takes its default price when it sends none (manual); a non stock product line sends its own price (manual); a text line carries only a description. A kit product explodes into its components. A discount is one of discount_percent or discount_cents, never both, with its reason. The order's currency is the customer's effective currency, copied, never sent. A delivery order takes the customer's default ship-to.
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OrderCreateRequest"
+              $ref: '#/components/schemas/OrderCreateRequest'
       responses:
-        "201":
-          description: The created order.
+        '201':
+          description: The created draft order.
+          headers:
+            Location:
+              description: /api/v1/orders/{id} of the created order.
+              schema:
+                type: string
+            ETag:
+              description: The order's revision.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Order"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          description: A conflict the finer codes do not name; blockers may name unit_not_stock_unit or tax_rate_not_configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WireError'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/orders/{id}:
     get:
       operationId: orderGet
-      tags: [order]
+      tags:
+        - order
       summary: Get one order with lines
       parameters:
         - name: id
@@ -5943,29 +6165,33 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The order.
+          headers:
+            ETag:
+              description: The order's revision.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Order"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "404":
-          $ref: "#/components/responses/NotFound"
-  /api/v1/orders/{id}/confirm:
-    post:
-      operationId: orderConfirm
-      tags: [order]
-      summary: Confirm a draft order
-      description: >-
-        Bare 204 on success; side effects (stock depletion for stocked lines) are not represented. A blocked exposure gate is the raw exposure 409 payload.
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: "#/components/responses/WireNotFound"
+    put:
+      operationId: orderUpdate
+      tags:
+        - order
+      summary: Replace a draft order
+      description: 'Replaces the header fields and the lines, in draft only: in any other status it is 409 with the blocker order_not_draft. A line keeps its id across edits when the request sends it. The tax estimate is refreshed on every edit. The revision precondition applies (If-Match or the body revision).'
       parameters:
         - name: id
           in: path
@@ -5973,189 +6199,185 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      responses:
-        "204":
-          description: Confirmed.
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          description: >-
-            The lumber index exposure gate blocks this order, or an idempotency claim in progress (the ADR 0001 envelope).
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: "#/components/schemas/ExposureBlock"
-                  - $ref: "#/components/schemas/WireError"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /api/v1/orders/{id}/fulfill:
-    post:
-      operationId: orderFulfill
-      tags: [order]
-      summary: Fulfill a confirmed order
-      description: >-
-        Bare 204 on success. Fulfilling creates an invoice, posts GL and AR and depletes stock; none of that is represented in the response.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      responses:
-        "204":
-          description: Fulfilled.
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          description: >-
-            The lumber index exposure gate blocks this order, or an idempotency claim in progress (the ADR 0001 envelope).
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: "#/components/schemas/ExposureBlock"
-                  - $ref: "#/components/schemas/WireError"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /api/v1/orders/{id}/cancel:
-    post:
-      operationId: orderCancel
-      tags: [order]
-      summary: Cancel an order
-      description: >-
-        A refusal from the state machine (already cancelled, not cancellable) is a 409. The reason is optional; an empty body is accepted.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OrderCancelRequest"
-      responses:
-        "204":
-          description: Cancelled.
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          $ref: "#/components/responses/ConflictEither"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /api/v1/orders/{id}/exposure-gate:
-    get:
-      operationId: orderExposureGate
-      tags: [order]
-      summary: Check the pre ship exposure gate
-      description: 200 with blocked false when clear; the raw exposure payload with 409 when blocked.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-      responses:
-        "200":
-          description: Not blocked.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrderExposureClear"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          description: Blocked by unresolved index exposure.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExposureBlock"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /api/v1/orders/{id}/exposure-override:
-    post:
-      operationId: orderExposureOverride
-      tags: [order]
-      summary: Override the exposure gate
-      description: >-
-        Records an explicit override with an audit entry. A notes justification of at least ten characters is required; shorter notes are a 400.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OrderExposureOverrideRequest"
+              $ref: '#/components/schemas/OrderCreateRequest'
       responses:
-        "200":
+        '200':
+          description: The edited order.
+          headers:
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: "#/components/responses/WireNotFound"
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/{id}/transitions:
+    post:
+      operationId: orderTransition
+      tags:
+        - order
+      summary: Move an order along its lifecycle
+      description: 'The transition table of ADR 0005 section 5.2. draft to confirmed runs the guards (price exposure, tax rate configured, PO required, contact authority, non empty) and the credit check: over the customer''s limit the order lands on_hold IN THE SAME TRANSACTION, with order.hold written, and the answer is 200 with the held order, never an error. on_hold to confirmed is the release (roles admin, owner, finance); it skips the credit check. confirmed or backordered to on_hold is a manual hold and requires hold_note. Any status to draft reopens (refused once the order has been billed, blocker has_fulfilments); any live status to cancelled requires reason. confirmed or backordered to fulfilled is the close short and requires reason; until the fulfilment route lands (C2-2b) it is refused with no_fulfilments when nothing has been billed against the order. Anything outside the table is 409 invalid_state_transition.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderTransitionRequest'
+      responses:
+        '200':
+          description: The order after the transition, on_hold included. A hold is a committed state, not an error.
+          headers:
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The release of a hold needs the admin, owner or finance role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WireError'
+        '404':
+          $ref: "#/components/responses/WireNotFound"
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/{id}/exposure-gate:
+    get:
+      operationId: orderExposureGate
+      tags:
+        - order
+      summary: Check the pre ship exposure gate
+      description: 200 with blocked false when clear; 409 with the wire's error envelope carrying the exposure payload as blockers when it does not. The behaviour of the pre-conversion route, onto the envelope.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: Not blocked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderExposureClear'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          description: Blocked by unresolved index exposure; the blockers carry the exposure payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WireError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{id}/exposure-override:
+    post:
+      operationId: orderExposureOverride
+      tags:
+        - order
+      summary: Override the exposure gate
+      description: Records an explicit override with an audit entry. A notes justification of at least ten characters is required; shorter notes are a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderExposureOverrideRequest'
+      responses:
+        '200':
           description: Overridden.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OrderExposureOverridden"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/OrderExposureOverridden'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/parsing/upload:
     post:
       operationId: parsingUpload
@@ -9714,6 +9936,92 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/products/{id}/kit-components:
+    get:
+      operationId: productKitComponentsGet
+      tags: [product]
+      summary: A kit's component list
+      description: >-
+        The kit's definition (ADR 0005 section 2.6): what it contains, per one kit, in each component's own stocking unit.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The component list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitComponentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: productKitComponentsPut
+      tags: [product]
+      summary: Replace a kit's component list
+      description: >-
+        Replaces the whole list. A product with a non empty list becomes a kit (is_kit); an empty list clears the definition. A kit cannot contain a kit and cannot contain itself. Until the products module converts there is no product revision to precondition on: last write wins, as ADR 0005 section 2.6 states.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [components]
+              properties:
+                components:
+                  type: array
+                  items:
+                    type: object
+                    required: [component_product_id, quantity]
+                    properties:
+                      component_product_id:
+                        type: string
+                        format: uuid
+                      quantity:
+                        type: string
+                        description: Per one kit, in the component's stocking unit; a decimal string greater than zero.
+      responses:
+        "200":
+          description: The replaced component list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitComponentList"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/portal/v1/projects:
     get:
       operationId: projectList
@@ -10469,11 +10777,11 @@ paths:
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/{id}/convert:
     post:
-      operationId: quoteConvertToOrderPayload
+      operationId: quoteConvertToOrder
       tags: [quote]
-      summary: Accept the quote and return the order creation payload
+      summary: Accept the quote and create its order in one act
       description: >-
-        A transition to accepted on the client's revision, then the body the client maps onto POST /api/v1/orders itself; no order is created here. The orders route is not converted yet and reads a numeric quantity and price_each in cents, so the client maps quantity and price_each_cents onto it. Until the orders contract carries the conversion pair (cycle 2), a quote with a line whose pair is not 1 to 1, or whose price_uom differs from uom, is refused with 409 invalid_state_transition and a line_not_convertible blocker naming lines[i]; the quote is left as it was.
+        A transition to accepted on the client's revision and the creation of the order in ONE transaction (ADR 0005 section 5.8), answering 201 with the order: no payload crosses the client, so a retry cannot create a second order. The lines carry the conversion pair and the scale 4 price without loss; the quote's freight becomes one FREIGHT charge line; a stocked line sold in another unit than its product's stocking unit is refused with 409 unit_not_stock_unit until cycle 3; a quote that already has an order not cancelled is 409 already_converted. Events: quote.accepted, then order.created.
       parameters:
         - name: id
           in: path
@@ -10485,17 +10793,21 @@ paths:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
-        "200":
-          description: The order creation payload, with the accepted quote's revision as the ETag.
+        "201":
+          description: The created order, with its revision as the ETag.
           headers:
+            Location:
+              description: /api/v1/orders/{id} of the created order.
+              schema:
+                type: string
             ETag:
-              description: The accepted quote's revision in quotes, for example "3".
+              description: The created order's revision in quotes, for example "1".
               schema:
                 type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuoteOrderPayload"
+                $ref: "#/components/schemas/Order"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
@@ -12993,6 +13305,65 @@ components:
         bank_transaction_id:
           type: string
           format: uuid
+    ChargeCode:
+      type: object
+      required: [id, code, name, revenue_account_code, taxable, default_unit_price_ten_thousandths, is_active, revision, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]{1,16}$"
+          description: What documents name; never changes once written.
+        name:
+          type: string
+        revenue_account_code:
+          type: string
+          description: The GL account the fee posts to; a line snapshots it at create, so a later edit never moves posted revenue.
+        taxable:
+          type: boolean
+          description: The default; a charge line may override it.
+        default_unit_price_ten_thousandths:
+          type: [integer, "null"]
+          format: int64
+          description: Fills a charge line that sends no price.
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ChargeCodeRequest:
+      type: object
+      required: [name, revenue_account_code]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]{1,16}$"
+          description: Create only; a PUT that sends it is a 400.
+        name:
+          type: string
+        revenue_account_code:
+          type: string
+        taxable:
+          type: boolean
+        default_unit_price_ten_thousandths:
+          type: integer
+          format: int64
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          description: >-
+            PUT only: the precondition, beside If-Match. On create it is a 400.
     ConfiguratorRule:
       type: object
       required: [id, attribute_type, attribute_value, depends_on_type, depends_on_value, is_allowed, created_at, updated_at]
@@ -16089,14 +16460,445 @@ components:
           description: Any JSON value; stored as sent. Absent is stored as null.
     OrderStatus:
       type: string
-      enum: [DRAFT, CONFIRMED, FULFILLED, CANCELLED, ON_HOLD]
-    Order:
+      enum:
+        - draft
+        - on_hold
+        - confirmed
+        - backordered
+        - fulfilled
+        - cancelled
+      description: The lifecycle, lowercase on the wire (ADR 0001 section 6; ADR 0005 section 5.2). The database keeps its uppercase CHECK.
+    OrderDeliveryType:
+      type: string
+      enum:
+        - pickup
+        - delivery
+      description: pickup is will-call, the customer collecting at the branch; delivery goes on a truck (ADR 0005 section 5.5).
+    OrderTaxSource:
+      type: string
+      enum:
+        - exempt
+        - provider
+        - ship_to_rate
+        - branch_rate
+        - legacy
+      description: How the order's tax was found (ADR 0005 section 3). Rows written before cycle 2 are legacy.
+    SalesLineType:
+      type: string
+      enum:
+        - product
+        - kit
+        - component
+        - charge
+        - text
+      description: The line types of ADR 0005 section 2.1, one shape on every sales document. kit and component lines are written by the server when a line names a kit product; a request never sends them.
+    SalesPriceSource:
+      type: string
+      enum:
+        - price_list
+        - quote
+        - override
+        - manual
+        - none
+      description: Where a line's unit price came from (ADR 0005 section 2.3).
+    SalesLine:
       type: object
-      required: [id, branch_id, customer_id, status, total_amount, created_at, updated_at, total_cost, total_margin, margin_percent, total_commission]
+      description: One line of a sales document, the shared shape of ADR 0005 section 2.2. Every priced line carries all the priced fields, always present; a text line carries them as null, present on the wire (ADR 0001 section 12), so a client reads one shape per line.
+      required:
+        - id
+        - position
+        - line_type
+        - parent_line_id
+        - product_id
+        - charge_code_id
+        - charge_code
+        - sku
+        - description
+        - quantity
+        - uom
+        - price_uom
+        - uom_qty
+        - price_uom_qty
+        - unit_price_ten_thousandths
+        - priced_unit_price_ten_thousandths
+        - price_source
+        - override_reason
+        - discount_percent
+        - discount_cents
+        - discount_reason
+        - price_adjusted_by
+        - line_total_cents
+        - taxable
+        - revenue_account_code
+        - is_special_order
+        - vendor_id
+        - special_order_unit_cost_ten_thousandths
+        - created_at
       properties:
         id:
           type: string
           format: uuid
+        position:
+          type: integer
+          description: The line's place on the document; a kit's components follow it.
+        line_type:
+          $ref: '#/components/schemas/SalesLineType'
+        parent_line_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a component line only, naming its kit line.
+        product_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Required on kit and component lines, optional on a product line (null is a non stock item), null on charge and text lines.
+        charge_code_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a charge line only.
+        charge_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's code text, read.
+        sku:
+          type:
+            - string
+            - 'null'
+          description: A snapshot of the product's SKU.
+        description:
+          type: string
+          description: A snapshot; required on every line.
+        quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity as a decimal string with its unit; null only on a text line.
+        uom:
+          type:
+            - string
+            - 'null'
+          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+        price_uom:
+          type:
+            - string
+            - 'null'
+          description: The unit the price is per; equals uom unless the pair says otherwise.
+        uom_qty:
+          type:
+            - string
+            - 'null'
+          description: One side of the conversion pair; 1 and 1 when the units agree (any other pair on equal units is a 400).
+        price_uom_qty:
+          type:
+            - string
+            - 'null'
+          description: The other side of the conversion pair.
+        unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: The price charged per price unit, after any override, before any discount.
+        priced_unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
+        price_source:
+          $ref: '#/components/schemas/SalesPriceSource'
+        override_reason:
+          type:
+            - string
+            - 'null'
+          description: Required when price_source is override.
+        discount_percent:
+          type:
+            - string
+            - 'null'
+          description: A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents.
+        discount_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A discount amount in cents, positive; never with discount_percent.
+        discount_reason:
+          type:
+            - string
+            - 'null'
+          description: Required with either discount.
+        price_adjusted_by:
+          type:
+            - string
+            - 'null'
+          description: The actor of the last override or discount; the audit row carries the rest.
+        line_total_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: The extension, rounded once (ADR 0005 section 2.4); null only on a text line.
+        taxable:
+          type: boolean
+        revenue_account_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's account, snapshotted at create; null on every other line type.
+        is_special_order:
+          type: boolean
+        vendor_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        special_order_unit_cost_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A unit cost at scale 4.
+        created_at:
+          type: string
+          format: date-time
+    OrderLine:
+      type: object
+      description: A sales line on an order, with the order's own columns (ADR 0005 sections 2.2 and 5.4).
+      required:
+        - id
+        - position
+        - line_type
+        - parent_line_id
+        - product_id
+        - charge_code_id
+        - charge_code
+        - sku
+        - description
+        - quantity
+        - uom
+        - price_uom
+        - uom_qty
+        - price_uom_qty
+        - unit_price_ten_thousandths
+        - priced_unit_price_ten_thousandths
+        - price_source
+        - override_reason
+        - discount_percent
+        - discount_cents
+        - discount_reason
+        - price_adjusted_by
+        - line_total_cents
+        - taxable
+        - revenue_account_code
+        - is_special_order
+        - vendor_id
+        - special_order_unit_cost_ten_thousandths
+        - created_at
+        - quote_line_id
+        - quantity_allocated
+        - quantity_backordered
+        - quantity_fulfilled
+      properties:
+        id:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          description: The line's place on the document; a kit's components follow it.
+        line_type:
+          $ref: '#/components/schemas/SalesLineType'
+        parent_line_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a component line only, naming its kit line.
+        product_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Required on kit and component lines, optional on a product line (null is a non stock item), null on charge and text lines.
+        charge_code_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a charge line only.
+        charge_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's code text, read.
+        sku:
+          type:
+            - string
+            - 'null'
+          description: A snapshot of the product's SKU.
+        description:
+          type: string
+          description: A snapshot; required on every line.
+        quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity as a decimal string with its unit; null only on a text line.
+        uom:
+          type:
+            - string
+            - 'null'
+          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+        price_uom:
+          type:
+            - string
+            - 'null'
+          description: The unit the price is per; equals uom unless the pair says otherwise.
+        uom_qty:
+          type:
+            - string
+            - 'null'
+          description: One side of the conversion pair; 1 and 1 when the units agree (any other pair on equal units is a 400).
+        price_uom_qty:
+          type:
+            - string
+            - 'null'
+          description: The other side of the conversion pair.
+        unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: The price charged per price unit, after any override, before any discount.
+        priced_unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
+        price_source:
+          $ref: '#/components/schemas/SalesPriceSource'
+        override_reason:
+          type:
+            - string
+            - 'null'
+          description: Required when price_source is override.
+        discount_percent:
+          type:
+            - string
+            - 'null'
+          description: A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents.
+        discount_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A discount amount in cents, positive; never with discount_percent.
+        discount_reason:
+          type:
+            - string
+            - 'null'
+          description: Required with either discount.
+        price_adjusted_by:
+          type:
+            - string
+            - 'null'
+          description: The actor of the last override or discount; the audit row carries the rest.
+        line_total_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: The extension, rounded once (ADR 0005 section 2.4); null only on a text line.
+        taxable:
+          type: boolean
+        revenue_account_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's account, snapshotted at create; null on every other line type.
+        is_special_order:
+          type: boolean
+        vendor_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        special_order_unit_cost_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A unit cost at scale 4.
+        created_at:
+          type: string
+          format: date-time
+        quote_line_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The quote line an order line came from (a conversion, ADR 0005 section 5.8).
+        quantity_allocated:
+          type: string
+          description: Stock allocated to the line; the allocation act arrives with C2-2b (ADR 0005 section 5.4).
+        quantity_backordered:
+          type: string
+          description: The short quantity, recorded by the allocation act (C2-2b).
+        quantity_fulfilled:
+          type: string
+          description: What has left the yard on the line (C2-2b's fulfilments).
+    OrderSummary:
+      type: object
+      description: An order header, used as a list item and as the head of the full document.
+      required:
+        - id
+        - number
+        - branch_id
+        - customer_id
+        - customer_name
+        - quote_id
+        - job_id
+        - status
+        - revision
+        - currency
+        - delivery_type
+        - ship_to_id
+        - customer_po
+        - ordered_by_contact_id
+        - salesperson_id
+        - salesperson_name
+        - scheduled_delivery_date
+        - subtotal_cents
+        - tax_cents
+        - tax_rate_percent
+        - tax_exempt
+        - tax_source
+        - total_cents
+        - total_cost_cents
+        - total_margin_cents
+        - margin_percent
+        - total_commission_cents
+        - hold_reason
+        - hold_note
+        - confirmed_at
+        - created_at
+        - updated_at
+        - invoice_ids
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: The human readable document number, SO- and at least six digits, from a database sequence.
+          pattern: ^SO-[0-9]{6,}$
         branch_id:
           type: string
           format: uuid
@@ -16106,135 +16908,484 @@ components:
         customer_name:
           type: string
         quote_id:
-          type: string
+          type:
+            - string
+            - 'null'
+          format: uuid
+        job_id:
+          type:
+            - string
+            - 'null'
           format: uuid
         status:
-          $ref: "#/components/schemas/OrderStatus"
-        total_amount:
+          $ref: '#/components/schemas/OrderStatus'
+        revision:
           type: integer
           format: int64
-          description: Cents.
+          minimum: 1
+          description: Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
+        currency:
+          type: string
+          description: The customer's effective currency at create, copied (ADR 0005 section 4.2); a create body that sends it is a 400.
+          pattern: ^[A-Z]{3}$
+        delivery_type:
+          $ref: '#/components/schemas/OrderDeliveryType'
+        ship_to_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The customer's default ship-to is taken on a delivery order at create.
+        customer_po:
+          type:
+            - string
+            - 'null'
+          description: Required at confirm when the customer requires a PO (blocker po_required).
+        ordered_by_contact_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The contact that placed the order; its authority is checked at confirm (blocker contact_authority).
+        salesperson_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        salesperson_name:
+          type:
+            - string
+            - 'null'
+        scheduled_delivery_date:
+          type:
+            - string
+            - 'null'
+          description: A business date as YYYY-MM-DD.
+        subtotal_cents:
+          type: integer
+          format: int64
+        tax_cents:
+          type: integer
+          format: int64
+          description: The estimate, rounded once per document (ADR 0005 section 3); each invoice computes its own.
+        tax_rate_percent:
+          type:
+            - string
+            - 'null'
+          description: The resolved rate as a percent decimal string ("8.875"); null when the provider answered.
+        tax_exempt:
+          type: boolean
+        tax_source:
+          $ref: '#/components/schemas/OrderTaxSource'
+        total_cents:
+          type: integer
+          format: int64
+          description: The subtotal plus the tax estimate.
+        total_cost_cents:
+          type: integer
+          format: int64
+          description: The lines' cost at the products' average cost, read at read time.
+        total_margin_cents:
+          type: integer
+          format: int64
+        margin_percent:
+          type:
+            - string
+            - 'null'
+          description: The margin as a percentage decimal string; null when the subtotal is zero.
+        total_commission_cents:
+          type: integer
+          format: int64
+        hold_reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - credit_limit
+            - manual
+            - null
+          description: Set only while on hold (ADR 0005 section 5.1).
+        hold_note:
+          type:
+            - string
+            - 'null'
+        confirmed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: The first confirm.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-        salesperson_id:
-          type: string
-          format: uuid
-        salesperson_name:
-          type: string
-        total_cost:
-          type: integer
-          format: int64
-          description: Cents.
-        total_margin:
-          type: integer
-          format: int64
-          description: Cents.
-        margin_percent:
-          type: number
-          description: Percentage, kept as float.
-        total_commission:
-          type: integer
-          format: int64
-          description: Cents.
-        lines:
+        invoice_ids:
           type: array
+          description: The invoices written against the order, oldest first.
           items:
-            $ref: "#/components/schemas/OrderLine"
-    OrderLine:
+            type: string
+            format: uuid
+    Order:
       type: object
-      required: [id, order_id, product_id, quantity, price_each, unit_cost, commission_rate, is_special_order]
+      description: The full order document.
+      required:
+        - id
+        - number
+        - branch_id
+        - customer_id
+        - customer_name
+        - quote_id
+        - job_id
+        - status
+        - revision
+        - currency
+        - delivery_type
+        - ship_to_id
+        - customer_po
+        - ordered_by_contact_id
+        - salesperson_id
+        - salesperson_name
+        - scheduled_delivery_date
+        - subtotal_cents
+        - tax_cents
+        - tax_rate_percent
+        - tax_exempt
+        - tax_source
+        - total_cents
+        - total_cost_cents
+        - total_margin_cents
+        - margin_percent
+        - total_commission_cents
+        - hold_reason
+        - hold_note
+        - confirmed_at
+        - created_at
+        - updated_at
+        - invoice_ids
+        - ship_to
+        - lines
       properties:
         id:
           type: string
           format: uuid
-        order_id:
+        number:
+          type: string
+          description: The human readable document number, SO- and at least six digits, from a database sequence.
+          pattern: ^SO-[0-9]{6,}$
+        branch_id:
           type: string
           format: uuid
-        product_id:
+        customer_id:
           type: string
           format: uuid
-        product_sku:
+        customer_name:
           type: string
-        product_name:
-          type: string
-        quantity:
-          type: number
-        price_each:
+        quote_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        job_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        revision:
           type: integer
           format: int64
-          description: Cents. The quote module's convert payload carries float dollars; the client converts.
-        unit_cost:
+          minimum: 1
+          description: Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
+        currency:
+          type: string
+          description: The customer's effective currency at create, copied (ADR 0005 section 4.2); a create body that sends it is a 400.
+          pattern: ^[A-Z]{3}$
+        delivery_type:
+          $ref: '#/components/schemas/OrderDeliveryType'
+        ship_to_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The customer's default ship-to is taken on a delivery order at create.
+        customer_po:
+          type:
+            - string
+            - 'null'
+          description: Required at confirm when the customer requires a PO (blocker po_required).
+        ordered_by_contact_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The contact that placed the order; its authority is checked at confirm (blocker contact_authority).
+        salesperson_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        salesperson_name:
+          type:
+            - string
+            - 'null'
+        scheduled_delivery_date:
+          type:
+            - string
+            - 'null'
+          description: A business date as YYYY-MM-DD.
+        subtotal_cents:
           type: integer
           format: int64
-          description: Cents.
-        commission_rate:
-          type: number
-          description: Percentage, kept as float.
-        is_special_order:
+        tax_cents:
+          type: integer
+          format: int64
+          description: The estimate, rounded once per document (ADR 0005 section 3); each invoice computes its own.
+        tax_rate_percent:
+          type:
+            - string
+            - 'null'
+          description: The resolved rate as a percent decimal string ("8.875"); null when the provider answered.
+        tax_exempt:
           type: boolean
-        vendor_id:
-          type: string
-          format: uuid
-        special_order_cost:
+        tax_source:
+          $ref: '#/components/schemas/OrderTaxSource'
+        total_cents:
           type: integer
           format: int64
-          description: Cents.
+          description: The subtotal plus the tax estimate.
+        total_cost_cents:
+          type: integer
+          format: int64
+          description: The lines' cost at the products' average cost, read at read time.
+        total_margin_cents:
+          type: integer
+          format: int64
+        margin_percent:
+          type:
+            - string
+            - 'null'
+          description: The margin as a percentage decimal string; null when the subtotal is zero.
+        total_commission_cents:
+          type: integer
+          format: int64
+        hold_reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - credit_limit
+            - manual
+            - null
+          description: Set only while on hold (ADR 0005 section 5.1).
+        hold_note:
+          type:
+            - string
+            - 'null'
+        confirmed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: The first confirm.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        invoice_ids:
+          type: array
+          description: The invoices written against the order, oldest first.
+          items:
+            type: string
+            format: uuid
+        ship_to:
+          type:
+            - object
+            - 'null'
+          description: The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one.
+          properties:
+            id:
+              type: string
+              format: uuid
+            code:
+              type: string
+            name:
+              type: string
+            line1:
+              type: string
+            line2:
+              type:
+                - string
+                - 'null'
+            city:
+              type: string
+            region:
+              type: string
+            postal_code:
+              type: string
+            country:
+              type:
+                - string
+                - 'null'
+            phone:
+              type:
+                - string
+                - 'null'
+            delivery_instructions:
+              type:
+                - string
+                - 'null'
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderLine'
     OrderCreateRequest:
       type: object
-      required: [customer_id, lines]
+      description: The body of POST /orders and PUT /orders/{id}.
+      required:
+        - customer_id
+        - delivery_type
+        - lines
       properties:
+        branch_id:
+          type: string
+          format: uuid
+          description: Held to the caller's branch context (ADR 0007 section 2.3); fixed at create.
         customer_id:
           type: string
           format: uuid
         quote_id:
           type: string
           format: uuid
+          description: 'Never accepted: a 400 on create and on PUT. A quote''s order is created by POST /quotes/{id}/convert (ADR 0005 section 5.8).'
+        job_id:
+          type: string
+          format: uuid
+        delivery_type:
+          $ref: '#/components/schemas/OrderDeliveryType'
+        ship_to_id:
+          type: string
+          format: uuid
+        customer_po:
+          type: string
+          maxLength: 100
+        ordered_by_contact_id:
+          type: string
+          format: uuid
+        salesperson_id:
+          type: string
+          format: uuid
+        scheduled_delivery_date:
+          type: string
+          description: YYYY-MM-DD.
+        revision:
+          type: integer
+          format: int64
+          description: 'PUT only: the precondition, beside If-Match. On create it is a 400.'
         lines:
           type: array
           items:
-            $ref: "#/components/schemas/OrderLineRequest"
+            $ref: '#/components/schemas/OrderLineRequest'
     OrderLineRequest:
       type: object
-      required: [product_id, quantity, price_each]
+      description: One line of a create or edit body. The parse collects every problem into one 400 with the full field path (lines[2].quantity).
       properties:
+        id:
+          type: string
+          format: uuid
+          description: A line keeps its id across edits when the request sends it.
+        line_type:
+          type: string
+          enum:
+            - product
+            - charge
+            - text
+          description: 'Derived when absent: a charge_code means charge, a product or a priced field means product, a description alone means text. kit and component are never a request.'
         product_id:
           type: string
           format: uuid
+        charge_code:
+          type: string
+          description: The charge code's code text, on a charge line.
+          pattern: ^[A-Z0-9_]{1,16}$
+        sku:
+          type: string
+        description:
+          type: string
+          description: Required on every line without a product (the product fills its own); required on a text line.
         quantity:
-          type: number
-        price_each:
+          type: string
+          description: A decimal string, at most 4 fraction digits, positive on a sales document.
+        uom:
+          type: string
+          description: A unit code; a product line may leave it to the product's stocking unit.
+        price_uom:
+          type: string
+          description: A unit code; defaults to uom.
+        uom_qty:
+          type: string
+          description: One side of the conversion pair; both together or neither; 1 and 1 when the units agree.
+        price_uom_qty:
+          type: string
+        unit_price_ten_thousandths:
           type: integer
           format: int64
-          description: Cents.
+          description: Absent on a stocked product line means the engine prices it; present it is an override naming override_reason, and on a non stock or charge line the manual price.
+        override_reason:
+          type: string
+          maxLength: 500
+        discount_percent:
+          type: string
+        discount_cents:
+          type: integer
+          format: int64
+        discount_reason:
+          type: string
+        taxable:
+          type: boolean
+          description: A charge line's override of its code's flag; a non stock product line's own flag.
         is_special_order:
           type: boolean
         vendor_id:
           type: string
           format: uuid
-        special_order_cost:
+        special_order_unit_cost_ten_thousandths:
           type: integer
           format: int64
-          description: Cents.
-    OrderCancelRequest:
+    OrderTransitionRequest:
       type: object
-      required: [reason]
+      required:
+        - to
       properties:
+        to:
+          $ref: '#/components/schemas/OrderStatus'
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
         reason:
           type: string
+          description: Required by the cancel and the close short.
+        hold_note:
+          type: string
+          description: Required by the manual hold.
     OrderExposureClear:
       type: object
-      required: [blocked]
+      required:
+        - blocked
       properties:
         blocked:
           type: boolean
-          enum: [false]
+          enum:
+            - false
     OrderExposureOverrideRequest:
       type: object
-      required: [notes]
+      required:
+        - notes
       properties:
         notes:
           type: string
@@ -16242,25 +17393,33 @@ components:
           description: The justification recorded with the override and its audit entry.
     OrderExposureOverridden:
       type: object
-      required: [overridden]
+      required:
+        - overridden
       properties:
         overridden:
           type: boolean
-          enum: [true]
+          enum:
+            - true
     OrderPage:
       type: object
-      required: [data, total, limit, offset]
+      required:
+        - items
+        - next_cursor
+        - limit
       properties:
-        data:
+        items:
           type: array
           items:
-            $ref: "#/components/schemas/Order"
-        total:
-          type: integer
+            $ref: '#/components/schemas/OrderSummary'
+        next_cursor:
+          type:
+            - string
+            - 'null'
         limit:
           type: integer
-        offset:
+        total:
           type: integer
+          description: Only under include=total.
     ParsingParseResponse:
       type: object
       description: Go type parsing.ParseResponse (github.com/gablelbm/gable/internal/parsing).
@@ -18313,6 +19472,35 @@ components:
           type: [array, "null"]
           items:
             $ref: "#/components/schemas/MarketIndexRefreshTopCustomer"
+    KitComponent:
+      type: object
+      required: [component_product_id, sku, description, quantity, uom, position]
+      properties:
+        component_product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: string
+          description: Per one kit, in the component's stocking unit.
+        uom:
+          type: string
+        position:
+          type: integer
+    KitComponentList:
+      type: object
+      required: [kit_product_id, components]
+      properties:
+        kit_product_id:
+          type: string
+          format: uuid
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitComponent"
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.
@@ -19381,41 +20569,6 @@ components:
           type: integer
           format: int64
           minimum: 1
-    QuoteOrderPayload:
-      type: object
-      required: [customer_id, quote_id, revision, lines]
-      description: What the client maps onto POST /api/v1/orders, which is not converted yet and reads a numeric quantity and price_each in cents.
-      properties:
-        customer_id:
-          type: string
-          format: uuid
-        quote_id:
-          type: string
-          format: uuid
-        revision:
-          type: integer
-          format: int64
-          minimum: 1
-          description: The accepted quote's revision.
-        lines:
-          type: array
-          items:
-            $ref: "#/components/schemas/QuoteOrderPayloadLine"
-    QuoteOrderPayloadLine:
-      type: object
-      required: [product_id, quantity, uom, price_each_cents]
-      properties:
-        product_id:
-          type: [string, "null"]
-          format: uuid
-        quantity:
-          $ref: "#/components/schemas/Quantity"
-        uom:
-          $ref: "#/components/schemas/QuoteUom"
-        price_each_cents:
-          type: integer
-          format: int64
-          description: The price per sale unit in cents (the unit price through the line's conversion pair).
     QuotePage:
       type: object
       required: [items, next_cursor, limit]

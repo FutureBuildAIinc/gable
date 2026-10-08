@@ -10,8 +10,8 @@
       "content_type": "application/pdf",
       "body": {
         "binary": {
-          "length": 3076,
-          "text_sha256": "ff0be32dafb466a7f97962d64a01a19ecd2f171fc7b2dcbf3aecb7f0ab8531a6"
+          "length": 3073,
+          "text_sha256": "636c00282364af74edaed6e21f44b5cbaa42f788794f85847b0c7243d39969b8"
         }
       }
     }

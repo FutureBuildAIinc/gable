@@ -7,8 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { ArrowRight, ShoppingCart, BarChart3, Sparkles, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide';
-import { QuoteService, QuoteApiError, quoteErrorMessage, orderRequestFromQuotePayload } from '../../services/QuoteService.ts';
-import { OrderService } from '../../services/OrderService.ts';
+import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { QuoteSummary, QuoteStatus } from '../../types/quote.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
@@ -145,8 +144,7 @@ export class GableQuoteList extends LitElement {
     private async handleConvert(quote: QuoteSummary) {
         this.converting = quote.id;
         try {
-            const orderPayload = await QuoteService.convert(quote.id, quote.revision);
-            const order = await OrderService.createOrder(orderRequestFromQuotePayload(orderPayload));
+            const order = await QuoteService.convert(quote.id, quote.revision);
             ToastService.show('Quote converted to order successfully', 'success');
             router.navigate(`/orders/${order.id}`);
         } catch (error) {

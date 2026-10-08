@@ -6,9 +6,10 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { X, Package, MapPin, FileText, AlertTriangle } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
+import { formatCents } from '../../lib/utils';
 import { OrderService } from '../../services/OrderService';
 import { ToastService } from '../../lib/toast-service';
-import type { Order } from '../../types/order';
+import type { OrderSummary } from '../../types/order';
 import type { Vehicle, Delivery } from '../../types/delivery';
 
 @customElement('gable-assign-order-modal')
@@ -20,7 +21,7 @@ export class GableAssignOrderModal extends LitElement {
   @property({ type: String, attribute: 'vehicle-id' }) vehicleId = '';
   @property({ type: Array, attribute: false }) existingDeliveries: Delivery[] = [];
 
-  @state() private _orders: Order[] = [];
+  @state() private _orders: OrderSummary[] = [];
   @state() private _vehicle: Vehicle | null = null;
   @state() private _selectedOrderId = '';
   @state() private _instructions = '';
@@ -37,11 +38,11 @@ export class GableAssignOrderModal extends LitElement {
     this._loading = true;
     try {
       const [allOrders, vehicles] = await Promise.all([
-        OrderService.listOrders(),
+        OrderService.allOrders(),
         deliveryService.listVehicles(),
       ]);
       const assignedOrderIds = new Set(this.existingDeliveries.map(d => d.order_id));
-      this._orders = allOrders.filter((o: Order) => o.status === 'CONFIRMED' && !assignedOrderIds.has(o.id));
+      this._orders = allOrders.filter((o: OrderSummary) => o.status === 'confirmed' && !assignedOrderIds.has(o.id));
       this._vehicle = vehicles.find((v: Vehicle) => v.id === this.vehicleId) || null;
     } catch {
       ToastService.show('Failed to load orders', 'error');
@@ -154,7 +155,7 @@ export class GableAssignOrderModal extends LitElement {
                         <div class="flex-1 min-w-0">
                           <div class="flex justify-between items-center">
                             <span class="text-white font-mono text-sm">${order.customer_name}</span>
-                            <span class="text-xs text-zinc-500 font-mono">$${(order.total_amount / 100).toFixed(2)}</span>
+                            <span class="text-xs text-zinc-500 font-mono">${formatCents(order.total_cents)}</span>
                           </div>
                           <span class="text-xs text-zinc-500">Order #${order.id.slice(0, 8)}</span>
                         </div>

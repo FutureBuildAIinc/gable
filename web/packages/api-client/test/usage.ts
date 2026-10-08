@@ -33,7 +33,7 @@ async function _happy() {
 
   const created = await client.post(
     "/api/v1/orders",
-    { customer_id: customerId, lines: [{ product_id: customerId, quantity: 2, price_each: 199 }] },
+    { customer_id: customerId, delivery_type: "pickup", lines: [{ product_id: customerId, quantity: "2" }] },
     { idempotencyKey: "replay-once" },
   );
   const orderStatus: string | undefined = created.body?.status;
@@ -45,8 +45,14 @@ async function _happy() {
   const vehicles = await integration.get("/api/integration/vehicles");
   const vehicleCount: number = vehicles.body.length;
 
-  const cleared = await client.post("/api/v1/orders/{id}/cancel", undefined, { path: { id: "8f14e45f" } });
-  const noBody: undefined = cleared.body;
+  // The cancel is the transition now (ADR 0005 5.2): it answers with the
+  // cancelled order, not a bare 204.
+  const cancelled = await client.post(
+    "/api/v1/orders/{id}/transitions",
+    { to: "cancelled", revision: 1, reason: "customer moved" },
+    { path: { id: "8f14e45f" } },
+  );
+  const cancelledStatus: string | undefined = cancelled.body?.status;
 
   const customers = await client.get("/api/v1/customers", { query: { q: "acme", tier: "gold", is_active: true, limit: 20 } });
   const limit: number | null | undefined = customers.body.items[0]?.credit_limit_cents;
@@ -64,7 +70,7 @@ async function _happy() {
   );
   const customerRevision: number = edited.body.revision;
 
-  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, noBody, limit, terms, shipToRevision, customerRevision];
+  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, limit, terms, shipToRevision, customerRevision];
 }
 
 // Wrong paths: each line must be a compile error --------------------------

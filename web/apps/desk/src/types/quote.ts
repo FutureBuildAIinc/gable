@@ -24,7 +24,6 @@ export type QuoteTransitionRequest = Schemas['QuoteTransitionRequest'];
 export type QuotePage = Schemas['QuotePage'];
 export type QuoteAnalytics = Schemas['QuoteAnalytics'];
 export type QuoteAnalyticsTrend = Schemas['QuoteAnalyticsTrend'];
-export type QuoteOrderPayload = Schemas['QuoteOrderPayload'];
 
 export interface ParseMapItem {
     raw_text: string;

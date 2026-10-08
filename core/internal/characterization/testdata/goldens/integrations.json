@@ -539,13 +539,13 @@
           "lines": [
             {
               "product_id": "<id-26>",
-              "quantity": 5,
+              "quantity": 6,
               "sku": "LUM-248-PREM",
               "weight_lbs": 9
             }
           ],
           "scheduled_date": "<day+0>",
-          "status": "FULFILLED"
+          "status": "DRAFT"
         },
         {
           "address": "150 Deckboard Rd, West Kelowna BC",
@@ -740,50 +740,66 @@
           "status": "CONFIRMED"
         },
         {
+          "address": "1885 Formwork Rd, Kelowna BC",
+          "branch_id": "<id-1>",
+          "customer_name": "Kelbrook Construction",
+          "id": "<id-51>",
+          "lines": [
+            {
+              "product_id": "<id-26>",
+              "quantity": 20,
+              "sku": "LUM-248-PREM",
+              "weight_lbs": 9
+            }
+          ],
+          "scheduled_date": "<day+0>",
+          "status": "DRAFT"
+        },
+        {
           "address": "200 Ridgecap Rd, Summerland BC",
           "branch_id": "<id-1>",
           "customer_name": "Summerland Roofers",
-          "id": "<id-51>",
+          "id": "<id-52>",
           "latitude": 49.6005,
           "lines": [
             {
-              "product_id": "<id-52>",
+              "product_id": "<id-53>",
               "quantity": 48,
               "sku": "RF-ARCH-30",
               "weight_lbs": 70
             },
             {
-              "product_id": "<id-53>",
+              "product_id": "<id-54>",
               "quantity": 6,
               "sku": "RF-FELT-15",
               "weight_lbs": 15
             },
             {
-              "product_id": "<id-54>",
+              "product_id": "<id-55>",
               "quantity": 8,
               "sku": "RF-ICE-65",
               "weight_lbs": 36
             },
             {
-              "product_id": "<id-55>",
+              "product_id": "<id-56>",
               "quantity": 12,
               "sku": "RF-DRIP-10",
               "weight_lbs": 2
             },
             {
-              "product_id": "<id-56>",
+              "product_id": "<id-57>",
               "quantity": 8,
               "sku": "RF-START",
               "weight_lbs": 2.5
             },
             {
-              "product_id": "<id-57>",
+              "product_id": "<id-58>",
               "quantity": 8,
               "sku": "RF-NAIL-125",
               "weight_lbs": 5
             },
             {
-              "product_id": "<id-58>",
+              "product_id": "<id-59>",
               "quantity": 8,
               "sku": "PLY-12-CDX",
               "weight_lbs": 48
@@ -797,7 +813,7 @@
           "address": "2100 Joist Rd, Lake Country BC",
           "branch_id": "<id-2>",
           "customer_name": "Lake Country Builders",
-          "id": "<id-59>",
+          "id": "<id-60>",
           "latitude": 50.0503,
           "lines": [
             {
@@ -833,7 +849,7 @@
           "address": "300 Topsoil Dr, Kelowna BC",
           "branch_id": "<id-1>",
           "customer_name": "Knox Mountain Landscapes",
-          "id": "<id-60>",
+          "id": "<id-61>",
           "latitude": 49.9019,
           "lines": [
             {
@@ -861,7 +877,7 @@
               "weight_lbs": 5
             },
             {
-              "product_id": "<id-61>",
+              "product_id": "<id-62>",
               "quantity": 2,
               "sku": "CORNPOLY18",
               "weight_lbs": 25
@@ -875,29 +891,29 @@
           "address": "3200 Cornice Rd, West Kelowna BC",
           "branch_id": "<id-4>",
           "customer_name": "Mission Hill Custom",
-          "id": "<id-62>",
+          "id": "<id-63>",
           "latitude": 49.8404,
           "lines": [
             {
-              "product_id": "<id-63>",
+              "product_id": "<id-64>",
               "quantity": 1,
               "sku": "DR-EXT-3680-STL",
               "weight_lbs": 85
             },
             {
-              "product_id": "<id-64>",
+              "product_id": "<id-65>",
               "quantity": 6,
               "sku": "DR-INT-3680-6P",
               "weight_lbs": 42
             },
             {
-              "product_id": "<id-65>",
+              "product_id": "<id-66>",
               "quantity": 40,
               "sku": "MLD-BASE-MDF",
               "weight_lbs": 8
             },
             {
-              "product_id": "<id-66>",
+              "product_id": "<id-67>",
               "quantity": 40,
               "sku": "MLD-CASE-MDF",
               "weight_lbs": 5
@@ -911,7 +927,7 @@
           "address": "45 Sawhorse Ln, Lake Country BC",
           "branch_id": "<id-2>",
           "customer_name": "Okanagan DIY Owner",
-          "id": "<id-67>",
+          "id": "<id-68>",
           "latitude": 50.0793,
           "lines": [
             {
@@ -927,7 +943,7 @@
               "weight_lbs": 44
             },
             {
-              "product_id": "<id-68>",
+              "product_id": "<id-69>",
               "quantity": 2,
               "sku": "RF-SH-BLK",
               "weight_lbs": 70
@@ -947,7 +963,7 @@
           "address": "5315 Snowload Way, Big White BC",
           "branch_id": "<id-1>",
           "customer_name": "Big White Cabin Co",
-          "id": "<id-69>",
+          "id": "<id-70>",
           "latitude": 49.7208,
           "lines": [
             {
@@ -963,7 +979,7 @@
               "weight_lbs": 70
             },
             {
-              "product_id": "<id-70>",
+              "product_id": "<id-71>",
               "quantity": 6,
               "sku": "DW-12-REG",
               "weight_lbs": 57
@@ -975,7 +991,7 @@
               "weight_lbs": 22
             },
             {
-              "product_id": "<id-65>",
+              "product_id": "<id-66>",
               "quantity": 16,
               "sku": "MLD-BASE-MDF",
               "weight_lbs": 8
@@ -989,7 +1005,7 @@
           "address": "5500 Truss Ave, Peachland BC",
           "branch_id": "<id-4>",
           "customer_name": "Peachland Framing Crew",
-          "id": "<id-71>",
+          "id": "<id-72>",
           "latitude": 49.7742,
           "lines": [
             {
@@ -1031,35 +1047,35 @@
           "address": "780 Casement Ave, Kelowna BC",
           "branch_id": "<id-1>",
           "customer_name": "Glenmore Heritage Reno",
-          "id": "<id-72>",
+          "id": "<id-73>",
           "latitude": 49.9105,
           "lines": [
             {
-              "product_id": "<id-73>",
+              "product_id": "<id-74>",
               "quantity": 6,
               "sku": "DR-INT-3080-6P",
               "weight_lbs": 38
             },
             {
-              "product_id": "<id-70>",
+              "product_id": "<id-71>",
               "quantity": 24,
               "sku": "DW-12-REG",
               "weight_lbs": 57
             },
             {
-              "product_id": "<id-65>",
+              "product_id": "<id-66>",
               "quantity": 50,
               "sku": "MLD-BASE-MDF",
               "weight_lbs": 8
             },
             {
-              "product_id": "<id-66>",
+              "product_id": "<id-67>",
               "quantity": 60,
               "sku": "MLD-CASE-MDF",
               "weight_lbs": 5
             },
             {
-              "product_id": "<id-58>",
+              "product_id": "<id-59>",
               "quantity": 16,
               "sku": "PLY-12-CDX",
               "weight_lbs": 48
@@ -1079,17 +1095,17 @@
           "address": "9000 Blueprint Pkwy, Kelowna BC",
           "branch_id": "<id-1>",
           "customer_name": "Okanagan Homes Ltd",
-          "id": "<id-74>",
+          "id": "<id-75>",
           "latitude": 49.9204,
           "lines": [
             {
-              "product_id": "<id-70>",
+              "product_id": "<id-71>",
               "quantity": 64,
               "sku": "DW-12-REG",
               "weight_lbs": 57
             },
             {
-              "product_id": "<id-75>",
+              "product_id": "<id-76>",
               "quantity": 24,
               "sku": "DW-58-FC",
               "weight_lbs": 70
@@ -1101,7 +1117,7 @@
               "weight_lbs": 8.5
             },
             {
-              "product_id": "<id-76>",
+              "product_id": "<id-77>",
               "quantity": 6,
               "sku": "INS-R19-15",
               "weight_lbs": 42
@@ -1119,7 +1135,7 @@
               "weight_lbs": 13.5
             },
             {
-              "product_id": "<id-77>",
+              "product_id": "<id-78>",
               "quantity": 6,
               "sku": "CORNSFT1612V",
               "weight_lbs": 30
@@ -1141,7 +1157,7 @@
         "X-Integration-Key": "fb-brain-demo-key-2026"
       },
       "body": {
-        "customer_id": "<id-78>",
+        "customer_id": "<id-79>",
         "lines": [
           {
             "product_id": "<id-26>",
@@ -1155,8 +1171,8 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "customer_id": "<id-78>",
-        "id": "<id-79>",
+        "customer_id": "<id-79>",
+        "id": "<id-80>",
         "status": "DRAFT",
         "total": 6600
       }
@@ -1171,7 +1187,7 @@
         "X-Integration-Key": "fb-brain-demo-key-2026"
       },
       "body": {
-        "customer_id": "<id-78>",
+        "customer_id": "<id-79>",
         "items": [
           {
             "product_id": "<id-26>",
@@ -1213,7 +1229,7 @@
     "name": "integration.quotes.accept_and_convert",
     "request": {
       "method": "POST",
-      "path": "/api/integration/quotes/<id-79>/accept-and-convert",
+      "path": "/api/integration/quotes/<id-80>/accept-and-convert",
       "headers": {
         "X-Integration-Key": "fb-brain-demo-key-2026"
       }
@@ -1222,8 +1238,8 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "id": "<id-80>",
-        "quote_id": "<id-79>",
+        "id": "<id-81>",
+        "quote_id": "<id-80>",
         "status": "CONFIRMED"
       }
     }
@@ -1251,7 +1267,7 @@
         "roles": [
           "sales"
         ],
-        "staff_id": "<id-81>"
+        "staff_id": "<id-82>"
       }
     }
   },
@@ -1304,7 +1320,7 @@
       "body": {
         "created": true,
         "replaced": false,
-        "route_id": "<id-82>",
+        "route_id": "<id-83>",
         "stop_count": 1
       }
     }

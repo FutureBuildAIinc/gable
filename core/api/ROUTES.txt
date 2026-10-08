@@ -119,6 +119,10 @@ GET	/api/v1/branches/{id}	internal/location	h.GetBranch
 PUT	/api/v1/branches/{id}	internal/location	h.UpdateBranch
 GET	/api/v1/branches/{id}/tree	internal/location	tree
 GET	/api/v1/branches/{id}/users	internal/location	h.ListBranchUsers
+GET	/api/v1/charge-codes	internal/chargecode	h.HandleList
+POST	/api/v1/charge-codes	internal/chargecode	h.HandleCreate
+GET	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleGet
+PUT	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleUpdate
 POST	/api/v1/configurator/build-sku	internal/configurator	h.handleBuildSKU
 GET	/api/v1/configurator/options	internal/configurator	h.handleGetOptions
 GET	/api/v1/configurator/presets	internal/configurator	h.handleGetPresets
@@ -233,11 +237,10 @@ POST	/api/v1/millwork/options	internal/millwork	h.handleCreateOption
 GET	/api/v1/orders	internal/order	h.HandleListOrders
 POST	/api/v1/orders	internal/order	h.HandleCreateOrder
 GET	/api/v1/orders/{id}	internal/order	h.HandleGetOrder
-POST	/api/v1/orders/{id}/cancel	internal/order	h.HandleCancelOrder
-POST	/api/v1/orders/{id}/confirm	internal/order	h.HandleConfirmOrder
+PUT	/api/v1/orders/{id}	internal/order	h.HandleUpdateOrder
 GET	/api/v1/orders/{id}/exposure-gate	internal/order	h.HandleExposureGate
 POST	/api/v1/orders/{id}/exposure-override	internal/order	h.HandleExposureOverride
-POST	/api/v1/orders/{id}/fulfill	internal/order	h.HandleFulfillOrder
+POST	/api/v1/orders/{id}/transitions	internal/order	h.HandleTransition
 POST	/api/v1/parsing/upload	internal/parsing	h.HandleUpload
 GET	/api/v1/payment-terms	internal/customer	h.HandleListTerms
 POST	/api/v1/payment-terms	internal/customer	h.HandleCreateTerms
@@ -294,6 +297,8 @@ GET	/api/v1/products/reorder-alerts	internal/product	h.HandleReorderAlerts
 GET	/api/v1/products/{id}	internal/product	h.HandleGetProduct
 GET	/api/v1/products/{id}/detail	internal/pim	h.HandleGetProductDetail
 PATCH	/api/v1/products/{id}/dimensions	internal/product	h.HandleUpdateDimensions
+GET	/api/v1/products/{id}/kit-components	internal/product	h.HandleGetKitComponents
+PUT	/api/v1/products/{id}/kit-components	internal/product	h.HandlePutKitComponents
 PATCH	/api/v1/products/{id}/lead-time	internal/product	h.HandleUpdateLeadTime
 PATCH	/api/v1/products/{id}/margins	internal/product	h.HandleUpdateMarginRules
 GET	/api/v1/products/{id}/pim/collateral	internal/pim	h.HandleListCollateral

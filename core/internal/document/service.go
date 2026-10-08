@@ -11,6 +11,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/salesdoc"
 
 	"github.com/johnfercher/maroto/v2"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
@@ -148,18 +149,25 @@ func (s *Service) GeneratePickTicketPDF(ctx context.Context, o *order.Order, cus
 		text.NewCol(4, "Qty to Pick", props.Text{Style: fontstyle.Bold, Align: align.Center}),
 	)
 
-	for _, line := range o.Lines {
-		prod, err := s.productRepo.GetProduct(ctx, line.ProductID)
-		desc := "Unknown Product"
+	for i := range o.Lines {
+		line := &o.Lines[i]
+		// A pick ticket prints the goods: text notes and charge lines have
+		// nothing to pick.
+		if line.LineType != salesdoc.LineProduct && line.LineType != salesdoc.LineComponent {
+			continue
+		}
+		desc := line.Description
 		uom := "EA"
-		if err == nil && prod != nil {
-			desc = fmt.Sprintf("%s - %s", prod.SKU, prod.Description)
-			uom = string(prod.UOMPrimary)
+		if line.UOM != nil {
+			uom = *line.UOM
+		}
+		if line.SKU != nil && *line.SKU != "" {
+			desc = fmt.Sprintf("%s - %s", *line.SKU, desc)
 		}
 
 		m.AddRow(18,
 			text.NewCol(8, desc, props.Text{Size: 12}),
-			text.NewCol(4, fmt.Sprintf("%.2f [%s]", line.Quantity, uom), props.Text{Size: 14, Style: fontstyle.Bold, Align: align.Center}),
+			text.NewCol(4, fmt.Sprintf("%s [%s]", line.Quantity.WireString(), uom), props.Text{Size: 14, Style: fontstyle.Bold, Align: align.Center}),
 		)
 	}
 

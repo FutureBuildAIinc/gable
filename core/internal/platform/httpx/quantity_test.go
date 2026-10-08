@@ -305,3 +305,78 @@ func TestExtendOverflow(t *testing.T) {
 		t.Error("overflowing product extended, want a refusal")
 	}
 }
+
+func TestExtendDiscounted(t *testing.T) {
+	mustQ := func(s string) Quantity {
+		q, err := ParseQuantity(s)
+		if err != nil {
+			t.Fatalf("ParseQuantity(%q): %v", s, err)
+		}
+		return q
+	}
+	cases := []struct {
+		name        string
+		qty         string
+		uomQty      string
+		priceUomQty string
+		price       Price
+		percent     string
+		want        Cents
+	}{
+		{"ten at 1.50 less 10 percent", "10", "1", "1", 15000, "10", 1350},
+		{"a whole MBF at 500.00 less 25 percent", "187.5", "187.5", "1", 5000000, "25", 37500},
+		{"no discount is the plain extension", "10", "1", "1", 15000, "0", 1500},
+		{"a full 100 percent discounts to zero", "10", "1", "1", 15000, "100", 0},
+		{"a quarter percent on an odd product rounds once, to the exact product", "1", "1", "1", 19999, "0.25", 199},
+		{"one piece at 500.00 per MBF less 10 percent", "1", "187.5", "1", 5000000, "10", 240},
+		{"a credit line discounted", "-187.5", "187.5", "1", 5000000, "10", -45000},
+		{"a fraction percent at scale 4", "10", "1", "1", 15000, "12.3456", 1315},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ExtendDiscounted(mustQ(tc.qty), mustQ(tc.uomQty), mustQ(tc.priceUomQty), tc.price, mustQ(tc.percent))
+			if err != nil {
+				t.Fatalf("ExtendDiscounted: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("ExtendDiscounted(%s, %s, %s, %d, %s) = %d cents, want %d",
+					tc.qty, tc.uomQty, tc.priceUomQty, tc.price, tc.percent, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtendDiscountedRefusesZeroPair(t *testing.T) {
+	one := Quantity(10000)
+	for _, bad := range []Quantity{0, -1, -one} {
+		if _, err := ExtendDiscounted(one, bad, one, Price(15000), one); err == nil {
+			t.Errorf("sale units %d extended, want a refusal", bad)
+		}
+		if _, err := ExtendDiscounted(one, one, bad, Price(15000), one); err == nil {
+			t.Errorf("price units %d extended, want a refusal", bad)
+		}
+	}
+}
+
+// The percent side multiplies the exact product before the one rounding: a
+// line whose plain extension is exactly half a cent still rounds away from
+// zero after the discount factor, and a discount never produces a different
+// rounding mode than Extend.
+func TestExtendDiscountedMatchesExtendScaled(t *testing.T) {
+	mustQ := func(s string) Quantity {
+		q, err := ParseQuantity(s)
+		if err != nil {
+			t.Fatalf("ParseQuantity(%q): %v", s, err)
+		}
+		return q
+	}
+	// 3 at 0.3333 is 99.99 cents plain; less 50 percent the exact product is
+	// 49.995, which rounds once to 50.
+	got, err := ExtendDiscounted(mustQ("3"), mustQ("1"), mustQ("1"), 3333, mustQ("50"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 50 {
+		t.Errorf("ExtendDiscounted(3, 1, 1, 3333, 50) = %d, want 50", got)
+	}
+}

@@ -204,7 +204,7 @@ test.describe('Quote flow on the new contract', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-stale-edit.png') });
   });
 
-  test('convert refuses a quote with a line priced per another unit, names the line, and leaves the quote a draft', async ({ page, request }) => {
+  test('convert carries a line priced per another unit without loss (the R1-15 refusal lifted)', async ({ page, request }) => {
     const { customer, product } = await firstCustomerAndProduct(request);
     const made = await (await request.post('/api/v1/quotes', {
       data: {
@@ -225,16 +225,24 @@ test.describe('Quote flow on the new contract', () => {
     const convert = page.waitForResponse((r) => r.url().endsWith(`/api/v1/quotes/${made.id}/convert`));
     await page.getByRole('button', { name: /Convert to Order/ }).click();
     const res = await convert;
-    expect(res.status()).toBe(409);
-    const body = await res.json();
-    expect(body.error.code).toBe('invalid_state_transition');
-    expect(body.error.details[0].code).toBe('line_not_convertible');
-    await expect(page.getByText(/lines\[1\] is priced per M/)).toBeVisible();
-    await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-convert-refused.png') });
+    // One act (ADR 0005 5.8): 201 with the order, the pair intact.
+    expect(res.status(), await res.text()).toBe(201);
+    const order = await res.json();
+    expect(order.status).toBe('draft');
+    expect(order.lines).toHaveLength(2);
+    const perM = order.lines[1];
+    expect(perM.price_uom).toBe('M');
+    expect(perM.uom_qty).toBe('1000');
+    expect(perM.price_uom_qty).toBe('1');
+    expect(perM.unit_price_ten_thousandths).toBe(37500);
+    expect(perM.price_source).toBe('quote');
+    // 1500 EA at 3.75 per M: 1500/1000 x 3.75 = 5.625 -> 563 cents.
+    expect(perM.line_total_cents).toBe(563);
+    await expect(page).toHaveURL(new RegExp(`/orders/${order.id}$`));
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-convert-per-M.png') });
 
     const after = await (await request.get(`/api/v1/quotes/${made.id}`)).json();
-    expect(after.status).toBe('draft');
-    expect(after.revision).toBe(1);
+    expect(after.status).toBe('accepted');
   });
 
   test('the list filters by status on the server and pages by cursor', async ({ page, request }) => {

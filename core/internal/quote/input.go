@@ -306,6 +306,11 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 	case uqOK && pqOK:
 		v.Check(uq > 0, path+".uom_qty", "must be greater than zero")
 		v.Check(pq > 0, path+".price_uom_qty", "must be greater than zero")
+		// The rule carried into cycle 2 from R1-15's review: when the price
+		// unit is the sale unit the pair is 1 and 1, never anything else.
+		if d.PriceUOM == string(d.UOM) && d.UOM != "" && (uq != one || pq != one) {
+			v.Check(false, path+".uom_qty", "must be 1 when price_uom equals uom: the units agree, so the pair is 1 and 1")
+		}
 		d.UOMQty, d.PriceUOMQty = uq, pq
 	case uqOK != pqOK:
 		missing := path + ".uom_qty"

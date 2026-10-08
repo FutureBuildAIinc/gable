@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
@@ -323,7 +324,11 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 	db := testutil.RequireDBMaxConns(t, 4)
 	customerID, productID := seedCustomerAndProduct(t, db)
 	events := outbox.NewWriter(db, "")
-	plain := quote.NewService(quote.NewRepository(db)).WithOutbox(events).WithTxRunner(db)
+	// The convert needs the order service; the real one over the same
+	// database joins the gated transactions.
+	orderEvents := outbox.NewWriter(db, "")
+	orderSvc := order.NewService(order.NewRepository(db)).WithOutbox(orderEvents).WithTxRunner(db)
+	plain := quote.NewService(quote.NewRepository(db)).WithOutbox(events).WithTxRunner(db).WithOrderCreator(orderSvc)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -340,7 +345,7 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 
 	phase := func(name string, run func(svc *quote.Service, i int) error) {
 		t.Helper()
-		svc := quote.NewService(quote.NewRepository(db)).WithOutbox(events).WithTxRunner(newGatedTx(db, contenders))
+		svc := quote.NewService(quote.NewRepository(db)).WithOutbox(events).WithTxRunner(newGatedTx(db, contenders)).WithOrderCreator(orderSvc)
 		var wg sync.WaitGroup
 		errs := make(chan error, contenders)
 		for i := 0; i < contenders; i++ {

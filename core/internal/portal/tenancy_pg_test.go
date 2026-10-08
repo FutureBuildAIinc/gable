@@ -94,11 +94,15 @@ func setupTenants(t *testing.T) *tenants {
 		cust    uuid.UUID
 		project uuid.UUID
 	}{{tt.aOrder, tt.aCustomer, tt.aProject}, {tt.bOrder, tt.bCustomer, tt.bProject}} {
-		exec(`INSERT INTO orders (id, customer_id, project_id, status, total_amount, branch_id, created_at, updated_at)
+		exec(`INSERT INTO orders (id, customer_id, project_id, status, total_amount, branch_id, created_at, updated_at, delivery_type, currency)
 		      VALUES ($1, $2, $3, 'CONFIRMED', 100.00,
-		              (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), NOW(), NOW())`,
+		              (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), NOW(), NOW(), 'PICKUP', 'USD')`,
 			o.id, o.cust, o.project)
-		exec(`INSERT INTO order_lines (order_id, product_id, quantity, price_each) VALUES ($1, $2, 10, 10.00)`,
+		exec(`INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
+				description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable)
+			SELECT $1, $2, 10, 10.00, 'PRODUCT', 0,
+				COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, 10.00, 'PRICE_LIST', 100.00, TRUE
+			FROM products p WHERE p.id = $2`,
 			o.id, tt.product)
 	}
 
