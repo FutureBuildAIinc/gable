@@ -36,7 +36,10 @@ run:
    `GODEBUG=randautoseed=0` and `TZ=Etc/UTC`, so the same draw sequence lands
    on every run and every machine. (The draw sequence is consumed inside
    map-iteration loops, so which customer owns which drawn value still varies
-   per run; see "endpoints not goldened" below for what that rules out.)
+   per run; see the identity mask below for what that rules out.) After the
+   seed binary finishes, the harness inserts its own clock-window fixture
+   rows through SQL on the fresh database (see "Clock-window fixture rows"
+   below).
 3. **Real server.** It runs the real `cmd/server` binary as a subprocess on a
    free port with `AUTH_MODE=dev` (the same shape as CI's backend job). The
    whole wiring of `cmd/server/main.go` (middleware order, schedulers,
@@ -71,6 +74,37 @@ values - never from `os.Environ()`. A variable in a developer's shell
 (`INTEGRATION_API_KEY`, `RUN_PAYMENTS_*`, `AVALARA_*`, `CORS_ORIGINS`, ...)
 configures the server and would silently change the goldens per machine;
 `TestSubprocessEnvBlocksOutsideVariables` pins the allow list.
+
+### Clock-window fixture rows
+
+The demo seed lands every payment and invoice it writes on the seed day, so
+the clock windows' edges had no rows on either side: a revenue trend of 6
+instead of 7 days, or a yesterday comparison reaching two days back, answered
+identically and passed the goldens. After seeding, the harness therefore
+inserts fixture rows through its own SQL - mirroring the payment, invoice and
+vendor-invoice repositories' INSERT statements (same columns, dollar amounts,
+CHECK-constrained method and status values), never product code - at known day
+offsets from the seed day, each at UTC midnight so the run's time of day
+cannot flip an edge:
+
+- payments at day-1 and day-2: the summary's yesterday window is
+  [day-1, day0) - inside and outside its left edge.
+- payments at day-6, day-7 and day-8: the revenue trend's 7-day window -
+  day-6 is the oldest day fully inside, day-7 sits on the boundary (its
+  midnight precedes the request's now-of-day, so it is out, and a widened
+  window pulls it in), day-8 is clearly outside.
+- AR invoices and AP bills at day-29 and day-31: inside and outside the sales
+  summary's 30-day default window, and on either side of the AR aging current
+  bucket's 30-day edge (aged by due date).
+- AR invoices and AP bills at day-61 and day-91: the AR aging 61-90 bucket's
+  edges, past the AP aging 60-day boundary.
+
+The AR invoices belong to a harness-created customer, not a seeded one: a
+seeded customer's aging total varies per run (the draw assignment), while the
+fixture customer's row is exactly these invoices on every run. Only the rows
+the windows read are written; the product's follow-on writes when a payment
+happens through the API (invoice status transition, GL postings) are not
+simulated, and no goldened query observes their absence.
 
 ### What is normalised, and why
 

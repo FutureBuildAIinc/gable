@@ -12,10 +12,10 @@
       "body": [
         {
           "current": 10000,
-          "past_30": 0,
-          "past_60": 0,
-          "past_90": 0,
-          "total": 10000,
+          "past_30": 29029,
+          "past_60": 31031,
+          "past_90": 152152,
+          "total": 222212,
           "vendor_id": "<id-1>",
           "vendor_name": "BC Roofing Wholesale"
         }
@@ -33,11 +33,11 @@
       "content_type": "application/json",
       "body": {
         "end_date": "<day+0>",
-        "invoice_count": 10,
-        "outstanding_ar": 20423.85,
+        "invoice_count": 11,
+        "outstanding_ar": 23324.14,
         "start_date": "<day-30>",
-        "total_collected": 306232.76,
-        "total_invoiced": 73490.23
+        "total_collected": 308657,
+        "total_invoiced": 76390.52
       }
     }
   },
@@ -52,11 +52,11 @@
       "content_type": "application/json",
       "body": {
         "active_orders": 21,
-        "outstanding_ar": 7864003,
-        "outstanding_ar_count": 11,
+        "outstanding_ar": 9984215,
+        "outstanding_ar_count": 15,
         "pending_dispatch": 28,
         "today_revenue": 30623276,
-        "today_revenue_change": 0
+        "today_revenue_change": 303070.7355707356
       }
     }
   },
@@ -70,6 +70,18 @@
       "status": 200,
       "content_type": "application/json",
       "body": [
+        {
+          "date": "<day-6>",
+          "revenue": 60606
+        },
+        {
+          "date": "<day-2>",
+          "revenue": 20202
+        },
+        {
+          "date": "<day-1>",
+          "revenue": 10101
+        },
         {
           "date": "<day+0>",
           "revenue": 30623276

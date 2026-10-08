@@ -248,6 +248,8 @@ func newHarness(t *testing.T, freshURL string) *harness {
 		"TZ":           "Etc/UTC",
 	}), buildDir+"/seed", "")
 
+	seedClockWindowFixtures(t, freshURL)
+
 	vars := seedVars(t, freshURL)
 
 	h := &harness{t: t, vars: vars, backendRoot: backendRoot}
