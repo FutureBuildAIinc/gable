@@ -93,12 +93,27 @@ func configuratorGroups() []groupDef {
 	return []groupDef{{
 		name: "configurator",
 		steps: []stepDef{
+			{name: "configurator.rules", method: "GET", path: "/api/v1/configurator/rules"},
+			{name: "configurator.presets", method: "GET", path: "/api/v1/configurator/presets"},
+			{name: "configurator.presets.filter", method: "GET", path: "/api/v1/configurator/presets?product_type=Door"},
 			{name: "configurator.options", method: "GET", path: "/api/v1/configurator/options?attribute_type=Species"},
+			// The selections ride as one declared parameter, not as any
+			// unknown query name (the strict query posture).
+			{name: "configurator.options.selected", method: "GET",
+				path: "/api/v1/configurator/options?attribute_type=Grade&selections=Species%3DSYP"},
+			{name: "configurator.options.unknown_param", method: "GET",
+				path: "/api/v1/configurator/options?attribute_type=Grade&Species=SYP"},
 			{
 				name:   "configurator.validate",
 				method: "POST",
 				path:   "/api/v1/configurator/validate",
 				body:   map[string]any{"selections": map[string]any{"Species": "SYP", "Grade": "#2"}},
+			},
+			{
+				name:   "configurator.validate.conflict",
+				method: "POST",
+				path:   "/api/v1/configurator/validate",
+				body:   map[string]any{"selections": map[string]any{"Species": "SYP", "Grade": "Appearance"}},
 			},
 			{
 				name:   "configurator.build_sku",
@@ -107,6 +122,15 @@ func configuratorGroups() []groupDef {
 				body: map[string]any{
 					"product_type": "Lumber",
 					"selections":   map[string]any{"Species": "SYP", "Grade": "#2", "Length": "8"},
+				},
+			},
+			{
+				name:   "configurator.build_sku.conflict",
+				method: "POST",
+				path:   "/api/v1/configurator/build-sku",
+				body: map[string]any{
+					"product_type": "Lumber",
+					"selections":   map[string]any{"Species": "SYP", "Grade": "Appearance"},
 				},
 			},
 			{name: "configurator.validate.empty", method: "POST", path: "/api/v1/configurator/validate",

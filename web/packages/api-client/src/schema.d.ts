@@ -734,7 +734,7 @@ export interface paths {
         };
         /**
          * List every configurator rule
-         * @description Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+         * @description The whole rule matrix, the charge codes master shape: ordered by dependency type and value, then attribute type and value, never null. A query parameter the route does not declare is a 400 unsupported_query_parameter.
          */
         get: operations["configuratorListRules"];
         put?: never;
@@ -754,7 +754,7 @@ export interface paths {
         };
         /**
          * List the allowed values of one attribute
-         * @description Admin, owner or sales. Every query parameter other than attribute_type is read as a current selection (attribute type to chosen value, first value wins), for example attribute_type=Grade&Species=SYP. With no selections, or when no rule matches them, the static defaults for the attribute are answered (an empty array for an unknown attribute). Otherwise the order of the options is unspecified.
+         * @description The values the attribute may take under the current selections, deterministically ordered by value. attribute_type is required; the selections ride as one parameter, a comma separated list of Type=Value pairs (selections=Species=SYP,Treatment=None), so the route declares exactly the two names it reads (the base consumed every unknown query name as a selection and never said so). With no selections, or when no rule matches them, the static defaults for the attribute answer (an empty array for an unknown attribute). A parameter the route does not declare, a missing attribute_type or a malformed selections value is a 400.
          */
         get: operations["configuratorListOptions"];
         put?: never;
@@ -774,7 +774,7 @@ export interface paths {
         };
         /**
          * List the active presets
-         * @description Admin, owner or sales. Active presets only, ordered by name. Never null.
+         * @description Active presets ordered by name, never null. product_type filters (the filter filters); a parameter the route does not declare is a 400 unsupported_query_parameter.
          */
         get: operations["configuratorListPresets"];
         put?: never;
@@ -796,7 +796,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a set of selections against the rules
-         * @description Admin, owner or sales. The body is capped at 64 KiB; an oversized or malformed body is a 400, as is an empty selections map. A rule conflict is a 200 with valid false and the conflicts listed.
+         * @description The body is capped at 64 KiB; an oversized or malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
          */
         post: operations["configuratorValidate"];
         delete?: never;
@@ -816,7 +816,7 @@ export interface paths {
         put?: never;
         /**
          * Build a non stock SKU from selections
-         * @description Admin, owner or sales. The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict, and any other service failure including a database fault, answers 400 (never 500). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+         * @description The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
          */
         post: operations["configuratorBuildSku"];
         delete?: never;
@@ -6486,7 +6486,7 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description Go type configurator.ConfiguratorRule. error_message is a pointer with omitempty, so it is absent when the database value is null. */
+        /** @description One dependency rule. error_message is present as null when the database value is null, never omitted (ADR 0001 section 12). */
         ConfiguratorRule: {
             /** Format: uuid */
             id: string;
@@ -6495,41 +6495,41 @@ export interface components {
             depends_on_type: string;
             depends_on_value: string;
             is_allowed: boolean;
-            error_message?: string;
+            error_message: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type configurator.ConfiguratorPreset. config is a Go byte slice, so it serializes as a base64 string of the stored JSON text, not as a JSON object. description is a pointer with omitempty, absent when null. */
+        /** @description One preset. config is the JSON the dealer stored, carried as JSON (it serialized as a base64 string before the conversion); description is present as null when the database value is null. */
         ConfiguratorPreset: {
             /** Format: uuid */
             id: string;
             name: string;
-            description?: string;
+            description: string | null;
             product_type: string;
-            config: string | null;
+            /** @description The preset's attribute selections, as stored. */
+            config: unknown;
             is_active: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type configurator.AvailableOption. message is omitted when empty. */
+        /** @description One value with its verdict; message is present as null when no rule explained a refusal. */
         ConfiguratorAvailableOption: {
             value: string;
             allowed: boolean;
             /** @description Why the value is disallowed. */
-            message?: string;
+            message: string | null;
         };
-        /** @description Go type configurator.ValidateConfigRequest. An empty map is a 400. */
+        /** @description An empty map is a 400 naming selections. */
         ConfiguratorValidateRequest: {
             /** @description Attribute type to chosen value, for example Species to SYP. */
             selections: {
                 [key: string]: string;
             };
         };
-        /** @description Go type configurator.ValidationConflict. */
         ConfiguratorValidationConflict: {
             attribute_type: string;
             attribute_value: string;
@@ -6537,12 +6537,12 @@ export interface components {
             depends_on_value: string;
             message: string;
         };
-        /** @description Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none. */
+        /** @description conflicts is always an array, empty when the selections are valid. */
         ConfiguratorValidateResponse: {
             valid: boolean;
-            conflicts?: components["schemas"]["ConfiguratorValidationConflict"][];
+            conflicts: components["schemas"]["ConfiguratorValidationConflict"][];
         };
-        /** @description Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400. */
+        /** @description An empty product type or an empty selections map is a 400 naming the field. */
         ConfiguratorBuildSKURequest: {
             /** @description Lumber, Door, Trim or Panel map to LBR, DR, TRM and PNL; any other value is upper cased and cut to three characters. */
             product_type: string;
@@ -6550,7 +6550,6 @@ export interface components {
                 [key: string]: string;
             };
         };
-        /** @description Go type configurator.BuildSKUResponse. */
         ConfiguratorBuildSKUResponse: {
             sku: string;
             description: string;
@@ -13287,10 +13286,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorRule"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorListOptions: {
@@ -13298,6 +13298,8 @@ export interface operations {
             query: {
                 /** @description The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType. */
                 attribute_type: string;
+                /** @description The current selections as Type=Value pairs, comma separated. */
+                selections?: string;
             };
             header?: never;
             path?: never;
@@ -13314,11 +13316,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorAvailableOption"][];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorListPresets: {
@@ -13342,10 +13344,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorPreset"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorValidate: {
@@ -13377,10 +13380,9 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorBuildSku: {
@@ -13412,9 +13414,9 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     customerList: {
