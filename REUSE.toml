@@ -34,6 +34,15 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
 
+# Native shells (the Tauri desktop shell today): a shell is a client surface,
+# so it takes the Surface licence like the web apps it wraps. Covers the
+# binary icons and the Cargo.lock, which cannot carry an inline header.
+[[annotations]]
+path = "tauri/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
+
 # Shared web packages (auth, design-system, later api-client): Surface
 # licensed, same as the apps that consume them. The desk's shared tokens,
 # components and auth code were MOVED here (identifier for identifier).
