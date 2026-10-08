@@ -30,9 +30,16 @@ bullet of section 8.4 in its own pull request, on the lead's instruction:
 a stocked special order line costs at `costOf`, because its receipt entered
 stock and moved the average, and the linked received purchase line's cost
 applies only to lines whose receipt never enters stock, a non stock line
-and a direct ship line; and the same bullet's read of the average becomes
+and a direct ship line, whose billing relieves `1030` from the linked
+receipt lines' posted values, pro rata to the billed quantity, the last
+bill taking the remainder (ADR 0008 3.4), never a recompute of one
+purchase line's cost, which is undefined when several purchase lines fill
+one order line and leaves cent residues in `1030`; and the same bullet's
+read of the average becomes
 the product row's share lock from C4-2 (ADR 0008 sections 3.5 and 9 step
-6b), so a sale racing a receipt leaves no residue in `1030`.
+6b), so a sale racing a receipt leaves no residue in `1030`. C2-2b
+builds this bullet ahead of ADR 0008's items and follows it as amended
+here, the posted values relief included.
 
 The items land in a chain: C2-1 (which may start at once), then C2-2, then
 C2-3, then C2-4, then C2-5. Each item below names what it builds and, where a
@@ -1000,10 +1007,20 @@ revenue posts net. Component and text lines post nothing.
   purchase order line linked to it
   (`purchase_order_lines.linked_so_line_id`) applies only to lines whose
   receipt never enters stock, a non stock line and a direct ship line,
-  else `costOf`; never the `special_order_cost` estimate, which would
+  else `costOf`; and on those lines the billing does not recompute the
+  purchase line's cost: it relieves `1030` from the linked receipt
+  lines' posted values, pro rata to the billed quantity, the last bill
+  taking the remainder (ADR 0008 3.4; several purchase lines at different
+  costs can fill one order line, where a single linked cost is undefined,
+  and a recompute of one of them leaves cent residues in `1030`);
+  never the `special_order_cost` estimate, which would
   leave a residue in `1030` against what the receipt cost.
 - `cost = round_half_away(quantity x unit_cost)` per line, in cents, stored
   on the invoice line with `unit_cost`; the entry's COGS legs are the sum.
+  On a non stock or direct ship line with linked receipts the relieved
+  amount is the pro rata posted value above, and the `unit_cost` stored on
+  the invoice line is that amount divided by the quantity, a display
+  figure.
 - A unit cost of zero or NULL posts no COGS for that line and stores 0; the
   margin read shows it. It is not an error: a missing cost must not stop a
   sale.
@@ -1011,7 +1028,7 @@ revenue posts net. Component and text lines post nothing.
   `unit_cost` (the cost that left), or `costOf` when it names no invoice
   line, and its restock legs reverse COGS at that cost.
 - Kit lines, charge lines and text lines carry no cost; a non stock line
-  carries cost only through a linked received purchase order line.
+  carries cost only through its linked receipt lines' posted values.
 
 ### 9. Payments and the AR subledger
 
