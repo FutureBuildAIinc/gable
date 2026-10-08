@@ -1,354 +1,652 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-# ADR 0010: Multi company within one database
+# ADR 0010: multi company within one database
 
 ## Status
 
-Accepted on `refactor/v1`. Builds on ADR 0001 (wire contract), ADR 0002
-(machine keys), ADR 0005 (sales and money core), ADR 0006 (units and pricing),
-ADR 0007 (drafts, links and confirm gated scopes, especially 2.3, 5 and 7),
-and ADR 0008 (inventory identity and vendor intake). No prior ADR is
-superseded; ADR 0005 section 4's numbering rule and section 5's one currency
-per document rule extend to per company. The PRs of PR 37 (the draft link list
-guard that pins its left side to the request's branch) and PR 39 (the link
-target guard that pins its right side to the same branch or a denied list of
-peer branches) extend to companies the same way they extend to branches.
+Proposed for the Gable v1 refactor (item C5-3's design stop; the build items
+are section 11). It becomes accepted when the lead merges it after review.
+
+It stands on ADR 0001 (the wire contract), ADR 0002 (machine keys), ADR 0003
+(the outbox), ADR 0005 (the sales and money core), ADR 0006 (units and
+pricing), ADR 0007 (drafts, links and confirm gated scopes) and ADR 0008
+(inventory identity and vendor intake). ADR 0009 (finer admin and users
+scopes) is in flight on `refactor/c5-1a-admin`; this record takes the next
+free number after it, which is why a design record carries 0010.
+
+No merged record is superseded. Two listed contract changes extend merged
+records by their own rules: the gapless counter key of ADR 0005 section 4.1
+becomes per company, and the number patterns of ADR 0007 section 7 carry the
+company code. ADR 0005 section 4.2 (currency) is unchanged by this record, as
+ADR 0005's Status requires: an accepted record is changed only by a
+superseding one, and nothing here needs to change it.
+
+This record replaces the first draft of ADR 0010 in full, on the round 1
+review's instruction. What that draft got right is kept: a company is the
+legal entity that owns the books; a branch belongs to exactly one company;
+parties, products and units are shared; a branch move is refused in v1; the
+inter company sale to an outside customer is refused.
 
 ## Context
 
-Today's code in `core/internal/location/model.go` puts every branch on a
-single `location` table with `Type = BRANCH` and `ParentID = nil`, and carries
-the branch onto every other table through `branch_id` columns such as
-`core/internal/invoice/model.go:24`. There is no company row anywhere, and
-`grep -rn "type Company"` over `core/internal/` returns only tax engine URLs
-(`core/internal/tax/avalara.go:208`, `:236`). In other words, one tenant
-database already models one operation; multi company is the next shape above
-it.
+Today's tenancy, with file and line:
 
-A company is the legal entity that owns its own books. A branch is a place
-inside one company. A dealer who runs two companies under one tenant wants
-each company's general ledger (GL), accounts receivable (AR), accounts payable
-(AP), invoices, credit memos, payments, deposits, purchase orders, vendor
-invoices, tax registrations, document number series, bank accounts and
-reconciliations kept apart, while still sharing customers, vendors,
-products, units, price lists, users, and locations so that the two companies
-do not double key the same record. The boundary inside one tenant database
-is what this ADR fixes.
+- One database per dealer. ADR 0003 section 1 stamps every event with the
+  deployment's org slug because "Gable today is one database per dealer with
+  no org identity in the schema"; the org is not a row anywhere.
+- Branches are `locations` rows: type `BRANCH` with a null parent
+  (`core/internal/location/model.go:20`, the type list at `:17-27`). Every
+  non branch row (zone, aisle, rack, shelf, bin, yard) carries a denormalized
+  `branch_id` kept by a database trigger (`model.go:47`;
+  `core/migrations/057_branches_on_locations.sql:21`,
+  `core/migrations/058_locations_branch_denorm_trigger.sql`). A branch
+  carries the branch level tax facts: `tax_jurisdiction_code` and
+  `default_tax_rate` (`model.go:43,44`), and a timezone (`model.go:45`).
+- Grants are rows of `user_locations`, keyed by the JWT subject; there is no
+  users table (`core/migrations/061_user_locations.sql:5,10-17`). The branch
+  middleware reads `X-Branch-Id`, checks it against those grants, honours the
+  `multi_branch_enabled` kill switch and `default_branch_required`
+  (`core/pkg/middleware/branch.go:105-110,168,281`), and `ResolveBranchForWrite`
+  stamps writes with the context branch or the default branch
+  (`branch.go:68-97`). PR 37 ("Security: a payload branch must be within the
+  caller's branch grants") added the payload guard
+  `BranchGuard.CheckPayloadBranch` (`core/pkg/middleware/branch_payload.go:51`),
+  PR 39 ("Security: the branch wall on path ids (PO receive, location reads)")
+  extended the same guard to path ids
+  (`core/internal/purchase_order/handler.go:34,35,67,233`, wired in
+  `core/internal/app/serve/wire_branch_wall.go:36-37`), and PR 44 ("Security:
+  lists without a branch header are held to the caller's grants") added the
+  list rule (`branch.go:44-66`).
+- The books have no branch at all: `gl_accounts`, `gl_fiscal_periods`,
+  `gl_journal_entries` and `gl_journal_lines`
+  (`core/migrations/025_general_ledger.sql:8,28,42,60`), `payments`
+  (`008_payments_and_till.sql:9`), `credit_memos`
+  (`018_financial_features.sql:14`), `vendor_invoices` and `ap_payments`
+  (`028_accounts_payable.sql:7,36`), `bank_accounts`,
+  `reconciliation_sessions` and `bank_transactions`
+  (`029_matching_and_bankrecon.sql:65,75,95`). `git grep branch_id
+  core/migrations` finds branch columns only on the sales, stock and counter
+  documents (`062_orders_branch.sql:7`, `063_quotes_branch.sql:6`,
+  `064_invoices_branch.sql:7`, `065_po_branch.sql:7,21`,
+  `066_pos_branch.sql:13,23`, `067_customers_branch.sql:9,22`,
+  `075_till_sessions_pos_payments.sql:21`, `078_till_z_reports.sql:15`,
+  `079_pos_returns_customer_deposits.sql:42,79`, and
+  `089_events_outbox.sql:64`), several of them nullable (`075:21`,
+  `078:15`, `079:42`, `079:79`, `089:64`).
+- One chart of accounts for the database: `gl_accounts.code` is `UNIQUE`
+  (`025:10`), the standard chart is seeded once (`025:76`), and every posting
+  resolves accounts by stable code through `gl.resolveAccountIDs`, which
+  loads the whole chart (`core/internal/gl/service.go:49-71`; the posting
+  family `SyncInvoice` to `SyncVendorPayment` at `service.go:426-769` and
+  `PostEntry` at `core/internal/gl/postentry.go:67,92`).
+- One fiscal calendar: `gl_fiscal_periods` (`025:28`) with the non overlap
+  exclusion and the closed period trigger of
+  `077_gl_reversal_period_hardening.sql` (`:29-33,43-60`).
+- One tax company for the provider: `AVALARA_COMPANY_CODE` is one process
+  setting (`core/internal/config/config.go:36,150`), stamped on every
+  provider call (`core/internal/tax/avalara.go:107`) and held by the tax
+  service at construction (`core/internal/tax/service.go:36,43,111`; wired at
+  `core/internal/app/serve/serve.go:473-483`).
+- One dealer default currency: `system_settings` key `currency.default`,
+  seeded `USD` (`core/migrations/091_customers_wire_contract.sql:36`), inside
+  ADR 0005 section 4.2's chain (customer override, else this default).
+- GL, AP and bank routes take no branch or company at all today
+  (`core/internal/gl/handler.go:39-61`, `core/internal/ap/handler.go:38-48`,
+  `core/internal/bankrecon/handler.go:37-50`).
+
+The requirement is the plan's GC-207: a dealer may run several legal entities
+under one operation. Nothing in the repository says a dealer today really
+does; this record assumes it can, and keeps the single company deployment
+byte for byte in behaviour wherever it can. Two scoping statements follow
+from that: the migration of section 10 puts all of today's books into one
+company, and splitting an existing ledger that already mixes two legal
+entities into two companies is out of scope for v1 (history would have to be
+restated per company; no migration may invent it).
 
 ## Decision
 
-### 1. What a company is
+### 1. What a company is, and the invariant
 
-A company is a legal entity with its own books. It carries its own general
-ledger, its own subledgers, its own document number series, its own tax
-registrations, its own bank accounts, and its own currency. It does not
-carry cash on its own books; cash sits on a bank account that belongs to a
-company and only to one of them. A company is identified by a UUID and a
-short code (`code`), both unique within the tenant.
+A company is the legal entity that owns its books: its chart of accounts,
+its journal, its AR and AP subledgers, its gapless document series, its tax
+registration with the provider, and its bank accounts. It does not hold cash
+of its own; cash sits in a bank account, and each bank account belongs to
+exactly one company.
 
-A branch is a place. A branch row in `core/internal/location/model.go` is
-already a `Type = BRANCH` row of the `location` table. A branch belongs to
-exactly one company. The company of a branch is read from `branch.company_id`
-and is set when the branch is created. Moving a branch between companies is
-not allowed in v1; it is a separate scope because every per company row on
-that branch would have to be reassigned and the document number series would
-have to reconcile across the move. See "Closest calls" below.
+The table `company`:
 
-### 2. The table
+- `id UUID PRIMARY KEY`
+- `code TEXT NOT NULL UNIQUE` (short, uppercase, chosen by the dealer; it
+  appears in gapless document numbers, section 4)
+- `name TEXT NOT NULL`
+- `functional_currency CHAR(3) NOT NULL` (section 5)
+- `fiscal_year_start_month SMALLINT NOT NULL DEFAULT 1` (drives the period
+  rows seeded when a company is created, section 3)
+- `tax_company_code TEXT NULL` (the provider's company code, section 7; null
+  falls back to the process setting)
+- `created_at`, `updated_at TIMESTAMPTZ NOT NULL`
 
-A new table `company` lives in `core/migrations/`. The initial migration is
-numbered by the lead as part of the C5-3 migration, and that filename is a
-placeholder only; this ADR names it the C5-3 migration. The schema:
+No timezone column: branches already carry one (`model.go:45`) and ADR 0005
+section 8.1 dates each entry in the branch's time zone, which stays the rule.
+No country code and no reporting currency: both have no reader in v1 (no FX,
+section 9).
 
-- `id uuid primary key`
-- `code text not null unique` (short, uppercased, used by humans)
-- `name text not null`
-- `functional_currency_code text not null` (the ISO code for the GL currency)
-- `reporting_currency_code text not null` (default equals functional; may differ)
-- `country_code text not null`
-- `timezone text not null`
-- `fiscal_year_start_month smallint not null default 1` (calendar-aligned)
-- `created_at`, `updated_at` not null
+The invariant: every branch is a `locations` row of type `BRANCH`, and every
+branch belongs to exactly one company. `locations` gains `company_id UUID
+NOT NULL REFERENCES company(id)` on every row (branch rows directly; every
+other row takes its branch's company, which is its company by construction,
+because a non branch row never leaves its branch's subtree,
+`058_locations_branch_denorm_trigger.sql`). The company of a branch is set
+at create and never moves in v1: an update that would change a location
+row's company is refused (section 9).
 
-Every row that already carries a per branch column `branch_id` gets a
-generated `company_id` column and a foreign key to `company(id)`. The
-denormalization follows the same rule ADR 0007 used for branches: the
-`branch` table is the source of truth, a `before insert/update` trigger on
-each per company table writes `company_id` from the branch's `company_id`,
-and no application code writes `company_id` directly. New triggers live in
-the C5-3 migration alongside the column adds.
+### 2. The table, by module
 
-### 3. What is per company
+Every table gets exactly one of three rules:
 
-Per company, owned by exactly one company and only seen inside that scope:
+- **R1, follows its parent.** The row carries a NOT NULL parent that already
+  names a company (today always `branch_id`; a bank account for the bank
+  tables). A `BEFORE INSERT OR UPDATE` trigger sets `company_id` from that
+  parent and refuses a row whose parent moved to another company.
+  Application code never writes `company_id` here. A trigger, not a
+  generated column: a Postgres generated column cannot read another table.
+- **R2, set by the single writer and checked.** The books carry no branch
+  (`025`, `008`, `018`, `028`, `029`, above), so no trigger can reach them.
+  The owning service sets `company_id` explicitly inside the act's
+  transaction, from the document's company, with the foreign key to
+  `company(id)` and a database check that the row's company equals its
+  source document's company (a composite foreign key where the shapes allow
+  it, section 3; a checked read where they do not). A row whose source
+  document is in another company is never written.
+- **R3, shared.** No `company_id` column at all.
 
-- `gl_account`: one chart of accounts per company. ADR 0005 section 4's
-  numbering rule becomes `gl_account.code` unique within `(company_id, code)`.
-- `gl_journal_entry` and every `gl_journal_line`: posts to one company only;
-  the trial balance is per company.
-- `ar_invoice`, `ar_credit_memo`, `ar_payment`, `ar_deposit`: AR subledger
-  rows are owned by one company. An AR invoice now carries both `branch_id`
-  (the issuing branch) and `company_id` (the issuer's company).
-- `ap_invoice`, `ap_credit_memo`, `ap_payment`, `ap_deposit`: AP subledger
-  rows mirror the AR shape with the same two columns.
-- `purchase_order`, `purchase_order_line`, `vendor_invoice`: belong to the
-  buying company.
-- `tax_registration`: a row per `(company_id, jurisdiction, tax_type)`; the
-  tax engine reads the registration of the document's company.
-- `document_number_series`: one series per `(company_id, document_type)`;
-  see section 7 for the numbering rule.
-- `bank_account` and `bank_reconciliation`: the bank account is owned by one
-  company; AR and AP cash posts hit that company's ledger.
+Child line tables (`order_lines`, `invoice_lines`, `credit_memo_lines`,
+`pos_line_items`, `pos_tenders`, `vendor_invoice_lines`, `gl_journal_lines`,
+a transfer's, adjustment's or count's lines, draft payloads) take no
+column: their header is the boundary, and every read that needs a company
+joins the header. This keeps the column count down and the invariant in one
+place per document.
 
-### 4. What is shared across companies
+| Module | Table | Rule | Source or note |
+|---|---|---|---|
+| locations | `locations` | R1 | `company_id` on every row; branch rows are the anchor, others take their branch's (`057`, `058`) |
+| sales | `orders` | R1 | `062:7` (`branch_id` NOT NULL from `062:13`) |
+| sales | `quotes` | R1 | `063:6` |
+| sales | `invoices` | R1 | `064:7` |
+| sales | `payments` | R2 | no branch (`008:9`); the AR core sets it from the branch context of the receipt act |
+| sales | `credit_memos` | R2 | no branch (`018:14`); from its invoice or branch context |
+| sales (C2-4, ADR 0005 9.2) | `ar_applications` | R2 | child of a payment or credit memo and an invoice of one company; the AR core checks both sides agree |
+| sales (C2-4, ADR 0005 9.3) | `customer_transactions` | R2 | the AR subledger row; from its invoice, credit memo or payment; the balance invariant of ADR 0005 9.3 holds per company |
+| sales (C2-4) | `payment_refunds` | R2 | from its payment or credit memo |
+| sales (legacy) | `customer_deposits`, `customer_deposit_applications` | left alone | renamed `*_legacy` by C2-4 (ADR 0005 9.1); no rule, no reader |
+| counter | `pos_registers`, `pos_transactions` | R1 | `066:13,23` |
+| counter | `till_sessions`, `till_z_reports` | R2 | `branch_id` nullable today (`075:21`, `078:15`); the writer sets the company from the register's branch at open and close; backfilled by section 10 |
+| counter | `pos_returns` | R2 | `079:42`; from the sale it returns |
+| purchasing | `purchase_orders`, `po_receipts` | R1 | `065:7,21` |
+| purchasing | `po_freight_charges` | none | child of the purchase order |
+| AP | `vendor_invoices` | R2 | no branch (`028:7`); from the purchase order it buys against, else the request's company |
+| AP | `ap_payments`, `ap_payment_applications` | R2 | `028:36`; from the invoices they pay, checked one company per act |
+| AP (C4, ADR 0008 7.2) | `vendor_credit_memos` | R2 | from the vendor return or invoice it credits |
+| GL | `gl_accounts` | R2 | section 3 |
+| GL | `gl_journal_entries` | R2 | section 3; `PostEntry` sets it |
+| GL | `gl_fiscal_periods` | R2 | section 3; per company calendar |
+| bank | `bank_accounts` | R2 | created naming its company; its `gl_account_id` must be of the same company (`029:70`, section 3) |
+| bank | `reconciliation_sessions`, `bank_transactions` | R1 | parent is the bank account (`029:75,95`); trigger from `bank_accounts.company_id` |
+| parties | `customers`, `customer_ship_tos`, `customer_contacts`, `vendors` | R3 | shared masters; per company facts below |
+| parties | `customer_branches` | R3 | `067:22`; a shared "trades at" fact |
+| catalog | `products`, `product_kit_components`, `product_categories`, PIM tables | R3 | shared |
+| catalog | `charge_codes` | R3 | `092:235`; the code FK question is settled in section 3 |
+| pricing (ADR 0006) | `product_units`, `price_levels`, `pricing_rules`, `category_pricing_rules`, `vendor_price_levels`, `vendor_product_costs` | R3 | shared masters (ADR 0006 sections 3 and 5); a row that names a branch (ADR 0006's branch specific prices) follows that branch's company, read through the join, no column |
+| stock (ADR 0008) | `inventory` rows, tallies, lots, serials, bundles | R1 | stock sits at a location (`002_add_locations.sql:27-30`; the branch is derived through `locations.branch_id`, `068_inventory_branch_helper.sql:5-9`); inventory value is therefore per company, because stock sits at branch locations |
+| stock (ADR 0008) | `stock_moves`, `stock_transfers`, `stock_adjustments`, `stock_counts`, `stock_allocations` | R1 | each carries `branch_id` (ADR 0008 2.6, 2.8, 3.3, 2.9) |
+| stock (ADR 0008) | `adjustment_reasons` | R3 | shared master naming an account code (ADR 0008 3.1); resolved at posting, section 3 |
+| feeds (ADR 0008) | feed run and outbox tables | R1 or R2 | a feed run lands stock at branches; it follows the branch it feeds when it names one, else the writer sets it (ADR 0008 8.2) |
+| delivery | `deliveries`, routes, stops | none | children of orders and trucks; no book of their own; a delivery's company is its order's |
+| users | `user_locations` | R3 | the grant table stays exactly as it is (`061:10-17`); a user's companies are derived: a user reaches a company exactly when a granted branch is of it. No `company_id` column and no new index |
+| users | `module_grants` | R3 | shared |
+| keys | `api_keys` | | gains nullable `company_id`, section 6 |
+| drafts (ADR 0007) | `drafts` | R1 | the branch is fixed at create (ADR 0007 2.3), so the draft follows it when C5-2a builds the table |
+| events | `events_outbox` | R3 | no company column in v1; consumers derive it from `branch_id` (ADR 0003 section 1), which every branch carrying act stamps; a null `branch_id` event (`089:64`) names no company, and a consumer that needs one reads the entity. Stated as a known limit |
+| settings | `system_settings` | R3 | one row set per database stays. What varies per legal entity moves to the company row: `functional_currency` (section 5) and `tax_company_code` (section 7). Settings that name one branch (`default_branch_id`, `brain_inbound_branch_id`, `pos.walk_in_customer_id`) or gate the process (`multi_branch_enabled`, `default_branch_required`, `currency.enabled`) stay database level, each listed here so the ruling is on the record |
 
-A record that describes a person, a thing, a rule or a person-place, with no
-book attached, is shared. The list:
+Shared parties carry facts a company would own. The v1 ruling: the master is
+shared and its terms apply to every company alike, stated as a known limit;
+per company terms are a later item (a `customer_company_terms` child row
+keyed `(customer_id, company_id)` carrying credit limit, payment terms,
+credit hold, currency override and PO required; the same shape for vendor
+terms and tax reporting). The facts in question, all on the shared row
+today: `customers.credit_limit`, `customers.payment_terms_id`,
+`customers.currency`, `customers.po_required` (ADR 0005 sections 5.3 and
+7.4), `customers.primary_branch_id` and `customer_branches` (`067:9,22`);
+`vendors.payment_terms` (`020_create_vendors.sql:16`). Balances stay per
+company by construction, because every document carries its company:
+`customers.balance_due` remains the running sum the AR core keeps (ADR 0005
+9.3), now per currency across companies, and every AR read that names a
+company filters documents by it.
 
-- `customer` and `customer_address`: one master per party regardless of
-  which companies that party trades with. Pricing and balance stay per
-  company on `ar_invoice`.
-- `vendor` and `vendor_address`: same shape, shared master.
-- `product`, `product_variant`, `unit`, `unit_conversion`: shared catalog.
-  ADR 0006's pricing rules at C3-1 base are shared.
-- `price_list` and `price_list_rule`: shared. The price a customer is
-  charged is the price list applied in the AR invoice of a given company.
-- `user`, `role`, `grant`: a user can hold grants to branches of several
-  companies. The grant table grows `company_id` on top of `branch_id` so
-  the access check runs once. See `core/internal/location/user_repository.go`
-  for the grant shape that ADR 0007 section 5's branch access check reads.
-- `location` rows that are not branches (zone, aisle, rack, shelf, bin, yard)
-  are shared, because their `branch_id` already pins them to one branch and
-  through that to one company.
+### 3. The GL per company
 
-### 5. How a branch belongs to one company
+- **Chart.** `gl_accounts` gains `company_id UUID NOT NULL`; `UNIQUE (code)`
+  (`025:10`) becomes `UNIQUE (company_id, code)`. The standard chart seeded
+  once (`025:76`) becomes the seed company's chart, and every company
+  created later gets the same standard chart seeded in its creation
+  transaction (the same INSERT list, `company_id` bound), so `resolveAccountIDs`
+  never fails on a fresh company. `gl_accounts.parent_id` (`025:14`) must
+  stay inside one company, checked in the account write.
+- **Foreign keys that name accounts.** `gl_journal_lines.account_id`
+  (`025:63`) and `bank_accounts.gl_account_id` (`029:70`) become composite
+  foreign keys: `UNIQUE (company_id, id)` is added to `gl_accounts`, and the
+  two reference `(company_id, account_id)` and `(company_id,
+  gl_account_id)`, so the database itself refuses a line or a bank account
+  pointing into another company's chart. `charge_codes.revenue_account_code`
+  (`092:239`) and, when it lands, `adjustment_reasons.gl_account_code`
+  (ADR 0008 3.1) lose their database FK to `gl_accounts(code)`: a shared
+  table cannot hold a foreign key into every company's chart. Both are
+  stable code references, resolved at posting through the document's
+  company's chart, exactly as ADR 0005 section 8.1 resolves posting codes
+  and section 2.5 snapshots the code on the line.
+- **The resolver.** `resolveAccountIDs(ctx, codes...)` (`service.go:53`)
+  becomes `resolveAccountIDs(ctx, companyID, codes...)`: it loads one
+  company's chart and fails the act when a code is missing there, as it
+  fails today. `PostingInput` gains `CompanyID` (`postentry.go:51-60`), and
+  every posting path names its company: the `Sync*` family
+  (`service.go:426-769`) from its document, and the AR core's calls (ADR
+  0005 8.2) from the document the entry belongs to. An entry's legs are all
+  of one company by construction, because the resolver takes one company id
+  per entry.
+- **Entries.** `gl_journal_entries.company_id NOT NULL`, set by `PostEntry`,
+  never by raw SQL (the AR core gate of ADR 0005 9.3 covers the writers).
+  `entry_number` stays one `SERIAL` across the database (`025:43`): it is an
+  internal ordering key with no legal reader, cross database uniqueness
+  holds, and per company numbering of entries would buy nothing. Stated.
+- **Fiscal periods.** `gl_fiscal_periods.company_id NOT NULL`; the seed
+  calendar rows become the seed company's. The 077 constraints become per
+  company: the non overlap exclusion over `(company_id, daterange)` and the
+  closed period trigger checking periods of `NEW.company_id`
+  (`077:29-33,43-60`). A company's periods are seeded from its
+  `fiscal_year_start_month` when it is created. Closing a period closes it
+  for that company only, which is the accounting question a calendar answers.
+- **Postings unchanged.** Every entry keeps exactly ADR 0005 section 8.2's
+  shape and ADR 0008 section 3.4's shape; only the company plumbing changes.
+  A single entry never spans two companies: it could not balance per
+  company, and the per company trial balance would be wrong (section 9).
 
-`branch.company_id` is set on branch creation and is not null thereafter.
-The `location` row's `Type = BRANCH` shape in
-`core/internal/location/model.go:26` becomes the root of a sub-tree that
-this migration adds. Updates that would clear `branch.company_id` are
-refused at the trigger level. The company of a branch is denormalized onto
-every per company row by the triggers described in section 2.
+### 4. Numbering
 
-### 6. Inter company sales and transfers
+ADR 0005 section 4.1 gives invoices and credit memos gapless numbers from
+`document_counters (series TEXT PRIMARY KEY, next_value)` with one series
+`invoice` and one `credit_memo` (built by C2-3, in review as PR 46), and the
+other documents gapped numbers from Postgres sequences; its named escape,
+if a dealer ever reaches the mint's ceiling, is a series per branch with the
+branch code in the prefix.
 
-A transfer of stock between two branches of two different companies is an
-inter company transfer. It must post in both ledgers at the same instant so
-that consolidated elimination can see the matching pair.
+The gapless counter key becomes per company: series `invoice:<company code>`
+and `credit_memo:<company code>`, and the prefix carries the company code,
+`IN-<code>-000001` and `CM-<code>-000001`. The reason gaplessness exists is
+the tax authority, and the tax authority is per legal entity (ADR 0005
+section 4.1); two companies must not both issue `IN-000001`. This is the
+widening ADR 0005 section 1's boundary row reserved for cycle 5 ("Multi
+company: none; the series key for numbers is the entity; cycle 5 may widen
+series keys").
 
-In v1, this ADR accepts the inter company stock transfer as scope, on the
-following shape:
+`number` stays `UNIQUE NOT NULL` across the database. ADR 0007 section 7
+serves record URLs by number only under that constraint, and its parser
+reads the entity's number pattern; the invoice and credit memo patterns
+widen to carry the company code (`^IN-[A-Z0-9]+-[0-9]{6,}$` shaped), which
+is a listed contract change against ADR 0007 section 7's pattern table and
+the openapi fragments. Both spellings of a company's numbers parse, so
+existing rows keep working.
 
-- The document type is `stock_transfer_inter_company`. Its header carries
-  `(from_branch_id, to_branch_id, from_company_id, to_company_id)`. The two
-  company ids must differ.
-- The receiving side posts an AP interim (`ap_intercompany` as the
-  `ap_invoice` subtype) and the issuing side posts an AR interim
-  (`ar_intercompany` as the `ar_invoice` subtype). Both interims post in one
-  GL transaction so that the consolidated trial balance inter company
-  elimination rule can net them out.
-- Each interim carries the same `intercompany_group_id` (a UUID set when the
-  transfer is created and stamped onto both interims) so that the
-  consolidated report pairs them.
-- A reversal is one document and posts both legs as a reverse in the same
-  transaction.
+Backfill ruling: while there is exactly one company (every deployment
+today), existing numbers keep their form `IN-000001`; from the item's
+landing, new numbers of the seed company carry its code. No collision is
+possible: the code bearing form is a different string. A second company
+starts its own series at 1 under its own code.
 
-This shape uses about 7 dev hour equivalents (4 for the document, 2 for the
-GL legs, 1 for the test). It is sized at the end of section 8 with the rest
-of the later items.
+Gapped sequences (orders `SO`, payments `PAY`, counter sales `POS`,
+counter returns `RTN`, and ADR 0008's transfers, adjustments and counts)
+stay shared across companies: gaps are allowed there by ADR 0005 section
+4.1's own table, cross database uniqueness holds, and interleaved internal
+numbers across companies cost nothing. Stated, so the next record does not
+re litigate it. The mint stays where ADR 0005 section 4.1 and section 11
+put it (lock order step 8); only the series key and the format change.
 
-The complement, an AR inter company sale (one company sells to a customer
-of another company), is refused in v1. The reason: that sale has to honour
-both companies' price lists, tax registrations and AR subledgers at once,
-which the C5-3 migration does not cover. ADR 0005's one currency per document
-rule pins that rule, and allowing a cross-company sale would break it. A
-later ADR can pick this up when multi-currency and multi-AR are in scope.
+### 5. Currency
 
-### 7. Reports
+ADR 0005 section 4.2 is unchanged: a document's currency is its customer's
+effective currency at create, copied, never sent (a `currency` in a create
+body is a 400 unknown field), never changing; cross currency applications
+are refused; every journal entry carries its currency.
 
-The GL trial balance becomes per company. The path
-`gl.AccountService.TrialBalance` (see `core/internal/gl/service.go`) gains a
-`company_id` filter; without it, the service refuses to run and returns
-`400 missing_company`. A consolidated trial balance is a new path
-`gl.AccountService.TrialBalanceConsolidated(groupIDs)` which sums per
-company balances and subtracts inter company eliminations keyed by
-`intercompany_group_id` from section 6.
+The one addition: the dealer default inside that chain becomes per company.
+The chain is: `customers.currency`, when set; else the document's company's
+`functional_currency`; else `system_settings` `currency.default` (`091:36`).
+A customer with no override who trades with two companies of different
+functional currencies is billed in each company's functional currency: one
+document, one company, one currency. The seed company's
+`functional_currency` is the setting's value at migration (section 10), so a
+single company deployment changes nothing.
 
-Reports that already take a `branch_id` filter accept a `company_id`
-filter as a stricter superset. The consolidated report only runs when the
-caller's grant list covers every company in the consolidated set.
+The ledger rule of ADR 0005 section 4.2 extends to the company boundary
+without change: GL reports group by currency inside a company, and the
+consolidated report groups by currency across companies (section 8); amounts
+of two currencies are never added. No FX in v1 (section 9).
 
-### 8. Numbering
+### 6. The request's company
 
-ADR 0005 section 4 defines a document number series per
-`(document_type, location_id)`. The location id in that pair is the branch
-id today. This ADR extends that pair to
-`(company_id, document_type, location_id)`; the original `series` table
-gains `company_id` and the unique index becomes `(company_id, document_type,
-location_id, sequence_name)`. Migration of the series uses the same trigger
-pattern as section 2: the series row's `company_id` is denormalized from
-the branch's `company_id`. Numbering is booked against the request's
-company, never against the body, the same way ADR 0007 section 2.3 pins a
-branch from the path and the headers and not from the body.
+The company is a function of the branch, and the request's company is the
+company of its context branch: the `X-Branch-Id` header, a bound key's
+branch, `ResolveBranchForWrite`'s default, the single branch kill switch
+(`branch.go:105-110,68`). It is never sent. There is no `/c/{company_id}`
+path prefix: it would double every route, the route census, the OpenAPI
+contract and the goldens. There is no `X-Company-Id` header: it could
+disagree with the branch and create a second, inconsistent scope. A
+`company_id` in a body is a 400 unknown field, as a `currency` already is
+(ADR 0005 section 4.2).
 
-### 9. Currency
+For a record by path id, PR 39's wall already loads the record's branch
+(`purchase_order/handler.go:34,35`; `wire_branch_wall.go`); the record's
+company follows by one lookup (the branch row's `company_id`), and a caller
+whose grants reach no branch of that company gets the same 403 the branch
+wall gives. No new guard layer: the existing guard grows one join.
 
-ADR 0005 fixes one currency per document. A company's GL is in its
-`functional_currency_code`. A document issued from a branch of that company
-is in that company's functional currency. The body of a request that names a
-currency other than the request's company's functional currency is rejected
-with `400 currency_mismatch`; the request's company is the source of truth
-here.
+The few routes with no branch at all (a company's GL, AP and bank reads, and
+the consolidated report) take the company as the path parameter of their own
+resource: `/api/v1/companies/{id}/trial-balance`, `.../profit-and-loss`,
+`.../balance-sheet`, `.../accounts`, `.../journal-entries`,
+`.../fiscal-periods`, and the AP and bank reads under the same segment. A
+new module segment `companies` joins ADR 0002's vocabulary and the route
+census test (ADR 0002 section 2). A caller reaches a company exactly when
+their grants reach a branch of it: one query over `user_locations` joined to
+branch rows. Today's branchless GL routes (`gl/handler.go:39-61`) move under
+the company resource, each with a row in `docs/refactor/CONTRACT-CHANGES.md`;
+AP's (`ap/handler.go:38-48`) and bank reconciliation's
+(`bankrecon/handler.go:37-50`) the same.
 
-A document in the AR or AP subledger that belongs to a company and that
-company has changed currency (a separate scope, not in v1) would conflict
-with this rule; this ADR records the conflict and leaves the move to a
-later ADR.
+Keys, per ADR 0002: a branch bound key (ADR 0007 5.5) reaches its branch's
+company and no other, whatever its scopes. An unbound key today reaches
+every branch (ADR 0002 section 6's known limit), so it reaches every
+company; that reach is kept and restated as this record's known limit
+rather than refused, because refusing would break every existing key the
+day the build lands. This record adds `api_keys.company_id UUID NULL
+REFERENCES company(id)`, minted with the key and never edited, exactly as
+ADR 0007 5.5 adds `branch_id`: a company bound key is pinned to one company;
+a `X-Branch-Id` or payload branch outside it is 403 `forbidden`, audited as
+`key.company_refused` beside `key.branch_refused`.
 
-### 10. The request's company
+The integration seam (ADR 0007 5.6) is untouched: it keeps its own key, its
+goldens hold, and its writes resolve the company through the default branch
+as every branchless write does today.
 
-ADR 0007 section 2.3 reads the request's branch from the path and the
-headers, not from the body. The request's company is read by the same
-mechanism:
+### 7. Tax
 
-- A leading path segment `/c/{company_id}/...` is accepted only when the
-  signed-in user's grants include a row with that `company_id`. The
-  middleware looks up the grant using
-  `core/internal/location/user_repository.go` plus a new `company_id`
-  column.
-- A header `X-Company-Id` is accepted only when the path did not already
-  pin one and the grant check passes; the header rule mirrors ADR 0007
-  section 2.3's branch header rule.
-- The body never names a company. A body that carries `company_id` is
-  rejected at the request decode layer with `400 company_from_body_forbidden`.
+- The provider's company code becomes per company: `company.tax_company_code`
+  (section 1). Today one process setting (`config.go:36,150`) is stamped on
+  every provider call (`avalara.go:107`) and held by the tax service at
+  construction (`tax/service.go:36,43`, used at `:111`; wired at
+  `serve.go:473-483`). The build moves the stamp to the document's company
+  at call time: the tax service takes the company code per call; a company
+  row with a null code falls back to the config value, so a single company
+  deployment changes nothing. The provider's commit and void paths already
+  take the company code as a parameter (`avalara.go:214,242`); their callers
+  pass the document's company's code.
+- Registrations: the branch's `tax_jurisdiction_code` and `default_tax_rate`
+  (`model.go:43,44`) already follow the branch, and through it the company;
+  ADR 0005 section 3's resolution order (exemption, ship-to rate, branch
+  rate, refusal) is unchanged. The jurisdiction is a branch fact; the
+  provider registration is the company fact; neither moves.
 
-When the path or header is absent and the request hits a per company route,
-the server returns `400 missing_company`, the same shape as the missing
-branch error. When the path and header disagree, the server returns `400
-company_mismatch`. Through this, PR 37 (draft link list guards the left
-side against the request's branch) and PR 39 (link target guards the right
-side against the same branch or a denied list of peer branches) extend to
-company ids: a draft link row is refused when its left side or right side
-sits in a company the caller cannot act on, and the denied peer list is
-`other_companies` only when the scope is intra-company-only and not when
-the scope is inter-company.
+### 8. Reports and consolidation
 
-### 11. Migration
+- `gl.Service.GetTrialBalance(ctx, asOfDate)` (`service.go:244`) and the
+  statements (`service.go:258,280`) take the company, served by the company
+  routes of section 6. No route answers a company-less trial balance after
+  the conversion; the removal is a listed contract change.
+- Consolidated trial balance: `GetTrialBalanceConsolidated(ctx, asOf,
+  companyIDs)`, a new read over a named set of company ids the caller's
+  grants reach in full; a set holding a company the caller cannot reach is
+  403, the wall of section 6 applied per element. Grouped by currency:
+  companies whose functional currencies differ are consolidated per currency
+  only, never added (section 5). Eliminations have nothing to net in v1
+  (no inter company documents exist, section 9), so the v1 answer is a plain
+  sum per currency per account code across the named companies; the
+  elimination rule arrives with the inter company transfer's own record.
+- The reporting module's queries over invoices, orders and inventory carry
+  no branch predicate today, and the dashboard cache key carries no branch
+  scope; that is C5-1c's branch wall to build, per its brief. The company
+  filter on those reads lands with C5-1c, not before it: this record owns
+  the GL, AP and bank company filters (they move with section 6's routes),
+  and C5-1c owns the rest when its wall lands.
 
-A single migration (the C5-3 migration, number assigned by the lead, this
-ADR only names it as a placeholder) does the following, in one transaction:
+### 9. Refused in v1, with reasons
 
-1. Creates the `company` table from section 2.
-2. Inserts one row per existing tenant database, with `code` derived from
-   the tenant name, `functional_currency_code` set by the tenant config,
-   `fiscal_year_start_month` set to 1, and an `id` carried back by the
-   trigger that follows.
-3. Adds `branch.company_id not null references company(id)` and backfills
-   every branch to the inserted company.
-4. Adds the `company_id` column on every per company table listed in
-   section 3, with a not null constraint that takes effect after step 5.
-5. Adds the `before insert/update` triggers that denormalize
-   `company_id` from `branch_id` on every per company table.
-6. Extends the `document_number_series` table with `company_id` and
-   backfills it from the branch the series points to, then tightens the
-   unique index to `(company_id, document_type, location_id, sequence_name)`.
-7. Updates the access check grants (`core/internal/location/user_repository.go`)
-   with a `company_id` column and a unique index
-   `(user_id, branch_id, company_id)`.
+- **A branch moving between companies.** Every per company row of that
+  branch, closed books included, would have to be reassigned, and closed
+  periods of both companies would be questions. A discrete item with its
+  own record if a dealer ever needs it; refused here.
+- **The inter company stock transfer.** v1 has no inter branch transfer at
+  all: ADR 0008 section 1 refuses it ("Refused, as today. A move stays
+  inside one branch"), and ADR 0008 section 2.8 pins a move inside one
+  branch (blocker `cross_branch`) and posts no entry ("both sides are
+  `1030` at the same cost"). An inter company transfer is first a transfer
+  between two branches. The later path is named, and it is not this
+  record's: first ADR 0008 section 1's own later item, a transfer order
+  with in transit stock; then the inter company form on top of it, on its
+  own sized record: two journal entries, one per company, each balanced, in
+  one database transaction, stamped with one `intercompany_group_id`; due
+  to and due from accounts in each company's chart; the transfer price rule
+  against ADR 0005 section 8.4 and ADR 0008 section 3.5; an elimination
+  rule for section 8's consolidation. One entry holding two companies'
+  lines is refused by design: it cannot balance per company (section 3).
+  The first draft of this record accepted the transfer in seven dev hour
+  equivalents; that was a fraction of a fraction of the work, and the
+  review was right to strike it.
+- **The inter company sale**: one invoice spanning two companies, or one
+  company selling on another's AR ledger. Refused. One invoice is one
+  company's document: its entry, its gapless series, its tax registration,
+  its currency chain (section 5) are each one company's. A dealer who must
+  bill a customer from both companies issues two documents, one per
+  company. (The first draft's reason, "ADR 0005's one currency per document
+  rule forbids it", was wrong: a sale by one company to a customer is one
+  document in one currency. The reason recorded here is the one that
+  holds.)
+- **FX.** No exchange rates are stored or applied (ADR 0005 section 4.2
+  unchanged). A company changing its `functional_currency` after documents
+  exist is a later record: history would need restating.
+- **Splitting an existing ledger into two companies.** Out of scope
+  (Context). The migration writes one company and attaches everything to
+  it.
 
-The migration is reversible. The down steps clear the triggers, drop the
-columns, drop the inserted `company` row, and remove the seeding script. A
-test exercises the down and a fresh up to confirm the round trip.
+### 10. The migration
 
-The cycle 2 chain (C2-3 invoices, C2-4 credit memos, C2-5 counter), the
-cycle 3 item C3-2, and cycle 4's ADR 0008 are run before the C5-3
-migration. The reason: those items grow the per company tables, and the
-C5-3 trigger that denormalizes `company_id` from `branch_id` is correct
-only when every branch has a `company_id` and every per company row's
-trigger fires. Items that follow C5-3 do not change the per company /
-shared split; they extend within it.
+One numbered migration and its down file (the number is the next free when
+the build item merges; another item may take it), one transaction,
+idempotent on re-run, touching only tables that exist when it runs. The
+census test below is the guard for tables that land later.
 
-### 12. Later items, run order, sizes
+Up, in order:
 
-Sizes are dev hour equivalents. The order below matches the dependency.
+1. Create `company` (section 1) and insert exactly one row: `code` `MAIN`
+   (a fixed code the dealer can rename on the admin screen of section 11),
+   `name` `Main`, `functional_currency` from `system_settings`
+   `currency.default` (`091:36`; `USD` when absent),
+   `fiscal_year_start_month` 1, `tax_company_code` null (the operator sets
+   it; the config fallback keeps answering, section 7).
+2. `locations.company_id UUID NOT NULL REFERENCES company(id)`: branch rows
+   take the seed company; every other row takes its `branch_id`'s company,
+   its `branch_id` first backfilled from its ancestor chain where null
+   (`057:21` allows null; `058` and `060` keep and backfill it). The
+   update trigger of step 4 refuses a later move.
+3. The R1 tables of section 2 that exist today: add `company_id`, backfill
+   from the parent, NOT NULL, the foreign key, and the `BEFORE INSERT OR
+   UPDATE` trigger that keeps it and refuses a parent of another company.
+   The nullable branch rows (`075:21`, `078:15`, `079:42`) are backfilled
+   from their register or sale; `079:79` is left alone (legacy after C2-4,
+   ADR 0005 9.1); `089:64` is left alone (no company column, section 2).
+4. The R2 tables of section 2 that exist today: add `company_id`, backfill
+   every row to the seed company, NOT NULL, the foreign key. No trigger:
+   the writers of section 11's third item set it from then on.
+5. GL: `UNIQUE (code)` dropped and `UNIQUE (company_id, code)` added
+   (`025:10`); `UNIQUE (company_id, id)` added; the composite foreign keys
+   of section 3; `charge_codes.revenue_account_code`'s FK dropped
+   (`092:239`); `gl_fiscal_periods` attached to the seed company; the 077
+   exclusion and trigger replaced with the per company forms
+   (`077:29-33,43-60`).
+6. Numbering groundwork only: nothing. The series rename (`invoice` to
+   `invoice:MAIN`) is the numbering item's own migration step, after C2-3
+   has built the counters; this migration does not touch tables that do
+   not exist when it runs.
+7. `api_keys.company_id UUID NULL REFERENCES company(id)` (section 6).
+   `user_locations` is not touched.
 
-1. The C5-3 migration (this ADR). 4 dev hour equivalents.
-2. Reports: per company trial balance and consolidated trial balance.
-   Builds on 1. 4 dev hour equivalents.
-3. Inter company stock transfer (section 6). Builds on 1. 7 dev hour
-   equivalents (4 doc, 2 GL, 1 test).
-4. AR inter company sale. Refused in v1 (section 6). 0 dev hour
-   equivalents.
-5. Numbering per company (section 8). Builds on 1. 2 dev hour equivalents.
-6. Currency guard per company (section 9). Builds on 1 and 5. 1 dev hour
-   equivalent.
-7. Branch access grant by company (section 10). Builds on 1. 2 dev hour
-   equivalents.
-8. Access check consolidation, so that the per company guard and the
-   per branch guard run in one call. 2 dev hour equivalents.
+Down: refuses, with `RAISE`, when more than one company exists, or when any
+row of any table the up touched points at a company other than the seed;
+otherwise it drops the triggers, the columns, the seed row and the `company`
+table, in reverse order. A down that would lose a second company's data
+loses nothing instead: it answers.
 
-The order against the cycle 2 chain (C2-3 invoices, C2-4 credit memos,
-C2-5 counter): those come first, because each adds a per company table that
-the trigger in the C5-3 migration must denormalize. The C5-3 migration
-runs after C2-5. The order against C3-2 (units and pricing): C3-2 runs
-before C5-3, because the shared price list row from section 4 has to
-exist before the price list per AR invoice rule lands. The order against
-cycle 4 (ADR 0008, inventory identity and vendor intake): cycle 4 runs
-before C5-3, because `product`, `product_variant`, and `vendor` from
-section 4 are the shared masters that the C5-3 migration leaves alone.
+Tests, in the migration item:
+
+- Up, down, up, on the repository's seed data and on a database with the
+  cycle 2 to 4 tables present (the migration test shape the recipe's step 3
+  names), proving idempotency and the round trip.
+- The refusal paths of the down: one extra company row, and one row pointed
+  at a made up company, each making the down raise.
+- **The census test**: it fails when any table with a `branch_id` column
+  (minus the legacy renames and `events_outbox`) lacks its company rule
+  (trigger or named writer), and when any table named in section 2's per
+  company list lacks `company_id`. Every later item that adds a branch
+  carrying table extends the census in the same pull request, so a table
+  cannot land without its rule. The census list lives beside the migration,
+  one line per table, so the test reads as the table of section 2 does.
+
+### 11. Items, order and sizes
+
+The build is this record's own items, inside C5-3. There is no C5-4 or C5-5
+in v1: the plan skips R5-4, the shared kit, and the cycle 5 items are C5-0,
+C5-1 (with C5-1a and C5-1b already split out of it), C5-1c, C5-2a, C5-2b and
+C5-3. This record is C5-3's design stop; its build items run in the order
+below.
+
+Against the cycles already running: after C2-5. The cycle 2 chain is C2-2b
+(allocation, back orders, fulfilment; merged as PR 43), C2-3 (invoices,
+credit memos, gapless numbering and void; in review as PR 46), then C2-4
+(payments, deposits, AR) and C2-5 (POS, till). C2-3 to C2-5 add and reshape
+the AR and counter tables (`ar_applications`, `document_counters`, the
+payment and credit memo columns, ADR 0005 sections 4.1, 9.1, 9.2 and 13),
+so the company build waits for them. After C3-2B (order, invoice, credit
+memo and counter line parity per ADR 0006): it reshapes the lines the
+company migration attaches. After C4-2: the real reason, on the record, is
+that ADR 0008 adds the stock, adjustment, receipt, vendor credit and feed
+tables of section 2, each needing a company rule; the census test then
+covers them from the start. After C5-1's GL, finance and bank reconciliation
+conversion and after C5-1c's branch wall: the company filter of sections 6
+and 8 rides the routes and the wall those items build. The design itself,
+this record, can merge now, ahead of all of them: it changes no code.
+
+Sizes, dev hour equivalents, re argued against the code from the round 1
+review's estimate (the review's envelope was 60 to 100; the buckets below
+are its own, and their sum is stated rather than rounded):
+
+| Order | Item | Size |
+|---|---|---|
+| 1 | The migration and the census test (section 10: about twenty tables, three rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
+| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart seed per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
+| 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
+| 4 | Numbering and URLs (section 4: series per company, the code bearing prefix, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
+| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
+| 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
+| 7 | Company admin (create a company with its chart and periods seeded, rename the seed, set its tax code; routes and the desk screen) | 6 to 10 |
+
+Total: 66 to 106 dev hour equivalents. Item 1 lands first and items 2 to 7
+depend on it; items 2 and 3 land together or in that order; 4 to 7 are
+independent of each other.
 
 ## Consequences
 
-- Every per company table grows a `company_id` column that is denormalized
-  from `branch_id` by trigger, so application code never sets
-  `company_id`. PR 37 and PR 39 extend to companies through the guard
-  pattern ADR 0007 section 2.3 already uses.
-- A consolidated trial balance is now possible because inter company
-  transfers land in both ledgers keyed by `intercompany_group_id`. A
-  third party report tool that aggregates rows by `company_id` can pair
-  them.
-- The AR inter company sale is refused in v1. A user of multi company who
-  wants a customer of company A to buy through company B will have to
-  issue the sale twice, once per company, until a later ADR allows a
-  cross-company sale. The reason is on the record (ADR 0005's one
-  currency per document rule, and the lack of multi-currency in v1).
-- Moving a branch between companies is refused in v1. The data move
-  requires a re-assignment of every per company row and a reconciliation
-  of the document number series, which is a separate item.
+- One dealer database can hold several companies' books, separated at the
+  chart, the journal, the subledgers, the gapless series, the tax
+  registration and the bank accounts, while sharing parties, catalog,
+  pricing, stock identity, users and locations.
+- The single company deployment keeps its behaviour: one seed company, the
+  config tax fallback, the currency chain unchanged, new numbers carrying a
+  code the dealer can keep short.
+- The books stop being branchless: every journal entry, payment, credit
+  memo, vendor bill and bank account names its company, set by its writer
+  and checked by the database where the shapes allow.
+- Gapless numbers become per company with the company code in the prefix,
+  and number URLs keep working under widened patterns, recorded as contract
+  changes.
+- The census test holds the split: no branch carrying table lands without
+  a company rule after the migration item merges.
+- The inter company transfer, the inter company sale, FX, the branch move
+  and the ledger split are all refused, each with its reason and its later
+  path on the record.
+
+## Alternatives considered
+
+**A company from a path prefix and a header** (the first draft): a
+`/c/{company_id}/...` prefix doubles every route, the census, the contract
+and the goldens, and an `X-Company-Id` header that can disagree with the
+branch creates a second scope. Refused: the company is a function of the
+branch (section 6).
+
+**One trigger for every table** (the first draft): a `company_id` copied
+from `branch_id` cannot reach the books, which carry no branch
+(`025`, `008`, `018`, `028`, `029`), and several `branch_id` columns are
+nullable, so a NOT NULL copy fails on real rows. Replaced by the three
+rules of section 2.
+
+**A shared chart with a company column on balances only**: every posting
+resolves accounts by code (ADR 0005 section 8.1), and codes collide as soon
+as two companies customize their charts; the trial balance would join
+negatively. Refused: per company charts with a per company resolver
+(section 3).
+
+**Per company customer terms now** (a `customer_company_terms` child row):
+no v1 requirement names it, and the shared master with the limit stated is
+smaller. Deferred, with the shape named (section 2).
+
+**A company column on the outbox**: every event writer pays for it, and no
+consumer filters events by company today. Refused: derived from `branch_id`
+where present, stated as a limit (section 2).
+
+**Fiscal periods shared, one calendar**: smaller, and wrong the day a second
+legal entity has a different year end; the closed period guard has to be
+per company either way, because a period of one company must not lock
+another's postings. Per company (section 3).
 
 ## Closest calls
 
-- Whether to refuse the inter company stock transfer in v1 or to ship it.
-  Accepted for v1 because the document type fits the C5-3 trigger rule
-  and the GL post is one transaction. The AR inter company sale was
-  refused because it crosses the AR subledger of two companies and
-  forces multi-currency into scope.
-- Whether to allow a branch move between companies. Refused in v1
-  because the per company row reassignment and the numbering series
-  reconciliation are a discrete piece of work that has its own ADR.
-- Whether the request's company is read from the body. Refused; the path
-  and header are the only sources, mirroring ADR 0007 section 2.3 for
-  branches.
-- Whether `customer` and `vendor` are shared or per company. Shared,
-  because a party is a master row that trades with whichever company
-  the AR or AP invoice names. Balances stay per company on
-  `ar_invoice` and `ap_invoice`, so a party's AR balance is the sum of
-  the per company AR balances.
+- Fiscal periods per company versus one shared calendar: per company, for
+  the reason above; it is the larger half of item 2.
+- Gapped sequences shared versus per company: shared. Gaps are allowed
+  there (ADR 0005 section 4.1's own table) and uniqueness holds; only the
+  gapless documents are per company, because their gaplessness is the tax
+  authority's.
+- Unbound keys reaching every company: kept (ADR 0002 section 6's reach
+  today) rather than refused on the company routes, with
+  `api_keys.company_id` as the narrowing a dealer mints when it needs one.
+- `api_keys.company_id` now versus later: now. It is the same mint
+  mechanism as ADR 0007 5.5's branch binding, and a dealer running two
+  companies needs it on the day the second company exists.
+- The tax company code per company with the config value as fallback,
+  rather than config only or company only: the fallback keeps every single
+  company deployment byte for byte.
+- Customer terms shared with a stated limit, rather than the per company
+  child row now (section 2).
 
-## What I could not settle
+## Known limits
 
-- The exact rename of the `document_number_series` unique index. Section
-  8 names `(company_id, document_type, location_id, sequence_name)` as the
-  new shape. ADR 0005 section 4 reads `series.location_id` as the branch
-  id today, and a follow-up ADR may move to `(company_id, document_type,
-  sequence_name)` once a per company series can have several branches.
-- Whether a consolidated report respects a signed-in user's grants when
-  the consolidated set spans companies. Section 7 says yes; the rule
-  for one user with grants only on company A who requests a consolidated
-  report across companies A and B is `403 grant_missing`, but the exact
-  error code shape is owned by a later ADR.
-- The cycle 5 chain (C5-1, C5-2, C5-3) order against C5-4 and C5-5.
-  C5-1 and C5-2 are out of scope for this ADR. The brief lists C5-3 in
-  the cycle 5 chain, and this ADR's order in section 12 is the strict
-  topological order against the cycles named, not a global plan.
+- Shared party terms (customer credit limit, payment terms, currency
+  override, PO required; vendor terms) apply to every company alike, until
+  the per company terms child row of section 2 is built.
+- An unbound machine key reaches every company (ADR 0002 section 6's reach,
+  restated for companies); a dealer narrows it by minting a bound key.
+- Events carry no company column; consumers derive it from `branch_id`, and
+  an event with a null branch names no company (ADR 0003 section 1).
+- Consolidation sums per currency with no eliminations, until inter company
+  documents exist (section 9 names the record that adds them).
+- Splitting an existing ledger into two companies is out of scope; the
+  migration writes one company (Context, section 10).
