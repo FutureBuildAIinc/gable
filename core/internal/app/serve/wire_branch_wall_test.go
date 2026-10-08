@@ -735,6 +735,59 @@ func TestBranchWall_QuoteListGrants(t *testing.T) {
 			t.Errorf("quote list, %s: branch B's quote present = %v, want %v", c.name, got, c.wantB)
 		}
 	}
+
+	// The pager total counts the same filtered set the page draws from: with
+	// include=total and a one row page, the total agrees with what the page
+	// carries in every arm (a one row total is a one row page and the last
+	// one, so no next cursor; an exact total only for the arms whose filtered
+	// set is this fixture's rows alone, a lower bound for the admin, whose
+	// set includes other tests' quotes).
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantTotal               int
+		wantTotalExact          bool
+	}{
+		{"sales, header A", "sales", "u-a", A, 1, true},
+		{"sales, no header", "sales", "u-a", "", 1, true},
+		{"sales u-none, no header", "sales", "u-none", "", 0, true},
+		{"admin, no header", "admin", "boss", "", 2, false},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/quotes?include=total&limit=1", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("quote page total, %s: %d, want 200", c.name, status)
+			continue
+		}
+		var page struct {
+			Items      []json.RawMessage `json:"items"`
+			NextCursor *string           `json:"next_cursor"`
+			Total      *int64            `json:"total"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("quote page total, %s: body: %v\n%s", c.name, err, body)
+		}
+		if page.Total == nil {
+			t.Errorf("quote page total, %s: no total on the include=total page", c.name)
+			continue
+		}
+		total := int(*page.Total)
+		if total < c.wantTotal || (c.wantTotalExact && total != c.wantTotal) {
+			t.Errorf("quote page total, %s: total = %d, want %d", c.name, total, c.wantTotal)
+		}
+		wantPage := total
+		if wantPage > 1 {
+			wantPage = 1
+		}
+		if len(page.Items) != wantPage {
+			t.Errorf("quote page total, %s: page carries %d items, want %d (the total's page at limit 1)", c.name, len(page.Items), wantPage)
+			continue
+		}
+		if total > len(page.Items) && page.NextCursor == nil {
+			t.Errorf("quote page total, %s: total %d over a %d row page with no next cursor", c.name, total, len(page.Items))
+		}
+		if total == len(page.Items) && page.NextCursor != nil {
+			t.Errorf("quote page total, %s: total %d is the whole set but a next cursor was minted", c.name, total)
+		}
+	}
 }
 
 // The inventory levels list is filtered by the caller's branches like the
