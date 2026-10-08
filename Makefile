@@ -122,8 +122,10 @@ cover:
 # contract-go in the backend job, contract-ts in the frontend job.
 contract: contract-go contract-ts
 
+# The last step reruns the conformance test with -v only to print its counts
+# line: go test hides a passing test's log otherwise.
 contract-go:
-	cd core && go run ./api/tools/merge -check && go run ./cmd/pending && go test -count=1 ./internal/apicontract/...
+	cd core && go run ./api/tools/merge -check && go run ./cmd/pending && go test -count=1 ./internal/apicontract/... && go test -count=1 -v -run '^TestGoldenResponsesConform$$' ./internal/apicontract/ | sed -n 's/^ *conformance_test.go:[0-9]*: //p'
 
 contract-ts:
 	cd web/packages/api-client && npm ci && npm run drift && npm run typecheck
