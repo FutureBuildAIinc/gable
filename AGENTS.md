@@ -204,6 +204,7 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 | ERP `/api/v1/orders`, `/api/v1/invoices` | **int64 cents** | `order/repository.go` does `dollarsToInt64Cents()` on read, `/100.0` on write. DB column is `DECIMAL(10,2)` dollars |
 | Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go:61` has a TODO to migrate. Don't mix with ERP frontend helpers |
 | Quotes `/api/v1/quotes` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths (`unit_price_ten_thousandths`) | Converted by R1-15 onto ADR 0001; the template is `docs/refactor/MODULE-RECIPE.md`. DB columns stay `NUMERIC`; the module converts in SQL, never through float64 |
+| Customers `/api/v1/customers` | **int64 cents** (`credit_limit_cents`, null for no limit; `balance_cents`, read only) | Converted by C2-1 onto ADR 0001 with ship-tos and the payment terms master (`docs/adr/0005-sales-and-money-core.md` section 7). `customers.credit_limit` is NULL for no limit and 0 is no credit. DB columns stay `NUMERIC(12,2)`; the module converts in SQL |
 | DailyTill, reporting | **float64 dollars** | Legacy float convention |
 | `account` module | **int64 cents** | Reads/writes `customers.balance_due` as cents — incompatible with portal's dollar interpretation of the same column |
 
