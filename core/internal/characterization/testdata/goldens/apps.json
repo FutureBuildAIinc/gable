@@ -1,0 +1,1314 @@
+[
+  {
+    "name": "apps.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/apps"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "apps": [
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "parsing",
+            "name": "AI Document Parsing",
+            "summary": "Material-list and freight OCR ingestion."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "crm",
+            "name": "CRM Activities",
+            "summary": "Customer activity feed and follow-ups."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "customer",
+            "name": "Customers",
+            "summary": "Customer master, credit limits, and branch assignment."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "salesteam",
+            "name": "Sales Teams",
+            "summary": "Sales rep assignments and team structure."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "inventory",
+            "name": "Inventory",
+            "summary": "Stock quants, double-entry moves, and cycle counts."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "location",
+            "name": "Locations & Branches",
+            "summary": "Warehouse location tree and branch management."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "pim",
+            "name": "Product Content (PIM)",
+            "summary": "AI-generated product descriptions and images."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [
+              "vendor"
+            ],
+            "enabled": true,
+            "key": "product",
+            "name": "Products",
+            "summary": "Product master, SKUs, and units of measure."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "inventory",
+              "order",
+              "pricing",
+              "product"
+            ],
+            "enabled": true,
+            "key": "portal",
+            "name": "B2B Portal",
+            "summary": "Dealer customer portal: catalog, cart, orders, AR."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "order",
+              "pricing",
+              "product",
+              "quote"
+            ],
+            "enabled": true,
+            "key": "integrations",
+            "name": "Integrations",
+            "summary": "Service-to-service API, X12 connectors, GL adapters."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "quote"
+            ],
+            "enabled": true,
+            "key": "partner",
+            "name": "Partner API",
+            "summary": "Co-op partner dashboard and quote API."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "project",
+            "name": "Portal Projects",
+            "summary": "Customer project tracking on the B2B portal."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "vision",
+            "name": "Vision",
+            "summary": "Image-based intake experiments."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "ap",
+              "purchase_order"
+            ],
+            "enabled": true,
+            "key": "matching",
+            "name": "3-Way Matching",
+            "summary": "PO / receipt / AP-invoice matching."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "account",
+            "name": "AR Subledger",
+            "summary": "Customer transactions and balance subledger."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "gl"
+            ],
+            "enabled": true,
+            "key": "ap",
+            "name": "Accounts Payable",
+            "summary": "Vendor bills and AP workflows."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "gl"
+            ],
+            "enabled": true,
+            "key": "bankrecon",
+            "name": "Bank Reconciliation",
+            "summary": "Bank statement import and reconciliation."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "gl",
+            "name": "General Ledger",
+            "summary": "Chart of accounts, journal entries, trial balance."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "account",
+              "gl"
+            ],
+            "enabled": true,
+            "key": "invoice",
+            "name": "Invoicing",
+            "summary": "Invoices, tax resolution, and GL posting."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "account",
+              "invoice"
+            ],
+            "enabled": true,
+            "key": "payment",
+            "name": "Payments",
+            "summary": "Payment processing and AR application."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "tax",
+            "name": "Tax",
+            "summary": "Tax calculation and exemption certificates."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "dashboard",
+            "name": "Dashboard",
+            "summary": "Executive KPIs and operational overview."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "invoice",
+              "order",
+              "product"
+            ],
+            "enabled": true,
+            "key": "document",
+            "name": "Documents",
+            "summary": "Generated PDFs and document delivery."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [
+              "inventory",
+              "invoice",
+              "payment",
+              "product"
+            ],
+            "enabled": true,
+            "key": "pos",
+            "name": "Point of Sale",
+            "summary": "Contractor-desk POS terminal and daily till."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "reporting",
+            "name": "Reporting",
+            "summary": "Report builder, BI exports, and scheduled reports."
+          },
+          {
+            "category": "Logistics",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "delivery",
+            "name": "Logistics",
+            "summary": "Dispatch board, routing, fleet, and proof of delivery."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "ai",
+            "name": "AI Client",
+            "summary": "OpenRouter client, KeyStore, and model routing (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "config",
+            "name": "Configuration",
+            "summary": "Environment configuration loader (library)."
+          },
+          {
+            "category": "Platform",
+            "core": false,
+            "depends_on": [],
+            "enabled": true,
+            "key": "governance",
+            "name": "Governance (RFCs)",
+            "summary": "RFC drafting from a structured template, plus review and status tracking for platform governance."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "notification",
+            "name": "Notifications",
+            "summary": "Email/SMS senders (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "domain",
+            "name": "Shared Domain Types",
+            "summary": "Cross-module EDI/GL structs (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "techadmin",
+            "name": "Tech Admin",
+            "summary": "System settings, AI keys, and integration keys."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "edi",
+            "name": "EDI",
+            "summary": "X12 EDI documents (850/855/810)."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [
+              "edi",
+              "inventory",
+              "product",
+              "vendor"
+            ],
+            "enabled": true,
+            "key": "purchase_order",
+            "name": "Purchasing",
+            "summary": "Purchase orders, receiving, EDI, and auto-reorder."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "vendor",
+            "name": "Vendors",
+            "summary": "Vendor master and terms."
+          },
+          {
+            "category": "Sales",
+            "core": false,
+            "depends_on": [],
+            "enabled": true,
+            "key": "millwork",
+            "name": "Millwork",
+            "summary": "Door and window configurator: option catalogs, rule validation, and SKU building."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "inventory",
+              "invoice",
+              "purchase_order"
+            ],
+            "enabled": true,
+            "key": "order",
+            "name": "Orders",
+            "summary": "Sales orders, fulfilment, and credit gating."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "product"
+            ],
+            "enabled": true,
+            "key": "pricing",
+            "name": "Pricing",
+            "summary": "Price levels, category pricing, escalators, and rebates."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "quote",
+            "name": "Quotes",
+            "summary": "Quoting and quote-to-order conversion."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "apps.disable_core_conflict",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/apps/product/disable"
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "app_core",
+          "message": "core apps cannot be disabled: \"product\""
+        }
+      }
+    }
+  },
+  {
+    "name": "apps.governance.disable",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/apps/governance/disable"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "apps": [
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "parsing",
+            "name": "AI Document Parsing",
+            "summary": "Material-list and freight OCR ingestion."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "crm",
+            "name": "CRM Activities",
+            "summary": "Customer activity feed and follow-ups."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "customer",
+            "name": "Customers",
+            "summary": "Customer master, credit limits, and branch assignment."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "salesteam",
+            "name": "Sales Teams",
+            "summary": "Sales rep assignments and team structure."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "inventory",
+            "name": "Inventory",
+            "summary": "Stock quants, double-entry moves, and cycle counts."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "location",
+            "name": "Locations & Branches",
+            "summary": "Warehouse location tree and branch management."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "pim",
+            "name": "Product Content (PIM)",
+            "summary": "AI-generated product descriptions and images."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [
+              "vendor"
+            ],
+            "enabled": true,
+            "key": "product",
+            "name": "Products",
+            "summary": "Product master, SKUs, and units of measure."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "inventory",
+              "order",
+              "pricing",
+              "product"
+            ],
+            "enabled": true,
+            "key": "portal",
+            "name": "B2B Portal",
+            "summary": "Dealer customer portal: catalog, cart, orders, AR."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "order",
+              "pricing",
+              "product",
+              "quote"
+            ],
+            "enabled": true,
+            "key": "integrations",
+            "name": "Integrations",
+            "summary": "Service-to-service API, X12 connectors, GL adapters."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "quote"
+            ],
+            "enabled": true,
+            "key": "partner",
+            "name": "Partner API",
+            "summary": "Co-op partner dashboard and quote API."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "project",
+            "name": "Portal Projects",
+            "summary": "Customer project tracking on the B2B portal."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "vision",
+            "name": "Vision",
+            "summary": "Image-based intake experiments."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "ap",
+              "purchase_order"
+            ],
+            "enabled": true,
+            "key": "matching",
+            "name": "3-Way Matching",
+            "summary": "PO / receipt / AP-invoice matching."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "account",
+            "name": "AR Subledger",
+            "summary": "Customer transactions and balance subledger."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "gl"
+            ],
+            "enabled": true,
+            "key": "ap",
+            "name": "Accounts Payable",
+            "summary": "Vendor bills and AP workflows."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "gl"
+            ],
+            "enabled": true,
+            "key": "bankrecon",
+            "name": "Bank Reconciliation",
+            "summary": "Bank statement import and reconciliation."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "gl",
+            "name": "General Ledger",
+            "summary": "Chart of accounts, journal entries, trial balance."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "account",
+              "gl"
+            ],
+            "enabled": true,
+            "key": "invoice",
+            "name": "Invoicing",
+            "summary": "Invoices, tax resolution, and GL posting."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "account",
+              "invoice"
+            ],
+            "enabled": true,
+            "key": "payment",
+            "name": "Payments",
+            "summary": "Payment processing and AR application."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "tax",
+            "name": "Tax",
+            "summary": "Tax calculation and exemption certificates."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "dashboard",
+            "name": "Dashboard",
+            "summary": "Executive KPIs and operational overview."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "invoice",
+              "order",
+              "product"
+            ],
+            "enabled": true,
+            "key": "document",
+            "name": "Documents",
+            "summary": "Generated PDFs and document delivery."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [
+              "inventory",
+              "invoice",
+              "payment",
+              "product"
+            ],
+            "enabled": true,
+            "key": "pos",
+            "name": "Point of Sale",
+            "summary": "Contractor-desk POS terminal and daily till."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "reporting",
+            "name": "Reporting",
+            "summary": "Report builder, BI exports, and scheduled reports."
+          },
+          {
+            "category": "Logistics",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "delivery",
+            "name": "Logistics",
+            "summary": "Dispatch board, routing, fleet, and proof of delivery."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "ai",
+            "name": "AI Client",
+            "summary": "OpenRouter client, KeyStore, and model routing (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "config",
+            "name": "Configuration",
+            "summary": "Environment configuration loader (library)."
+          },
+          {
+            "category": "Platform",
+            "core": false,
+            "depends_on": [],
+            "enabled": false,
+            "key": "governance",
+            "name": "Governance (RFCs)",
+            "summary": "RFC drafting from a structured template, plus review and status tracking for platform governance."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "notification",
+            "name": "Notifications",
+            "summary": "Email/SMS senders (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "domain",
+            "name": "Shared Domain Types",
+            "summary": "Cross-module EDI/GL structs (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "techadmin",
+            "name": "Tech Admin",
+            "summary": "System settings, AI keys, and integration keys."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "edi",
+            "name": "EDI",
+            "summary": "X12 EDI documents (850/855/810)."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [
+              "edi",
+              "inventory",
+              "product",
+              "vendor"
+            ],
+            "enabled": true,
+            "key": "purchase_order",
+            "name": "Purchasing",
+            "summary": "Purchase orders, receiving, EDI, and auto-reorder."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "vendor",
+            "name": "Vendors",
+            "summary": "Vendor master and terms."
+          },
+          {
+            "category": "Sales",
+            "core": false,
+            "depends_on": [],
+            "enabled": true,
+            "key": "millwork",
+            "name": "Millwork",
+            "summary": "Door and window configurator: option catalogs, rule validation, and SKU building."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "inventory",
+              "invoice",
+              "purchase_order"
+            ],
+            "enabled": true,
+            "key": "order",
+            "name": "Orders",
+            "summary": "Sales orders, fulfilment, and credit gating."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "product"
+            ],
+            "enabled": true,
+            "key": "pricing",
+            "name": "Pricing",
+            "summary": "Price levels, category pricing, escalators, and rebates."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "quote",
+            "name": "Quotes",
+            "summary": "Quoting and quote-to-order conversion."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "apps.governance.enable",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/apps/governance/enable"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "apps": [
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "parsing",
+            "name": "AI Document Parsing",
+            "summary": "Material-list and freight OCR ingestion."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "crm",
+            "name": "CRM Activities",
+            "summary": "Customer activity feed and follow-ups."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "customer",
+            "name": "Customers",
+            "summary": "Customer master, credit limits, and branch assignment."
+          },
+          {
+            "category": "CRM & People",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "salesteam",
+            "name": "Sales Teams",
+            "summary": "Sales rep assignments and team structure."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "inventory",
+            "name": "Inventory",
+            "summary": "Stock quants, double-entry moves, and cycle counts."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "location",
+            "name": "Locations & Branches",
+            "summary": "Warehouse location tree and branch management."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "pim",
+            "name": "Product Content (PIM)",
+            "summary": "AI-generated product descriptions and images."
+          },
+          {
+            "category": "Catalog & Inventory",
+            "core": true,
+            "depends_on": [
+              "vendor"
+            ],
+            "enabled": true,
+            "key": "product",
+            "name": "Products",
+            "summary": "Product master, SKUs, and units of measure."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "inventory",
+              "order",
+              "pricing",
+              "product"
+            ],
+            "enabled": true,
+            "key": "portal",
+            "name": "B2B Portal",
+            "summary": "Dealer customer portal: catalog, cart, orders, AR."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "order",
+              "pricing",
+              "product",
+              "quote"
+            ],
+            "enabled": true,
+            "key": "integrations",
+            "name": "Integrations",
+            "summary": "Service-to-service API, X12 connectors, GL adapters."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "quote"
+            ],
+            "enabled": true,
+            "key": "partner",
+            "name": "Partner API",
+            "summary": "Co-op partner dashboard and quote API."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "project",
+            "name": "Portal Projects",
+            "summary": "Customer project tracking on the B2B portal."
+          },
+          {
+            "category": "External Surfaces",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "vision",
+            "name": "Vision",
+            "summary": "Image-based intake experiments."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "ap",
+              "purchase_order"
+            ],
+            "enabled": true,
+            "key": "matching",
+            "name": "3-Way Matching",
+            "summary": "PO / receipt / AP-invoice matching."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "account",
+            "name": "AR Subledger",
+            "summary": "Customer transactions and balance subledger."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "gl"
+            ],
+            "enabled": true,
+            "key": "ap",
+            "name": "Accounts Payable",
+            "summary": "Vendor bills and AP workflows."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "gl"
+            ],
+            "enabled": true,
+            "key": "bankrecon",
+            "name": "Bank Reconciliation",
+            "summary": "Bank statement import and reconciliation."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "gl",
+            "name": "General Ledger",
+            "summary": "Chart of accounts, journal entries, trial balance."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "account",
+              "gl"
+            ],
+            "enabled": true,
+            "key": "invoice",
+            "name": "Invoicing",
+            "summary": "Invoices, tax resolution, and GL posting."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [
+              "account",
+              "invoice"
+            ],
+            "enabled": true,
+            "key": "payment",
+            "name": "Payments",
+            "summary": "Payment processing and AR application."
+          },
+          {
+            "category": "Finance",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "tax",
+            "name": "Tax",
+            "summary": "Tax calculation and exemption certificates."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "dashboard",
+            "name": "Dashboard",
+            "summary": "Executive KPIs and operational overview."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "invoice",
+              "order",
+              "product"
+            ],
+            "enabled": true,
+            "key": "document",
+            "name": "Documents",
+            "summary": "Generated PDFs and document delivery."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [
+              "inventory",
+              "invoice",
+              "payment",
+              "product"
+            ],
+            "enabled": true,
+            "key": "pos",
+            "name": "Point of Sale",
+            "summary": "Contractor-desk POS terminal and daily till."
+          },
+          {
+            "category": "Front of House",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "reporting",
+            "name": "Reporting",
+            "summary": "Report builder, BI exports, and scheduled reports."
+          },
+          {
+            "category": "Logistics",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "delivery",
+            "name": "Logistics",
+            "summary": "Dispatch board, routing, fleet, and proof of delivery."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "ai",
+            "name": "AI Client",
+            "summary": "OpenRouter client, KeyStore, and model routing (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "config",
+            "name": "Configuration",
+            "summary": "Environment configuration loader (library)."
+          },
+          {
+            "category": "Platform",
+            "core": false,
+            "depends_on": [],
+            "enabled": true,
+            "key": "governance",
+            "name": "Governance (RFCs)",
+            "summary": "RFC drafting from a structured template, plus review and status tracking for platform governance."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "notification",
+            "name": "Notifications",
+            "summary": "Email/SMS senders (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "domain",
+            "name": "Shared Domain Types",
+            "summary": "Cross-module EDI/GL structs (library)."
+          },
+          {
+            "category": "Platform",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "techadmin",
+            "name": "Tech Admin",
+            "summary": "System settings, AI keys, and integration keys."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "edi",
+            "name": "EDI",
+            "summary": "X12 EDI documents (850/855/810)."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [
+              "edi",
+              "inventory",
+              "product",
+              "vendor"
+            ],
+            "enabled": true,
+            "key": "purchase_order",
+            "name": "Purchasing",
+            "summary": "Purchase orders, receiving, EDI, and auto-reorder."
+          },
+          {
+            "category": "Purchasing",
+            "core": true,
+            "depends_on": [],
+            "enabled": true,
+            "key": "vendor",
+            "name": "Vendors",
+            "summary": "Vendor master and terms."
+          },
+          {
+            "category": "Sales",
+            "core": false,
+            "depends_on": [],
+            "enabled": true,
+            "key": "millwork",
+            "name": "Millwork",
+            "summary": "Door and window configurator: option catalogs, rule validation, and SKU building."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "inventory",
+              "invoice",
+              "purchase_order"
+            ],
+            "enabled": true,
+            "key": "order",
+            "name": "Orders",
+            "summary": "Sales orders, fulfilment, and credit gating."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "customer",
+              "product"
+            ],
+            "enabled": true,
+            "key": "pricing",
+            "name": "Pricing",
+            "summary": "Price levels, category pricing, escalators, and rebates."
+          },
+          {
+            "category": "Sales",
+            "core": true,
+            "depends_on": [
+              "product"
+            ],
+            "enabled": true,
+            "key": "quote",
+            "name": "Quotes",
+            "summary": "Quoting and quote-to-order conversion."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "apps.unknown_key",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/apps/no-such-app/disable"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  }
+]

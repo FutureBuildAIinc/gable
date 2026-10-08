@@ -1,0 +1,97 @@
+[
+  {
+    "name": "pos.till.open",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/open",
+      "body": {
+        "opening_float": 100,
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "cashier_id": "<id-1>",
+        "id": "<id-2>",
+        "notes": "",
+        "opened_at": "<ts+0d>",
+        "opening_float": 10000,
+        "register_id": "REG-01",
+        "status": "OPEN"
+      }
+    }
+  },
+  {
+    "name": "pos.till.current",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/current?register_id=REG-01"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "session": {
+          "cashier_id": "<id-1>",
+          "id": "<id-2>",
+          "notes": "",
+          "opened_at": "<ts+0d>",
+          "opening_float": 10000,
+          "register_id": "REG-01",
+          "status": "OPEN"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.start",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions",
+      "body": {
+        "customer_id": "<id-3>",
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-4>",
+        "cashier_id": "<id-5>",
+        "change_due": 0,
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-3>",
+        "id": "<id-6>",
+        "register_id": "REG-01",
+        "status": "OPEN",
+        "subtotal": 0,
+        "tax_amount": 0,
+        "till_session_id": "<id-2>",
+        "total": 0
+      }
+    }
+  },
+  {
+    "name": "pos.catalog",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/catalog"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,118 @@
+[
+  {
+    "name": "staff.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "active": true,
+          "created_at": "<ts+0d>",
+          "email": "admin@gable.com",
+          "full_name": "Avery Kim",
+          "id": "<id-1>",
+          "modules": [],
+          "role": "admin",
+          "staff_no": "STF-003",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "created_at": "<ts+0d>",
+          "email": "dispatcher@gable.com",
+          "full_name": "Dana Ramirez",
+          "id": "<id-2>",
+          "modules": [
+            "ai_lm"
+          ],
+          "role": "dispatcher",
+          "staff_no": "STF-001",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "created_at": "<ts+0d>",
+          "email": "yard@gable.com",
+          "full_name": "Yuki Tan",
+          "id": "<id-3>",
+          "modules": [],
+          "role": "yard",
+          "staff_no": "STF-002",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "staff.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff",
+      "body": {
+        "email": "goldens@example.com",
+        "full_name": "Golden Staff",
+        "role": "sales"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens@example.com",
+        "full_name": "Golden Staff",
+        "id": "<id-4>",
+        "modules": [],
+        "role": "sales",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.modules",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/modules"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "enabled": true,
+          "id": "ai_lm",
+          "name": "AI_LM"
+        }
+      ]
+    }
+  },
+  {
+    "name": "staff.create.missing_fields",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff",
+      "body": {
+        "email": "",
+        "full_name": ""
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  }
+]
