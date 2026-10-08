@@ -27,13 +27,13 @@ var (
 	ErrInsufficientAllocated = errors.New("inventory: insufficient allocated stock")
 )
 
-// AvailableQty is the product's unallocated stock at the branch, read through
-// the caller's transaction without locking (a desk read; the allocation reads
-// it again under the lock).
+// AvailableQty is the product's unallocated stock at the branch. It takes the
+// product's rows FOR UPDATE (section 11, step 6), so a plan made from the
+// answer holds until the transaction ends.
 func (s *Service) AvailableQty(ctx context.Context, productID, branchID uuid.UUID) (httpx.Quantity, error) {
-	items, err := s.repo.ListInventoryByProductAndBranch(ctx, productID, &branchID)
+	items, err := s.repo.LockBranchInventory(ctx, productID, branchID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to list inventory: %w", err)
+		return 0, err
 	}
 	var total int64
 	for i := range items {

@@ -86,6 +86,9 @@ type Repository interface {
 	// (ADR 0005 5.3).
 	OpenReceivableCents(ctx context.Context, customerID uuid.UUID, excludingOrder *uuid.UUID) (int64, error)
 	HasInvoices(ctx context.Context, orderID uuid.UUID) (bool, error)
+	// SaveLineQuantities writes the allocated, back ordered and fulfilled
+	// quantities of the lines (ADR 0005 5.4); the caller holds the order lock.
+	SaveLineQuantities(ctx context.Context, lines []OrderLine) error
 	OrderExistsForQuote(ctx context.Context, quoteID uuid.UUID) (bool, error)
 }
 
@@ -985,4 +988,22 @@ func (r *PostgresRepository) OrderExistsForQuote(ctx context.Context, quoteID uu
 		return false, fmt.Errorf("failed to read orders for quote: %w", err)
 	}
 	return exists, nil
+}
+
+// SaveLineQuantities writes each line's allocated, back ordered and fulfilled
+// quantities.
+func (r *PostgresRepository) SaveLineQuantities(ctx context.Context, lines []OrderLine) error {
+	exec := r.db.GetExecutor(ctx)
+	for i := range lines {
+		l := &lines[i]
+		if _, err := exec.Exec(ctx, `
+			UPDATE order_lines
+			SET quantity_allocated = $2::numeric / 10000, quantity_backordered = $3::numeric / 10000,
+				quantity_fulfilled = $4::numeric / 10000
+			WHERE id = $1`,
+			l.ID, int64(l.QuantityAllocated), int64(l.QuantityBackordered), int64(l.QuantityFulfilled)); err != nil {
+			return fmt.Errorf("failed to write the line quantities: %w", err)
+		}
+	}
+	return nil
 }

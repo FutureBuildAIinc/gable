@@ -91,6 +91,7 @@ type Service struct {
 	pricer    PriceEngine
 	tax       TaxProvider
 	exposure  ExposureGate
+	inventory Inventory
 	overrider ExposureOverrider
 	audit     *audit.Logger
 	logger    *slog.Logger
@@ -110,6 +111,25 @@ func (s *Service) WithAuditLog(l *audit.Logger) *Service    { s.audit = l; retur
 func (s *Service) WithExposureGate(gate ExposureGate, overrider ExposureOverrider) *Service {
 	s.exposure, s.overrider = gate, overrider
 	return s
+}
+
+// checkOrderBranch is the record branch rule (ADR 0007 section 2.3) for an
+// order a path id addresses on the new write routes: the order's branch must
+// be one the caller may target, else 403 forbidden naming id. It fails closed:
+// a caller with no branch context is refused unless it marked itself a system
+// caller with branchctx.WithSystem (the workers, the delivery adapter and the
+// integration seam do).
+func (s *Service) checkOrderBranch(ctx context.Context, o *Order) error {
+	if s.branches == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, o.BranchID)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "order is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
 }
 
 func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -1013,6 +1033,8 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 	if err != nil {
 		return nil, err
 	}
+	// Anything shipped counts as billed for the has_fulfilments guards.
+	hasInvoices = hasInvoices || anyFulfilled(cur)
 
 	switch to {
 	case StatusConfirmed:
@@ -1034,7 +1056,17 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		if err := s.refreshTax(ctx, cur, priced); err != nil {
 			return nil, err
 		}
-		cur.Status = StatusConfirmed
+		// Allocation: a release allocates when the order never was (a credit
+		// hold lands before allocation); a manual hold kept its allocations.
+		if neverAllocated(cur) {
+			if _, err := s.allocateLines(ctx, cur); err != nil {
+				return nil, err
+			}
+		}
+		cur.Status = deriveStatus(cur)
+		if cur.Status == StatusFulfilled {
+			cur.Status = StatusConfirmed
+		}
 		cur.HoldReason, cur.HoldNote = nil, nil
 		neverConfirmed := cur.ConfirmedAt == nil
 		if neverConfirmed {
@@ -1051,10 +1083,17 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		}
 		// 5.2: order.confirmed only if never confirmed before, so a
 		// consumer counting confirms counts a held order once.
-		if !neverConfirmed {
-			return cur, nil
+		if neverConfirmed {
+			if err := s.record(ctx, cur, EventConfirmed, StatusOnHold.Status()); err != nil {
+				return nil, err
+			}
 		}
-		return cur, s.record(ctx, cur, EventConfirmed, StatusOnHold.Status())
+		if cur.Status == StatusBackordered {
+			if err := s.record(ctx, cur, EventBackordered, StatusOnHold.Status()); err != nil {
+				return nil, err
+			}
+		}
+		return cur, nil
 
 	case StatusOnHold:
 		// A manual hold: a note is required, allocations are kept.
@@ -1077,6 +1116,9 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 			return nil, conflictBlocker("has_fulfilments", "the order has been billed: reverse its invoices, do not reopen it")
 		}
 		from := cur.Status
+		if err := s.releaseAllocations(ctx, cur); err != nil {
+			return nil, err
+		}
 		cur.Status = StatusDraft
 		cur.HoldReason, cur.HoldNote = nil, nil
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
@@ -1094,6 +1136,9 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 			return nil, conflictBlocker("has_fulfilments", "the order has been billed: reverse its invoices, do not cancel it")
 		}
 		from := cur.Status
+		if err := s.releaseAllocations(ctx, cur); err != nil {
+			return nil, err
+		}
 		cur.Status = StatusCancelled
 		cur.HoldReason, cur.HoldNote = nil, nil
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
@@ -1110,18 +1155,22 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		return cur, s.record(ctx, cur, EventCancelled, from.Status())
 
 	case StatusFulfilled:
-		// The close short: the unfulfilled remainder is recorded closed.
-		// Until the fulfilment route lands (C2-2b), a close short needs the
-		// order to have been billed: a remainder presupposes a partial bill.
+		// The close short: the allocations and back orders of the unfulfilled
+		// remainder are released, and the remainder is recorded closed (the
+		// line's quantity exceeds allocated, backordered and fulfilled by it).
+		// A remainder presupposes a partial bill.
 		if body.Reason == "" {
 			return nil, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
 				Message: "a close short carries its reason",
 				Details: []httpx.FieldError{{Field: "reason", Message: "is required to close an order short"}}}
 		}
-		if !hasInvoices {
+		if !hasInvoices && !anyFulfilled(cur) {
 			return nil, conflictBlocker("no_fulfilments", "nothing has been billed against this order: cancel it instead of closing it short")
 		}
 		from := cur.Status
+		if err := s.releaseAllocations(ctx, cur); err != nil {
+			return nil, err
+		}
 		cur.Status = StatusFulfilled
 		cur.HoldReason, cur.HoldNote = nil, nil
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
@@ -1208,7 +1257,15 @@ func (s *Service) confirm(ctx context.Context, cur *Order, body TransitionBody, 
 
 	now := httpx.TimestampOf(s.now().UTC())
 	cur.ConfirmedAt = &now
-	cur.Status = StatusConfirmed
+	// Allocation (ADR 0005 5.4): each stocked line takes min(available,
+	// quantity) and the rest lands on back order; the status is derived.
+	if _, err := s.allocateLines(ctx, cur); err != nil {
+		return nil, err
+	}
+	cur.Status = deriveStatus(cur)
+	if cur.Status == StatusFulfilled {
+		cur.Status = StatusConfirmed
+	}
 	// The ship-to snapshot at confirm (ADR 0005 section 5.1).
 	if cur.ShipToID != nil && cur.ShipTo == nil {
 		snap, _, err := s.repo.ShipTo(ctx, *cur.ShipToID)
@@ -1228,7 +1285,25 @@ func (s *Service) confirm(ctx context.Context, cur *Order, body TransitionBody, 
 			return nil, err
 		}
 	}
-	return cur, s.record(ctx, cur, EventConfirmed, StatusDraft.Status())
+	if err := s.record(ctx, cur, EventConfirmed, StatusDraft.Status()); err != nil {
+		return nil, err
+	}
+	if cur.Status == StatusBackordered {
+		if err := s.record(ctx, cur, EventBackordered, StatusDraft.Status()); err != nil {
+			return nil, err
+		}
+	}
+	return cur, nil
+}
+
+// anyFulfilled reports whether any line of the order has shipped.
+func anyFulfilled(cur *Order) bool {
+	for i := range cur.Lines {
+		if cur.Lines[i].QuantityFulfilled > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // refreshTax re-resolves the tax at confirm (ADR 0005 section 3): by rate
