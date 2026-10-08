@@ -973,14 +973,36 @@ func (h *harness) doSQLStep(t *testing.T, s stepDef) capturedStep {
 		t.Fatalf("step %s: open db: %v", s.name, err)
 	}
 	defer db.Close()
-	rows, err := db.Query(query)
+	out, err := runSQLProbe(db, query)
 	if err != nil {
 		t.Fatalf("step %s: probe query: %v", s.name, err)
+	}
+	t.Logf("step %s: SQL probe -> %d rows", s.name, len(out))
+	return capturedStep{
+		Name:     s.name,
+		Request:  capturedRequest{Method: "SQL", Path: strings.Join(strings.Fields(query), " ")},
+		Response: capturedResponse{Status: http.StatusOK, ContentType: "application/x-sql-rows", Body: out},
+	}
+}
+
+// runSQLProbe runs one query inside a read only transaction that is always
+// rolled back, so a probe can never change the database it observes: a write
+// is refused by Postgres ("cannot execute ... in a read-only transaction").
+func runSQLProbe(db *sql.DB, query string) ([]any, error) {
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin read-only tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
-		t.Fatalf("step %s: columns: %v", s.name, err)
+		return nil, fmt.Errorf("columns: %w", err)
 	}
 	out := []any{}
 	for rows.Next() {
@@ -990,7 +1012,7 @@ func (h *harness) doSQLStep(t *testing.T, s stepDef) capturedStep {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			t.Fatalf("step %s: scan: %v", s.name, err)
+			return nil, fmt.Errorf("scan: %w", err)
 		}
 		row := map[string]any{}
 		for i, c := range cols {
@@ -1013,12 +1035,7 @@ func (h *harness) doSQLStep(t *testing.T, s stepDef) capturedStep {
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatalf("step %s: rows: %v", s.name, err)
+		return nil, fmt.Errorf("rows: %w", err)
 	}
-	t.Logf("step %s: SQL probe -> %d rows", s.name, len(out))
-	return capturedStep{
-		Name:     s.name,
-		Request:  capturedRequest{Method: "SQL", Path: strings.Join(strings.Fields(query), " ")},
-		Response: capturedResponse{Status: http.StatusOK, ContentType: "application/x-sql-rows", Body: out},
-	}
+	return out, nil
 }
