@@ -114,6 +114,13 @@ func resetTransactionalData(db *sql.DB) {
 		return
 	}
 	log.Printf("Seed: resetTransactionalData cleared %d transactional tables (prevents cross-deploy accumulation)", len(existing))
+
+	// A document number sequence is not owned by a column, so RESTART IDENTITY
+	// leaves it running. The quotes are gone, so the demo's numbering starts
+	// again at Q-000001 instead of continuing from the last deploy's.
+	if _, err := db.Exec(`ALTER SEQUENCE IF EXISTS quote_number_seq RESTART`); err != nil {
+		log.Printf("resetTransactionalData: restart quote_number_seq: %v", err)
+	}
 }
 
 // demoSeedEnv gates the entire command. Keep this name in sync with the

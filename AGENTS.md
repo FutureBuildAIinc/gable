@@ -191,10 +191,11 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 |---|---|---|
 | ERP `/api/v1/orders`, `/api/v1/invoices` | **int64 cents** | `order/repository.go` does `dollarsToInt64Cents()` on read, `/100.0` on write. DB column is `DECIMAL(10,2)` dollars |
 | Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go:61` has a TODO to migrate. Don't mix with ERP frontend helpers |
-| Quotes, DailyTill, reporting | **float64 dollars** | Legacy float convention |
+| Quotes `/api/v1/quotes` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths (`unit_price_ten_thousandths`) | Converted by R1-15 onto ADR 0001; the template is `docs/refactor/MODULE-RECIPE.md`. DB columns stay `NUMERIC`; the module converts in SQL, never through float64 |
+| DailyTill, reporting | **float64 dollars** | Legacy float convention |
 | `account` module | **int64 cents** | Reads/writes `customers.balance_due` as cents — incompatible with portal's dollar interpretation of the same column |
 
-When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.00 — the cents value `7388` formatted as if it were dollars. Portal/quotes pages already get dollars from the API and should format directly.
+When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.00 — the cents value `7388` formatted as if it were dollars. Portal pages already get dollars from the API and should format directly. Quote pages get cents and `formatCents()` applies.
 
 ### AR balance: read live from invoices; `customers.balance_due` is a secondary record
 For **reads / decisions**, compute the customer's AR balance live from open invoices —

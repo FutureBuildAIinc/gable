@@ -209,7 +209,7 @@ Fragments done (the pattern the rest copy):
 
 | Module | Fragment | Routes |
 |---|---|---|
-| quote | `quote.yaml` | 14 |
+| quote | `quote.yaml` | 14 (converted onto ADR 0001 by R1-15, see MODULE-RECIPE.md) |
 | customer | `customer.yaml` | 14 |
 | order | `order.yaml` | 8 |
 | invoice | `invoice.yaml` | 5 |
