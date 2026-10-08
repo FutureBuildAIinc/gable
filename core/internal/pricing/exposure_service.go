@@ -31,6 +31,7 @@ type ExposureService struct {
 	events     EventRecorder // optional; nil disables event recording
 	audit      AuditWriter
 	checker    ExposureChecker
+	tx         TxRunner // optional; nil runs each method's writes unwrapped (tests)
 	logger     *slog.Logger
 }
 
@@ -60,6 +61,26 @@ func NewExposureService(
 func (s *ExposureService) WithOutbox(events EventRecorder) *ExposureService {
 	s.events = events
 	return s
+}
+
+// WithTxRunner wires the transaction wrapper the write methods use, so the
+// ledger row, the rollup flips and the outbox event are one transactional
+// fact (a failed event write rolls the acknowledgment back with it, and a
+// crash can no longer leave a committed ack without its event). `*database.DB`
+// satisfies TxRunner; a nil runner (tests, unwired deployments) runs the
+// writes without wrapping, as before.
+func (s *ExposureService) WithTxRunner(tx TxRunner) *ExposureService {
+	s.tx = tx
+	return s
+}
+
+// runInTx wraps fn in one transaction when a runner is configured and joins
+// the caller's transaction when the caller already opened one.
+func (s *ExposureService) runInTx(ctx context.Context, fn func(context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
 }
 
 // ----- Acknowledge -----
@@ -110,22 +131,30 @@ func (s *ExposureService) Acknowledge(ctx context.Context, quoteID uuid.UUID, re
 		ExposureDollars: float64Ptr(status.ExposureDollars),
 		CreatedAt:       now,
 	}
-	if _, err := s.exposure.InsertEvent(ctx, ev); err != nil {
-		return nil, fmt.Errorf("acknowledge: insert event: %w", err)
-	}
+	// One transactional fact: the ledger row, the rollup flips and the
+	// outbox event commit together or not at all. The outbox write is the
+	// transaction's last statement (ADR 0003 section 2: the advisory lock is
+	// held to commit, and statements after it serialize every other event
+	// writer behind this one).
+	err = s.runInTx(ctx, func(txCtx context.Context) error {
+		if _, err := s.exposure.InsertEvent(txCtx, ev); err != nil {
+			return fmt.Errorf("acknowledge: insert event: %w", err)
+		}
 
-	// Flip rollup to ACKNOWLEDGED on the quote AND each active line escalator.
-	if err := s.quoteRepo.UpdateQuoteExposure(ctx, quoteID, string(ExposureStateAcknowledged), 0, now); err != nil {
-		return ev, fmt.Errorf("acknowledge: update quote rollup: %w", err)
-	}
-	if err := s.flipAllActiveEscalators(ctx, quoteID, ExposureStateAcknowledged, now); err != nil {
-		return ev, fmt.Errorf("acknowledge: flip escalators: %w", err)
+		// Flip rollup to ACKNOWLEDGED on the quote AND each active line escalator.
+		if err := s.quoteRepo.UpdateQuoteExposure(txCtx, quoteID, string(ExposureStateAcknowledged), 0, now); err != nil {
+			return fmt.Errorf("acknowledge: update quote rollup: %w", err)
+		}
+		if err := s.flipAllActiveEscalators(txCtx, quoteID, ExposureStateAcknowledged, now); err != nil {
+			return fmt.Errorf("acknowledge: flip escalators: %w", err)
+		}
+		return s.recordStatus(txCtx, EventAcknowledged, status)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("acknowledge: %w", err)
 	}
 
 	s.writeAudit(ctx, ev)
-	if err := s.recordStatus(ctx, EventAcknowledged, status); err != nil {
-		return ev, fmt.Errorf("acknowledge: record outbox event: %w", err)
-	}
 	return ev, nil
 }
 
@@ -147,15 +176,18 @@ func (s *ExposureService) RequestAck(ctx context.Context, quoteID uuid.UUID, act
 		IdempotencyKey: userEventKey(quoteID, EventAckRequested, actor, now),
 		CreatedAt:      now,
 	}
-	if _, err := s.exposure.InsertEvent(ctx, ev); err != nil {
-		return nil, fmt.Errorf("request-ack: insert event: %w", err)
-	}
-
-	// Notify the salesperson: the event is recorded in the outbox and the
-	// drain republishes it on the ACK_REQUIRED subject, so the notifier's
-	// per-(salesperson, index) routing engages.
-	if err := s.recordStatus(ctx, EventAckRequired, status); err != nil {
-		return ev, fmt.Errorf("request-ack: record outbox event: %w", err)
+	// The ledger row and the notification event are one transactional fact,
+	// with the outbox write as the transaction's last statement; the drain
+	// republishes the committed row on the ACK_REQUIRED subject, so the
+	// notifier's per-(salesperson, index) routing engages.
+	err = s.runInTx(ctx, func(txCtx context.Context) error {
+		if _, err := s.exposure.InsertEvent(txCtx, ev); err != nil {
+			return fmt.Errorf("request-ack: insert event: %w", err)
+		}
+		return s.recordStatus(txCtx, EventAckRequired, status)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("request-ack: %w", err)
 	}
 
 	s.writeAudit(ctx, ev)

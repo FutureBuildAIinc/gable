@@ -112,7 +112,7 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 
 	exposureSvc := pricing.NewExposureService(
 		exposureRepo, deps.EscalatorRepo, deps.QuoteRepo, exposureAudit, exposureChecker, logger,
-	).WithOutbox(outboxWriter)
+	).WithOutbox(outboxWriter).WithTxRunner(deps.DB)
 
 	registerExposureRoutes(deps.Mux, exposureRoutes{
 		Scanner:    exposureScanner,
