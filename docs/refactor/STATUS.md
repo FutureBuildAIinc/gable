@@ -25,7 +25,7 @@ top of it.
 | R1-8 | | | | | not started |
 | R1-9 | | | | | not started |
 | R1-10 | | | | | not started |
-| R1-11 | | | | | not started |
+| R1-11 | `refactor/r1-11-idempotency` | https://github.com/FutureBuildAIinc/gable/pull/5 | 0 | `7d70803` | in review |
 | R1-12 | | | | | not started |
 | R1-13 | | | | | not started |
 | R1-14 | | | | | not started |
