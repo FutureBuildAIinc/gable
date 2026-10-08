@@ -12,7 +12,7 @@
  * line, so it gets the deepest tests in this suite.
  */
 import { describe, it, expect } from 'vitest'
-import { cn, formatCents } from './utils'
+import { cn, formatCents, formatPrice4 } from './utils'
 
 describe('test environment', () => {
   // formatCents() calls toLocaleString(undefined, ...) — it inherits the runtime's
@@ -162,5 +162,30 @@ describe('cn', () => {
 
   it('keeps non-conflicting utilities from the same group', () => {
     expect(cn('px-4', 'py-2')).toBe('px-4 py-2')
+  })
+})
+
+describe('formatPrice4', () => {
+  it('trims trailing zeros but keeps two decimals', () => {
+    expect(formatPrice4(55000)).toBe('$5.50')
+    expect(formatPrice4(50000)).toBe('$5.00')
+    expect(formatPrice4(0)).toBe('$0.00')
+  })
+
+  it('keeps up to four decimals when they carry value', () => {
+    expect(formatPrice4(13725)).toBe('$1.3725')
+    expect(formatPrice4(13720)).toBe('$1.372')
+    expect(formatPrice4(1)).toBe('$0.0001')
+  })
+
+  it('groups thousands and handles negatives', () => {
+    expect(formatPrice4(12345670000)).toBe('$1,234,567.00')
+    expect(formatPrice4(-15000)).toBe('-$1.50')
+  })
+
+  it('treats null, undefined and NaN as zero', () => {
+    expect(formatPrice4(null)).toBe('$0.00')
+    expect(formatPrice4(undefined)).toBe('$0.00')
+    expect(formatPrice4(NaN)).toBe('$0.00')
   })
 })

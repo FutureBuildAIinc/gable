@@ -1,59 +1,29 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import type { UOM } from "./product";
+// The quote wire types come from the generated contract (core/api/fragments/quote.yaml
+// through @gable/api-client); nothing here restates a field by hand. Money is integer
+// cents (*_cents), a unit price is an integer in ten thousandths of a dollar, and a
+// quantity is a decimal string. Exposure states on a quote are lowercase; the exposure
+// routes keep their own uppercase vocabulary (types/exposure.ts).
 
-export type QuoteState = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+import type { components } from '@gable/api-client';
 
-export interface QuoteLine {
-    id: string;
-    quote_id: string;
-    product_id: string;
-    sku: string;
-    description: string;
-    quantity: number;
-    uom: UOM;
-    unit_price: number;
-    unit_cost: number;
-    line_total: number;
-    created_at: string;
-}
+type Schemas = components['schemas'];
 
-export interface Quote {
-    id: string;
-    customer_id: string;
-    customer_name?: string;
-    job_id?: string;
-    state: QuoteState;
-    total_amount: number;
-    expires_at?: string;
-    created_at: string;
-    updated_at: string;
-
-    // Lifecycle timestamps
-    sent_at?: string;
-    accepted_at?: string;
-    rejected_at?: string;
-
-    // Delivery
-    delivery_type: 'PICKUP' | 'DELIVERY';
-    freight_amount: number;
-    vehicle_id?: string;
-    vehicle_name?: string;
-
-    // Analytics
-    margin_total?: number;
-    source?: 'manual' | 'ai';
-
-    // Original upload metadata (file downloaded separately)
-    original_filename?: string;
-    original_content_type?: string;
-
-    // AI parse mapping data
-    parse_map?: ParseMapItem[];
-
-    lines?: QuoteLine[];
-}
+export type Quote = Schemas['Quote'];
+export type QuoteSummary = Schemas['QuoteSummary'];
+export type QuoteLine = Schemas['QuoteLine'];
+export type QuoteStatus = Schemas['QuoteStatus'];
+export type QuoteDeliveryType = Schemas['QuoteDeliveryType'];
+export type QuoteExposureStatus = Schemas['QuoteExposureStatus'];
+export type QuoteRequest = Schemas['QuoteRequest'];
+export type QuoteLineRequest = Schemas['QuoteLineRequest'];
+export type QuoteTransitionRequest = Schemas['QuoteTransitionRequest'];
+export type QuotePage = Schemas['QuotePage'];
+export type QuoteAnalytics = Schemas['QuoteAnalytics'];
+export type QuoteAnalyticsTrend = Schemas['QuoteAnalyticsTrend'];
+export type QuoteOrderPayload = Schemas['QuoteOrderPayload'];
 
 export interface ParseMapItem {
     raw_text: string;
@@ -75,54 +45,4 @@ export interface ParseMapItem {
         uom: string;
         base_price: number;
     }[];
-}
-
-export interface QuoteAnalytics {
-    total_quotes: number;
-    draft_count: number;
-    sent_count: number;
-    accepted_count: number;
-    rejected_count: number;
-    expired_count: number;
-    conversion_rate: number;
-    avg_margin_accepted: number;
-    avg_margin_rejected: number;
-    avg_days_to_close: number;
-    total_quote_value: number;
-    total_accepted_value: number;
-    ai_sourced_count: number;
-    ai_conversion_rate: number;
-    manual_conversion_rate: number;
-    trend_data: QuoteAnalyticsTrend[];
-}
-
-export interface QuoteAnalyticsTrend {
-    date: string;
-    created: number;
-    accepted: number;
-    rejected: number;
-    total_value: number;
-    accepted_value: number;
-}
-
-// Payload for creating a quote
-export interface CreateQuoteRequest {
-    customer_id: string;
-    job_id?: string;
-    source?: 'manual' | 'ai';
-    delivery_type?: 'PICKUP' | 'DELIVERY';
-    freight_amount?: number;
-    vehicle_id?: string;
-    original_file?: string; // base64 encoded
-    original_filename?: string;
-    original_content_type?: string;
-    parse_map?: ParseMapItem[];
-    lines: Array<{
-        product_id: string;
-        sku: string;
-        description: string;
-        quantity: number;
-        uom: UOM;
-        unit_price: number;
-    }>;
 }

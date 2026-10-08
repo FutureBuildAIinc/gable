@@ -31,3 +31,18 @@ export function formatCents(cents: number | null | undefined): string {
     // positive zero, so a zero balance never renders as "-$0.00".
     return CURRENCY.format(n / 100 || 0);
 }
+
+// A quote line's unit price arrives as an integer in ten thousandths of a dollar
+// (55000 is 5.5000). This renders it with the fraction digits it needs and no
+// more than four, but never fewer than two: 55000 -> "$5.50", 13725 -> "$1.3725".
+// It is pure integer arithmetic, so a price never passes through a float.
+export function formatPrice4(tenThousandths: number | null | undefined): string {
+    const n = typeof tenThousandths === 'number' && Number.isFinite(tenThousandths) ? Math.trunc(tenThousandths) : 0;
+    const negative = n < 0;
+    const abs = Math.abs(n);
+    const whole = Math.floor(abs / 10000);
+    let frac = String(abs % 10000).padStart(4, '0');
+    while (frac.length > 2 && frac.endsWith('0')) frac = frac.slice(0, -1);
+    const wholeText = new Intl.NumberFormat('en-US').format(whole);
+    return `${negative && abs !== 0 ? '-' : ''}$${wholeText}.${frac}`;
+}

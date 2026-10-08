@@ -9,6 +9,7 @@ import type { Product } from '../../types/product';
 import { PricingService } from '../../services/pricing.service';
 import type { CalculatedPrice } from '../../types/pricing';
 import { ToastService } from '../../lib/toast-service';
+import { normalizeQuantity, dollarsToTenThousandths, floatDollarsToTenThousandths, tenThousandthsToInput } from '../../lib/money';
 
 @customElement('gable-line-item-editor')
 export class GableLineItemEditor extends LitElement {
@@ -19,8 +20,9 @@ export class GableLineItemEditor extends LitElement {
 
   @state() private _searchTerm = '';
   @state() private _selectedProduct: Product | null = null;
-  @state() private _quantity = 1;
-  @state() private _price = 0;
+  // Held as the text the user sees; converted by the integer helpers on add.
+  @state() private _quantity = '1';
+  @state() private _price = '0.00';
   @state() private _isSearchOpen = false;
   @state() private _priceDetails: CalculatedPrice | null = null;
 
@@ -39,31 +41,52 @@ export class GableLineItemEditor extends LitElement {
     if (this.customerId) {
       try {
         const pricing = await PricingService.calculatePrice(this.customerId, p.id);
-        this._price = pricing.final_price;
+        // The pricing service answers in float dollars; convert once, at this boundary.
+        this._price = tenThousandthsToInput(floatDollarsToTenThousandths(pricing.final_price));
         this._priceDetails = pricing;
       } catch (err) {
         console.error('Failed to fetch price', err);
         ToastService.show('Resolved price failed, using fallback base price', 'error');
-        this._price = p.base_price || 0;
+        this._price = tenThousandthsToInput(floatDollarsToTenThousandths(p.base_price || 0));
         this._priceDetails = null;
       }
     } else {
-      this._price = p.base_price || 0;
+      this._price = tenThousandthsToInput(floatDollarsToTenThousandths(p.base_price || 0));
       this._priceDetails = null;
     }
   }
 
+  private get _parsedQuantity(): string | null {
+    return normalizeQuantity(this._quantity);
+  }
+
+  private get _parsedPrice(): number | null {
+    return dollarsToTenThousandths(this._price);
+  }
+
+  private get _canAdd(): boolean {
+    return !!this._selectedProduct && this._parsedQuantity !== null && this._parsedPrice !== null;
+  }
+
   private _handleAdd() {
-    if (this._selectedProduct && this._quantity > 0) {
+    const quantity = this._parsedQuantity;
+    const price = this._parsedPrice;
+    if (this._selectedProduct && quantity !== null && price !== null) {
       this.dispatchEvent(new CustomEvent('add-line', {
-        detail: { product: this._selectedProduct, quantity: this._quantity, unitPrice: this._price },
+        // uom defaults to the product's own unit; a line is never sent without one.
+        detail: {
+          product: this._selectedProduct,
+          quantity,
+          uom: this._selectedProduct.uom_primary,
+          unitPriceTenThousandths: price,
+        },
         bubbles: true,
         composed: true,
       }));
       this._selectedProduct = null;
       this._searchTerm = '';
-      this._quantity = 1;
-      this._price = 0;
+      this._quantity = '1';
+      this._price = '0.00';
       this._priceDetails = null;
     }
   }
@@ -115,9 +138,10 @@ export class GableLineItemEditor extends LitElement {
             <input
               type="number"
               class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-[#00FFA3] outline-none"
-              .value=${String(this._quantity)}
-              @input=${(e: InputEvent) => this._quantity = Number((e.target as HTMLInputElement).value)}
+              .value=${this._quantity}
+              @input=${(e: InputEvent) => this._quantity = (e.target as HTMLInputElement).value}
               min="1"
+              step="any"
             />
           </div>
 
@@ -127,8 +151,8 @@ export class GableLineItemEditor extends LitElement {
             <input
               type="number"
               class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-[#00FFA3] outline-none"
-              .value=${String(this._price)}
-              @input=${(e: InputEvent) => this._price = Number((e.target as HTMLInputElement).value)}
+              .value=${this._price}
+              @input=${(e: InputEvent) => this._price = (e.target as HTMLInputElement).value}
               step="0.01"
             />
             ${this._priceDetails && this._priceDetails.source !== 'RETAIL' ? html`
@@ -140,7 +164,7 @@ export class GableLineItemEditor extends LitElement {
           <div class="col-span-2">
             <button
               @click=${this._handleAdd}
-              ?disabled=${!this._selectedProduct || this._quantity <= 0}
+              ?disabled=${!this._canAdd}
               class="w-full flex items-center justify-center bg-[#00FFA3] text-black font-medium py-2 rounded hover:bg-[#00FFA3]/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               ${icon(Plus, 16, 'mr-1')} Add

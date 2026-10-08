@@ -7,9 +7,10 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { ArrowRight, ShoppingCart, BarChart3, Sparkles, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide';
-import { QuoteService } from '../../services/QuoteService.ts';
+import { QuoteService, QuoteApiError, quoteErrorMessage, orderRequestFromQuotePayload } from '../../services/QuoteService.ts';
 import { OrderService } from '../../services/OrderService.ts';
-import type { Quote, QuoteState } from '../../types/quote.ts';
+import type { QuoteSummary, QuoteStatus } from '../../types/quote.ts';
+import { formatCents } from '../../lib/utils.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 
 @customElement('gable-quote-view-tabs')
@@ -48,18 +49,21 @@ export class GableQuoteViewTabs extends LitElement {
 export class GableQuoteList extends LitElement {
     createRenderRoot() { return this; }
 
-    @state() private quotes: Quote[] = [];
+    @state() private quotes: QuoteSummary[] = [];
+    @state() private nextCursor: string | null = null;
+    @state() private total: number | null = null;
+    @state() private loadingMore = false;
     @state() private loading = true;
     @state() private error: string | null = null;
     @state() private converting: string | null = null;
     @state() private updatingState: string | null = null;
 
     private stateColors: Record<string, string> = {
-        DRAFT: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
-        SENT: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-        ACCEPTED: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-        REJECTED: 'bg-red-500/20 text-red-400 border-red-500/30',
-        EXPIRED: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+        draft: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+        sent: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+        accepted: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
+        expired: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
     };
 
     private _unsubBranch: (() => void) | null = null;
@@ -81,41 +85,87 @@ export class GableQuoteList extends LitElement {
         }
     }
 
+    private static readonly PAGE_SIZE = 50;
+    private static readonly STATUSES: QuoteStatus[] = ['draft', 'sent', 'accepted', 'rejected', 'expired'];
+
+    /** An optional ?status=sent,draft on the page URL narrows the list on the server. */
+    private get statusFilter(): QuoteStatus[] {
+        const raw = new URLSearchParams(window.location.search).get('status') ?? '';
+        return raw.split(',').map(v => v.trim().toLowerCase())
+            .filter((v): v is QuoteStatus => (GableQuoteList.STATUSES as string[]).includes(v));
+    }
+
     private async loadQuotes() {
         try {
             this.error = null;
-            const data = await QuoteService.listQuotes();
-            this.quotes = data || [];
+            const page = await QuoteService.list({
+                status: this.statusFilter,
+                limit: GableQuoteList.PAGE_SIZE,
+                includeTotal: true,
+            });
+            this.quotes = page.items || [];
+            this.nextCursor = page.next_cursor ?? null;
+            this.total = page.total ?? null;
         } catch (err) {
             console.error('Failed to load quotes:', err);
-            this.error = err instanceof Error ? err.message : 'Failed to load quotes';
+            this.error = quoteErrorMessage(err, 'Failed to load quotes');
         } finally {
             this.loading = false;
         }
     }
 
-    private async handleConvert(quoteId: string) {
-        this.converting = quoteId;
+    private async loadMore() {
+        if (!this.nextCursor || this.loadingMore) return;
+        this.loadingMore = true;
         try {
-            const orderPayload = await QuoteService.convertToOrder(quoteId);
-            const order = await OrderService.createOrder(orderPayload);
+            const page = await QuoteService.list({
+                status: this.statusFilter,
+                limit: GableQuoteList.PAGE_SIZE,
+                cursor: this.nextCursor,
+            });
+            this.quotes = [...this.quotes, ...(page.items || [])];
+            this.nextCursor = page.next_cursor ?? null;
+        } catch (err) {
+            ToastService.show(`Failed to load more: ${quoteErrorMessage(err)}`, 'error');
+        } finally {
+            this.loadingMore = false;
+        }
+    }
+
+    /** A 409 stale_revision means another session moved the quote: say so and reload. */
+    private async handleStale(error: unknown): Promise<boolean> {
+        if (error instanceof QuoteApiError && error.isStaleRevision) {
+            ToastService.show('This quote changed elsewhere. Reloaded.', 'error');
+            await this.loadQuotes();
+            return true;
+        }
+        return false;
+    }
+
+    private async handleConvert(quote: QuoteSummary) {
+        this.converting = quote.id;
+        try {
+            const orderPayload = await QuoteService.convert(quote.id, quote.revision);
+            const order = await OrderService.createOrder(orderRequestFromQuotePayload(orderPayload));
             ToastService.show('Quote converted to order successfully', 'success');
             router.navigate(`/orders/${order.id}`);
         } catch (error) {
-            ToastService.show(`Failed to convert: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+            if (await this.handleStale(error)) return;
+            ToastService.show(`Failed to convert: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
         } finally {
             this.converting = null;
         }
     }
 
-    private async handleStateChange(quoteId: string, state: QuoteState) {
-        this.updatingState = quoteId;
+    private async handleStateChange(quote: QuoteSummary, to: QuoteStatus) {
+        this.updatingState = quote.id;
         try {
-            await QuoteService.updateQuoteState(quoteId, state);
+            await QuoteService.transition(quote.id, to, quote.revision);
             await this.loadQuotes();
-            ToastService.show(`Quote marked as ${state.toLowerCase()}`, 'success');
+            ToastService.show(`Quote marked as ${to}`, 'success');
         } catch (error) {
-            ToastService.show(`Failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+            if (await this.handleStale(error)) return;
+            ToastService.show(`Failed: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
         } finally {
             this.updatingState = null;
         }
@@ -188,7 +238,7 @@ export class GableQuoteList extends LitElement {
                                 const isBusy = this.converting === quote.id || this.updatingState === quote.id;
                                 return html`
                                     <tr class="hover:bg-white/5 transition-colors cursor-pointer" @click=${() => router.navigate(`/quotes/${quote.id}`)}>
-                                        <td class="p-4 font-mono text-white/80">#${quote.id.slice(0, 8)}</td>
+                                        <td class="p-4 font-mono text-white/80">${quote.number}</td>
                                         <td class="p-4 text-white/80">${new Date(quote.created_at).toLocaleDateString()}</td>
                                         <td class="p-4 text-white font-medium">${quote.customer_name || quote.customer_id.slice(0, 8)}</td>
                                         <td class="p-4">
@@ -201,7 +251,7 @@ export class GableQuoteList extends LitElement {
                                             `}
                                         </td>
                                         <td class="p-4">
-                                            ${quote.delivery_type === 'DELIVERY' ? html`
+                                            ${quote.delivery_type === 'delivery' ? html`
                                                 <span class="inline-flex items-center gap-1 text-xs text-blue-400">
                                                     ${icon(Truck, 12)} Delivery
                                                 </span>
@@ -212,39 +262,39 @@ export class GableQuoteList extends LitElement {
                                             `}
                                         </td>
                                         <td class="p-4">
-                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${this.stateColors[quote.state] || ''}">
-                                                ${quote.state}
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border uppercase ${this.stateColors[quote.status] || ''}">
+                                                ${quote.status}
                                             </span>
                                         </td>
                                         <td class="p-4 font-mono text-right text-gable-green">
-                                            $${quote.total_amount.toFixed(2)}
+                                            ${formatCents(quote.total_cents)}
                                         </td>
                                         <td class="p-4 text-right" @click=${(e: Event) => e.stopPropagation()}>
                                             <div class="flex items-center justify-end gap-1.5">
-                                                ${quote.state === 'DRAFT' ? html`
+                                                ${quote.status === 'draft' ? html`
                                                     <button @click=${() => router.navigate(`/quotes/${quote.id}/edit`)} ?disabled=${isBusy}
                                                         class="text-amber-400 hover:text-amber-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Edit Draft" aria-label="Edit draft">
                                                         ${icon(Pencil, 14)}
                                                     </button>
                                                 ` : nothing}
-                                                ${quote.state === 'DRAFT' ? html`
-                                                    <button @click=${() => this.handleStateChange(quote.id, 'SENT')} ?disabled=${isBusy}
+                                                ${quote.status === 'draft' ? html`
+                                                    <button @click=${() => this.handleStateChange(quote, 'sent')} ?disabled=${isBusy}
                                                         class="text-blue-400 hover:text-blue-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Mark Sent" aria-label="Mark sent">
                                                         ${icon(Send, 14)}
                                                     </button>
                                                 ` : nothing}
-                                                ${(quote.state === 'DRAFT' || quote.state === 'SENT') ? html`
-                                                    <button @click=${() => this.handleStateChange(quote.id, 'ACCEPTED')} ?disabled=${isBusy}
+                                                ${(quote.status === 'draft' || quote.status === 'sent') ? html`
+                                                    <button @click=${() => this.handleStateChange(quote, 'accepted')} ?disabled=${isBusy}
                                                         class="text-emerald-400 hover:text-emerald-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Accept" aria-label="Accept quote">
                                                         ${icon(Check, 14)}
                                                     </button>
-                                                    <button @click=${() => this.handleStateChange(quote.id, 'REJECTED')} ?disabled=${isBusy}
+                                                    <button @click=${() => this.handleStateChange(quote, 'rejected')} ?disabled=${isBusy}
                                                         class="text-red-400 hover:text-red-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Reject" aria-label="Reject quote">
                                                         ${icon(X, 14)}
                                                     </button>
                                                 ` : nothing}
-                                                ${(quote.state === 'DRAFT' || quote.state === 'SENT' || quote.state === 'ACCEPTED') ? html`
-                                                    <button @click=${() => this.handleConvert(quote.id)} ?disabled=${isBusy}
+                                                ${(quote.status === 'draft' || quote.status === 'sent' || quote.status === 'accepted') ? html`
+                                                    <button @click=${() => this.handleConvert(quote)} ?disabled=${isBusy}
                                                         class="text-gable-green hover:text-gable-green/80 transition-colors flex items-center gap-1 text-xs font-medium disabled:opacity-50 p-1 rounded hover:bg-white/5"
                                                         title="Convert to Order" aria-label="Convert to order">
                                                         ${icon(ShoppingCart, 14)}
@@ -262,6 +312,17 @@ export class GableQuoteList extends LitElement {
                         </tbody>
                     </table>
                 </div>
+                ${!this.loading && this.quotes.length > 0 ? html`
+                    <div class="flex items-center justify-between text-sm text-zinc-500">
+                        <span class="font-mono">${this.total !== null ? `${this.quotes.length} of ${this.total} quotes` : `${this.quotes.length} quotes`}</span>
+                        ${this.nextCursor ? html`
+                            <button @click=${() => this.loadMore()} ?disabled=${this.loadingMore}
+                                class="border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 font-medium px-4 py-2 rounded transition-colors text-sm disabled:opacity-50">
+                                ${this.loadingMore ? 'Loading...' : 'Load more'}
+                            </button>
+                        ` : nothing}
+                    </div>
+                ` : nothing}
             </div>
         `;
     }

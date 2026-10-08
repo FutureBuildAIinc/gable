@@ -372,7 +372,7 @@ export class ProductConfigurator extends LitElement {
             <div class="text-sm text-gray-300">${this._skuResult.description}</div>
             <!--
               A generated non-stock SKU has no catalog product row, and a quote
-              line requires a product_id (CreateQuoteRequest in types/quote.ts),
+              line requires a product_id (QuoteRequest in types/quote.ts),
               so there is no existing service call to add this to a quote. The
               button renders disabled rather than looking live and doing nothing
               on click.

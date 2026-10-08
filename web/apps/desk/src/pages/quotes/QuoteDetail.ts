@@ -7,8 +7,10 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, Sparkles, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
-import { QuoteService } from '../../services/QuoteService.ts';
-import type { Quote, QuoteState, ParseMapItem } from '../../types/quote.ts';
+import { QuoteService, QuoteApiError, quoteErrorMessage, orderRequestFromQuotePayload } from '../../services/QuoteService.ts';
+import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
+import { formatCents, formatPrice4 } from '../../lib/utils.ts';
+import { extensionCents, dollarsToCents } from '../../lib/money.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import '../../components/quotes/exposure-banner.ts';
 
@@ -28,11 +30,11 @@ export class GableQuoteDetail extends LitElement {
     @state() private exposureDollars = 0;
 
     private stateColors: Record<string, string> = {
-        DRAFT: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
-        SENT: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-        ACCEPTED: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-        REJECTED: 'bg-red-500/20 text-red-400 border-red-500/30',
-        EXPIRED: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+        draft: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+        sent: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+        accepted: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
+        expired: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
     };
 
     connectedCallback() {
@@ -49,25 +51,36 @@ export class GableQuoteDetail extends LitElement {
 
     private async loadQuote(quoteId: string) {
         try {
-            const data = await QuoteService.getQuote(quoteId);
+            const data = await QuoteService.get(quoteId);
             this.quote = data;
         } catch (error) {
             console.error(error);
-            ToastService.show('Failed to load quote', 'error');
+            ToastService.show(`Failed to load quote: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
         } finally {
             this.loading = false;
         }
     }
 
-    private async handleStateChange(state: QuoteState) {
+    /** A 409 stale_revision means another session moved the quote: say so and reload it. */
+    private async handleStale(error: unknown): Promise<boolean> {
+        if (error instanceof QuoteApiError && error.isStaleRevision && this.quote) {
+            ToastService.show('This quote changed elsewhere. Reloaded.', 'error');
+            await this.loadQuote(this.quote.id);
+            return true;
+        }
+        return false;
+    }
+
+    private async handleStateChange(to: QuoteStatus) {
         if (!this.quote) return;
         this.processing = true;
         try {
-            const updated = await QuoteService.updateQuoteState(this.quote.id, state);
+            const updated = await QuoteService.transition(this.quote.id, to, this.quote.revision);
             this.quote = updated;
-            ToastService.show(`Quote marked as ${state.toLowerCase()}`, 'success');
+            ToastService.show(`Quote marked as ${to}`, 'success');
         } catch (error) {
-            ToastService.show(`Failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+            if (await this.handleStale(error)) return;
+            ToastService.show(`Failed: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
         } finally {
             this.processing = false;
         }
@@ -77,12 +90,13 @@ export class GableQuoteDetail extends LitElement {
         if (!this.quote) return;
         this.processing = true;
         try {
-            const orderPayload = await QuoteService.convertToOrder(this.quote.id);
-            const order = await OrderService.createOrder(orderPayload);
+            const orderPayload = await QuoteService.convert(this.quote.id, this.quote.revision);
+            const order = await OrderService.createOrder(orderRequestFromQuotePayload(orderPayload));
             ToastService.show('Quote converted to order', 'success');
             router.navigate(`/orders/${order.id}`);
         } catch (error) {
-            ToastService.show(`Failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+            if (await this.handleStale(error)) return;
+            ToastService.show(`Failed: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
         } finally {
             this.processing = false;
         }
@@ -132,15 +146,20 @@ export class GableQuoteDetail extends LitElement {
 
     private renderDetailsTab(quote: Quote) {
         const lines = quote.lines || [];
-        const totalRevenue = lines.reduce((s, l) => s + l.line_total, 0);
-        const baseCost = lines.reduce((s, l) => s + l.unit_cost * l.quantity, 0);
+        // All money here is integer cents. The line cost is the unit cost (ten
+        // thousandths) times the quantity, rounded once like the line total.
+        const lineCostCents = (l: Quote['lines'][number]) => extensionCents(l.quantity, l.unit_cost_ten_thousandths);
+        const totalRevenue = lines.reduce((s, l) => s + l.line_total_cents, 0);
+        const baseCost = lines.reduce((s, l) => s + lineCostCents(l), 0);
         const baseMargin = totalRevenue - baseCost;
         const baseMarginPct = totalRevenue > 0 ? (baseMargin / totalRevenue) * 100 : 0;
-        const hasCostData = lines.some(l => l.unit_cost > 0);
+        const hasCostData = lines.some(l => l.unit_cost_ten_thousandths > 0);
 
         // Index-driven margin erosion: the locked price stands, but the cost to
         // fulfil has risen by the exposure dollars, so realized margin drops.
-        const erosion = this.exposureDollars > 0 ? this.exposureDollars : 0;
+        // The exposure route still answers in float dollars; it is converted to
+        // cents once, here, through the integer parser.
+        const erosion = this.exposureDollars > 0 ? (dollarsToCents(this.exposureDollars.toFixed(2)) ?? 0) : 0;
         const totalCost = baseCost + erosion;
         const projectedMargin = totalRevenue - totalCost;
         const marginPct = totalRevenue > 0 ? (projectedMargin / totalRevenue) * 100 : 0;
@@ -157,22 +176,22 @@ export class GableQuoteDetail extends LitElement {
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
                             <div>
                                 <div class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Revenue</div>
-                                <div class="text-xl font-mono font-bold text-white">$${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                <div class="text-xl font-mono font-bold text-white">${formatCents(totalRevenue)}</div>
                             </div>
                             <div>
                                 <div class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Est. Cost</div>
-                                <div class="text-xl font-mono font-bold text-zinc-300">$${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                <div class="text-xl font-mono font-bold text-zinc-300">${formatCents(totalCost)}</div>
                                 ${erosion > 0 ? html`
-                                    <div class="text-[11px] font-mono text-rose-400 mt-1">+$${erosion.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} index</div>
+                                    <div class="text-[11px] font-mono text-rose-400 mt-1">+${formatCents(erosion)} index</div>
                                 ` : nothing}
                             </div>
                             <div>
                                 <div class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Projected Margin</div>
                                 <div class="text-xl font-mono font-bold ${projectedMargin >= 0 ? 'text-gable-green' : 'text-red-400'}">
-                                    $${projectedMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ${formatCents(projectedMargin)}
                                 </div>
                                 ${erosion > 0 ? html`
-                                    <div class="text-[11px] font-mono text-zinc-500 mt-1 line-through">$${baseMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                    <div class="text-[11px] font-mono text-zinc-500 mt-1 line-through">${formatCents(baseMargin)}</div>
                                 ` : nothing}
                             </div>
                             <div>
@@ -194,14 +213,14 @@ export class GableQuoteDetail extends LitElement {
 
                 <!-- Summary Cards -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    ${this.renderSummaryCard('Total Amount', `$${quote.total_amount.toFixed(2)}`, 'text-gable-green')}
+                    ${this.renderSummaryCard('Total Amount', formatCents(quote.total_cents), 'text-gable-green')}
                     ${this.renderSummaryCard('Lines', String(lines.length))}
-                    ${this.renderSummaryCard('Fulfillment', quote.delivery_type === 'DELIVERY' ? 'Delivery' : 'Pickup', quote.delivery_type === 'DELIVERY' ? 'text-blue-400' : undefined)}
+                    ${this.renderSummaryCard('Fulfillment', quote.delivery_type === 'delivery' ? 'Delivery' : 'Pickup', quote.delivery_type === 'delivery' ? 'text-blue-400' : undefined)}
                     ${this.renderSummaryCard('Source', quote.source === 'ai' ? 'AI Parsed' : 'Manual')}
                 </div>
 
                 <!-- Delivery Info -->
-                ${quote.delivery_type === 'DELIVERY' ? html`
+                ${quote.delivery_type === 'delivery' ? html`
                     <div class="bg-blue-500/5 border border-blue-500/20 rounded-lg p-4 flex items-center gap-4">
                         ${icon(Truck, 20, 'w-5 h-5 text-blue-400 shrink-0')}
                         <div class="flex-1 flex items-center gap-6 text-sm">
@@ -211,10 +230,10 @@ export class GableQuoteDetail extends LitElement {
                                     <span class="text-white font-medium">${quote.vehicle_name}</span>
                                 </div>
                             ` : nothing}
-                            ${quote.freight_amount > 0 ? html`
+                            ${quote.freight_cents > 0 ? html`
                                 <div>
                                     <span class="text-zinc-500 mr-2">Freight:</span>
-                                    <span class="text-blue-400 font-mono font-medium">$${quote.freight_amount.toFixed(2)}</span>
+                                    <span class="text-blue-400 font-mono font-medium">${formatCents(quote.freight_cents)}</span>
                                 </div>
                             ` : nothing}
                         </div>
@@ -248,26 +267,27 @@ export class GableQuoteDetail extends LitElement {
                         </thead>
                         <tbody class="divide-y divide-white/5">
                             ${lines.map(line => {
-                                const lineCost = line.unit_cost * line.quantity;
-                                const lineMargin = line.line_total - lineCost;
-                                const lineMarginPct = line.line_total > 0 ? (lineMargin / line.line_total) * 100 : 0;
+                                const lineCost = lineCostCents(line);
+                                const lineMargin = line.line_total_cents - lineCost;
+                                const lineMarginPct = line.line_total_cents > 0 ? (lineMargin / line.line_total_cents) * 100 : 0;
                                 return html`
                                     <tr class="hover:bg-white/5 transition-colors">
                                         <td class="p-4 font-mono text-white">${line.sku}</td>
                                         <td class="p-4 text-zinc-300">${line.description}</td>
                                         <td class="p-4 text-right font-mono text-zinc-300">
                                             ${line.quantity} <span class="text-zinc-600 text-xs">${line.uom}</span>
+                                            ${line.price_uom && line.price_uom !== line.uom ? html`<div class="text-zinc-600 text-[10px]">priced per ${line.price_uom}</div>` : nothing}
                                         </td>
-                                        <td class="p-4 text-right font-mono text-zinc-300">$${line.unit_price.toFixed(2)}</td>
+                                        <td class="p-4 text-right font-mono text-zinc-300">${formatPrice4(line.unit_price_ten_thousandths)}</td>
                                         ${hasCostData ? html`
                                             <td class="p-4 text-right font-mono text-zinc-500">
-                                                ${line.unit_cost > 0 ? `$${line.unit_cost.toFixed(2)}` : '\u2014'}
+                                                ${line.unit_cost_ten_thousandths > 0 ? formatPrice4(line.unit_cost_ten_thousandths) : '\u2014'}
                                             </td>
                                         ` : nothing}
-                                        <td class="p-4 text-right font-mono text-gable-green font-medium">$${line.line_total.toFixed(2)}</td>
+                                        <td class="p-4 text-right font-mono text-gable-green font-medium">${formatCents(line.line_total_cents)}</td>
                                         ${hasCostData ? html`
                                             <td class="p-4 text-right font-mono">
-                                                ${line.unit_cost > 0 ? html`
+                                                ${line.unit_cost_ten_thousandths > 0 ? html`
                                                     <span class="${lineMarginPct >= 20 ? 'text-gable-green' : lineMarginPct >= 10 ? 'text-amber-400' : 'text-red-400'}">
                                                         ${lineMarginPct.toFixed(1)}%
                                                     </span>
@@ -280,11 +300,11 @@ export class GableQuoteDetail extends LitElement {
                         </tbody>
                         ${lines.length > 0 ? html`
                             <tfoot class="bg-white/5 border-t border-white/10">
-                                ${quote.freight_amount > 0 ? html`
+                                ${quote.freight_cents > 0 ? html`
                                     <tr>
                                         <td colspan="${hasCostData ? 6 : 4}" class="p-4 text-right font-medium text-zinc-400 uppercase tracking-wider text-xs">Lines Subtotal</td>
                                         <td class="p-4 text-right font-mono text-lg text-zinc-300">
-                                            $${totalRevenue.toFixed(2)}
+                                            ${formatCents(totalRevenue)}
                                         </td>
                                     </tr>
                                     <tr class="border-t border-white/5">
@@ -293,12 +313,12 @@ export class GableQuoteDetail extends LitElement {
                                                 ${icon(Truck, 12, 'w-3 h-3 text-blue-400')} Freight
                                             </span>
                                         </td>
-                                        <td class="px-4 py-2 text-right font-mono text-sm text-blue-400">$${quote.freight_amount.toFixed(2)}</td>
+                                        <td class="px-4 py-2 text-right font-mono text-sm text-blue-400">${formatCents(quote.freight_cents)}</td>
                                     </tr>
                                 ` : nothing}
-                                <tr class="${quote.freight_amount > 0 ? 'border-t border-white/5' : ''}">
+                                <tr class="${quote.freight_cents > 0 ? 'border-t border-white/5' : ''}">
                                     <td colspan="${hasCostData ? 6 : 4}" class="p-4 text-right font-medium text-zinc-400 uppercase tracking-wider text-xs">Total</td>
-                                    <td class="p-4 text-right font-mono text-xl font-bold text-gable-green">$${quote.total_amount.toFixed(2)}</td>
+                                    <td class="p-4 text-right font-mono text-xl font-bold text-gable-green">${formatCents(quote.total_cents)}</td>
                                 </tr>
                             </tfoot>
                         ` : nothing}
@@ -445,9 +465,9 @@ export class GableQuoteDetail extends LitElement {
                             ${icon(ArrowLeft, 14)} Back to Quotes
                         </button>
                         <div class="flex items-center gap-4 mb-2">
-                            <h1 class="text-3xl font-bold font-mono text-white">Quote #${quote.id.slice(0, 8)}</h1>
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${this.stateColors[quote.state] || ''}">
-                                ${quote.state}
+                            <h1 class="text-3xl font-bold font-mono text-white">Quote ${quote.number}</h1>
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border uppercase ${this.stateColors[quote.status] || ''}">
+                                ${quote.status}
                             </span>
                             ${quote.source === 'ai' ? html`
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-violet-500/15 text-violet-400 border border-violet-500/20">
@@ -460,23 +480,23 @@ export class GableQuoteDetail extends LitElement {
                         </p>
                     </div>
                     <div class="flex gap-2">
-                        ${quote.state === 'DRAFT' ? html`
-                            <button @click=${() => this.handleStateChange('SENT')} ?disabled=${this.processing}
+                        ${quote.status === 'draft' ? html`
+                            <button @click=${() => this.handleStateChange('sent')} ?disabled=${this.processing}
                                 class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Send, 14)} Mark Sent
                             </button>
                         ` : nothing}
-                        ${(quote.state === 'DRAFT' || quote.state === 'SENT') ? html`
-                            <button @click=${() => this.handleStateChange('ACCEPTED')} ?disabled=${this.processing}
+                        ${(quote.status === 'draft' || quote.status === 'sent') ? html`
+                            <button @click=${() => this.handleStateChange('accepted')} ?disabled=${this.processing}
                                 class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Check, 14)} Accept
                             </button>
-                            <button @click=${() => this.handleStateChange('REJECTED')} ?disabled=${this.processing}
+                            <button @click=${() => this.handleStateChange('rejected')} ?disabled=${this.processing}
                                 class="bg-red-600/80 text-white px-4 py-2 rounded hover:bg-red-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(X, 14)} Reject
                             </button>
                         ` : nothing}
-                        ${(quote.state === 'DRAFT' || quote.state === 'SENT' || quote.state === 'ACCEPTED') ? html`
+                        ${(quote.status === 'draft' || quote.status === 'sent' || quote.status === 'accepted') ? html`
                             <button @click=${() => this.handleConvert()} ?disabled=${this.processing}
                                 class="bg-gable-green text-black px-4 py-2 rounded hover:bg-gable-green/90 transition-colors flex items-center gap-2 text-sm font-bold disabled:opacity-50">
                                 ${icon(ShoppingCart, 14)} Convert to Order
@@ -488,7 +508,7 @@ export class GableQuoteDetail extends LitElement {
                 <!-- Lumber index exposure / margin erosion (self-hides when not at risk) -->
                 <gable-exposure-banner
                     .quoteId=${quote.id}
-                    .shortId=${quote.id.slice(0, 8)}
+                    .shortId=${quote.number}
                     @exposure-loaded=${(e: Event) => { this.exposureDollars = (e as CustomEvent).detail?.exposureDollars ?? 0; }}>
                 </gable-exposure-banner>
 
@@ -512,7 +532,7 @@ export class GableQuoteDetail extends LitElement {
                 <!-- Tab Content -->
                 ${this.activeTab === 'details' ? this.renderDetailsTab(quote) : nothing}
                 ${this.activeTab === 'original' ? this.renderOriginalUploadTab(quote) : nothing}
-                ${this.activeTab === 'mapping' ? this.renderMappingTab(quote.parse_map || []) : nothing}
+                ${this.activeTab === 'mapping' ? this.renderMappingTab((quote.parse_map ?? []) as unknown as ParseMapItem[]) : nothing}
             </div>
         `;
     }

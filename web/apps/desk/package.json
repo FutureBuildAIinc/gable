@@ -17,6 +17,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@gable/api-client": "*",
     "@gable/auth": "*",
     "@gable/design-system": "*",
     "chart.js": "^4.4.8",
