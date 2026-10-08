@@ -43,7 +43,8 @@ func TestCheckPayloadBranch(t *testing.T) {
 		payload uuid.UUID
 		refused bool
 	}{
-		{"no branch middleware (system caller)", ctx, other, false},
+		{"no branch middleware, not marked", ctx, other, true},
+		{"no branch middleware, marked system caller", branchctx.WithSystem(ctx), other, false},
 		{"context branch equals payload", with(&branchctx.Context{UserSub: sub, BranchID: &own}), own, false},
 		{"context branch differs from payload", with(&branchctx.Context{UserSub: sub, BranchID: &own}), other, true},
 		{"admin with context branch, foreign payload", with(&branchctx.Context{UserSub: "a", IsAdmin: true, BranchID: &own}), other, true},
@@ -84,6 +85,12 @@ func TestCheckPayloadLocation(t *testing.T) {
 	})
 
 	bound := branchctx.With(ctx, &branchctx.Context{UserSub: "u", BranchID: &own})
+	if err := guard.CheckPayloadLocation(ctx, own); !errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		t.Errorf("no context, not marked: %v, want refused", err)
+	}
+	if err := guard.CheckPayloadLocation(branchctx.WithSystem(ctx), other); err != nil {
+		t.Errorf("no context, system caller: %v, want admitted", err)
+	}
 	for _, c := range []struct {
 		name    string
 		loc     uuid.UUID

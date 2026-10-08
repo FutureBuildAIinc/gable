@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -42,13 +43,18 @@ func NewBranchGuard(db *database.DB) *BranchGuard {
 //     any branch, as the header allows. A branch bound key always carries a
 //     context branch, so it is held to the first rule.
 //
-// A request the branch middleware never saw (a system caller) is not
-// restricted. The lookup runs on ctx's executor, so inside a transaction it
+// The guard fails closed: a call with no branch Context is refused unless the
+// caller marked itself a system caller with branchctx.WithSystem. A route
+// mounted without the branch middleware therefore refuses a payload branch
+// rather than passing it. The lookup runs on ctx's executor, so inside a transaction it
 // joins it rather than taking a second connection.
 func (g *BranchGuard) CheckPayloadBranch(ctx context.Context, payload uuid.UUID) error {
 	bc := BranchFromContext(ctx)
 	if bc == nil {
-		return nil
+		if branchctx.IsSystem(ctx) {
+			return nil
+		}
+		return ErrPayloadBranchRefused
 	}
 	if bc.BranchID != nil {
 		if *bc.BranchID != payload {
@@ -77,7 +83,10 @@ func (g *BranchGuard) CheckPayloadBranch(ctx context.Context, payload uuid.UUID)
 // answers for an unknown id.
 func (g *BranchGuard) CheckPayloadLocation(ctx context.Context, locationID uuid.UUID) error {
 	if BranchFromContext(ctx) == nil {
-		return nil
+		if branchctx.IsSystem(ctx) {
+			return nil
+		}
+		return ErrPayloadBranchRefused
 	}
 	var branch *uuid.UUID
 	err := g.m.db.GetExecutor(ctx).QueryRow(ctx,

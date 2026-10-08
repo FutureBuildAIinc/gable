@@ -322,3 +322,9 @@ func claimsHasAnyRole(claims *UserClaims, roles ...string) bool {
 	}
 	return false
 }
+
+// ClaimsHaveAnyRole reports whether claims grant any of the roles. A nil claims
+// grants none.
+func ClaimsHaveAnyRole(claims *UserClaims, roles ...string) bool {
+	return claimsHasAnyRole(claims, roles...)
+}
