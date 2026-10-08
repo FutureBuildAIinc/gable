@@ -5,9 +5,9 @@ name: CI
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main, staging, refactor/v1]
   pull_request:
-    branches: [main, staging]
+    branches: [main, staging, refactor/v1]
   # The nightly trigger exists for the `vulnerabilities` job only: a new CVE
   # can land in a dependency without anyone touching the repo, and we want to
   # hear about it then rather than on the next unrelated PR. Every other job is
