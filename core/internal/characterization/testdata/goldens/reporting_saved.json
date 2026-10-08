@@ -1,0 +1,401 @@
+[
+  {
+    "name": "reporting.saved.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/save",
+      "body": {
+        "definition_json": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "description": "r1b drafter d",
+        "entity_type": "orders",
+        "name": "Golden D Orders By Status"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "created_by": "",
+        "definition_json": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "description": "r1b drafter d",
+        "entity_type": "orders",
+        "id": "<id-1>",
+        "name": "Golden D Orders By Status",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/saved/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "created_by": "",
+        "definition_json": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "description": "r1b drafter d",
+        "entity_type": "orders",
+        "id": "<id-1>",
+        "name": "Golden D Orders By Status",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/saved/<id-2>"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/reporting/saved/<id-1>",
+      "body": {
+        "definition_json": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "description": "updated",
+        "entity_type": "orders",
+        "name": "Golden D Orders By Status v2"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/reporting/saved/<id-1>",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.get_after_update",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/saved/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "created_by": "",
+        "definition_json": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "description": "updated",
+        "entity_type": "orders",
+        "id": "<id-1>",
+        "name": "Golden D Orders By Status v2",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.run",
+    "sort_primary_array": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/saved/<id-1>/run"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "id": 16,
+          "status": "DRAFT"
+        },
+        {
+          "id": 21,
+          "status": "CONFIRMED"
+        },
+        {
+          "id": 48,
+          "status": "FULFILLED"
+        },
+        {
+          "id": 7,
+          "status": "CANCELLED"
+        }
+      ]
+    }
+  },
+  {
+    "name": "reporting.saved.run.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/saved/<id-2>/run"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.schedule.create_own",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/schedules",
+      "body": {
+        "cron_expression": "0 30 6 * * *",
+        "format": "XLSX",
+        "recipients": [
+          "goldens-d@example.com"
+        ],
+        "report_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "execution": {
+          "cron_dialect": "Six fields, seconds first: \"second minute hour day-of-month month day-of-week\" (e.g. \"0 0 9 * * *\" for 09:00 daily). Five-field crontab expressions are rejected. Descriptors such as @daily and @every 1h are accepted.",
+          "delivery": "Email is log-only in this deployment: the report is generated and handed to notification.LogEmailService, which records the recipients, subject, filename and size in the server log instead of sending. Replace the NewLogEmailService call in cmd/server/main.go with an SMTP-backed EmailService to deliver for real.",
+          "enabled": true,
+          "summary": "Schedules run on the server's cron engine: each run executes the saved report and renders it to CSV."
+        },
+        "schedule": {
+          "created_at": "<ts+0d>",
+          "cron_expression": "0 30 6 * * *",
+          "format": "XLSX",
+          "id": "<id-6>",
+          "recipients": [
+            "goldens-d@example.com"
+          ],
+          "report_id": "<id-1>",
+          "status": "ACTIVE",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.schedule.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/reporting/schedules/<id-6>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "reporting.schedule.delete.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/reporting/schedules/<id-6>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "reporting.schedule.delete.unknown",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/reporting/schedules/<id-2>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/reporting/saved/<id-1>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.delete.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/reporting/saved/<id-1>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.get_after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/saved/<id-1>"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,320 @@
+[
+  {
+    "name": "reporting.builder.preview",
+    "sort_primary_array": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/builder/preview",
+      "body": {
+        "definition": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "entity_type": "orders"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "id": 16,
+          "status": "DRAFT"
+        },
+        {
+          "id": 21,
+          "status": "CONFIRMED"
+        },
+        {
+          "id": 48,
+          "status": "FULFILLED"
+        },
+        {
+          "id": 7,
+          "status": "CANCELLED"
+        }
+      ]
+    }
+  },
+  {
+    "name": "reporting.builder.preview.invalid_column",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/builder/preview",
+      "body": {
+        "definition": {
+          "columns": [
+            {
+              "field": "no_such_field",
+              "label": "x"
+            }
+          ]
+        },
+        "entity_type": "orders"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.builder.preview.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/builder/preview",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.builder.export.csv",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/builder/export",
+      "body": {
+        "definition": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "entity_type": "orders",
+        "format": "csv"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "text/csv",
+      "body": {
+        "binary": {
+          "length": 61,
+          "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.builder.export.xlsx",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/builder/export",
+      "body": {
+        "definition": {
+          "columns": [
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ]
+        },
+        "entity_type": "orders",
+        "format": "xlsx"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "body": {
+        "binary": {
+          "length": 6140,
+          "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.builder.export.bad_format",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/builder/export",
+      "body": {
+        "definition": {
+          "columns": [
+            {
+              "field": "status",
+              "label": "Status"
+            },
+            {
+              "aggregation": "COUNT",
+              "field": "id",
+              "label": "Orders"
+            }
+          ],
+          "filters": [],
+          "groupings": [
+            {
+              "field": "status"
+            }
+          ]
+        },
+        "entity_type": "orders",
+        "format": "pdf"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.builder.export.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/builder/export",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.bi_export.invoices",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/export/invoices"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.bi_export.orders",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/export/orders"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.bi_export.inventory",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/export/inventory"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.bi_export.invalid_entity",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/export/no_such_entity"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,223 @@
+[
+  {
+    "name": "rebate.program.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rebates/programs/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "end_date": "<ts+730d>",
+        "id": "<id-1>",
+        "is_active": true,
+        "name": "Golden Volume Rebate",
+        "program_type": "VOLUME",
+        "start_date": "<ts+0d>",
+        "tiers": [
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-2>",
+            "max_volume": null,
+            "min_volume": 100,
+            "program_id": "<id-1>",
+            "rebate_pct": 2
+          }
+        ],
+        "vendor_id": "<id-3>"
+      }
+    }
+  },
+  {
+    "name": "rebate.program.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rebates/programs/<id-4>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "rebate.program.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rebates/programs/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "rebate.claims.list_before",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rebates/programs/<id-1>/claims"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": null
+    }
+  },
+  {
+    "name": "rebate.claims.calculate",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pricing/rebates/programs/<id-1>/claims/calculate",
+      "body": {
+        "mock_volume": 250,
+        "period_end": "<ts+90d>",
+        "period_start": "<ts+0d>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "claimed_at": null,
+        "created_at": "<ts+0d>",
+        "id": "<id-7>",
+        "period_end": "<ts+90d>",
+        "period_start": "<ts+0d>",
+        "program_id": "<id-1>",
+        "qualifying_volume": 250,
+        "rebate_amount": 500,
+        "status": "CALCULATED"
+      }
+    }
+  },
+  {
+    "name": "rebate.claims.calculate.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pricing/rebates/programs/<id-1>/claims/calculate",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "rebate.claims.calculate.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pricing/rebates/programs/not-a-uuid/claims/calculate",
+      "body": {}
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "rebate.claims.calculate.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pricing/rebates/programs/<id-4>/claims/calculate",
+      "body": {
+        "mock_volume": 1,
+        "period_end": "<ts+90d>",
+        "period_start": "<ts+0d>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "rebate.claims.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rebates/programs/<id-1>/claims"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "claimed_at": null,
+          "created_at": "<ts+0d>",
+          "id": "<id-7>",
+          "period_end": "<ts+90d>",
+          "period_start": "<ts+0d>",
+          "program_id": "<id-1>",
+          "qualifying_volume": 250,
+          "rebate_amount": 500,
+          "status": "CALCULATED"
+        }
+      ]
+    }
+  },
+  {
+    "name": "rebate.claims.list.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rebates/programs/not-a-uuid/claims"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  }
+]
