@@ -3,7 +3,8 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import type { MatrixCell, ProductCategory, CategoryPricingRule } from '../../../types/category-pricing';
+import type { MatrixCell, ProductCategory } from '../../../types/category-pricing';
+import { formatRuleValue } from '../../../services/CategoryPricingService';
 import { cn } from '../../../lib/utils';
 
 const TIER_COLORS: Record<string, string> = {
@@ -11,16 +12,6 @@ const TIER_COLORS: Record<string, string> = {
   SILVER: 'text-slate-300',
   GOLD: 'text-amber-400',
   PLATINUM: 'text-violet-400',
-};
-
-const formatRuleValue = (rule: CategoryPricingRule): string => {
-  switch (rule.rule_type) {
-    case 'MARKDOWN': return `-${rule.rule_value}%`;
-    case 'MARKUP': return `+${rule.rule_value}%`;
-    case 'MARGIN': return `M${rule.rule_value}%`;
-    case 'FIXED': return `$${rule.rule_value.toFixed(2)}`;
-    default: return `${rule.rule_value}`;
-  }
 };
 
 const flattenCategories = (categories: ProductCategory[], depth = 0): { category: ProductCategory; depth: number }[] => {
@@ -137,12 +128,12 @@ export class GableMatrixGrid extends LitElement {
                             <span
                               class=${cn(
                                 'inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold',
-                                cell.rule.target_type === 'ACCOUNT'
+                                cell.rule.target_type === 'account'
                                   ? 'bg-gable-green/20 text-gable-green'
                                   : 'bg-blueprint-blue/20 text-blueprint-blue'
                               )}
                             >
-                              ${cell.rule.target_type === 'ACCOUNT' ? 'A' : 'T'}
+                              ${cell.rule.target_type === 'account' ? 'A' : 'T'}
                             </span>
                           ` : nothing}
                           ${isInherited ? html`

@@ -2471,7 +2471,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List every location node */
+        /**
+         * List every location node
+         * @description The keyset envelope of ADR 0001 section 1, ordered created_at DESC, id DESC, behind the branch wall: a bound caller lists its branches' rows.
+         */
         get: operations["locationList"];
         put?: never;
         /**
@@ -2494,7 +2497,10 @@ export interface paths {
         };
         /** Get one location node */
         get: operations["locationGet"];
-        /** Update a location node */
+        /**
+         * Update a location node
+         * @description Type and parent_id are not mutable; the write carries the revision.
+         */
         put: operations["locationUpdate"];
         post?: never;
         /** Soft archive a location node */
@@ -2511,12 +2517,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List branches */
+        /**
+         * List branches
+         * @description The keyset envelope, ordered created_at DESC, id DESC.
+         */
         get: operations["branchList"];
         put?: never;
         /**
          * Create a branch
-         * @description Creates a location node with type BRANCH and no parent.
+         * @description Creates a location node with type branch and no parent; the type in the body, when sent, is overridden.
          */
         post: operations["branchCreate"];
         delete?: never;
@@ -2559,7 +2568,7 @@ export interface paths {
         };
         /**
          * Get a branch's location tree
-         * @description The branch with its children nested.
+         * @description The branch's rows as the list envelope, ordered by path.
          */
         get: operations["branchTree"];
         put?: never;
@@ -4089,7 +4098,7 @@ export interface paths {
         };
         /**
          * Calculate a customer price for a product
-         * @description Guarded admin or owner. customer_id and product_id are required UUIDs. A non positive or unparseable quantity silently falls back to 1 and an unparseable job_id is silently ignored. A customer or product lookup failure of any kind (not only a missing row) answers 404.
+         * @description Guarded admin or owner. The price one line would carry (ADR 0006 section 7.3): the exact scale 4 unit price in the product's stocking unit, the conversion pair (1 and 1 until the unit sets of C3-2A), the extension rounded once to cents by the line extension rule, and the price basis in lowercase. customer_id and product_id are required UUIDs; a quantity that is not a positive decimal string at scale 4 or a job_id that is not a UUID is a 400 naming it. A missing customer or product is 404.
          */
         get: operations["pricingCalculate"];
         put?: never;
@@ -4109,13 +4118,13 @@ export interface paths {
         };
         /**
          * List pricing rules
-         * @description Guarded admin or owner. A bare array, unpaged; null when the table is empty.
+         * @description Guarded admin or owner. The list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC); items is never null.
          */
         get: operations["pricingRuleList"];
         put?: never;
         /**
          * Create a pricing rule
-         * @description Guarded admin or owner. Only name and rule_type are validated. The server assigns id and both timestamps; is_active is not defaulted, so an omitted is_active is stored and echoed as false. Unknown rule_type values fail at the database and answer 500.
+         * @description Guarded admin or owner. Every field problem is collected into one 400 naming each field. A rule carries a fixed price, a discount or a markup. Prices are integers at scale 4 (fixed_price_ten_thousandths); percentages and quantities are decimal strings. The response is 201 with Location and the revision ETag.
          */
         post: operations["pricingRuleCreate"];
         delete?: never;
@@ -4153,13 +4162,13 @@ export interface paths {
         };
         /**
          * List product categories
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. The only pricing route with no role guard (any authenticated caller). view=flat returns the flat list; any other value, or none, returns the nested tree (children populated). Null when there are no categories.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. The only pricing route with no role guard beyond authentication. view=tree (default) returns the nested tree, view=flat the flat list; any other value is a 400. The list envelope with every category on one page.
          */
         get: operations["pricingCategoryList"];
         put?: never;
         /**
          * Create a product category
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. name, slug and path are required. Duplicate slugs or paths fail at the database and answer 500.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. name, slug and path are required.
          */
         post: operations["pricingCategoryCreate"];
         delete?: never;
@@ -4178,7 +4187,7 @@ export interface paths {
         get?: never;
         /**
          * Update a product category
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Updates name, slug, sort_order and is_active only (path and parent are not changed). There is no existence check: an unknown id still answers 200 with the echoed body.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Updates name, slug, sort_order and is_active; the path and parent are fixed.
          */
         put: operations["pricingCategoryUpdate"];
         post?: never;
@@ -4197,13 +4206,13 @@ export interface paths {
         };
         /**
          * List category pricing rules
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. When either limit or offset is present in the query the answer is the {data,total,limit,offset} page (limit non positive becomes 50, above 200 becomes 200, negative offset becomes 0); otherwise it is a bare array of every matching rule. Filters with an unparseable UUID are silently ignored; is_active is not a filter.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC). An unknown filter value or parameter is a 400 naming it; the legacy offset parameters are gone.
          */
         get: operations["pricingCategoryRuleList"];
         put?: never;
         /**
          * Create a category pricing rule
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Validation: target_type ACCOUNT or TIER; customer_id required for ACCOUNT; tier required for TIER; category_id required; rule_type one of MARKUP, MARKDOWN, FIXED, MARGIN. A duplicate answers 409.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. target_type account needs customer_id, tier needs tier. A fixed rule carries value_ten_thousandths (a scale 4 price), any other rule value_pct (a decimal string). The rule and its audit entry are written in one transaction. A second active rule for the same target and category is 409 duplicate.
          */
         post: operations["pricingCategoryRuleCreate"];
         delete?: never;
@@ -4223,12 +4232,12 @@ export interface paths {
         put?: never;
         /**
          * Bulk upsert category pricing rules
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The body is a bare JSON array of 1 to 500 rules, each validated as on single create; any failure rejects the whole batch with 400.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The body is a JSON array of 1 to 500 rules, each validated as on single create; an element that carries an id replaces the rule with that id at its revision. Any failure refuses the whole batch, which is written with its audit entries in one transaction.
          */
         post: operations["pricingCategoryRuleBulkUpsert"];
         /**
          * Bulk delete category pricing rules
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. DELETE with a JSON body of ids; at least one is required.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. DELETE with a JSON body of ids; at least one is required. The deletions and their audit entries are one transaction.
          */
         delete: operations["pricingCategoryRuleBulkDelete"];
         options?: never;
@@ -4246,13 +4255,13 @@ export interface paths {
         get?: never;
         /**
          * Update a category pricing rule
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. No validation and no existence check: the decoded body is stored against the path id and echoed with 200.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Takes the rule's revision (If-Match or the body revision; neither is 428, a stale one 409 stale_revision). The target (account or tier, customer, category) is fixed at create: a body that names one is a 400 naming it. The write and its audit entry are one transaction.
          */
         put: operations["pricingCategoryRuleUpdate"];
         post?: never;
         /**
          * Delete a category pricing rule
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. No existence check: an unknown id still answers 204.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. At the rule's revision (If-Match or an optional body revision). A missing rule is 404.
          */
         delete: operations["pricingCategoryRuleDelete"];
         options?: never;
@@ -4269,7 +4278,7 @@ export interface paths {
         };
         /**
          * List audit entries for a category pricing rule
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. A bare array, always an array (empty when none).
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The list envelope, the rule's most recent entries (at most 50) on one page.
          */
         get: operations["pricingCategoryRuleAudit"];
         put?: never;
@@ -4309,7 +4318,7 @@ export interface paths {
         };
         /**
          * Preview the effective category price for a product
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. product_id is required. An unparseable customer_id is silently ignored (treated as none). When tier is absent it is taken from the customer, else RETAIL. A product with no category resolves to match_type none with an empty category_path, with 200.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. product_id is required; a customer_id that is not a UUID is a 400. When tier is absent it is taken from the customer, else RETAIL. A product with no category resolves to match_type none with an empty category_path, with 200.
          */
         get: operations["pricingResolve"];
         put?: never;
@@ -4511,7 +4520,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List products */
+        /**
+         * List products
+         * @description The keyset envelope of ADR 0001 section 1, ordered created_at DESC, id DESC. Money is integer scaled; quantities are decimal strings.
+         */
         get: operations["productList"];
         put?: never;
         /** Create a product */
@@ -4531,7 +4543,7 @@ export interface paths {
         };
         /**
          * List products below their reorder point
-         * @description The alert rows omit on order quantity, velocity and lead time; they carry the deficit only.
+         * @description The envelope; quantities are decimal strings. The rows carry the deficit only.
          */
         get: operations["productReorderAlerts"];
         put?: never;
@@ -4568,7 +4580,7 @@ export interface paths {
         };
         /**
          * Get product detail
-         * @description A missing product answers 500, not 404.
+         * @description The PIM aggregate; the product summary is the converted product wire.
          */
         get: operations["productDetail"];
         put?: never;
@@ -4775,11 +4787,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /**
-         * Set the target margin and commission rate
-         * @description A bare 200 with no body on success.
-         */
-        patch: operations["productUpdateMarginRules"];
+        /** Update the margin rules */
+        patch: operations["productUpdateMargins"];
         trace?: never;
     };
     "/api/v1/products/{id}/dimensions": {
@@ -4796,8 +4805,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Set the PIM parametric geometry
-         * @description All fields are nullable: an omitted or explicitly null field clears the column to no geometry recorded, while a real zero is a recorded zero dimension. The persisted geometry is returned.
+         * Write the parametric geometry
+         * @description Every geometry field is a pointer: a null clears the column to SQL NULL ("not recorded"), a real zero is a measurement.
          */
         patch: operations["productUpdateDimensions"];
         trace?: never;
@@ -4816,8 +4825,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Set the dealer side lead time
-         * @description The lead time in days published to the portal catalog. A null clears it back to unpublished; zero asserts same day availability. The request is echoed as the response.
+         * Publish or clear the lead time
+         * @description lead_time_days null is "unpublished", a different fact than zero ("available today").
          */
         patch: operations["productUpdateLeadTime"];
         trace?: never;
@@ -4836,7 +4845,7 @@ export interface paths {
         get: operations["productKitComponentsGet"];
         /**
          * Replace a kit's component list
-         * @description Replaces the whole list. A product with a non empty list becomes a kit (is_kit); an empty list clears the definition. A kit cannot contain a kit and cannot contain itself. Until the products module converts there is no product revision to precondition on: last write wins, as ADR 0005 section 2.6 states.
+         * @description Replaces the whole list in one transaction at the product's revision (If-Match or the body revision, as every write): the delete, the inserts and the is_kit update with the revision bump are one database act, with the audit row and a product.updated event (parts kit_components) in the same transaction, so a fault partway leaves the kit unchanged. A product with a non empty list becomes a kit (is_kit); an empty list clears the definition. A kit cannot contain a kit, cannot contain itself and lists a component once.
          */
         put: operations["productKitComponentsPut"];
         post?: never;
@@ -8123,33 +8132,60 @@ export interface components {
             status: "queued";
         };
         /** @enum {string} */
-        LocationType: "BRANCH" | "ZONE" | "AISLE" | "RACK" | "SHELF" | "BIN" | "YARD";
+        LocationType: "branch" | "zone" | "aisle" | "rack" | "shelf" | "bin" | "yard";
+        /** @description A node of the hierarchy; the type is lowercase on the wire and the optional metadata is present with null (ADR 0001 sections 6 and 12). */
         Location: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            parent_id?: string;
+            parent_id: string | null;
             path: string;
             type: components["schemas"]["LocationType"];
             code: string;
-            description?: string;
-            name?: string;
-            address?: string;
-            city?: string;
-            state?: string;
-            zip?: string;
-            phone?: string;
-            tax_jurisdiction_code?: string;
-            default_tax_rate?: number | null;
-            timezone?: string;
+            description: string | null;
+            name: string | null;
+            address: string | null;
+            city: string | null;
+            state: string | null;
+            zip: string | null;
+            phone: string | null;
+            tax_jurisdiction_code: string | null;
+            default_tax_rate: number | null;
+            timezone: string | null;
             active: boolean;
             /** Format: uuid */
-            branch_id?: string;
+            branch_id: string | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-            children?: components["schemas"]["Location"][];
+        };
+        /** @description The list envelope of ADR 0001 section 1. */
+        LocationPage: {
+            items: components["schemas"]["Location"][];
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        LocationUpdate: {
+            path?: string;
+            code?: string;
+            description?: string | null;
+            name?: string | null;
+            address?: string | null;
+            city?: string | null;
+            state?: string | null;
+            zip?: string | null;
+            phone?: string | null;
+            tax_jurisdiction_code?: string | null;
+            default_tax_rate?: number | null;
+            timezone?: string | null;
+            active?: boolean;
+            /** Format: int64 */
+            revision?: number;
         };
         /** @description The location shape with the active flag told apart from an explicit false. */
         LocationCreateRequest: {
@@ -8171,7 +8207,6 @@ export interface components {
             /** @description Defaults to true when absent; an explicit false is honored. */
             active?: boolean | null;
         };
-        LocationList: components["schemas"]["Location"][] | null;
         BranchSummary: {
             /** Format: uuid */
             id: string;
@@ -9829,18 +9864,29 @@ export interface components {
             gateway_tx_id?: string;
             lines: components["schemas"]["PosReturnLineRequest"][];
         };
+        /**
+         * @description Where a price came from, lowercase (ADR 0006 section 7.3).
+         * @enum {string}
+         */
+        PricingSource: "contract" | "tier" | "retail" | "quantity_break" | "job_override" | "promotional" | "category_tier" | "category_account";
         /** @enum {string} */
-        PricingSource: "CONTRACT" | "TIER" | "RETAIL" | "QUANTITY_BREAK" | "JOB_OVERRIDE" | "PROMOTIONAL" | "CATEGORY_TIER" | "CATEGORY_ACCOUNT";
-        /** @enum {string} */
-        PricingRuleType: "QUANTITY_BREAK" | "JOB_OVERRIDE" | "PROMOTIONAL";
+        PricingRuleType: "quantity_break" | "job_override" | "promotional";
+        /** @description The price read (ADR 0006 section 7.3). unit_price_ten_thousandths is the exact scale 4 price in price_uom; uom_qty and price_uom_qty are the line's conversion pair; line_total_cents is the one rounding, by the line extension rule. */
         PricingCalculatedPrice: {
             /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
             product_id: string;
-            /** @description Base retail price. */
-            original_price: number;
-            final_price: number;
-            discount_pct: number;
-            source: components["schemas"]["PricingSource"];
+            quantity: string;
+            uom: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            price_uom: string;
+            uom_qty: string;
+            price_uom_qty: string;
+            /** Format: int64 */
+            line_total_cents: number;
+            price_basis: components["schemas"]["PricingSource"];
             /** @description Free text such as "Gold Tier (15%)". */
             details: string;
         };
@@ -9850,52 +9896,63 @@ export interface components {
             name: string;
             rule_type: components["schemas"]["PricingRuleType"];
             /** Format: uuid */
-            product_id?: string;
+            product_id: string | null;
             /** Format: uuid */
-            customer_id?: string;
+            customer_id: string | null;
             /** Format: uuid */
-            job_id?: string;
-            /** @description Empty (and omitted) means unscoped. */
-            category?: string;
-            fixed_price?: number;
-            discount_pct?: number;
-            markup_pct?: number;
-            min_quantity: number;
-            max_quantity?: number;
-            margin_floor_pct?: number;
+            job_id: string | null;
+            /** @description Empty means unscoped. */
+            category: string;
+            /** Format: int64 */
+            fixed_price_ten_thousandths: number | null;
+            discount_pct: string | null;
+            markup_pct: string | null;
+            min_quantity: string;
+            max_quantity: string | null;
+            margin_floor_pct: string | null;
             /** Format: date-time */
-            starts_at?: string;
+            starts_at: string | null;
             /** Format: date-time */
-            expires_at?: string;
+            expires_at: string | null;
             is_active: boolean;
             priority: number;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description The pricing rule body the create handler decodes. id and both timestamps are overwritten or filled by the server. */
+        PricingRulePage: {
+            items: components["schemas"]["PricingRule"][];
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description The create body. The server assigns the id, the revision and both timestamps; a field not listed is a 400. */
         PricingRuleCreateRequest: {
             name: string;
             rule_type: components["schemas"]["PricingRuleType"];
             /** Format: uuid */
-            product_id?: string;
+            product_id?: string | null;
             /** Format: uuid */
-            customer_id?: string;
+            customer_id?: string | null;
             /** Format: uuid */
-            job_id?: string;
-            category?: string;
-            fixed_price?: number;
-            discount_pct?: number;
-            markup_pct?: number;
-            min_quantity?: number;
-            max_quantity?: number;
-            margin_floor_pct?: number;
+            job_id?: string | null;
+            category?: string | null;
+            /** Format: int64 */
+            fixed_price_ten_thousandths?: number | null;
+            discount_pct?: string | null;
+            markup_pct?: string | null;
+            min_quantity?: string | null;
+            max_quantity?: string | null;
+            margin_floor_pct?: string | null;
             /** Format: date-time */
-            starts_at?: string;
+            starts_at?: string | null;
             /** Format: date-time */
-            expires_at?: string;
-            /** @description Not defaulted; omitted stores false. */
+            expires_at?: string | null;
+            /** @description Defaults to true. */
             is_active?: boolean;
             priority?: number;
         };
@@ -9934,36 +9991,56 @@ export interface components {
             /** @description ltree path such as lumber.framing. */
             path: string;
             /** Format: uuid */
-            parent_id?: string;
+            parent_id: string | null;
             sort_order: number;
             is_active: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description Present on the tree view only. */
             children?: components["schemas"]["PricingProductCategory"][];
         };
+        PricingProductCategoryList: {
+            items: components["schemas"]["PricingProductCategory"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingProductCategoryWrite: {
+            name: string;
+            slug: string;
+            path: string;
+            /** Format: uuid */
+            parent_id?: string | null;
+            sort_order?: number;
+            is_active?: boolean;
+        };
+        /** @description The rule's value is one number with two readings (ADR 0001 section 7): value_ten_thousandths on a fixed rule, value_pct otherwise, null for the other. */
         PricingCategoryRule: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            target_type: "ACCOUNT" | "TIER";
+            target_type: "account" | "tier";
             /** Format: uuid */
-            customer_id?: string;
-            tier?: string;
+            customer_id: string | null;
+            tier: string;
             /** Format: uuid */
             category_id: string;
             /** @enum {string} */
-            rule_type: "MARKUP" | "MARKDOWN" | "FIXED" | "MARGIN";
-            rule_value: number;
-            margin_floor_pct?: number;
+            rule_type: "markup" | "markdown" | "fixed" | "margin";
+            /** Format: int64 */
+            value_ten_thousandths: number | null;
+            value_pct: string | null;
+            margin_floor_pct: string | null;
             /** Format: date-time */
-            starts_at?: string;
+            starts_at: string | null;
             /** Format: date-time */
-            expires_at?: string;
+            expires_at: string | null;
             is_active: boolean;
             priority: number;
-            created_by?: string;
+            created_by: string;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -9976,10 +10053,48 @@ export interface components {
             customer_name?: string;
         };
         PricingCategoryRulePage: {
-            data: components["schemas"]["PricingCategoryRule"][];
-            total: number;
+            items: components["schemas"]["PricingCategoryRule"][];
+            next_cursor: string | null;
             limit: number;
-            offset: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        PricingCategoryRuleValues: {
+            /** @enum {string} */
+            rule_type?: "markup" | "markdown" | "fixed" | "margin";
+            /** Format: int64 */
+            value_ten_thousandths?: number | null;
+            value_pct?: string | null;
+            margin_floor_pct?: string | null;
+            /** Format: date-time */
+            starts_at?: string | null;
+            /** Format: date-time */
+            expires_at?: string | null;
+            /** @description Defaults to true. */
+            is_active?: boolean;
+            priority?: number;
+        };
+        /** @description The create body; a field not listed is a 400. */
+        PricingCategoryRuleCreateRequest: components["schemas"]["PricingCategoryRuleValues"] & {
+            /** @enum {string} */
+            target_type: "account" | "tier";
+            /** Format: uuid */
+            customer_id?: string | null;
+            tier?: string | null;
+            /** Format: uuid */
+            category_id: string;
+        };
+        /** @description One element of the bulk body; an id replaces the rule that has it, at the revision the element names (required with an id: 428 without, 409 when stale) and without changing the rule's scope. */
+        PricingCategoryRuleBulkItem: components["schemas"]["PricingCategoryRuleCreateRequest"] & {
+            /** Format: uuid */
+            id?: string;
+            /** Format: int64 */
+            revision?: number;
+        };
+        /** @description The update body: the values and the revision. A target field (target_type, customer_id, tier, category_id) is a 400. */
+        PricingCategoryRuleUpdateRequest: components["schemas"]["PricingCategoryRuleValues"] & {
+            /** Format: int64 */
+            revision?: number;
         };
         PricingCategoryRuleAudit: {
             /** Format: uuid */
@@ -10002,6 +10117,11 @@ export interface components {
             tier?: string;
             /** Format: uuid */
             customer_id?: string;
+        };
+        PricingCategoryRuleAuditList: {
+            items: components["schemas"]["PricingCategoryRuleAudit"][];
+            next_cursor: string | null;
+            limit: number;
         };
         PricingBulkCount: {
             count: number;
@@ -10029,8 +10149,11 @@ export interface components {
             /** @enum {string} */
             match_type: "account_exact" | "account_ancestor" | "tier_exact" | "tier_ancestor" | "none";
             category_path: string;
-            /** @description The product average unit cost, used by MARKUP and MARGIN rules. */
-            cost_price: number;
+            /**
+             * Format: int64
+             * @description The product average unit cost at scale 4, used by markup and margin rules.
+             */
+            cost_price_ten_thousandths: number;
         };
         PricingRebateTier: {
             /** Format: uuid */
@@ -10192,51 +10315,85 @@ export interface components {
             /** Format: uuid */
             kit_product_id: string;
             components: components["schemas"]["KitComponent"][];
+            /**
+             * Format: int64
+             * @description The product's current revision; send it (or If-Match) on the next write.
+             */
+            revision: number;
         };
         /**
          * @description The database unit of measure vocabulary, verbatim.
          * @enum {string}
          */
         UOM: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
-        Product: {
+        /** @description The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit. */
+        ProductView: {
             /** Format: uuid */
             id: string;
             sku: string;
             description: string;
-            uom_primary: components["schemas"]["UOM"];
-            /** @description Float dollars. */
-            base_price: number;
-            /** @description Denormalized display name. */
+            stock_uom: components["schemas"]["UOM"];
+            /**
+             * Format: int64
+             * @description The base price per stocking unit at scale 4.
+             */
+            base_price_ten_thousandths: number;
+            /** Format: int64 */
+            average_unit_cost_ten_thousandths: number;
+            target_margin: number;
+            commission_rate: number;
             vendor: string | null;
             /** Format: uuid */
             vendor_id: string | null;
             upc: string | null;
             weight_lbs: number;
-            /** @description Inches; null when the PIM has no geometry for the SKU. */
             length_in: number | null;
             width_in: number | null;
             height_in: number | null;
             stackable: boolean | null;
             geometry_source: string | null;
-            reorder_point: number;
-            reorder_qty: number;
-            /** @description Aggregated from inventory. */
-            total_quantity: number;
-            total_allocated: number;
-            /** @description Float dollars. */
-            average_unit_cost: number;
-            target_margin: number;
-            commission_rate: number;
+            lead_time_days: number | null;
+            /** @description A decimal string at scale 4. */
+            reorder_point: string;
+            reorder_qty: string;
+            /** @description The stocking unit total of quantity. */
+            on_hand: string;
+            allocated: string;
+            /** @description on_hand less allocated. */
+            available: string;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        ProductCreate: {
+            sku: string;
+            description: string;
+            stock_uom: components["schemas"]["UOM"];
+            /** Format: int64 */
+            base_price_ten_thousandths?: number;
+            vendor?: string | null;
+            /** Format: uuid */
+            vendor_id?: string | null;
+            upc?: string | null;
+            weight_lbs?: number;
+            length_in?: number | null;
+            width_in?: number | null;
+            height_in?: number | null;
+            stackable?: boolean | null;
+            geometry_source?: string | null;
+            reorder_point?: string;
+            reorder_qty?: string;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ProductPage: {
-            data: components["schemas"]["Product"][];
-            total: number;
+            items: components["schemas"]["ProductView"][];
+            next_cursor: string | null;
             limit: number;
-            offset: number;
+            /** Format: int64 */
+            total?: number;
         };
         /** @description The mutable parametric geometry slice; every field is always present and nullable on purpose (nil means not recorded, zero is a recorded zero). */
         Geometry: {
@@ -10254,19 +10411,35 @@ export interface components {
             vendor: string | null;
             /** Format: uuid */
             vendor_id: string | null;
-            reorder_point: number;
-            reorder_qty: number;
-            current_stock: number;
-            deficit: number;
+            reorder_point: string;
+            reorder_qty: string;
+            current_stock: string;
+            deficit: string;
         };
-        ReorderAlertList: components["schemas"]["ReorderAlert"][] | null;
+        ReorderAlertList: {
+            items: components["schemas"]["ReorderAlert"][];
+            next_cursor: string | null;
+            limit: number;
+        };
         ProductMarginUpdate: {
-            target_margin: number;
-            commission_rate: number;
+            target_margin?: number;
+            commission_rate?: number;
+            /** Format: int64 */
+            revision?: number;
+        };
+        ProductDimensionsUpdate: {
+            length_in?: number | null;
+            width_in?: number | null;
+            height_in?: number | null;
+            stackable?: boolean | null;
+            geometry_source?: string | null;
+            /** Format: int64 */
+            revision?: number;
         };
         ProductLeadTimeUpdate: {
-            /** @description Days; null clears to unpublished, zero asserts same day. */
-            lead_time_days: number | null;
+            lead_time_days?: number | null;
+            /** Format: int64 */
+            revision?: number;
         };
         /** @description pim.PIMContent. The handler always sends all fifteen fields. A product with no content yet answers a record with a zero id and zero timestamps. */
         PimContent: {
@@ -10338,32 +10511,12 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description pim.ProductDetail. content is null when the product has none. */
+        /** @description The PIM aggregate. The product summary is the converted product wire (ADR 0006 7.1); content is null when the product has none. */
         ProductDetail: {
-            /** Format: uuid */
-            id: string;
-            sku: string;
-            description: string;
-            uom_primary: string;
-            /** @description Float dollars today. */
-            base_price: number;
-            vendor: string | null;
-            upc: string | null;
-            weight_lbs: number;
-            reorder_point: number;
-            reorder_qty: number;
-            total_quantity: number;
-            total_allocated: number;
-            average_unit_cost: number;
-            target_margin: number;
-            commission_rate: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-            content: components["schemas"]["PimContent"] | null;
-            media: components["schemas"]["PimMedia"][];
-            collateral: components["schemas"]["PimCollateral"][];
+            product: components["schemas"]["ProductView"];
+            content: Record<string, never> | null;
+            media: Record<string, never>[];
+            collateral: Record<string, never>[];
         };
         /** @description UpdateContentRequest: every field optional, absent means unchanged. */
         PimContentUpdate: {
@@ -16872,25 +17025,33 @@ export interface operations {
     };
     locationList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description All location nodes, a bare array that is null when none exist. */
+            /** @description The page of locations. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LocationList"];
+                    "application/json": components["schemas"]["LocationPage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     locationCreate: {
@@ -16909,9 +17070,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created location. */
+            /** @description The created location, revision 1, with its ETag and Location. */
             201: {
                 headers: {
+                    Location?: string;
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16924,6 +17087,7 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     locationGet: {
@@ -16937,20 +17101,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The location. */
+            /** @description The location, with its revision ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Location"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     locationUpdate: {
@@ -16959,6 +17124,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -16967,13 +17134,14 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Location"];
+                "application/json": components["schemas"]["LocationUpdate"];
             };
         };
         responses: {
-            /** @description The updated location. */
+            /** @description The updated location with the new revision and its ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16983,22 +17151,33 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
         };
     };
     locationDelete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The quoted revision; required unless a body revision carries it. */
+                "If-Match"?: string;
+            };
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision?: number;
+                };
+            };
+        };
         responses: {
             /** @description Archived (active set false). */
             204: {
@@ -17007,18 +17186,26 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     branchList: {
         parameters: {
             query?: {
-                /** @description Only the literal string true includes archived branches. */
-                include_inactive?: "true";
+                /** @description true includes archived branches. */
+                include_inactive?: "true" | "false";
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: never;
             path?: never;
@@ -17026,18 +17213,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The branches, a bare array that is null when none exist. */
+            /** @description The page of branches. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LocationList"];
+                    "application/json": components["schemas"]["LocationPage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     branchCreate: {
@@ -17056,9 +17244,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created branch. */
+            /** @description The created branch, revision 1, with its ETag and Location. */
             201: {
                 headers: {
+                    Location?: string;
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17071,6 +17261,7 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     branchGet: {
@@ -17084,20 +17275,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The branch. */
+            /** @description The branch, with its revision ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Location"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     branchUpdate: {
@@ -17106,6 +17298,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -17114,13 +17308,14 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Location"];
+                "application/json": components["schemas"]["LocationUpdate"];
             };
         };
         responses: {
-            /** @description The updated branch. */
+            /** @description The updated branch with the new revision and its ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17130,16 +17325,20 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
         };
     };
     branchDelete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The quoted revision; required unless a body revision carries it. */
+                "If-Match"?: string;
+            };
             path: {
                 id: string;
             };
@@ -17154,11 +17353,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     branchTree: {
@@ -17172,19 +17373,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The tree, a bare array. */
+            /** @description The tree's rows. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LocationList"];
+                    "application/json": components["schemas"]["LocationPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     branchListUsers: {
@@ -19985,8 +20186,8 @@ export interface operations {
             query: {
                 customer_id: string;
                 product_id: string;
-                /** @description Volume pricing quantity; default 1. */
-                quantity?: number;
+                /** @description A positive decimal string at scale 4; default "1". */
+                quantity?: string;
                 job_id?: string;
             };
             header?: never;
@@ -20004,34 +20205,42 @@ export interface operations {
                     "application/json": components["schemas"]["PricingCalculatedPrice"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingRuleList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Every pricing rule. */
+            /** @description The page of rules. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PricingRule"][] | null;
+                    "application/json": components["schemas"]["PricingRulePage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingRuleCreate: {
@@ -20050,9 +20259,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created rule. */
+            /** @description The created rule at revision 1. */
             201: {
                 headers: {
+                    /** @description The rule's URL. */
+                    Location?: string;
+                    /** @description The rule revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20062,10 +20275,10 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCalculateEscalation: {
@@ -20105,7 +20318,7 @@ export interface operations {
     pricingCategoryList: {
         parameters: {
             query?: {
-                view?: string;
+                view?: "tree" | "flat";
             };
             header?: never;
             path?: never;
@@ -20113,17 +20326,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The categories, flat or as a tree. */
+            /** @description The categories. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PricingProductCategory"][] | null;
+                    "application/json": components["schemas"]["PricingProductCategoryList"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryCreate: {
@@ -20138,13 +20352,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PricingProductCategory"];
+                "application/json": components["schemas"]["PricingProductCategoryWrite"];
             };
         };
         responses: {
-            /** @description The created category, echoed with server filled fields. */
+            /** @description The created category. */
             201: {
                 headers: {
+                    /** @description The category's URL. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20154,10 +20370,10 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryUpdate: {
@@ -20174,11 +20390,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PricingProductCategory"];
+                "application/json": components["schemas"]["PricingProductCategoryWrite"];
             };
         };
         responses: {
-            /** @description The body echoed with the path id and a fresh updated_at. */
+            /** @description The category as written. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -20190,21 +20406,27 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryRuleList: {
         parameters: {
             query?: {
-                target_type?: "ACCOUNT" | "TIER";
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+                target_type?: "account" | "tier";
                 tier?: string;
                 customer_id?: string;
                 category_id?: string;
-                limit?: number;
-                offset?: number;
+                is_active?: boolean;
             };
             header?: never;
             path?: never;
@@ -20212,18 +20434,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A bare array, or the page when limit or offset was supplied. */
+            /** @description The page of category rules. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PricingCategoryRule"][] | components["schemas"]["PricingCategoryRulePage"];
+                    "application/json": components["schemas"]["PricingCategoryRulePage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryRuleCreate: {
@@ -20238,13 +20461,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PricingCategoryRule"];
+                "application/json": components["schemas"]["PricingCategoryRuleCreateRequest"];
             };
         };
         responses: {
-            /** @description The created rule, echoed with server filled fields. */
+            /** @description The created rule at revision 1. */
             201: {
                 headers: {
+                    /** @description The rule's URL. */
+                    Location?: string;
+                    /** @description The rule revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20254,10 +20481,10 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryRuleBulkUpsert: {
@@ -20272,11 +20499,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PricingCategoryRule"][];
+                "application/json": components["schemas"]["PricingCategoryRuleBulkItem"][];
             };
         };
         responses: {
-            /** @description The number of rules submitted. */
+            /** @description The number of rules written. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -20288,10 +20515,10 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryRuleBulkDelete: {
@@ -20314,16 +20541,19 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryRuleUpdate: {
         parameters: {
             query?: never;
             header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -20334,13 +20564,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PricingCategoryRule"];
+                "application/json": components["schemas"]["PricingCategoryRuleUpdateRequest"];
             };
         };
         responses: {
-            /** @description The body echoed with the path id. */
+            /** @description The rule at its new revision. */
             200: {
                 headers: {
+                    /** @description The rule revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20350,16 +20582,21 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryRuleDelete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
             path: {
                 id: string;
             };
@@ -20374,10 +20611,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingCategoryRuleAudit: {
@@ -20397,13 +20637,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PricingCategoryRuleAudit"][];
+                    "application/json": components["schemas"]["PricingCategoryRuleAuditList"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingMatrix: {
@@ -20424,9 +20664,10 @@ export interface operations {
                     "application/json": components["schemas"]["PricingMatrix"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingResolve: {
@@ -20451,10 +20692,10 @@ export interface operations {
                     "application/json": components["schemas"]["PricingResolvedCategoryPrice"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     pricingRebateProgramList: {
@@ -20771,10 +21012,12 @@ export interface operations {
     productList: {
         parameters: {
             query?: {
-                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
-                limit?: components["parameters"]["Limit"];
-                /** @description Page offset. Unparseable or negative values are silently ignored and the default applies. */
-                offset?: components["parameters"]["Offset"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: never;
             path?: never;
@@ -20791,6 +21034,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProductPage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -20808,17 +21052,19 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Product"];
+                "application/json": components["schemas"]["ProductCreate"];
             };
         };
         responses: {
-            /** @description The created product. */
+            /** @description The created product, revision 1, with its ETag and Location. */
             201: {
                 headers: {
+                    Location?: string;
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Product"];
+                    "application/json": components["schemas"]["ProductView"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
@@ -20839,7 +21085,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The alerts, a bare array that is null when nothing is below its reorder point. */
+            /** @description The alerts envelope. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -20864,19 +21110,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The product. */
+            /** @description The product, with its revision ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Product"];
+                    "application/json": components["schemas"]["ProductView"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     productDetail: {
@@ -20890,7 +21137,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The product with its PIM content, media and collateral. */
+            /** @description The PIM aggregate. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -20899,9 +21146,10 @@ export interface operations {
                     "application/json": components["schemas"]["ProductDetail"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -21271,12 +21519,14 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    productUpdateMarginRules: {
+    productUpdateMargins: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -21289,19 +21539,23 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated; no body. */
+            /** @description The product with the new revision and its ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProductView"];
+                };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -21311,6 +21565,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -21319,25 +21575,27 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Geometry"];
+                "application/json": components["schemas"]["ProductDimensionsUpdate"];
             };
         };
         responses: {
-            /** @description The persisted geometry. */
+            /** @description The product with the persisted geometry, the new revision and its ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Geometry"];
+                    "application/json": components["schemas"]["ProductView"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -21347,6 +21605,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -21359,21 +21619,25 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The echoed request. */
+            /** @description The product with the new revision and its ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductLeadTimeUpdate"];
+                    "application/json": components["schemas"]["ProductView"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
         };
     };
     productKitComponentsGet: {
@@ -21413,6 +21677,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted product revision; required unless the body carries it. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -21422,6 +21688,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /**
+                     * Format: int64
+                     * @description The product revision this write builds on (If-Match carries it too; the write needs one of them).
+                     */
+                    revision?: number;
                     components: {
                         /** Format: uuid */
                         component_product_id: string;
@@ -21432,9 +21703,10 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The replaced component list. */
+            /** @description The replaced component list, with the product's new revision and its ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21445,8 +21717,10 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };

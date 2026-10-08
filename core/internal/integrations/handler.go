@@ -181,13 +181,23 @@ func (h *Handler) BulkCalculatePrice(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		calculated, err := h.pricingSvc.CalculatePriceWithQty(r.Context(), cust, productID, prod.BasePrice, float64(item.Quantity), nil)
+		calculated, err := h.pricingSvc.CalculateScaled(r.Context(), cust, productID, prod.BasePrice, float64(item.Quantity), nil)
 		if err != nil {
 			continue
 		}
 
-		unitPriceCents := int64(calculated.FinalPrice * 100)
-		totalPriceCents := unitPriceCents * int64(item.Quantity)
+		// The cents the order will bill: the exact price rounded half away
+		// from zero in integers, never truncated; and the total is the
+		// order's own extension, the exact scale 4 price extended once
+		// (3 x 20.025 is 60.075 = 6008 cents), never the rounded unit
+		// price times the quantity (2003 x 3 = 6009, a cent above the
+		// bill for a half cent unit price).
+		unitPriceCents := pricing.CentsOf(calculated.Price)
+		one := httpx.Quantity(10000)
+		totalPriceCents, err := httpx.Extend(httpx.Quantity(item.Quantity)*10000, one, one, calculated.Price)
+		if err != nil {
+			continue
+		}
 
 		results = append(results, PricedItemResponse{
 			ProductID:   item.ProductID,
@@ -195,7 +205,7 @@ func (h *Handler) BulkCalculatePrice(w http.ResponseWriter, r *http.Request) {
 			SKU:         prod.SKU,
 			Quantity:    item.Quantity,
 			UnitPrice:   unitPriceCents,
-			TotalPrice:  totalPriceCents,
+			TotalPrice:  int64(totalPriceCents),
 			UOM:         string(prod.UOMPrimary),
 		})
 	}

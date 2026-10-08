@@ -5,10 +5,12 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons';
 import { LayoutGrid, RefreshCw, ChevronDown, ChevronRight, AlertTriangle, Plus, User, Grid3X3, X } from 'lucide';
-import { categoryPricingService } from '../../../services/CategoryPricingService';
+import { categoryPricingService, ruleUpdateFromRule, ruleValuesFromInput } from '../../../services/CategoryPricingService';
+import { ApiError, apiErrorMessage } from '../../../services/apiError';
+import type { RuleSaveDetail } from './RuleDrawer';
 import { ToastService } from '../../../lib/toast-service';
 import { cn } from '../../../lib/utils';
-import type { ProductCategory, MatrixCell, MatrixResponse, CategoryPricingRule, CategoryRuleType } from '../../../types/category-pricing';
+import type { ProductCategory, MatrixCell, MatrixResponse, CategoryPricingRule, CategoryRuleType, CategoryRuleBulkItem, TargetType } from '../../../types/category-pricing';
 
 // Import child components so they register their custom elements
 import './CategoryTree.ts';
@@ -30,7 +32,7 @@ export class GablePricingMatrix extends LitElement {
 
   @state() private _drawerOpen = false;
   @state() private _drawerCell: MatrixCell | null = null;
-  @state() private _drawerTargetType?: 'TIER' | 'ACCOUNT';
+  @state() private _drawerTargetType?: TargetType;
 
   @state() private _showPreview = false;
   @state() private _activeTab: Tab = 'matrix';
@@ -40,7 +42,7 @@ export class GablePricingMatrix extends LitElement {
   // Bulk mode state
   @state() private _bulkMode = false;
   @state() private _selectedCells: Set<string> = new Set();
-  @state() private _bulkRuleType: CategoryRuleType = 'MARKDOWN';
+  @state() private _bulkRuleType: CategoryRuleType = 'markdown';
   @state() private _bulkRuleValue = '';
 
   connectedCallback() {
@@ -56,7 +58,7 @@ export class GablePricingMatrix extends LitElement {
       this._matrix = data;
     } catch (err) {
       console.error('Failed to load pricing matrix:', err);
-      this._error = err instanceof Error ? err.message : 'Failed to load pricing matrix';
+      this._error = apiErrorMessage(err, 'Failed to load pricing matrix');
     } finally {
       this._loading = false;
     }
@@ -65,10 +67,11 @@ export class GablePricingMatrix extends LitElement {
   private async _loadAccountRules() {
     this._accountRulesLoading = true;
     try {
-      const rules = await categoryPricingService.listRules({ target_type: 'ACCOUNT' });
-      this._accountRules = rules;
+      // Every account rule, paged through the cursor (capped at LIST_ALL_RULES_CAP rules).
+      this._accountRules = await categoryPricingService.listAllRules({ target_type: 'account' });
     } catch (err) {
       console.error('Failed to load account rules:', err);
+      ToastService.show(apiErrorMessage(err, 'Failed to load account rules'), 'error');
     } finally {
       this._accountRulesLoading = false;
     }
@@ -116,20 +119,45 @@ export class GablePricingMatrix extends LitElement {
     this._drawerTargetType = undefined;
   }
 
-  private async _handleSaveRule(e: CustomEvent<Partial<CategoryPricingRule>>) {
-    const rule = e.detail;
+  /** The rule the page loaded with this id (a matrix cell's direct rule, or an account rule), for its revision. */
+  private _findRule(id: string): CategoryPricingRule | undefined {
+    return (
+      this._accountRules.find(r => r.id === id) ??
+      this._matrix?.cells.find(c => !c.inherited && c.rule?.id === id)?.rule ??
+      (this._drawerCell?.rule?.id === id ? this._drawerCell.rule : undefined)
+    );
+  }
+
+  /** A 409 stale_revision means another session moved the rule: say so and read the rules again. */
+  private async _handleStale(err: unknown): Promise<boolean> {
+    if (!(err instanceof ApiError && err.isStaleRevision)) return false;
+    ToastService.show(`${err.message} The rules were reloaded.`, 'error');
+    this._handleDrawerClose();
+    await this._loadMatrix();
+    if (this._activeTab === 'accounts') await this._loadAccountRules();
+    return true;
+  }
+
+  private async _handleSaveRule(e: CustomEvent<RuleSaveDetail>) {
+    const { values, customerId } = e.detail;
     const cell = this._drawerCell;
     if (!cell) return;
 
     try {
-      if (rule.id) {
-        await categoryPricingService.updateRule(rule.id, rule);
+      const existing = cell.rule && cell.rule.id ? cell.rule : null;
+      if (existing) {
+        // The PUT replaces the values on the revision the page loaded; the target is fixed at create.
+        await categoryPricingService.updateRule(existing.id, ruleUpdateFromRule(existing, values), existing.revision);
         ToastService.show('Rule updated successfully', 'success');
       } else {
+        // A new rule, or an override of an inherited one (which loses the ancestor's id and revision).
+        const targetType: TargetType = cell.rule?.target_type ?? this._drawerTargetType ?? 'tier';
         await categoryPricingService.createRule({
-          ...rule,
-          target_type: rule.target_type || 'TIER',
-          tier: rule.target_type === 'ACCOUNT' ? undefined : cell.tier,
+          ...values,
+          target_type: targetType,
+          ...(targetType === 'account'
+            ? { customer_id: customerId ?? cell.rule?.customer_id ?? undefined }
+            : { tier: cell.tier }),
           category_id: cell.category_id,
           is_active: true,
         });
@@ -139,22 +167,29 @@ export class GablePricingMatrix extends LitElement {
       await this._loadMatrix();
       if (this._activeTab === 'accounts') await this._loadAccountRules();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save rule';
-      ToastService.show(message, 'error');
+      if (!(await this._handleStale(err))) {
+        ToastService.show(apiErrorMessage(err, 'Failed to save rule'), 'error');
+      }
     }
   }
 
   private async _handleDeleteRule(e: CustomEvent<string>) {
     const id = e.detail;
+    const rule = this._findRule(id);
+    if (!rule) {
+      ToastService.show('That rule is no longer loaded; refresh and try again', 'error');
+      return;
+    }
     try {
-      await categoryPricingService.deleteRule(id);
+      await categoryPricingService.deleteRule(id, rule.revision);
       ToastService.show('Rule deleted', 'success');
       this._handleDrawerClose();
       await this._loadMatrix();
       if (this._activeTab === 'accounts') await this._loadAccountRules();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete rule';
-      ToastService.show(message, 'error');
+      if (!(await this._handleStale(err))) {
+        ToastService.show(apiErrorMessage(err, 'Failed to delete rule'), 'error');
+      }
     }
   }
 
@@ -164,18 +199,24 @@ export class GablePricingMatrix extends LitElement {
   }
 
   private async _handleBulkApply() {
-    const value = parseFloat(this._bulkRuleValue);
-    if (isNaN(value) || this._selectedCells.size === 0 || !this._matrix) return;
+    if (this._selectedCells.size === 0 || !this._matrix) return;
+    const parsed = ruleValuesFromInput(this._bulkRuleType, this._bulkRuleValue);
+    if (!parsed.ok) {
+      ToastService.show(parsed.message, 'error');
+      return;
+    }
 
-    const rules: Partial<CategoryPricingRule>[] = [];
+    const rules: CategoryRuleBulkItem[] = [];
     for (const key of this._selectedCells) {
       const [catId, tier] = key.split(':');
+      // A cell that already holds its own rule is replaced by naming its id; the others create.
+      const direct = this._matrix.cells.find(c => c.category_id === catId && c.tier === tier && !c.inherited)?.rule;
       rules.push({
-        target_type: 'TIER',
+        ...parsed.values,
+        ...(direct?.id ? { id: direct.id, revision: direct.revision } : {}),
+        target_type: 'tier',
         tier,
         category_id: catId,
-        rule_type: this._bulkRuleType,
-        rule_value: value,
         is_active: true,
       });
     }
@@ -188,8 +229,7 @@ export class GablePricingMatrix extends LitElement {
       this._bulkRuleValue = '';
       await this._loadMatrix();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Bulk operation failed';
-      ToastService.show(message, 'error');
+      ToastService.show(apiErrorMessage(err, 'Bulk operation failed'), 'error');
     }
   }
 
@@ -210,7 +250,7 @@ export class GablePricingMatrix extends LitElement {
       inherited: false,
     };
     this._drawerCell = cell;
-    this._drawerTargetType = 'ACCOUNT';
+    this._drawerTargetType = 'account';
     this._drawerOpen = true;
   }
 
@@ -224,7 +264,7 @@ export class GablePricingMatrix extends LitElement {
       inherited: false,
     };
     this._drawerCell = cell;
-    this._drawerTargetType = 'ACCOUNT';
+    this._drawerTargetType = 'account';
     this._drawerOpen = true;
   }
 
@@ -307,14 +347,14 @@ export class GablePricingMatrix extends LitElement {
               @change=${(e: Event) => { this._bulkRuleType = (e.target as HTMLSelectElement).value as CategoryRuleType; }}
               class="bg-deep-space border border-white/10 rounded px-2 py-1.5 text-white text-sm"
             >
-              <option value="MARKDOWN">MARKDOWN</option>
-              <option value="MARKUP">MARKUP</option>
-              <option value="MARGIN">MARGIN</option>
-              <option value="FIXED">FIXED</option>
+              <option value="markdown">MARKDOWN</option>
+              <option value="markup">MARKUP</option>
+              <option value="margin">MARGIN</option>
+              <option value="fixed">FIXED</option>
             </select>
             <input
               type="number"
-              step="0.01"
+              step="0.0001"
               .value=${this._bulkRuleValue}
               @input=${(e: Event) => { this._bulkRuleValue = (e.target as HTMLInputElement).value; }}
               placeholder="Value"
@@ -477,7 +517,7 @@ export class GablePricingMatrix extends LitElement {
         ${this._drawerOpen && this._drawerCell ? html`
           <gable-rule-drawer
             .rule=${this._drawerCell.rule || {
-              target_type: this._drawerTargetType || 'TIER',
+              target_type: this._drawerTargetType || 'tier',
               tier: this._drawerCell.tier,
               category_id: this._drawerCell.category_id,
             }}

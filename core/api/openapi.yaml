@@ -5352,19 +5352,27 @@ paths:
       operationId: locationList
       tags: [location]
       summary: List every location node
+      description: >-
+        The keyset envelope of ADR 0001 section 1, ordered created_at DESC, id DESC, behind the branch wall: a bound caller lists its branches' rows.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: All location nodes, a bare array that is null when none exist.
+          description: The page of locations.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LocationList"
+                $ref: "#/components/schemas/LocationPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: locationCreate
       tags: [location]
@@ -5380,7 +5388,14 @@ paths:
               $ref: "#/components/schemas/LocationCreateRequest"
       responses:
         "201":
-          description: The created location.
+          description: The created location, revision 1, with its ETag and Location.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -5397,6 +5412,8 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/locations/{id}:
     get:
       operationId: locationGet
@@ -5411,25 +5428,30 @@ paths:
             format: uuid
       responses:
         "200":
-          description: The location.
+          description: The location, with its revision ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: locationUpdate
       tags: [location]
       summary: Update a location node
+      description: Type and parent_id are not mutable; the write carries the revision.
       parameters:
         - name: id
           in: path
@@ -5438,15 +5460,25 @@ paths:
             type: string
             format: uuid
         - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Location"
+              $ref: "#/components/schemas/LocationUpdate"
       responses:
         "200":
-          description: The updated location.
+          description: The updated location with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -5458,13 +5490,15 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
     delete:
       operationId: locationDelete
       tags: [location]
@@ -5476,49 +5510,76 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless a body revision carries it.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                revision:
+                  type: integer
+                  format: int64
       responses:
         "204":
           description: Archived (active set false).
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/branches:
     get:
       operationId: branchList
       tags: [location]
       summary: List branches
+      description: The keyset envelope, ordered created_at DESC, id DESC.
       parameters:
         - name: include_inactive
           in: query
-          description: Only the literal string true includes archived branches.
+          description: true includes archived branches.
           schema:
             type: string
-            enum: ["true"]
+            enum: ["true", "false"]
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: The branches, a bare array that is null when none exist.
+          description: The page of branches.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LocationList"
+                $ref: "#/components/schemas/LocationPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: branchCreate
       tags: [location]
       summary: Create a branch
-      description: Creates a location node with type BRANCH and no parent.
+      description: >-
+        Creates a location node with type branch and no parent; the type in the body, when sent, is overridden.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -5529,7 +5590,14 @@ paths:
               $ref: "#/components/schemas/LocationCreateRequest"
       responses:
         "201":
-          description: The created branch.
+          description: The created branch, revision 1, with its ETag and Location.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -5546,6 +5614,8 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/branches/{id}:
     get:
       operationId: branchGet
@@ -5561,21 +5631,25 @@ paths:
             format: uuid
       responses:
         "200":
-          description: The branch.
+          description: The branch, with its revision ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: branchUpdate
       tags: [location]
@@ -5589,15 +5663,25 @@ paths:
             type: string
             format: uuid
         - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Location"
+              $ref: "#/components/schemas/LocationUpdate"
       responses:
         "200":
-          description: The updated branch.
+          description: The updated branch with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -5609,13 +5693,15 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
     delete:
       operationId: branchDelete
       tags: [location]
@@ -5627,25 +5713,35 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless a body revision carries it.
       responses:
         "204":
           description: Archived (active set false).
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/branches/{id}/tree:
     get:
       operationId: branchTree
       tags: [location]
       summary: Get a branch's location tree
-      description: The branch with its children nested.
+      description: The branch's rows as the list envelope, ordered by path.
       parameters:
         - name: id
           in: path
@@ -5655,19 +5751,19 @@ paths:
             format: uuid
       responses:
         "200":
-          description: The tree, a bare array.
+          description: The tree's rows.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LocationList"
+                $ref: "#/components/schemas/LocationPage"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/branches/{id}/users:
     get:
       operationId: branchListUsers
@@ -8602,7 +8698,7 @@ paths:
       tags: [pricing]
       summary: Calculate a customer price for a product
       description: >-
-        Guarded admin or owner. customer_id and product_id are required UUIDs. A non positive or unparseable quantity silently falls back to 1 and an unparseable job_id is silently ignored. A customer or product lookup failure of any kind (not only a missing row) answers 404.
+        Guarded admin or owner. The price one line would carry (ADR 0006 section 7.3): the exact scale 4 unit price in the product's stocking unit, the conversion pair (1 and 1 until the unit sets of C3-2A), the extension rounded once to cents by the line extension rule, and the price basis in lowercase. customer_id and product_id are required UUIDs; a quantity that is not a positive decimal string at scale 4 or a job_id that is not a UUID is a 400 naming it. A missing customer or product is 404.
       parameters:
         - name: customer_id
           in: query
@@ -8615,8 +8711,8 @@ paths:
         - name: quantity
           in: query
           required: false
-          description: Volume pricing quantity; default 1.
-          schema: {type: number}
+          description: A positive decimal string at scale 4; default "1".
+          schema: {type: string}
         - name: job_id
           in: query
           required: false
@@ -8629,42 +8725,47 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingCalculatedPrice"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/rules:
     get:
       operationId: pricingRuleList
       tags: [pricing]
       summary: List pricing rules
-      description: Guarded admin or owner. A bare array, unpaged; null when the table is empty.
+      description: >-
+        Guarded admin or owner. The list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC); items is never null.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: Every pricing rule.
+          description: The page of rules.
           content:
             application/json:
               schema:
-                type: [array, "null"]
-                items:
-                  $ref: "#/components/schemas/PricingRule"
+                $ref: "#/components/schemas/PricingRulePage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: pricingRuleCreate
       tags: [pricing]
       summary: Create a pricing rule
       description: >-
-        Guarded admin or owner. Only name and rule_type are validated. The server assigns id and both timestamps; is_active is not defaulted, so an omitted is_active is stored and echoed as false. Unknown rule_type values fail at the database and answer 500.
+        Guarded admin or owner. Every field problem is collected into one 400 naming each field. A rule carries a fixed price, a discount or a markup. Prices are integers at scale 4 (fixed_price_ten_thousandths); percentages and quantities are decimal strings. The response is 201 with Location and the revision ETag.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -8675,7 +8776,16 @@ paths:
               $ref: "#/components/schemas/PricingRuleCreateRequest"
       responses:
         "201":
-          description: The created rule.
+          description: The created rule at revision 1.
+          headers:
+            Location:
+              description: The rule's URL.
+              schema:
+                type: string
+            ETag:
+              description: The rule revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -8687,13 +8797,13 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/ConflictEither"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/calculate-escalation:
     post:
       operationId: pricingCalculateEscalation
@@ -8736,31 +8846,31 @@ paths:
       tags: [pricing]
       summary: List product categories
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. The only pricing route with no role guard (any authenticated caller). view=flat returns the flat list; any other value, or none, returns the nested tree (children populated). Null when there are no categories.
+        Registered only when CATEGORY_PRICING_ENABLED=true. The only pricing route with no role guard beyond authentication. view=tree (default) returns the nested tree, view=flat the flat list; any other value is a 400. The list envelope with every category on one page.
       parameters:
         - name: view
           in: query
           required: false
-          schema: {type: string}
+          schema: {type: string, enum: [tree, flat]}
       responses:
         "200":
-          description: The categories, flat or as a tree.
+          description: The categories.
           content:
             application/json:
               schema:
-                type: [array, "null"]
-                items:
-                  $ref: "#/components/schemas/PricingProductCategory"
+                $ref: "#/components/schemas/PricingProductCategoryList"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: pricingCategoryCreate
       tags: [pricing]
       summary: Create a product category
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. name, slug and path are required. Duplicate slugs or paths fail at the database and answer 500.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. name, slug and path are required.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -8768,10 +8878,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PricingProductCategory"
+              $ref: "#/components/schemas/PricingProductCategoryWrite"
       responses:
         "201":
-          description: The created category, echoed with server filled fields.
+          description: The created category.
+          headers:
+            Location:
+              description: The category's URL.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -8783,20 +8898,20 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/ConflictEither"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/categories/{id}:
     put:
       operationId: pricingCategoryUpdate
       tags: [pricing]
       summary: Update a product category
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Updates name, slug, sort_order and is_active only (path and parent are not changed). There is no existence check: an unknown id still answers 200 with the echoed body.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Updates name, slug, sort_order and is_active; the path and parent are fixed.
       parameters:
         - name: id
           in: path
@@ -8808,10 +8923,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PricingProductCategory"
+              $ref: "#/components/schemas/PricingProductCategoryWrite"
       responses:
         "200":
-          description: The body echoed with the path id and a fresh updated_at.
+          description: The category as written.
           content:
             application/json:
               schema:
@@ -8822,26 +8937,31 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/ConflictEither"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/category-rules:
     get:
       operationId: pricingCategoryRuleList
       tags: [pricing]
       summary: List category pricing rules
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. When either limit or offset is present in the query the answer is the {data,total,limit,offset} page (limit non positive becomes 50, above 200 becomes 200, negative offset becomes 0); otherwise it is a bare array of every matching rule. Filters with an unparseable UUID are silently ignored; is_active is not a filter.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC). An unknown filter value or parameter is a 400 naming it; the legacy offset parameters are gone.
       parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
         - name: target_type
           in: query
           required: false
-          schema: {type: string, enum: [ACCOUNT, TIER]}
+          schema: {type: string, enum: [account, tier]}
         - name: tier
           in: query
           required: false
@@ -8854,37 +8974,31 @@ paths:
           in: query
           required: false
           schema: {type: string, format: uuid}
-        - name: limit
+        - name: is_active
           in: query
           required: false
-          schema: {type: integer}
-        - name: offset
-          in: query
-          required: false
-          schema: {type: integer}
+          schema: {type: boolean}
       responses:
         "200":
-          description: A bare array, or the page when limit or offset was supplied.
+          description: The page of category rules.
           content:
             application/json:
               schema:
-                oneOf:
-                  - type: array
-                    items:
-                      $ref: "#/components/schemas/PricingCategoryRule"
-                  - $ref: "#/components/schemas/PricingCategoryRulePage"
+                $ref: "#/components/schemas/PricingCategoryRulePage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: pricingCategoryRuleCreate
       tags: [pricing]
       summary: Create a category pricing rule
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Validation: target_type ACCOUNT or TIER; customer_id required for ACCOUNT; tier required for TIER; category_id required; rule_type one of MARKUP, MARKDOWN, FIXED, MARGIN. A duplicate answers 409.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. target_type account needs customer_id, tier needs tier. A fixed rule carries value_ten_thousandths (a scale 4 price), any other rule value_pct (a decimal string). The rule and its audit entry are written in one transaction. A second active rule for the same target and category is 409 duplicate.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -8892,10 +9006,19 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PricingCategoryRule"
+              $ref: "#/components/schemas/PricingCategoryRuleCreateRequest"
       responses:
         "201":
-          description: The created rule, echoed with server filled fields.
+          description: The created rule at revision 1.
+          headers:
+            Location:
+              description: The rule's URL.
+              schema:
+                type: string
+            ETag:
+              description: The rule revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -8907,20 +9030,20 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/ConflictEither"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/category-rules/bulk:
     post:
       operationId: pricingCategoryRuleBulkUpsert
       tags: [pricing]
       summary: Bulk upsert category pricing rules
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The body is a bare JSON array of 1 to 500 rules, each validated as on single create; any failure rejects the whole batch with 400.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The body is a JSON array of 1 to 500 rules, each validated as on single create; an element that carries an id replaces the rule with that id at its revision. Any failure refuses the whole batch, which is written with its audit entries in one transaction.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -8932,10 +9055,10 @@ paths:
               minItems: 1
               maxItems: 500
               items:
-                $ref: "#/components/schemas/PricingCategoryRule"
+                $ref: "#/components/schemas/PricingCategoryRuleBulkItem"
       responses:
         "200":
-          description: The number of rules submitted.
+          description: The number of rules written.
           content:
             application/json:
               schema:
@@ -8947,19 +9070,19 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/ConflictEither"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     delete:
       operationId: pricingCategoryRuleBulkDelete
       tags: [pricing]
       summary: Bulk delete category pricing rules
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. DELETE with a JSON body of ids; at least one is required.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. DELETE with a JSON body of ids; at least one is required. The deletions and their audit entries are one transaction.
       requestBody:
         required: true
         content:
@@ -8970,35 +9093,43 @@ paths:
         "204":
           description: Deleted; no body.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/category-rules/{id}:
     put:
       operationId: pricingCategoryRuleUpdate
       tags: [pricing]
       summary: Update a category pricing rule
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. No validation and no existence check: the decoded body is stored against the path id and echoed with 200.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Takes the rule's revision (If-Match or the body revision; neither is 428, a stale one 409 stale_revision). The target (account or tier, customer, category) is fixed at create: a body that names one is a 400 naming it. The write and its audit entry are one transaction.
       parameters:
         - name: id
           in: path
           required: true
           schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IfMatch"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PricingCategoryRule"
+              $ref: "#/components/schemas/PricingCategoryRuleUpdateRequest"
       responses:
         "200":
-          description: The body echoed with the path id.
+          description: The rule at its new revision.
+          headers:
+            ETag:
+              description: The rule revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -9009,43 +9140,54 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/ConflictEither"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     delete:
       operationId: pricingCategoryRuleDelete
       tags: [pricing]
       summary: Delete a category pricing rule
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. No existence check: an unknown id still answers 204.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. At the rule's revision (If-Match or an optional body revision). A missing rule is 404.
       parameters:
         - name: id
           in: path
           required: true
           schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "204":
           description: Deleted; no body.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/category-rules/{id}/audit:
     get:
       operationId: pricingCategoryRuleAudit
       tags: [pricing]
       summary: List audit entries for a category pricing rule
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. A bare array, always an array (empty when none).
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The list envelope, the rule's most recent entries (at most 50) on one page.
       parameters:
         - name: id
           in: path
@@ -9057,17 +9199,15 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/PricingCategoryRuleAudit"
+                $ref: "#/components/schemas/PricingCategoryRuleAuditList"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/matrix:
     get:
       operationId: pricingMatrix
@@ -9082,19 +9222,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PricingMatrix"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/resolve:
     get:
       operationId: pricingResolve
       tags: [pricing]
       summary: Preview the effective category price for a product
       description: >-
-        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. product_id is required. An unparseable customer_id is silently ignored (treated as none). When tier is absent it is taken from the customer, else RETAIL. A product with no category resolves to match_type none with an empty category_path, with 200.
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. product_id is required; a customer_id that is not a UUID is a 400. When tier is absent it is taken from the customer, else RETAIL. A product with no category resolves to match_type none with an empty category_path, with 200.
       parameters:
         - name: product_id
           in: query
@@ -9116,13 +9258,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingResolvedCategoryPrice"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/WireBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/pricing/rebates/programs:
     get:
       operationId: pricingRebateProgramList
@@ -9466,9 +9608,12 @@ paths:
       operationId: productList
       tags: [product]
       summary: List products
+      description: >-
+        The keyset envelope of ADR 0001 section 1, ordered created_at DESC, id DESC. Money is integer scaled; quantities are decimal strings.
       parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/Include'
       responses:
         '200':
           description: The page of products.
@@ -9476,6 +9621,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -9493,14 +9640,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Product'
+              $ref: '#/components/schemas/ProductCreate'
       responses:
         '201':
-          description: The created product.
+          description: The created product, revision 1, with its ETag and Location.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Product'
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
@@ -9521,10 +9675,10 @@ paths:
       tags: [product]
       summary: List products below their reorder point
       description: >-
-        The alert rows omit on order quantity, velocity and lead time; they carry the deficit only.
+        The envelope; quantities are decimal strings. The rows carry the deficit only.
       responses:
         '200':
-          description: The alerts, a bare array that is null when nothing is below its reorder point.
+          description: The alerts envelope.
           content:
             application/json:
               schema:
@@ -9549,26 +9703,30 @@ paths:
             format: uuid
       responses:
         '200':
-          description: The product.
+          description: The product, with its revision ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Product'
+                $ref: '#/components/schemas/ProductView'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/WireBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/WireNotFound'
   /api/v1/products/{id}/detail:
     get:
       operationId: productDetail
       tags:
         - product
       summary: Get product detail
-      description: A missing product answers 500, not 404.
+      description: The PIM aggregate; the product summary is the converted product wire.
       parameters:
         - name: id
           in: path
@@ -9578,17 +9736,19 @@ paths:
             format: uuid
       responses:
         '200':
-          description: The product with its PIM content, media and collateral.
+          description: The PIM aggregate.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductDetail'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/WireBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/content:
@@ -9997,10 +10157,9 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/margins:
     patch:
-      operationId: productUpdateMarginRules
+      operationId: productUpdateMargins
       tags: [product]
-      summary: Set the target margin and commission rate
-      description: A bare 200 with no body on success.
+      summary: Update the margin rules
       parameters:
         - name: id
           in: path
@@ -10009,6 +10168,12 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
@@ -10017,28 +10182,38 @@ paths:
               $ref: '#/components/schemas/ProductMarginUpdate'
       responses:
         '200':
-          description: Updated; no body.
+          description: The product with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/WireConflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/dimensions:
     patch:
       operationId: productUpdateDimensions
       tags: [product]
-      summary: Set the PIM parametric geometry
+      summary: Write the parametric geometry
       description: >-
-        All fields are nullable: an omitted or explicitly null field clears the column to no geometry recorded, while a real zero is a recorded zero dimension. The persisted geometry is returned.
+        Every geometry field is a pointer: a null clears the column to SQL NULL ("not recorded"), a real zero is a measurement.
       parameters:
         - name: id
           in: path
@@ -10047,40 +10222,52 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Geometry'
+              $ref: '#/components/schemas/ProductDimensionsUpdate'
       responses:
         '200':
-          description: The persisted geometry.
+          description: The product with the persisted geometry, the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Geometry'
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/WireConflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/lead-time:
     patch:
       operationId: productUpdateLeadTime
       tags: [product]
-      summary: Set the dealer side lead time
+      summary: Publish or clear the lead time
       description: >-
-        The lead time in days published to the portal catalog. A null clears it back to unpublished; zero asserts same day availability. The request is echoed as the response.
+        lead_time_days null is "unpublished", a different fact than zero ("available today").
       parameters:
         - name: id
           in: path
@@ -10089,6 +10276,12 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
@@ -10097,23 +10290,33 @@ paths:
               $ref: '#/components/schemas/ProductLeadTimeUpdate'
       responses:
         '200':
-          description: The echoed request.
+          description: The product with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProductLeadTimeUpdate'
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/WireConflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/kit-components:
     get:
       operationId: productKitComponentsGet
@@ -10149,7 +10352,7 @@ paths:
       tags: [product]
       summary: Replace a kit's component list
       description: >-
-        Replaces the whole list. A product with a non empty list becomes a kit (is_kit); an empty list clears the definition. A kit cannot contain a kit and cannot contain itself. Until the products module converts there is no product revision to precondition on: last write wins, as ADR 0005 section 2.6 states.
+        Replaces the whole list in one transaction at the product's revision (If-Match or the body revision, as every write): the delete, the inserts and the is_kit update with the revision bump are one database act, with the audit row and a product.updated event (parts kit_components) in the same transaction, so a fault partway leaves the kit unchanged. A product with a non empty list becomes a kit (is_kit); an empty list clears the definition. A kit cannot contain a kit, cannot contain itself and lists a component once.
       parameters:
         - name: id
           in: path
@@ -10159,6 +10362,12 @@ paths:
             format: uuid
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted product revision; required unless the body carries it.
       requestBody:
         required: true
         content:
@@ -10167,6 +10376,10 @@ paths:
               type: object
               required: [components]
               properties:
+                revision:
+                  type: integer
+                  format: int64
+                  description: The product revision this write builds on (If-Match carries it too; the write needs one of them).
                 components:
                   type: array
                   items:
@@ -10181,7 +10394,11 @@ paths:
                         description: Per one kit, in the component's stocking unit; a decimal string greater than zero.
       responses:
         "200":
-          description: The replaced component list.
+          description: The replaced component list, with the product's new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -10194,10 +10411,14 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/projects:
@@ -16354,16 +16575,18 @@ components:
           enum: [queued]
     LocationType:
       type: string
-      enum: [BRANCH, ZONE, AISLE, RACK, SHELF, BIN, YARD]
+      enum: [branch, zone, aisle, rack, shelf, bin, yard]
     Location:
       type: object
-      required: [id, path, type, code, active, created_at, updated_at]
+      description: >-
+        A node of the hierarchy; the type is lowercase on the wire and the optional metadata is present with null (ADR 0001 sections 6 and 12).
+      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, timezone, active, branch_id, revision, created_at, updated_at]
       properties:
         id:
           type: string
           format: uuid
         parent_id:
-          type: string
+          type: [string, "null"]
           format: uuid
         path:
           type: string
@@ -16372,40 +16595,87 @@ components:
         code:
           type: string
         description:
-          type: string
+          type: [string, "null"]
         name:
-          type: string
+          type: [string, "null"]
         address:
-          type: string
+          type: [string, "null"]
         city:
-          type: string
+          type: [string, "null"]
         state:
-          type: string
+          type: [string, "null"]
         zip:
-          type: string
+          type: [string, "null"]
         phone:
-          type: string
+          type: [string, "null"]
         tax_jurisdiction_code:
-          type: string
+          type: [string, "null"]
         default_tax_rate:
           type: [number, "null"]
         timezone:
-          type: string
+          type: [string, "null"]
         active:
           type: boolean
         branch_id:
-          type: string
+          type: [string, "null"]
           format: uuid
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-        children:
+    LocationPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1.
+      properties:
+        items:
           type: array
           items:
             $ref: "#/components/schemas/Location"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    LocationUpdate:
+      type: object
+      properties:
+        path:
+          type: string
+        code:
+          type: string
+        description:
+          type: [string, "null"]
+        name:
+          type: [string, "null"]
+        address:
+          type: [string, "null"]
+        city:
+          type: [string, "null"]
+        state:
+          type: [string, "null"]
+        zip:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        tax_jurisdiction_code:
+          type: [string, "null"]
+        default_tax_rate:
+          type: [number, "null"]
+        timezone:
+          type: [string, "null"]
+        active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
     LocationCreateRequest:
       type: object
       description: The location shape with the active flag told apart from an explicit false.
@@ -16443,10 +16713,6 @@ components:
         active:
           type: [boolean, "null"]
           description: Defaults to true when absent; an explicit false is honored.
-    LocationList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/Location"
     BranchSummary:
       type: object
       required: [id, code, name, active]
@@ -19370,70 +19636,90 @@ components:
             $ref: '#/components/schemas/PosReturnLineRequest'
     PricingSource:
       type: string
-      enum: [CONTRACT, TIER, RETAIL, QUANTITY_BREAK, JOB_OVERRIDE, PROMOTIONAL, CATEGORY_TIER, CATEGORY_ACCOUNT]
+      description: Where a price came from, lowercase (ADR 0006 section 7.3).
+      enum: [contract, tier, retail, quantity_break, job_override, promotional, category_tier, category_account]
     PricingRuleType:
       type: string
-      enum: [QUANTITY_BREAK, JOB_OVERRIDE, PROMOTIONAL]
+      enum: [quantity_break, job_override, promotional]
     PricingCalculatedPrice:
       type: object
-      required: [product_id, original_price, final_price, discount_pct, source, details]
+      description: >-
+        The price read (ADR 0006 section 7.3). unit_price_ten_thousandths is the exact scale 4 price in price_uom; uom_qty and price_uom_qty are the line's conversion pair; line_total_cents is the one rounding, by the line extension rule.
+      required: [customer_id, product_id, quantity, uom, unit_price_ten_thousandths, price_uom, uom_qty, price_uom_qty, line_total_cents, price_basis, details]
       properties:
+        customer_id: {type: string, format: uuid}
         product_id: {type: string, format: uuid}
-        original_price: {type: number, description: Base retail price.}
-        final_price: {type: number}
-        discount_pct: {type: number}
-        source:
+        quantity: {type: string}
+        uom: {type: string}
+        unit_price_ten_thousandths: {type: integer, format: int64}
+        price_uom: {type: string}
+        uom_qty: {type: string}
+        price_uom_qty: {type: string}
+        line_total_cents: {type: integer, format: int64}
+        price_basis:
           $ref: "#/components/schemas/PricingSource"
         details:
           type: string
           description: Free text such as "Gold Tier (15%)".
     PricingRule:
       type: object
-      required: [id, name, rule_type, min_quantity, is_active, priority, created_at, updated_at]
+      required: [id, name, rule_type, product_id, customer_id, job_id, category, fixed_price_ten_thousandths, discount_pct, markup_pct, min_quantity, max_quantity, margin_floor_pct, starts_at, expires_at, is_active, priority, revision, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
         rule_type:
           $ref: "#/components/schemas/PricingRuleType"
-        product_id: {type: string, format: uuid}
-        customer_id: {type: string, format: uuid}
-        job_id: {type: string, format: uuid}
+        product_id: {type: [string, "null"], format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
+        job_id: {type: [string, "null"], format: uuid}
         category:
           type: string
-          description: Empty (and omitted) means unscoped.
-        fixed_price: {type: number}
-        discount_pct: {type: number}
-        markup_pct: {type: number}
-        min_quantity: {type: number}
-        max_quantity: {type: number}
-        margin_floor_pct: {type: number}
-        starts_at: {type: string, format: date-time}
-        expires_at: {type: string, format: date-time}
+          description: Empty means unscoped.
+        fixed_price_ten_thousandths: {type: [integer, "null"], format: int64}
+        discount_pct: {type: [string, "null"]}
+        markup_pct: {type: [string, "null"]}
+        min_quantity: {type: string}
+        max_quantity: {type: [string, "null"]}
+        margin_floor_pct: {type: [string, "null"]}
+        starts_at: {type: [string, "null"], format: date-time}
+        expires_at: {type: [string, "null"], format: date-time}
         is_active: {type: boolean}
         priority: {type: integer}
+        revision: {type: integer, format: int64}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    PricingRulePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingRule"
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, format: int64}
     PricingRuleCreateRequest:
       type: object
       required: [name, rule_type]
-      description: The pricing rule body the create handler decodes. id and both timestamps are overwritten or filled by the server.
+      description: The create body. The server assigns the id, the revision and both timestamps; a field not listed is a 400.
       properties:
         name: {type: string, minLength: 1}
         rule_type:
           $ref: "#/components/schemas/PricingRuleType"
-        product_id: {type: string, format: uuid}
-        customer_id: {type: string, format: uuid}
-        job_id: {type: string, format: uuid}
-        category: {type: string}
-        fixed_price: {type: number}
-        discount_pct: {type: number}
-        markup_pct: {type: number}
-        min_quantity: {type: number}
-        max_quantity: {type: number}
-        margin_floor_pct: {type: number}
-        starts_at: {type: string, format: date-time}
-        expires_at: {type: string, format: date-time}
-        is_active: {type: boolean, description: Not defaulted; omitted stores false.}
+        product_id: {type: [string, "null"], format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
+        job_id: {type: [string, "null"], format: uuid}
+        category: {type: [string, "null"]}
+        fixed_price_ten_thousandths: {type: [integer, "null"], format: int64}
+        discount_pct: {type: [string, "null"]}
+        markup_pct: {type: [string, "null"]}
+        min_quantity: {type: [string, "null"]}
+        max_quantity: {type: [string, "null"]}
+        margin_floor_pct: {type: [string, "null"]}
+        starts_at: {type: [string, "null"], format: date-time}
+        expires_at: {type: [string, "null"], format: date-time}
+        is_active: {type: boolean, description: Defaults to true.}
         priority: {type: integer}
     PricingEscalationRequest:
       type: object
@@ -19467,7 +19753,7 @@ components:
         is_expired: {type: boolean}
     PricingProductCategory:
       type: object
-      required: [id, name, slug, path, sort_order, is_active, created_at, updated_at]
+      required: [id, name, slug, path, parent_id, sort_order, is_active, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -19475,36 +19761,61 @@ components:
         path:
           type: string
           description: ltree path such as lumber.framing.
-        parent_id: {type: string, format: uuid}
+        parent_id: {type: [string, "null"], format: uuid}
         sort_order: {type: integer}
         is_active: {type: boolean}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         children:
           type: array
+          description: Present on the tree view only.
           items:
             $ref: "#/components/schemas/PricingProductCategory"
+    PricingProductCategoryList:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingProductCategory"
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+    PricingProductCategoryWrite:
+      type: object
+      required: [name, slug, path]
+      properties:
+        name: {type: string}
+        slug: {type: string}
+        path: {type: string}
+        parent_id: {type: [string, "null"], format: uuid}
+        sort_order: {type: integer}
+        is_active: {type: boolean}
     PricingCategoryRule:
       type: object
-      required: [id, target_type, category_id, rule_type, rule_value, is_active, priority, created_at, updated_at]
+      description: >-
+        The rule's value is one number with two readings (ADR 0001 section 7): value_ten_thousandths on a fixed rule, value_pct otherwise, null for the other.
+      required: [id, target_type, customer_id, tier, category_id, rule_type, value_ten_thousandths, value_pct, margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, revision, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         target_type:
           type: string
-          enum: [ACCOUNT, TIER]
-        customer_id: {type: string, format: uuid}
+          enum: [account, tier]
+        customer_id: {type: [string, "null"], format: uuid}
         tier: {type: string}
         category_id: {type: string, format: uuid}
         rule_type:
           type: string
-          enum: [MARKUP, MARKDOWN, FIXED, MARGIN]
-        rule_value: {type: number}
-        margin_floor_pct: {type: number}
-        starts_at: {type: string, format: date-time}
-        expires_at: {type: string, format: date-time}
+          enum: [markup, markdown, fixed, margin]
+        value_ten_thousandths: {type: [integer, "null"], format: int64}
+        value_pct: {type: [string, "null"]}
+        margin_floor_pct: {type: [string, "null"]}
+        starts_at: {type: [string, "null"], format: date-time}
+        expires_at: {type: [string, "null"], format: date-time}
         is_active: {type: boolean}
         priority: {type: integer}
         created_by: {type: string}
+        revision: {type: integer, format: int64}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         category_name: {type: string, description: Joined on reads.}
@@ -19512,15 +19823,59 @@ components:
         customer_name: {type: string, description: Joined on reads.}
     PricingCategoryRulePage:
       type: object
-      required: [data, total, limit, offset]
+      required: [items, next_cursor, limit]
       properties:
-        data:
+        items:
           type: array
           items:
             $ref: "#/components/schemas/PricingCategoryRule"
-        total: {type: integer}
+        next_cursor: {type: [string, "null"]}
         limit: {type: integer}
-        offset: {type: integer}
+        total: {type: integer, format: int64}
+    PricingCategoryRuleValues:
+      type: object
+      properties:
+        rule_type:
+          type: string
+          enum: [markup, markdown, fixed, margin]
+        value_ten_thousandths: {type: [integer, "null"], format: int64}
+        value_pct: {type: [string, "null"]}
+        margin_floor_pct: {type: [string, "null"]}
+        starts_at: {type: [string, "null"], format: date-time}
+        expires_at: {type: [string, "null"], format: date-time}
+        is_active: {type: boolean, description: Defaults to true.}
+        priority: {type: integer}
+    PricingCategoryRuleCreateRequest:
+      description: The create body; a field not listed is a 400.
+      allOf:
+        - $ref: "#/components/schemas/PricingCategoryRuleValues"
+        - type: object
+          required: [target_type, category_id, rule_type]
+          properties:
+            target_type:
+              type: string
+              enum: [account, tier]
+            customer_id: {type: [string, "null"], format: uuid}
+            tier: {type: [string, "null"]}
+            category_id: {type: string, format: uuid}
+    PricingCategoryRuleBulkItem:
+      description: >-
+        One element of the bulk body; an id replaces the rule that has it, at the revision the element names (required with an id: 428 without, 409 when stale) and without changing the rule's scope.
+      allOf:
+        - $ref: "#/components/schemas/PricingCategoryRuleCreateRequest"
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            revision: {type: integer, format: int64}
+    PricingCategoryRuleUpdateRequest:
+      description: >-
+        The update body: the values and the revision. A target field (target_type, customer_id, tier, category_id) is a 400.
+      allOf:
+        - $ref: "#/components/schemas/PricingCategoryRuleValues"
+        - type: object
+          required: [rule_type]
+          properties:
+            revision: {type: integer, format: int64}
     PricingCategoryRuleAudit:
       type: object
       required: [id, rule_id, action, performed_by, performed_at]
@@ -19536,6 +19891,16 @@ components:
         target_type: {type: string}
         tier: {type: string}
         customer_id: {type: string, format: uuid}
+    PricingCategoryRuleAuditList:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingCategoryRuleAudit"
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
     PricingBulkCount:
       type: object
       required: [count]
@@ -19578,7 +19943,7 @@ components:
             $ref: "#/components/schemas/PricingMatrixCell"
     PricingResolvedCategoryPrice:
       type: object
-      required: [match_type, category_path, cost_price]
+      required: [match_type, category_path, cost_price_ten_thousandths]
       properties:
         rule:
           $ref: "#/components/schemas/PricingCategoryRule"
@@ -19586,9 +19951,10 @@ components:
           type: string
           enum: [account_exact, account_ancestor, tier_exact, tier_ancestor, none]
         category_path: {type: string}
-        cost_price:
-          type: number
-          description: The product average unit cost, used by MARKUP and MARGIN rules.
+        cost_price_ten_thousandths:
+          type: integer
+          format: int64
+          description: The product average unit cost at scale 4, used by markup and margin rules.
     PricingRebateTier:
       type: object
       required: [id, program_id, min_volume, max_volume, rebate_pct, created_at]
@@ -19761,7 +20127,7 @@ components:
           type: integer
     KitComponentList:
       type: object
-      required: [kit_product_id, components]
+      required: [kit_product_id, components, revision]
       properties:
         kit_product_id:
           type: string
@@ -19770,13 +20136,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/KitComponent"
+        revision:
+          type: integer
+          format: int64
+          description: The product's current revision; send it (or If-Match) on the next write.
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.
       enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
-    Product:
+    ProductView:
       type: object
-      required: [id, sku, description, uom_primary, base_price, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, reorder_point, reorder_qty, total_quantity, total_allocated, average_unit_cost, target_margin, commission_rate, created_at, updated_at]
+      description: >-
+        The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit.
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -19785,14 +20157,21 @@ components:
           type: string
         description:
           type: string
-        uom_primary:
-          $ref: "#/components/schemas/UOM"
-        base_price:
+        stock_uom:
+          $ref: '#/components/schemas/UOM'
+        base_price_ten_thousandths:
+          type: integer
+          format: int64
+          description: The base price per stocking unit at scale 4.
+        average_unit_cost_ten_thousandths:
+          type: integer
+          format: int64
+        target_margin:
           type: number
-          description: Float dollars.
+        commission_rate:
+          type: number
         vendor:
           type: [string, "null"]
-          description: Denormalized display name.
         vendor_id:
           type: [string, "null"]
           format: uuid
@@ -19802,7 +20181,62 @@ components:
           type: number
         length_in:
           type: [number, "null"]
-          description: Inches; null when the PIM has no geometry for the SKU.
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+        lead_time_days:
+          type: [integer, "null"]
+        reorder_point:
+          type: string
+          description: A decimal string at scale 4.
+        reorder_qty:
+          type: string
+        on_hand:
+          type: string
+          description: The stocking unit total of quantity.
+        allocated:
+          type: string
+        available:
+          type: string
+          description: on_hand less allocated.
+        revision:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductCreate:
+      type: object
+      required: [sku, description, stock_uom]
+      properties:
+        sku:
+          type: string
+        description:
+          type: string
+        stock_uom:
+          $ref: '#/components/schemas/UOM'
+        base_price_ten_thousandths:
+          type: integer
+          format: int64
+        vendor:
+          type: [string, "null"]
+        vendor_id:
+          type: [string, "null"]
+          format: uuid
+        upc:
+          type: [string, "null"]
+        weight_lbs:
+          type: number
+        length_in:
+          type: [number, "null"]
         width_in:
           type: [number, "null"]
         height_in:
@@ -19812,41 +20246,25 @@ components:
         geometry_source:
           type: [string, "null"]
         reorder_point:
-          type: number
+          type: string
         reorder_qty:
-          type: number
-        total_quantity:
-          type: number
-          description: Aggregated from inventory.
-        total_allocated:
-          type: number
-        average_unit_cost:
-          type: number
-          description: Float dollars.
-        target_margin:
-          type: number
-        commission_rate:
-          type: number
-        created_at:
           type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
     ProductPage:
       type: object
-      required: [data, total, limit, offset]
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
       properties:
-        data:
+        items:
           type: array
           items:
-            $ref: "#/components/schemas/Product"
-        total:
-          type: integer
+            $ref: '#/components/schemas/ProductView'
+        next_cursor:
+          type: [string, "null"]
         limit:
           type: integer
-        offset:
+        total:
           type: integer
+          format: int64
     Geometry:
       type: object
       description: >-
@@ -19880,32 +20298,59 @@ components:
           type: [string, "null"]
           format: uuid
         reorder_point:
-          type: number
+          type: string
         reorder_qty:
-          type: number
+          type: string
         current_stock:
-          type: number
+          type: string
         deficit:
-          type: number
+          type: string
     ReorderAlertList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/ReorderAlert"
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReorderAlert'
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
     ProductMarginUpdate:
       type: object
-      required: [target_margin, commission_rate]
       properties:
         target_margin:
           type: number
         commission_rate:
           type: number
+        revision:
+          type: integer
+          format: int64
+    ProductDimensionsUpdate:
+      type: object
+      properties:
+        length_in:
+          type: [number, "null"]
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+        revision:
+          type: integer
+          format: int64
     ProductLeadTimeUpdate:
       type: object
-      required: [lead_time_days]
       properties:
         lead_time_days:
           type: [integer, "null"]
-          description: Days; null clears to unpublished, zero asserts same day.
+        revision:
+          type: integer
+          format: int64
     PimContent:
       type: object
       description: pim.PIMContent. The handler always sends all fifteen fields. A product with no content yet answers a record with a zero id and zero timestamps.
@@ -20081,83 +20526,22 @@ components:
           format: date-time
     ProductDetail:
       type: object
-      description: pim.ProductDetail. content is null when the product has none.
-      required:
-        - id
-        - sku
-        - description
-        - uom_primary
-        - base_price
-        - vendor
-        - upc
-        - weight_lbs
-        - reorder_point
-        - reorder_qty
-        - total_quantity
-        - total_allocated
-        - average_unit_cost
-        - target_margin
-        - commission_rate
-        - created_at
-        - updated_at
-        - content
-        - media
-        - collateral
+      description: >-
+        The PIM aggregate. The product summary is the converted product wire (ADR 0006 7.1); content is null when the product has none.
+      required: [product, content, media, collateral]
       properties:
-        id:
-          type: string
-          format: uuid
-        sku:
-          type: string
-        description:
-          type: string
-        uom_primary:
-          type: string
-        base_price:
-          type: number
-          description: Float dollars today.
-        vendor:
-          type:
-            - string
-            - 'null'
-        upc:
-          type:
-            - string
-            - 'null'
-        weight_lbs:
-          type: number
-        reorder_point:
-          type: number
-        reorder_qty:
-          type: number
-        total_quantity:
-          type: number
-        total_allocated:
-          type: number
-        average_unit_cost:
-          type: number
-        target_margin:
-          type: number
-        commission_rate:
-          type: number
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+        product:
+          $ref: '#/components/schemas/ProductView'
         content:
-          oneOf:
-            - $ref: '#/components/schemas/PimContent'
-            - type: 'null'
+          type: [object, "null"]
         media:
           type: array
           items:
-            $ref: '#/components/schemas/PimMedia'
+            type: object
         collateral:
           type: array
           items:
-            $ref: '#/components/schemas/PimCollateral'
+            type: object
     PimContentUpdate:
       type: object
       description: 'UpdateContentRequest: every field optional, absent means unchanged.'

@@ -5,21 +5,72 @@ package pricing
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"math"
+	"math/big"
+	"sort"
+	"strings"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
+)
+
+// Precondition is the revision a client states for a write: the If-Match
+// header and the body's revision field, either or both (httpx.CheckRevision
+// resolves them against the locked row).
+type Precondition struct {
+	IfMatch  string
+	Revision *int64
+}
+
+// AuditLogger writes an audit row for a pricing write, inside the caller's
+// transaction: a failed write fails the mutation (the recipe's rule), so
+// unlike the exposure scanner's fire-and-forget AuditWriter the error
+// returns. Implemented by an adapter over pkg/audit.Logger in serve.go, as
+// the package mirrors audit entries rather than importing pkg/audit
+// (exposure_scanner.go's note); the outbox EventRecorder seam is the
+// scanner's own declaration, reused by these writes.
+type AuditLogger interface {
+	Log(ctx context.Context, e AuditEntry) error
+}
+
+// Event types the module writes to the outbox.
+const (
+	EventCategoryCreated     = "category.created"
+	EventCategoryUpdated     = "category.updated"
+	EventCategoryRuleCreated = "category_rule.created"
+	EventCategoryRuleUpdated = "category_rule.updated"
+	EventCategoryRuleDeleted = "category_rule.deleted"
 )
 
 // CategoryPricingService implements the 5-step category-aware pricing resolution.
 type CategoryPricingService struct {
 	catRepo CategoryRepository
+	tx      TxRunner      // optional; nil runs each write unwrapped (tests)
+	events  EventRecorder // optional; nil records nothing (tests)
+	audits  AuditLogger   // optional; nil writes no audit rows (tests)
 }
 
 // NewCategoryPricingService creates a new CategoryPricingService.
 func NewCategoryPricingService(catRepo CategoryRepository) *CategoryPricingService {
 	return &CategoryPricingService{catRepo: catRepo}
+}
+
+// WithOutbox wires the recorder of the category and category rule events.
+func (s *CategoryPricingService) WithOutbox(events EventRecorder) *CategoryPricingService {
+	s.events = events
+	return s
+}
+
+// WithAudit wires the audit rows of the category writes (a category rule's
+// audit trail is its own category_pricing_audit table).
+func (s *CategoryPricingService) WithAudit(a AuditLogger) *CategoryPricingService {
+	s.audits = a
+	return s
 }
 
 // ResolveEffectivePrice runs the 5-step resolution algorithm:
@@ -96,29 +147,37 @@ func (s *CategoryPricingService) ResolveEffectivePrice(
 	}, nil
 }
 
-// ApplyRule calculates the effective price based on rule type.
+// ApplyRule calculates the effective price based on rule type, in exact
+// rational arithmetic (ADR 0006 R3); the one scale 4 rounding happens where
+// the engine returns the price (R4.2), never inside a step.
 //   - MARKDOWN: basePrice * (1 - value/100)
-//   - MARKUP:   costPrice * (1 + value/100)
-//   - FIXED:    value (absolute price)
-//   - MARGIN:   costPrice / (1 - value/100)
-func (s *CategoryPricingService) ApplyRule(rule *CategoryPricingRule, basePrice float64, costPrice float64) float64 {
+//   - MARKUP:   costPrice * (1 + value/100), or on the base price when
+//     there is no cost to read (a cost of zero)
+//   - FIXED:    value (absolute price, exact)
+//   - MARGIN:   costPrice / (1 - value/100); a margin of 100 or more, or a
+//     zero cost, answers the base price unchanged
+func (s *CategoryPricingService) ApplyRule(rule *CategoryPricingRule, basePrice *big.Rat, costPrice *big.Rat) *big.Rat {
 	if rule == nil {
+		return basePrice
+	}
+	value := rule.ValueRat()
+	if value == nil {
 		return basePrice
 	}
 
 	switch rule.RuleType {
 	case CategoryRuleMarkdown:
-		return math.Round(basePrice*(1-rule.RuleValue/100)*100) / 100
+		return applyMarkdown(basePrice, value)
 	case CategoryRuleMarkup:
-		if costPrice > 0 {
-			return math.Round(costPrice*(1+rule.RuleValue/100)*100) / 100
+		if costPrice.Sign() > 0 {
+			return applyMarkupPercent(costPrice, value)
 		}
-		return math.Round(basePrice*(1+rule.RuleValue/100)*100) / 100
+		return applyMarkupPercent(basePrice, value)
 	case CategoryRuleFixed:
-		return rule.RuleValue
+		return value
 	case CategoryRuleMargin:
-		if costPrice > 0 && rule.RuleValue < 100 {
-			return math.Round(costPrice/(1-rule.RuleValue/100)*100) / 100
+		if costPrice.Sign() > 0 && value.Cmp(big.NewRat(100, 1)) < 0 {
+			return new(big.Rat).Quo(costPrice, new(big.Rat).Sub(big.NewRat(1, 1), new(big.Rat).Quo(value, big.NewRat(100, 1))))
 		}
 		return basePrice
 	default:
@@ -142,45 +201,204 @@ func (s *CategoryPricingService) ListCategoriesTree(ctx context.Context) ([]Prod
 	return buildCategoryTree(flat), nil
 }
 
-// CreateCategory creates a new product category.
+// CreateCategory creates a new product category with its audit row and its
+// category.created event in one transaction.
 func (s *CategoryPricingService) CreateCategory(ctx context.Context, c *ProductCategory) error {
-	return s.catRepo.CreateCategory(ctx, c)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.catRepo.CreateCategory(ctx, c); err != nil {
+			return err
+		}
+		return s.recordCategory(ctx, c, EventCategoryCreated)
+	})
 }
 
-// UpdateCategory updates an existing product category.
+// UpdateCategory updates an existing product category with its audit row and
+// its category.updated event in one transaction.
 func (s *CategoryPricingService) UpdateCategory(ctx context.Context, c *ProductCategory) error {
-	return s.catRepo.UpdateCategory(ctx, c)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.catRepo.UpdateCategory(ctx, c); err != nil {
+			return err
+		}
+		return s.recordCategory(ctx, c, EventCategoryUpdated)
+	})
+}
+
+// recordCategory writes a category write's audit row and outbox event inside
+// the caller's transaction, the event last.
+func (s *CategoryPricingService) recordCategory(ctx context.Context, c *ProductCategory, action string) error {
+	if s.audits != nil {
+		if err := s.audits.Log(ctx, AuditEntry{
+			Action: action, EntityType: "category", EntityID: c.ID.String(),
+			Changes: map[string]any{"slug": c.Slug, "name": c.Name, "path": c.Path},
+		}); err != nil {
+			return err
+		}
+	}
+	return s.recordCategoryEvent(ctx, c, action)
+}
+
+func (s *CategoryPricingService) recordCategoryEvent(ctx context.Context, c *ProductCategory, eventType string) error {
+	if s.events == nil {
+		return nil
+	}
+	raw, err := json.Marshal(map[string]any{"slug": c.Slug, "name": c.Name, "path": c.Path})
+	if err != nil {
+		return err
+	}
+	return s.events.Write(ctx, outbox.Event{
+		Type: eventType, EntityType: "category", EntityID: c.ID, Data: raw,
+	})
+}
+
+// recordRuleEvent writes a category rule's event inside the caller's
+// transaction. The rule's audit trail is its own category_pricing_audit
+// table; the event is the transaction's last statement.
+func (s *CategoryPricingService) recordRuleEvent(ctx context.Context, ruleID uuid.UUID, eventType string, data map[string]any) error {
+	if s.events == nil {
+		return nil
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return s.events.Write(ctx, outbox.Event{
+		Type: eventType, EntityType: "category_rule", EntityID: ruleID, Data: raw,
+	})
 }
 
 // --- Rule Management ---
 
-// CreateCategoryRule creates a new category pricing rule and logs an audit entry.
+// WithTxRunner substitutes the transaction boundary the rule writes run in.
+// Optional: unit tests run without one and each write then runs unwrapped.
+func (s *CategoryPricingService) WithTxRunner(tx TxRunner) *CategoryPricingService {
+	s.tx = tx
+	return s
+}
+
+// inTx runs fn in one transaction when a runner is wired, so a rule write
+// and its audit entry share one fate; every statement fn runs goes through
+// the transaction the context carries.
+func (s *CategoryPricingService) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
+}
+
+// CreateCategoryRule creates a new category pricing rule and its audit entry
+// in one transaction: a failed audit write fails the create. The rule's
+// category_rule.created event is the transaction's last statement.
 func (s *CategoryPricingService) CreateCategoryRule(ctx context.Context, r *CategoryPricingRule) error {
-	if err := s.catRepo.CreateCategoryRule(ctx, r); err != nil {
-		return err
-	}
-	s.logAudit(ctx, r.ID, "CREATE", nil, r)
-	return nil
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.catRepo.CreateCategoryRule(ctx, r); err != nil {
+			return err
+		}
+		if err := s.logAudit(ctx, r.ID, "CREATE", nil, r); err != nil {
+			return err
+		}
+		return s.recordRuleEvent(ctx, r.ID, EventCategoryRuleCreated, map[string]any{
+			"rule_type": strings.ToLower(string(r.RuleType)), "is_active": r.IsActive, "priority": r.Priority,
+		})
+	})
 }
 
-// UpdateCategoryRule updates an existing category pricing rule and logs an audit entry.
-func (s *CategoryPricingService) UpdateCategoryRule(ctx context.Context, r *CategoryPricingRule) error {
-	old, _ := s.catRepo.GetCategoryRule(ctx, r.ID)
-	if err := s.catRepo.UpdateCategoryRule(ctx, r); err != nil {
-		return err
-	}
-	s.logAudit(ctx, r.ID, "UPDATE", old, r)
-	return nil
+// UpdateCategoryRule updates an existing category pricing rule at the given
+// revision and writes its audit entry, in one transaction that holds the
+// row. A missing row or a stale revision is the contract's 404 or 409; the
+// revision check runs after the lock, so the audit entry's old values are
+// the row the update replaced.
+func (s *CategoryPricingService) UpdateCategoryRule(ctx context.Context, r *CategoryPricingRule, pre Precondition) error {
+	return s.inTx(ctx, func(ctx context.Context) error {
+		old, err := s.catRepo.LockCategoryRule(ctx, r.ID)
+		if err != nil {
+			return err
+		}
+		if old == nil {
+			return httpx.NotFound("no such category rule")
+		}
+		if err := httpx.CheckRevision(old.Revision, pre.IfMatch, pre.Revision); err != nil {
+			return err
+		}
+		r.TargetType, r.CustomerID, r.Tier, r.CategoryID = old.TargetType, old.CustomerID, old.Tier, old.CategoryID
+		if err := s.catRepo.UpdateCategoryRule(ctx, r, old.Revision); err != nil {
+			return resolveRuleWrite(err)
+		}
+		if err := s.logAudit(ctx, r.ID, "UPDATE", old, r); err != nil {
+			return err
+		}
+		stored, err := s.catRepo.GetCategoryRule(ctx, r.ID)
+		if err != nil {
+			return err
+		}
+		return s.recordRuleEvent(ctx, r.ID, EventCategoryRuleUpdated, map[string]any{
+			"rule_type": strings.ToLower(string(stored.RuleType)), "is_active": stored.IsActive,
+			"priority": stored.Priority, "revision": stored.Revision,
+		})
+	})
 }
 
-// DeleteCategoryRule deletes a category pricing rule and logs an audit entry.
-func (s *CategoryPricingService) DeleteCategoryRule(ctx context.Context, id uuid.UUID) error {
-	old, _ := s.catRepo.GetCategoryRule(ctx, id)
-	if err := s.catRepo.DeleteCategoryRule(ctx, id); err != nil {
+// resolveRuleWrite maps a rule write's refusals to the boundary errors.
+func resolveRuleWrite(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNotFound):
+		return httpx.NotFound("no such category rule")
+	case errors.Is(err, ErrStaleRevision):
+		return httpx.StaleRevision("the rule was changed after this revision was read; reload and retry")
+	default:
 		return err
 	}
-	s.logAudit(ctx, id, "DELETE", old, nil)
-	return nil
+}
+
+// ListCategoryRulesPage is the category rules list's keyset page:
+// `created_at DESC, id DESC` under the filters, limit+1 rows read so the
+// handler knows whether another page exists.
+func (s *CategoryPricingService) ListCategoryRulesPage(ctx context.Context, filter CategoryRuleFilter, after *time.Time, afterID *uuid.UUID, limit int, wantTotal bool) ([]CategoryPricingRule, bool, int64, error) {
+	rules, err := s.catRepo.ListCategoryRulesPage(ctx, filter, after, afterID, limit+1)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	more := len(rules) > limit
+	if more {
+		rules = rules[:limit]
+	}
+	var total int64
+	if wantTotal {
+		total, err = s.catRepo.CountCategoryRules(ctx, filter)
+		if err != nil {
+			return nil, false, 0, err
+		}
+	}
+	return rules, more, total, nil
+}
+
+// DeleteCategoryRule deletes a category pricing rule and writes its audit
+// entry, in one transaction that holds the row. The revision the caller
+// built on is checked after the lock.
+func (s *CategoryPricingService) DeleteCategoryRule(ctx context.Context, id uuid.UUID, pre Precondition) error {
+	return s.inTx(ctx, func(ctx context.Context) error {
+		old, err := s.catRepo.LockCategoryRule(ctx, id)
+		if err != nil {
+			return err
+		}
+		if old == nil {
+			return httpx.NotFound("no such category rule")
+		}
+		if err := httpx.CheckRevision(old.Revision, pre.IfMatch, pre.Revision); err != nil {
+			return err
+		}
+		if err := s.catRepo.DeleteCategoryRule(ctx, id); err != nil {
+			return err
+		}
+		if err := s.logAudit(ctx, id, "DELETE", old, nil); err != nil {
+			return err
+		}
+		return s.recordRuleEvent(ctx, id, EventCategoryRuleDeleted, nil)
+	})
 }
 
 // GetCategoryRule retrieves a single category pricing rule by ID.
@@ -193,67 +411,142 @@ func (s *CategoryPricingService) ListCategoryRules(ctx context.Context, filter C
 	return s.catRepo.ListCategoryRules(ctx, filter)
 }
 
-// ListCategoryRulesPaginated lists rules with pagination.
-func (s *CategoryPricingService) ListCategoryRulesPaginated(ctx context.Context, filter CategoryRuleFilter, limit, offset int) ([]CategoryPricingRule, int, error) {
-	return s.catRepo.ListCategoryRulesPaginated(ctx, filter, limit, offset)
-}
-
 // ListAuditEntries returns audit log entries for a given rule.
 func (s *CategoryPricingService) ListAuditEntries(ctx context.Context, ruleID uuid.UUID) ([]CategoryPricingAudit, error) {
 	return s.catRepo.ListAuditEntries(ctx, ruleID)
 }
 
-// BulkUpsertRules creates/updates multiple rules in a transaction with audit logging.
-func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []CategoryPricingRule) error {
-	// Fetch existing rules for audit diffing
-	existingMap := make(map[uuid.UUID]*CategoryPricingRule)
-	for _, r := range rules {
-		if r.ID != uuid.Nil {
-			if existing, err := s.catRepo.GetCategoryRule(ctx, r.ID); err == nil && existing != nil {
-				existingMap[r.ID] = existing
+// BulkUpsertRules creates or updates many rules, and writes one audit entry
+// per rule, in one transaction: a rule that cannot be written, or an audit
+// entry that cannot, refuses the whole batch. An element that replaces a rule
+// (it names an id that exists) must carry the revision it read, checked under
+// the row's lock, and may not change the rule's scope (the target and the
+// category are fixed at create, as on the single update). The same rule twice
+// in one batch is a 400 naming the second element's id: the revision check
+// exists to refuse the second write, and the audit would hold two entries
+// with the same old values. The rows are locked in id order, so two batches
+// naming the same rules never wait on each other in opposite orders. The
+// audit entries' new values come from the stored rows after the write, so
+// they carry what the batch really left, the moved revision included, never
+// the element the client sent.
+func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []CategoryPricingRule, pres []Precondition) error {
+	seen := make(map[uuid.UUID]bool, len(rules))
+	for i := range rules {
+		if rules[i].ID == uuid.Nil {
+			continue
+		}
+		if seen[rules[i].ID] {
+			return httpx.BadRequest("a batch lists a rule once",
+				httpx.FieldError{Field: fmt.Sprintf("[%d].id", i),
+					Message: "names a rule this batch already carries"})
+		}
+		seen[rules[i].ID] = true
+	}
+	return s.inTx(ctx, func(ctx context.Context) error {
+		order := make([]int, 0, len(rules))
+		for i := range rules {
+			if rules[i].ID != uuid.Nil {
+				order = append(order, i)
 			}
 		}
-	}
-
-	if err := s.catRepo.BulkUpsertRules(ctx, rules); err != nil {
-		return err
-	}
-
-	// Log audit for each rule
-	for i := range rules {
-		old := existingMap[rules[i].ID]
-		action := "CREATE"
-		if old != nil {
-			action = "UPDATE"
+		sort.Slice(order, func(a, b int) bool { return rules[order[a]].ID.String() < rules[order[b]].ID.String() })
+		existing := make(map[uuid.UUID]*CategoryPricingRule)
+		for _, i := range order {
+			old, err := s.catRepo.LockCategoryRule(ctx, rules[i].ID)
+			if err != nil {
+				return err
+			}
+			if old == nil {
+				continue
+			}
+			var pre Precondition
+			if i < len(pres) {
+				pre = pres[i]
+			}
+			if err := httpx.CheckRevision(old.Revision, pre.IfMatch, pre.Revision); err != nil {
+				return err
+			}
+			r := &rules[i]
+			if r.TargetType != old.TargetType || r.Tier != old.Tier || r.CategoryID != old.CategoryID ||
+				(r.CustomerID == nil) != (old.CustomerID == nil) || (r.CustomerID != nil && *r.CustomerID != *old.CustomerID) {
+				return httpx.BadRequest("a rule's target and category are fixed at create",
+					httpx.FieldError{Field: "id", Message: "the element changes the scope of the rule it replaces"})
+			}
+			existing[r.ID] = old
 		}
-		s.logAudit(ctx, rules[i].ID, action, old, &rules[i])
-	}
-	return nil
+		if err := s.catRepo.BulkUpsertRules(ctx, rules); err != nil {
+			return err
+		}
+		storedRules := make([]*CategoryPricingRule, len(rules))
+		for i := range rules {
+			old := existing[rules[i].ID]
+			action := "CREATE"
+			if old != nil {
+				action = "UPDATE"
+			}
+			stored, err := s.catRepo.GetCategoryRule(ctx, rules[i].ID)
+			if err != nil {
+				return err
+			}
+			storedRules[i] = stored
+			if err := s.logAudit(ctx, rules[i].ID, action, old, stored); err != nil {
+				return err
+			}
+		}
+		// Per-row events at the transaction's end (ADR 0003 section 2: a
+		// bulk writer never holds the event lock through its statements).
+		for i := range storedRules {
+			eventType := EventCategoryRuleCreated
+			if existing[rules[i].ID] != nil {
+				eventType = EventCategoryRuleUpdated
+			}
+			if err := s.recordRuleEvent(ctx, rules[i].ID, eventType, map[string]any{
+				"rule_type": strings.ToLower(string(storedRules[i].RuleType)),
+				"is_active": storedRules[i].IsActive, "priority": storedRules[i].Priority,
+				"revision": storedRules[i].Revision,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-// BulkDeleteRules deletes multiple rules with audit logging.
+// BulkDeleteRules deletes many rules and writes one audit entry per deleted
+// rule, in one transaction.
 func (s *CategoryPricingService) BulkDeleteRules(ctx context.Context, ids []uuid.UUID) error {
-	// Fetch existing rules for audit
-	var oldRules []*CategoryPricingRule
-	for _, id := range ids {
-		if old, err := s.catRepo.GetCategoryRule(ctx, id); err == nil && old != nil {
-			oldRules = append(oldRules, old)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		var oldRules []*CategoryPricingRule
+		for _, id := range ids {
+			old, err := s.catRepo.LockCategoryRule(ctx, id)
+			if err != nil {
+				return err
+			}
+			if old != nil {
+				oldRules = append(oldRules, old)
+			}
 		}
-	}
-
-	if err := s.catRepo.BulkDeleteRules(ctx, ids); err != nil {
-		return err
-	}
-
-	for _, old := range oldRules {
-		s.logAudit(ctx, old.ID, "DELETE", old, nil)
-	}
-	return nil
+		if err := s.catRepo.BulkDeleteRules(ctx, ids); err != nil {
+			return err
+		}
+		for _, old := range oldRules {
+			if err := s.logAudit(ctx, old.ID, "DELETE", old, nil); err != nil {
+				return err
+			}
+		}
+		// Per-row events at the transaction's end, as the bulk upsert does.
+		for _, old := range oldRules {
+			if err := s.recordRuleEvent(ctx, old.ID, EventCategoryRuleDeleted, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // --- Audit Helpers ---
 
-func (s *CategoryPricingService) logAudit(ctx context.Context, ruleID uuid.UUID, action string, old, new_ *CategoryPricingRule) {
+func (s *CategoryPricingService) logAudit(ctx context.Context, ruleID uuid.UUID, action string, old, new_ *CategoryPricingRule) error {
 	entry := &CategoryPricingAudit{
 		RuleID:      ruleID,
 		Action:      action,
@@ -273,8 +566,7 @@ func (s *CategoryPricingService) logAudit(ctx context.Context, ruleID uuid.UUID,
 		entry.Tier = new_.Tier
 		entry.CustomerID = new_.CustomerID
 	}
-	// Fire-and-forget: audit failures should not block the operation
-	_ = s.catRepo.CreateAuditEntry(ctx, entry)
+	return s.catRepo.CreateAuditEntry(ctx, entry)
 }
 
 func getPerformedBy(ctx context.Context) string {
@@ -289,13 +581,19 @@ func getPerformedBy(ctx context.Context) string {
 
 func ruleToMap(r *CategoryPricingRule) map[string]any {
 	m := map[string]any{
-		"rule_type":  string(r.RuleType),
-		"rule_value": r.RuleValue,
-		"is_active":  r.IsActive,
-		"priority":   r.Priority,
+		"rule_type": strings.ToLower(string(r.RuleType)),
+		"is_active": r.IsActive,
+		"priority":  r.Priority,
+		"revision":  r.Revision,
+	}
+	if r.ValuePrice != nil {
+		m["value_ten_thousandths"] = int64(*r.ValuePrice)
+	}
+	if r.ValuePct != nil {
+		m["value_pct"] = r.ValuePct.WireString()
 	}
 	if r.MarginFloorPct != nil {
-		m["margin_floor_pct"] = *r.MarginFloorPct
+		m["margin_floor_pct"] = r.MarginFloorPct.WireString()
 	}
 	if r.Tier != "" {
 		m["tier"] = r.Tier

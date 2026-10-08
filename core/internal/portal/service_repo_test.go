@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -396,15 +397,16 @@ func (f *fakeProductRepo) CreateProduct(context.Context, *product.Product) error
 func (f *fakeProductRepo) ListProducts(context.Context) ([]product.Product, error) {
 	return nil, nil
 }
-func (f *fakeProductRepo) ListProductsPaginated(context.Context, int, int) ([]product.Product, int, error) {
-	return nil, 0, nil
+func (f *fakeProductRepo) ListProductsPage(context.Context, *time.Time, *uuid.UUID, int) ([]product.Product, error) {
+	return nil, nil
 }
+func (f *fakeProductRepo) CountProducts(context.Context) (int64, error) { return 0, nil }
 func (f *fakeProductRepo) ListBelowReorder(context.Context) ([]product.ReorderAlert, error) {
 	return nil, nil
 }
 func (f *fakeProductRepo) UpdateAverageCost(context.Context, uuid.UUID, float64) error { return nil }
-func (f *fakeProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64) error {
-	return nil
+func (f *fakeProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64, int64) (int64, error) {
+	return 0, nil
 }
 func (f *fakeProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float64, float64) error {
 	return nil
@@ -412,17 +414,28 @@ func (f *fakeProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float
 func (f *fakeProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uuid.UUID) error {
 	return nil
 }
-func (f *fakeProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry) error {
-	return nil
+func (f *fakeProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry, int64) (int64, error) {
+	return 0, nil
 }
-func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int) error { return nil }
+func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64) (int64, error) {
+	return 0, nil
+}
 
 type fakePricingRepo struct {
-	contracts map[uuid.UUID]float64 // productID -> contract price
+	contracts map[uuid.UUID]httpx.Price // productID -> contract price
 	err       error
 }
 
 var _ pricing.Repository = (*fakePricingRepo)(nil)
+
+// portalPrice parses a fixture price the way the wire would.
+func portalPrice(f float64) httpx.Price {
+	p, err := httpx.ParsePrice(strconv.FormatFloat(f, 'f', -1, 64))
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
 
 func (f *fakePricingRepo) GetContract(_ context.Context, customerID, productID uuid.UUID) (*pricing.CustomerContract, error) {
 	if f.err != nil {
@@ -437,14 +450,18 @@ func (f *fakePricingRepo) GetContract(_ context.Context, customerID, productID u
 func (f *fakePricingRepo) CreateContract(context.Context, *pricing.CustomerContract) error {
 	return nil
 }
-func (f *fakePricingRepo) GetMatchingRules(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID, float64) ([]pricing.PricingRule, error) {
+func (f *fakePricingRepo) GetMatchingRules(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID, httpx.Quantity) ([]pricing.PricingRule, error) {
 	return nil, nil
 }
-func (f *fakePricingRepo) ListBreakQuantities(context.Context, uuid.UUID, *uuid.UUID) ([]float64, error) {
+func (f *fakePricingRepo) ListBreakQuantities(context.Context, uuid.UUID, *uuid.UUID) ([]httpx.Quantity, error) {
 	return nil, nil
 }
 func (f *fakePricingRepo) ListRules(context.Context) ([]pricing.PricingRule, error) { return nil, nil }
-func (f *fakePricingRepo) CreateRule(context.Context, *pricing.PricingRule) error   { return nil }
+func (f *fakePricingRepo) ListRulesPage(context.Context, *pricing.RuleCursor, int) ([]pricing.PricingRule, error) {
+	return nil, nil
+}
+func (f *fakePricingRepo) CountRules(context.Context) (int64, error)              { return 0, nil }
+func (f *fakePricingRepo) CreateRule(context.Context, *pricing.PricingRule) error { return nil }
 
 type fakeInventoryRepo struct {
 	byProduct map[uuid.UUID][]inventory.Inventory
@@ -650,7 +667,7 @@ func newPortalRig(t *testing.T) *portalRig {
 		repo:      newFakePortalRepo(),
 		customers: &fakeCustomerRepo{customers: map[uuid.UUID]*customer.Customer{}},
 		products:  &fakeProductRepo{products: map[uuid.UUID]*product.Product{}},
-		prices:    &fakePricingRepo{contracts: map[uuid.UUID]float64{}},
+		prices:    &fakePricingRepo{contracts: map[uuid.UUID]httpx.Price{}},
 		stock:     &fakeInventoryRepo{byProduct: map[uuid.UUID][]inventory.Inventory{}},
 	}
 	rig.orders = &fakeOrderRepo{
@@ -816,7 +833,7 @@ func TestAddToCart_WritesTheCustomerPriceNotTheBasePrice(t *testing.T) {
 	me, productID := uuid.New(), uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
 	rig.withProduct(productID, "2X4-8", 4.75)
-	rig.prices.contracts[productID] = 3.95 // negotiated
+	rig.prices.contracts[productID] = portalPrice(3.95) // negotiated
 
 	if _, err := rig.svc.AddToCart(context.Background(), me,
 		AddToCartRequest{ProductID: productID, Quantity: 12}); err != nil {

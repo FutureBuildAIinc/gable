@@ -7,6 +7,8 @@ import { icon } from '../lib/icons.ts';
 import { Plus, Search, Package } from 'lucide';
 import { ProductService } from '../services/product.service.ts';
 import type { Product } from '../types/product.ts';
+import { apiErrorMessage } from '../services/apiError.ts';
+import { ToastService } from '../lib/toast-service.ts';
 import { onBranchChanged } from '../lib/branch-listener.ts';
 
 // Side-effect imports: register child custom elements
@@ -49,19 +51,22 @@ export class GableInventory extends LitElement {
     private async loadProducts() {
         try {
             this.isLoading = true;
-            const data = await ProductService.getProducts();
-            this.products = data;
+            // The table searches the whole catalog on the client, so every page through the cursor is
+            // loaded, capped at LIST_ALL_PRODUCTS_CAP products (2000).
+            this.products = await ProductService.listAllProducts();
             this.error = '';
         } catch (err) {
-            this.error = 'Failed to load products';
+            this.error = apiErrorMessage(err, 'Failed to load products');
             console.error(err);
         } finally {
             this.isLoading = false;
         }
     }
 
-    private async handleSaveProduct(productData: Omit<Product, 'id' | 'created_at' | 'updated_at'>) {
-        await ProductService.createProduct(productData);
+    /** The add modal created the product; close it and read the catalog again. */
+    private async handleProductCreated() {
+        this.isModalOpen = false;
+        ToastService.show('Product created', 'success');
         await this.loadProducts();
     }
 
@@ -155,7 +160,7 @@ export class GableInventory extends LitElement {
                 <gable-add-product-modal
                     ?is-open=${this.isModalOpen}
                     @close=${() => { this.isModalOpen = false; }}
-                    @save=${(e: CustomEvent) => this.handleSaveProduct(e.detail)}
+                    @success=${() => { void this.handleProductCreated(); }}
                 ></gable-add-product-modal>
 
                 <gable-stock-adjustment-modal

@@ -13,6 +13,10 @@ import {
   normalizeQuantity,
   numberToQuantity,
   extensionCents,
+  formatQuantity,
+  isPositiveQuantity,
+  isNegativeQuantity,
+  scaleTenThousandths,
 } from './money'
 
 describe('dollarsToCents', () => {
@@ -144,5 +148,55 @@ describe('centsToInput', () => {
   it('renders two fraction digits', () => {
     expect(centsToInput(12500)).toBe('125.00')
     expect(centsToInput(5)).toBe('0.05')
+  })
+})
+
+describe('formatQuantity', () => {
+  it('groups the whole part and drops trailing fraction zeros', () => {
+    expect(formatQuantity('1234.5000')).toBe('1,234.5')
+    expect(formatQuantity('10.0000')).toBe('10')
+    expect(formatQuantity('0.2500')).toBe('0.25')
+    expect(formatQuantity('1234567')).toBe('1,234,567')
+    expect(formatQuantity('007.10')).toBe('7.1')
+  })
+
+  it('keeps a negative sign only on a non-zero value', () => {
+    expect(formatQuantity('-3.0000')).toBe('-3')
+    expect(formatQuantity('-0.0000')).toBe('0')
+  })
+
+  it('answers 0 for nothing and the text itself for non-decimals', () => {
+    expect(formatQuantity(null)).toBe('0')
+    expect(formatQuantity(undefined)).toBe('0')
+    expect(formatQuantity('')).toBe('0')
+    expect(formatQuantity('abc')).toBe('abc')
+  })
+})
+
+describe('isPositiveQuantity and isNegativeQuantity', () => {
+  it('tell positive, zero and negative decimal strings apart', () => {
+    expect(isPositiveQuantity('0.0001')).toBe(true)
+    expect(isPositiveQuantity('12')).toBe(true)
+    expect(isPositiveQuantity('0')).toBe(false)
+    expect(isPositiveQuantity('0.0000')).toBe(false)
+    expect(isPositiveQuantity('-1')).toBe(false)
+    expect(isPositiveQuantity('')).toBe(false)
+    expect(isNegativeQuantity('-0.5')).toBe(true)
+    expect(isNegativeQuantity('-0.0000')).toBe(false)
+    expect(isNegativeQuantity('5')).toBe(false)
+  })
+})
+
+describe('scaleTenThousandths', () => {
+  it('takes a ratio of a price with one rounding, half away from zero', () => {
+    expect(scaleTenThousandths(42500, 6, 10)).toBe(25500)
+    expect(scaleTenThousandths(1, 1, 2)).toBe(1)
+    expect(scaleTenThousandths(-1, 1, 2)).toBe(-1)
+    expect(scaleTenThousandths(10, 1, 3)).toBe(3)
+  })
+
+  it('is zero for a zero denominator or a non-finite input', () => {
+    expect(scaleTenThousandths(100, 1, 0)).toBe(0)
+    expect(scaleTenThousandths(Number.NaN, 1, 2)).toBe(0)
   })
 })

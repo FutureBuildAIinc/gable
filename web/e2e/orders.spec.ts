@@ -28,7 +28,7 @@ async function signIn(page: Page, name: string) {
 
 interface Seeded {
   customer: { id: string; name: string };
-  product: { id: string; sku: string; uom_primary: string };
+  product: { id: string; sku: string; stock_uom: string };
 }
 
 let seeded: Seeded | undefined;
@@ -37,8 +37,9 @@ async function firstCustomerAndProduct(request: import('@playwright/test').APIRe
   if (seeded) return seeded;
   const customers = (await (await request.get('/api/v1/customers?limit=200')).json()) as { items: { id: string; name: string; account_number: string }[] };
   const customer = customers.items.find((c) => !c.account_number.startsWith('E2E-'))!;
-  const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string; uom_primary: string }[] | { data: { id: string; sku: string; uom_primary: string }[] };
-  const product = (Array.isArray(products) ? products : products.data)[0];
+  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string }[] };
+  // The product list is the cursor envelope, newest first; the product spec adds E2E- SKUs.
+  const product = products.items.find((p) => !p.sku.startsWith('E2E-') && p.stock_uom === 'EA')!;
   seeded = { customer, product };
   return seeded;
 }

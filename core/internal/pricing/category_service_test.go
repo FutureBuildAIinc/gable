@@ -6,8 +6,11 @@ package pricing
 import (
 	"context"
 	"math"
+	"math/big"
 	"testing"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
@@ -19,7 +22,7 @@ type mockCategoryRepo struct {
 	productCatMap map[uuid.UUID]struct {
 		ID        uuid.UUID
 		Path      string
-		CostPrice float64
+		CostPrice httpx.Price
 	}
 }
 
@@ -50,12 +53,16 @@ func (m *mockCategoryRepo) CreateCategoryRule(_ context.Context, r *CategoryPric
 	return nil
 }
 
-func (m *mockCategoryRepo) UpdateCategoryRule(_ context.Context, _ *CategoryPricingRule) error {
+func (m *mockCategoryRepo) UpdateCategoryRule(_ context.Context, _ *CategoryPricingRule, _ int64) error {
 	return nil
 }
 
 func (m *mockCategoryRepo) DeleteCategoryRule(_ context.Context, _ uuid.UUID) error {
 	return nil
+}
+
+func (m *mockCategoryRepo) LockCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error) {
+	return m.GetCategoryRule(ctx, id)
 }
 
 func (m *mockCategoryRepo) GetCategoryRule(_ context.Context, id uuid.UUID) (*CategoryPricingRule, error) {
@@ -81,7 +88,7 @@ func (m *mockCategoryRepo) GetMatrixRules(_ context.Context) ([]CategoryPricingR
 	return tier, nil
 }
 
-func (m *mockCategoryRepo) GetProductCategoryPath(_ context.Context, productID uuid.UUID) (uuid.UUID, string, float64, error) {
+func (m *mockCategoryRepo) GetProductCategoryPath(_ context.Context, productID uuid.UUID) (uuid.UUID, string, httpx.Price, error) {
 	if entry, ok := m.productCatMap[productID]; ok {
 		return entry.ID, entry.Path, entry.CostPrice, nil
 	}
@@ -118,16 +125,14 @@ func (m *mockCategoryRepo) BulkDeleteRules(_ context.Context, ids []uuid.UUID) e
 	return nil
 }
 
-func (m *mockCategoryRepo) ListCategoryRulesPaginated(_ context.Context, _ CategoryRuleFilter, limit, offset int) ([]CategoryPricingRule, int, error) {
-	total := len(m.rules)
-	if offset >= total {
-		return nil, total, nil
+func (m *mockCategoryRepo) ListCategoryRulesPage(_ context.Context, _ CategoryRuleFilter, _ *time.Time, _ *uuid.UUID, limit int) ([]CategoryPricingRule, error) {
+	if limit < len(m.rules) {
+		return m.rules[:limit], nil
 	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-	return m.rules[offset:end], total, nil
+	return m.rules, nil
+}
+func (m *mockCategoryRepo) CountCategoryRules(_ context.Context, _ CategoryRuleFilter) (int64, error) {
+	return int64(len(m.rules)), nil
 }
 
 func (m *mockCategoryRepo) ResolveAccountExact(_ context.Context, customerID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error) {
@@ -239,10 +244,10 @@ func makeTestRepo() *mockCategoryRepo {
 		productCatMap: map[uuid.UUID]struct {
 			ID        uuid.UUID
 			Path      string
-			CostPrice float64
+			CostPrice httpx.Price
 		}{
-			product2x4:  {ID: framingID, Path: "lumber.framing", CostPrice: 3.50},
-			productNail: {ID: hardwareID, Path: "hardware", CostPrice: 0.15},
+			product2x4:  {ID: framingID, Path: "lumber.framing", CostPrice: priceOf(3.50)},
+			productNail: {ID: hardwareID, Path: "hardware", CostPrice: priceOf(0.15)},
 		},
 	}
 }
@@ -260,7 +265,7 @@ func TestResolveEffectivePrice_TierExact(t *testing.T) {
 			CategoryID:   framingID,
 			CategoryPath: "lumber.framing",
 			RuleType:     CategoryRuleMarkdown,
-			RuleValue:    15.0,
+			ValuePct:     pctQtyPtr(15.0),
 			IsActive:     true,
 		},
 	}
@@ -292,7 +297,7 @@ func TestResolveEffectivePrice_TierAncestor(t *testing.T) {
 			CategoryID:   lumberID,
 			CategoryPath: "lumber",
 			RuleType:     CategoryRuleMarkdown,
-			RuleValue:    10.0,
+			ValuePct:     pctQtyPtr(10.0),
 			IsActive:     true,
 		},
 	}
@@ -307,7 +312,7 @@ func TestResolveEffectivePrice_TierAncestor(t *testing.T) {
 	if resolved.MatchType != "tier_ancestor" {
 		t.Errorf("expected match_type=tier_ancestor, got %s", resolved.MatchType)
 	}
-	if resolved.Rule == nil || resolved.Rule.RuleValue != 10.0 {
+	if resolved.Rule == nil || resolved.Rule.ValuePct == nil || *resolved.Rule.ValuePct != qtyOf(10.0) {
 		t.Error("expected ancestor rule with value 10.0")
 	}
 }
@@ -322,7 +327,7 @@ func TestResolveEffectivePrice_AccountOverridesTier(t *testing.T) {
 			CategoryID:   framingID,
 			CategoryPath: "lumber.framing",
 			RuleType:     CategoryRuleMarkdown,
-			RuleValue:    10.0,
+			ValuePct:     pctQtyPtr(10.0),
 			IsActive:     true,
 		},
 		{
@@ -332,7 +337,7 @@ func TestResolveEffectivePrice_AccountOverridesTier(t *testing.T) {
 			CategoryID:   framingID,
 			CategoryPath: "lumber.framing",
 			RuleType:     CategoryRuleMarkdown,
-			RuleValue:    20.0,
+			ValuePct:     pctQtyPtr(20.0),
 			IsActive:     true,
 		},
 	}
@@ -346,8 +351,8 @@ func TestResolveEffectivePrice_AccountOverridesTier(t *testing.T) {
 	if resolved.MatchType != "account_exact" {
 		t.Errorf("expected match_type=account_exact, got %s", resolved.MatchType)
 	}
-	if resolved.Rule.RuleValue != 20.0 {
-		t.Errorf("expected account rule with value 20.0, got %f", resolved.Rule.RuleValue)
+	if resolved.Rule.ValuePct == nil || *resolved.Rule.ValuePct != qtyOf(20.0) {
+		t.Errorf("expected account rule with value 20.0, got %v", resolved.Rule.ValuePct)
 	}
 }
 
@@ -361,7 +366,7 @@ func TestResolveEffectivePrice_AccountAncestor(t *testing.T) {
 			CategoryID:   lumberID,
 			CategoryPath: "lumber",
 			RuleType:     CategoryRuleMarkdown,
-			RuleValue:    12.0,
+			ValuePct:     pctQtyPtr(12.0),
 			IsActive:     true,
 		},
 	}
@@ -405,7 +410,7 @@ func TestResolveEffectivePrice_RetailTierSkipped(t *testing.T) {
 			CategoryID:   framingID,
 			CategoryPath: "lumber.framing",
 			RuleType:     CategoryRuleMarkdown,
-			RuleValue:    5.0,
+			ValuePct:     pctQtyPtr(5.0),
 			IsActive:     true,
 		},
 	}
@@ -495,13 +500,15 @@ func TestApplyRule(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rule := &CategoryPricingRule{
-				RuleType:  tt.ruleType,
-				RuleValue: tt.ruleValue,
+			rule := &CategoryPricingRule{RuleType: tt.ruleType}
+			if tt.ruleType == CategoryRuleFixed {
+				rule.ValuePrice = pricePtrOf(tt.ruleValue)
+			} else {
+				rule.ValuePct = pctQtyPtr(tt.ruleValue)
 			}
-			got := svc.ApplyRule(rule, tt.basePrice, tt.costPrice)
-			if math.Abs(got-tt.expected) > 0.01 {
-				t.Errorf("ApplyRule() = %f, want %f", got, tt.expected)
+			got := svc.ApplyRule(rule, rat(tt.basePrice), rat(tt.costPrice))
+			if math.Abs(float64(priceOfRat(got))/10_000-tt.expected) > 0.01 {
+				t.Errorf("ApplyRule() = %v, want %f", priceOfRat(got), tt.expected)
 			}
 		})
 	}
@@ -509,10 +516,20 @@ func TestApplyRule(t *testing.T) {
 
 func TestApplyRule_NilRule(t *testing.T) {
 	svc := &CategoryPricingService{}
-	got := svc.ApplyRule(nil, 100.0, 50.0)
-	if got != 100.0 {
-		t.Errorf("ApplyRule(nil) = %f, want 100.0", got)
+	got := svc.ApplyRule(nil, rat(100.0), rat(50.0))
+	if got.Cmp(rat(100.0)) != 0 {
+		t.Errorf("ApplyRule(nil) = %v, want 100.0", got)
 	}
+}
+
+// rat is the fixture form of ratOfFloat, for tests that state decimal
+// inputs directly.
+func rat(f float64) *big.Rat {
+	r, err := ratOfFloat(f)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
 
 // --- Helper Tests ---

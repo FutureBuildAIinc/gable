@@ -44,12 +44,12 @@ type recordingRepo struct {
 	getErr  error
 }
 
-func (r *recordingRepo) UpdateDimensions(_ context.Context, id uuid.UUID, g Geometry) error {
+func (r *recordingRepo) UpdateDimensions(_ context.Context, id uuid.UUID, g Geometry, revision int64) (int64, error) {
 	r.calls++
 	r.gotID = id
 	r.got = g
 	if r.updateErr != nil {
-		return r.updateErr
+		return 0, r.updateErr
 	}
 	// Mirror what Postgres would then hold, so a later GetProduct read-back
 	// reflects the write rather than a hand-written fixture.
@@ -60,7 +60,7 @@ func (r *recordingRepo) UpdateDimensions(_ context.Context, id uuid.UUID, g Geom
 		r.product.Stackable = g.Stackable
 		r.product.GeometrySource = g.GeometrySource
 	}
-	return nil
+	return revision + 1, nil
 }
 
 func (r *recordingRepo) GetProduct(_ context.Context, _ uuid.UUID) (*Product, error) {
@@ -83,6 +83,15 @@ func newTestHandler(repo *recordingRepo) (*Handler, *http.ServeMux) {
 
 func patchDimensions(t *testing.T, mux *http.ServeMux, id uuid.UUID, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	// The write carries the precondition (ADR 0001 section 11); the fixture
+	// product sits at revision 1.
+	if !strings.Contains(body, "revision") {
+		if strings.TrimSpace(body) == "{}" {
+			body = `{"revision":1}`
+		} else {
+			body = strings.TrimSuffix(body, "}") + `,"revision":1}`
+		}
+	}
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/products/"+id.String()+"/dimensions", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -154,7 +163,7 @@ func TestUpdateDimensions_ClearedFieldsWriteNullNotZero(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := &recordingRepo{product: &Product{ID: id, SKU: "LUM-248-PREM"}}
+			repo := &recordingRepo{product: &Product{ID: id, SKU: "LUM-248-PREM", Revision: 1}}
 			_, mux := newTestHandler(repo)
 
 			if w := patchDimensions(t, mux, id, tc.body); w.Code != http.StatusOK {
@@ -186,20 +195,20 @@ func TestGeometry_NilFieldsSerializeAsJSONNull(t *testing.T) {
 		t.Fatalf("empty Geometry marshalled as\n  %s\nwant\n  %s", got, want)
 	}
 
-	// Same requirement for the Product the ERP read path returns, which is
-	// what the geometry editor prefills from.
-	pb, err := json.Marshal(Product{ID: uuid.New(), SKU: "HW-NAIL-16D"})
+	// Same requirement for the View the read path returns, which is what the
+	// geometry editor prefills from.
+	pb, err := json.Marshal(View{ID: uuid.New(), SKU: "HW-NAIL-16D"})
 	if err != nil {
 		t.Fatalf("marshal product: %v", err)
 	}
 	for _, field := range []string{`"length_in":null`, `"width_in":null`, `"height_in":null`, `"stackable":null`, `"geometry_source":null`} {
 		if !strings.Contains(string(pb), field) {
-			t.Errorf("Product JSON is missing %s; got %s", field, pb)
+			t.Errorf("View JSON is missing %s; got %s", field, pb)
 		}
 	}
 	for _, forbidden := range []string{`"length_in":0`, `"stackable":false`, `"geometry_source":""`} {
 		if strings.Contains(string(pb), forbidden) {
-			t.Errorf("Product JSON reports %s for an unrecorded field; got %s", forbidden, pb)
+			t.Errorf("View JSON reports %s for an unrecorded field; got %s", forbidden, pb)
 		}
 	}
 }
@@ -212,6 +221,7 @@ func TestUpdateDimensions_ResponseReportsNullForClearedFields(t *testing.T) {
 	repo := &recordingRepo{product: &Product{
 		ID:             id,
 		SKU:            "LUM-248-PREM",
+		Revision:       1,
 		LengthIn:       f64(96),
 		WidthIn:        f64(3.5),
 		HeightIn:       f64(1.5),
@@ -267,7 +277,7 @@ func TestUpdateDimensions_GeometrySourceProvenance(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := &recordingRepo{product: &Product{ID: id}}
+			repo := &recordingRepo{product: &Product{ID: id, Revision: 1}}
 			_, mux := newTestHandler(repo)
 
 			if w := patchDimensions(t, mux, id, tc.body); w.Code != http.StatusOK {
@@ -316,7 +326,7 @@ func TestUpdateDimensions_RejectsBadInput(t *testing.T) {
 // 200 will believe the dimensions are in the PIM.
 func TestUpdateDimensions_WriteFailureIs500(t *testing.T) {
 	id := uuid.New()
-	repo := &recordingRepo{product: &Product{ID: id}, updateErr: errors.New("db down")}
+	repo := &recordingRepo{product: &Product{ID: id, Revision: 1}, updateErr: errors.New("db down")}
 	_, mux := newTestHandler(repo)
 
 	if w := patchDimensions(t, mux, id, `{"length_in":96}`); w.Code != http.StatusInternalServerError {
@@ -324,20 +334,21 @@ func TestUpdateDimensions_WriteFailureIs500(t *testing.T) {
 	}
 }
 
-// A read-back failure is NOT a write failure: the geometry is already
-// persisted, so reporting 500 would send the operator back to re-enter data
-// that is safely stored.
-func TestUpdateDimensions_ReadBackFailureStillReportsSuccess(t *testing.T) {
+// A read failure refuses the write outright: the revision the write must
+// precondition on is read before anything is persisted, so a row the caller
+// cannot read is a row the caller cannot write, and nothing lands in the
+// PIM (ADR 0001 section 11: the check and the write are one act).
+func TestUpdateDimensions_ReadFailureRefusesTheWrite(t *testing.T) {
 	id := uuid.New()
-	repo := &recordingRepo{product: &Product{ID: id}, getErr: errors.New("replica lagging")}
+	repo := &recordingRepo{product: &Product{ID: id, Revision: 1}, getErr: errors.New("replica lagging")}
 	_, mux := newTestHandler(repo)
 
 	w := patchDimensions(t, mux, id, `{"length_in":96}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", w.Code, w.Body)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body %s)", w.Code, w.Body)
 	}
-	if repo.got.LengthIn == nil || *repo.got.LengthIn != 96 {
-		t.Errorf("length_in was not persisted before the read-back failed: %v", repo.got.LengthIn)
+	if repo.calls != 0 {
+		t.Errorf("the write ran %d times behind a read that failed; nothing may persist", repo.calls)
 	}
 }
 
@@ -364,17 +375,19 @@ func TestUpdateDimensionsQuery_WritesRawNulls(t *testing.T) {
 		}
 	}
 
-	// Each geometry column must be assigned from its own placeholder.
+	// Each geometry column must be assigned from its own placeholder. The
+	// id and the revision lead the argument list (the revision precondition,
+	// ADR 0001 section 11), so the geometry placeholders start at $3.
 	for _, assign := range []string{
-		"length_in = $1", "width_in = $2", "height_in = $3",
-		"stackable = $4", "geometry_source = $5",
+		"length_in = $3", "width_in = $4", "height_in = $5",
+		"stackable = $6", "geometry_source = $7",
 	} {
 		if !strings.Contains(q, assign) {
 			t.Errorf("updateDimensionsQuery is missing %q:\n%s", assign, q)
 		}
 	}
-	if !strings.Contains(q, "WHERE id = $6") {
-		t.Errorf("updateDimensionsQuery must be scoped to one product:\n%s", q)
+	if !strings.Contains(q, "WHERE id = $1 AND revision = $2") {
+		t.Errorf("updateDimensionsQuery must be scoped to one product at one revision:\n%s", q)
 	}
 }
 

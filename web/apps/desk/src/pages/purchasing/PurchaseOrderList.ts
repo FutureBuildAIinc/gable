@@ -9,6 +9,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import type { PurchaseOrder, POSourceSummary } from '../../types/purchaseOrder';
 import type { ReorderAlert } from '../../types/product';
+import { formatQuantity } from '../../lib/money';
 import { Package, AlertTriangle, Plus, Truck } from 'lucide';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 
@@ -168,13 +169,13 @@ export class PurchaseOrderList extends LitElement {
                                             <p class="text-xs text-zinc-400 mt-0.5">${alert.description}</p>
                                         </div>
                                         <span class="text-amber-400 font-mono text-sm font-bold">
-                                            -${alert.deficit.toFixed(0)}
+                                            -${formatQuantity(alert.deficit)}
                                         </span>
                                     </div>
                                     <div class="flex justify-between text-xs text-zinc-500 mt-2">
-                                        <span>Stock: ${alert.current_stock}</span>
-                                        <span>Reorder at: ${alert.reorder_point}</span>
-                                        <span>Order: ${alert.reorder_qty}</span>
+                                        <span>Stock: ${formatQuantity(alert.current_stock)}</span>
+                                        <span>Reorder at: ${formatQuantity(alert.reorder_point)}</span>
+                                        <span>Order: ${formatQuantity(alert.reorder_qty)}</span>
                                     </div>
                                 </div>
                             `)}

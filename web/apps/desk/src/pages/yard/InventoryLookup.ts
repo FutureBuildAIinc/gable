@@ -8,10 +8,10 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { Search, Package, MapPin, Minus, Plus, ArrowRightLeft, X, Loader2, ScanLine } from 'lucide';
 import type { Product, Inventory } from '../../types/product';
 import { InventoryService } from '../../services/InventoryService';
-import { fetchWithAuth } from '../../services/fetchClient';
+import { ProductService, matchProducts } from '../../services/product.service';
+import { formatQuantity, isPositiveQuantity } from '../../lib/money';
 import '../../components/BarcodeScanner.ts';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 @customElement('gable-yard-inventory-lookup')
 export class YardInventoryLookup extends LitElement {
@@ -26,6 +26,9 @@ export class YardInventoryLookup extends LitElement {
     @state() private adjustQty = 0;
     @state() private adjusting = false;
 
+    // The list route has no search parameter, so the catalog is loaded once (every page through the
+    // cursor, capped at 2000 products) and searched on the client.
+    private _catalog: Product[] | null = null;
     private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     disconnectedCallback() {
@@ -45,11 +48,8 @@ export class YardInventoryLookup extends LitElement {
         }
         this.loading = true;
         try {
-            const res = await fetchWithAuth(`${API_URL}/api/v1/products?q=${encodeURIComponent(this.query)}`);
-            if (res.ok) {
-                const data = await res.json();
-                this.products = Array.isArray(data) ? data : [];
-            }
+            if (!this._catalog) this._catalog = await ProductService.listAllProducts();
+            this.products = matchProducts(this._catalog, this.query);
         } catch {
             this.products = [];
             ToastService.show('Failed to search products', 'error');
@@ -87,6 +87,9 @@ export class YardInventoryLookup extends LitElement {
             const inv = await InventoryService.getInventoryByProduct(productId);
             this.inventory = inv;
             this.adjustQty = 0;
+            // The totals on the cards changed: drop the loaded catalog so the next search reads them fresh.
+            this._catalog = null;
+            void this._search();
         } catch (err) {
             console.error('Failed to adjust inventory:', err);
             ToastService.show('Failed to adjust inventory', 'error');
@@ -164,15 +167,15 @@ export class YardInventoryLookup extends LitElement {
                                         </div>
                                         <div class="text-right shrink-0 ml-3">
                                             <div class="font-mono text-amber-400 font-bold text-sm">
-                                                ${p.total_quantity ?? '-'}
+                                                ${formatQuantity(p.on_hand)}
                                             </div>
-                                            <div class="text-[10px] text-zinc-500 font-mono">${p.uom_primary}</div>
+                                            <div class="text-[10px] text-zinc-500 font-mono">${p.stock_uom}</div>
                                         </div>
                                     </div>
-                                    ${p.total_allocated && p.total_allocated > 0 ? html`
+                                    ${isPositiveQuantity(p.allocated) ? html`
                                         <div class="mt-2 flex items-center gap-2 text-[10px] text-zinc-500">
                                             ${icon(ArrowRightLeft, 12)}
-                                            ${p.total_allocated} allocated
+                                            ${formatQuantity(p.allocated)} allocated
                                         </div>
                                     ` : nothing}
                                 </div>

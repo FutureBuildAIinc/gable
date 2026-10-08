@@ -25,8 +25,8 @@ func breakRule(name string, productID uuid.UUID, minQty, discountPct float64, pr
 		Name:        name,
 		RuleType:    RuleTypeQuantityBreak,
 		ProductID:   &productID,
-		DiscountPct: ptr(discountPct),
-		MinQuantity: minQty,
+		DiscountPct: pctQtyPtr(discountPct),
+		MinQuantity: qtyOf(minQty),
 		IsActive:    true,
 		Priority:    priority,
 	}
@@ -257,7 +257,7 @@ func TestCalculatePriceWithQty_PromoOutranksABreakAtTheSamePriority(t *testing.T
 		Name:        "Fall Promo",
 		RuleType:    RuleTypePromotional,
 		ProductID:   &prod,
-		DiscountPct: ptr(5.0),
+		DiscountPct: pctQtyPtr(5.0),
 		IsActive:    true,
 		Priority:    10,
 	}
@@ -333,7 +333,7 @@ func TestGetMatchingRules_ShouldHonourCategoryScope(t *testing.T) {
 		Name:        "Spring Roofing Promo",
 		RuleType:    RuleTypePromotional,
 		Category:    "Roofing",
-		DiscountPct: ptr(5.0),
+		DiscountPct: pctQtyPtr(5.0),
 		IsActive:    true,
 	}
 	repo := &MockRepository{contracts: map[string]CustomerContract{}, rules: []PricingRule{roofingOnly}}
@@ -359,7 +359,7 @@ func TestGetMatchingRules_CategoryScopeReachesItsOwnCategory(t *testing.T) {
 		Name:        "Spring Roofing Promo",
 		RuleType:    RuleTypePromotional,
 		Category:    "Roofing",
-		DiscountPct: ptr(5.0),
+		DiscountPct: pctQtyPtr(5.0),
 		IsActive:    true,
 	}
 	repo := &MockRepository{

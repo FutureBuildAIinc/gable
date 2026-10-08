@@ -1,65 +1,33 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-export type UOM =
-    | 'PCS'
-    | 'EA'
-    | 'LF'
-    | 'SF'
-    | 'BF'
-    | 'MBF'
-    | 'SQ'
-    | 'BOX'
-    | 'CTN'
-    | 'RL'
-    | 'GAL'
-    | 'LBS'
-    | 'BAG'
-    | 'BUNDLE'
-    | 'PAIR'
-    | 'SET';
+// The product wire types come from the generated contract (core/api/fragments/product.yaml
+// through @gable/api-client); nothing here restates a field by hand. A price is an integer
+// in ten thousandths of a dollar per stocking unit (*_ten_thousandths), a quantity is a decimal
+// string in the stocking unit, and every product carries the revision a write must name (If-Match).
+// Geometry fields stay nullable on purpose: null means "no geometry recorded for this SKU" and is
+// NOT the same as 0 (AI_LM's load planner falls back to its own defaults only for null).
 
-export interface Product {
-    id: string;
-    sku: string;
-    description: string;
-    uom_primary: UOM;
-    base_price: number;
-    vendor?: string;         // Display name (denormalized)
-    vendor_id?: string;      // Canonical FK -> vendors.id
-    upc?: string;
-    weight_lbs?: number;
-    // Canonical parametric geometry (inches). `null` means "no geometry
-    // recorded for this SKU" and is NOT the same as 0 — AI_LM's load planner
-    // falls back to its own defaults only for null, and would treat a 0 as a
-    // real zero-volume box. Keep these nullable; see migration 080.
-    length_in?: number | null;
-    width_in?: number | null;
-    height_in?: number | null;
-    stackable?: boolean | null;       // null = unknown
-    geometry_source?: string | null;  // 'parametric' (future: 'mesh')
-    reorder_point?: number;
-    reorder_qty?: number;
-    total_quantity?: number;
-    total_allocated?: number;
-    average_unit_cost: number;
-    target_margin: number;
-    commission_rate: number;
-    created_at: string;
-    updated_at: string;
-}
+import type { components } from '@gable/api-client';
 
-export interface ReorderAlert {
-    product_id: string;
-    sku: string;
-    description: string;
-    vendor?: string;
-    vendor_id?: string;
-    reorder_point: number;
-    reorder_qty: number;
-    current_stock: number;
-    deficit: number;
-}
+type Schemas = components['schemas'];
+
+export type UOM = Schemas['UOM'];
+export type Product = Schemas['ProductView'];
+export type ProductCreate = Schemas['ProductCreate'];
+export type ProductPage = Schemas['ProductPage'];
+export type ProductMarginUpdate = Schemas['ProductMarginUpdate'];
+export type ProductDimensionsUpdate = Schemas['ProductDimensionsUpdate'];
+export type ProductLeadTimeUpdate = Schemas['ProductLeadTimeUpdate'];
+export type ReorderAlert = Schemas['ReorderAlert'];
+export type ReorderAlertList = Schemas['ReorderAlertList'];
+
+/** Every unit the wire accepts, in the order a picker shows them. The Record keys must match the contract's UOM exactly. */
+const UOM_SET: Record<UOM, true> = {
+    PCS: true, EA: true, LF: true, SF: true, BF: true, MBF: true, SQ: true, BOX: true,
+    CTN: true, RL: true, GAL: true, LBS: true, BAG: true, BUNDLE: true, PAIR: true, SET: true,
+};
+export const UOM_OPTIONS = Object.keys(UOM_SET) as UOM[];
 
 export interface Inventory {
     id: string;

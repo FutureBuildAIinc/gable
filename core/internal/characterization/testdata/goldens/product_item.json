@@ -5,35 +5,38 @@
       "method": "POST",
       "path": "/api/v1/products",
       "body": {
-        "base_price": 3.75,
+        "base_price_ten_thousandths": 37500,
         "description": "Golden item stud",
-        "reorder_point": 5000,
-        "reorder_qty": 100,
+        "reorder_point": "5000",
+        "reorder_qty": "100",
         "sku": "GOLD-A-STUD",
-        "uom_primary": "PCS"
+        "stock_uom": "PCS"
       }
     },
     "response": {
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "average_unit_cost": 0,
-        "base_price": 3.75,
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
         "commission_rate": 0,
         "created_at": "<ts+0d>",
         "description": "Golden item stud",
         "geometry_source": null,
         "height_in": null,
         "id": "<id-1>",
+        "lead_time_days": null,
         "length_in": null,
-        "reorder_point": 5000,
-        "reorder_qty": 100,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 1,
         "sku": "GOLD-A-STUD",
         "stackable": null,
+        "stock_uom": "PCS",
         "target_margin": 0,
-        "total_allocated": 0,
-        "total_quantity": 0,
-        "uom_primary": "PCS",
         "upc": null,
         "updated_at": "<ts+0d>",
         "vendor": null,
@@ -53,19 +56,68 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "current_stock": 535,
-          "deficit": 465,
-          "description": "2 X 4 RL #3 SPF",
-          "product_id": "<id-2>",
-          "reorder_point": 1000,
-          "reorder_qty": 5000,
-          "sku": "LUMB24RLN3",
-          "vendor": "Gable Lumber & Supply",
-          "vendor_id": null
+      "body": {
+        "items": [
+          {
+            "current_stock": "0",
+            "deficit": "5000",
+            "description": "Golden item stud",
+            "product_id": "<id-1>",
+            "reorder_point": "5000",
+            "reorder_qty": "100",
+            "sku": "GOLD-A-STUD",
+            "vendor": null,
+            "vendor_id": null
+          },
+          {
+            "current_stock": "535",
+            "deficit": "465",
+            "description": "2 X 4 RL #3 SPF",
+            "product_id": "<id-2>",
+            "reorder_point": "1000",
+            "reorder_qty": "5000",
+            "sku": "LUMB24RLN3",
+            "vendor": "Gable Lumber & Supply",
+            "vendor_id": null
+          },
+          {
+            "current_stock": "0",
+            "deficit": "10",
+            "description": "Golden harness stud",
+            "product_id": "<id-3>",
+            "reorder_point": "10",
+            "reorder_qty": "50",
+            "sku": "GOLD-HARNESS-2X4",
+            "vendor": null,
+            "vendor_id": null
+          }
+        ],
+        "limit": 0,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "product.dimensions.without_revision",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/dimensions",
+      "body": {
+        "length_in": 96
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-4>"
         }
-      ]
+      }
     }
   },
   {
@@ -73,6 +125,9 @@
     "request": {
       "method": "PATCH",
       "path": "/api/v1/products/<id-1>/dimensions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "height_in": 1.5,
         "length_in": 96,
@@ -84,11 +139,58 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
+        "commission_rate": 0,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
         "geometry_source": "parametric",
         "height_in": 1.5,
+        "id": "<id-1>",
+        "lead_time_days": null,
         "length_in": 96,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 2,
+        "sku": "GOLD-A-STUD",
         "stackable": true,
+        "stock_uom": "PCS",
+        "target_margin": 0,
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
         "width_in": 3.5
+      }
+    }
+  },
+  {
+    "name": "product.dimensions.stale",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/dimensions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "length_in": 97
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
       }
     }
   },
@@ -97,6 +199,9 @@
     "request": {
       "method": "PATCH",
       "path": "/api/v1/products/<id-1>/dimensions",
+      "headers": {
+        "If-Match": "\"2\""
+      },
       "body": {
         "geometry_source": "mesh",
         "length_in": 96
@@ -106,10 +211,31 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
+        "commission_rate": 0,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
         "geometry_source": "mesh",
         "height_in": null,
+        "id": "<id-1>",
+        "lead_time_days": null,
         "length_in": 96,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 3,
+        "sku": "GOLD-A-STUD",
         "stackable": null,
+        "stock_uom": "PCS",
+        "target_margin": 0,
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
         "width_in": null
       }
     }
@@ -119,16 +245,40 @@
     "request": {
       "method": "PATCH",
       "path": "/api/v1/products/<id-1>/dimensions",
+      "headers": {
+        "If-Match": "\"3\""
+      },
       "body": {}
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
+        "commission_rate": 0,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
         "geometry_source": null,
         "height_in": null,
+        "id": "<id-1>",
+        "lead_time_days": null,
         "length_in": null,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 4,
+        "sku": "GOLD-A-STUD",
         "stackable": null,
+        "stock_uom": "PCS",
+        "target_margin": 0,
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
         "width_in": null
       }
     }
@@ -145,11 +295,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-6>"
         }
       }
     }
@@ -168,11 +318,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-4>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -181,16 +337,22 @@
     "name": "product.dimensions.not_found",
     "request": {
       "method": "PATCH",
-      "path": "/api/v1/products/<id-5>/dimensions",
+      "path": "/api/v1/products/<id-8>/dimensions",
       "body": {
         "length_in": 1
       }
     },
     "response": {
-      "status": 200,
-      "content_type": "",
+      "status": 404,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "error": {
+          "code": "not_found",
+          "message": "no such product"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
       }
     }
   },
@@ -199,6 +361,9 @@
     "request": {
       "method": "PATCH",
       "path": "/api/v1/products/<id-1>/lead-time",
+      "headers": {
+        "If-Match": "\"4\""
+      },
       "body": {
         "lead_time_days": 9
       }
@@ -207,7 +372,32 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "lead_time_days": 9
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
+        "commission_rate": 0,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
+        "geometry_source": null,
+        "height_in": null,
+        "id": "<id-1>",
+        "lead_time_days": 9,
+        "length_in": null,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 5,
+        "sku": "GOLD-A-STUD",
+        "stackable": null,
+        "stock_uom": "PCS",
+        "target_margin": 0,
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
+        "width_in": null
       }
     }
   },
@@ -216,6 +406,9 @@
     "request": {
       "method": "PATCH",
       "path": "/api/v1/products/<id-1>/lead-time",
+      "headers": {
+        "If-Match": "\"5\""
+      },
       "body": {
         "lead_time_days": null
       }
@@ -224,7 +417,32 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "lead_time_days": null
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
+        "commission_rate": 0,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
+        "geometry_source": null,
+        "height_in": null,
+        "id": "<id-1>",
+        "lead_time_days": null,
+        "length_in": null,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 6,
+        "sku": "GOLD-A-STUD",
+        "stackable": null,
+        "stock_uom": "PCS",
+        "target_margin": 0,
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
+        "width_in": null
       }
     }
   },
@@ -233,6 +451,9 @@
     "request": {
       "method": "PATCH",
       "path": "/api/v1/products/<id-1>/lead-time",
+      "headers": {
+        "If-Match": "\"6\""
+      },
       "body": {
         "lead_time_days": -3
       }
@@ -242,11 +463,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "lead_time_days",
+              "message": "must be zero or positive"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -263,11 +490,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -286,11 +513,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -300,6 +533,9 @@
     "request": {
       "method": "PATCH",
       "path": "/api/v1/products/<id-1>/margins",
+      "headers": {
+        "If-Match": "\"6\""
+      },
       "body": {
         "commission_rate": 3.25,
         "target_margin": 22.5
@@ -307,9 +543,34 @@
     },
     "response": {
       "status": 200,
-      "content_type": "",
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
+        "commission_rate": 3.25,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
+        "geometry_source": null,
+        "height_in": null,
+        "id": "<id-1>",
+        "lead_time_days": null,
+        "length_in": null,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 7,
+        "sku": "GOLD-A-STUD",
+        "stackable": null,
+        "stock_uom": "PCS",
+        "target_margin": 22.5,
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
+        "width_in": null
       }
     }
   },
@@ -325,11 +586,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -348,11 +609,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -361,17 +628,23 @@
     "name": "product.margins.not_found",
     "request": {
       "method": "PATCH",
-      "path": "/api/v1/products/<id-5>/margins",
+      "path": "/api/v1/products/<id-8>/margins",
       "body": {
         "commission_rate": 1,
         "target_margin": 1
       }
     },
     "response": {
-      "status": 200,
-      "content_type": "",
+      "status": 404,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "error": {
+          "code": "not_found",
+          "message": "no such product"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
       }
     }
   },
@@ -385,23 +658,26 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "average_unit_cost": 0,
-        "base_price": 3.75,
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 37500,
         "commission_rate": 3.25,
         "created_at": "<ts+0d>",
         "description": "Golden item stud",
         "geometry_source": null,
         "height_in": null,
         "id": "<id-1>",
+        "lead_time_days": null,
         "length_in": null,
-        "reorder_point": 0,
-        "reorder_qty": 0,
+        "on_hand": "0",
+        "reorder_point": "5000",
+        "reorder_qty": "100",
+        "revision": 7,
         "sku": "GOLD-A-STUD",
         "stackable": null,
+        "stock_uom": "PCS",
         "target_margin": 22.5,
-        "total_allocated": 0,
-        "total_quantity": 0,
-        "uom_primary": "PCS",
         "upc": null,
         "updated_at": "<ts+0d>",
         "vendor": null,
