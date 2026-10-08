@@ -122,14 +122,22 @@ func TestCoreWorkerStopsCleanlyOnSignal(t *testing.T) {
 		t.Fatalf("send SIGINT to core worker (pid %d): %v", workerPID, err)
 	}
 
+	// Wait closes the pipes once the process exits, so the readers must reach
+	// EOF first or the last log lines can be lost (os/exec: it is incorrect to
+	// call Wait before all reads from the pipe have completed).
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		wg.Wait()
+		done <- cmd.Wait()
+	}()
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
-		t.Fatalf("core worker (pid %d) did not exit within 30s of SIGINT; output so far:\n%s", workerPID, strings.Join(lines, "\n"))
+		mu.Lock()
+		output := strings.Join(lines, "\n")
+		mu.Unlock()
+		t.Fatalf("core worker (pid %d) did not exit within 30s of SIGINT; output so far:\n%s", workerPID, output)
 	}
-	wg.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()
