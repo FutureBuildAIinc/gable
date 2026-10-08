@@ -28,26 +28,6 @@
           "branch_id": "<id-1>",
           "created_at": "<ts+0d>",
           "id": "<id-3>",
-          "line_count": 1,
-          "source": "SPECIAL_ORDER",
-          "status": "DRAFT",
-          "total_cost": 42,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "branch_id": "<id-1>",
-          "created_at": "<ts+0d>",
-          "id": "<id-4>",
-          "line_count": 1,
-          "source": "SPECIAL_ORDER",
-          "status": "DRAFT",
-          "total_cost": 70,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "branch_id": "<id-1>",
-          "created_at": "<ts+0d>",
-          "id": "<id-5>",
           "line_count": 2,
           "source": "MANUAL",
           "status": "RECEIVED",
@@ -58,7 +38,7 @@
         {
           "branch_id": "<id-1>",
           "created_at": "<ts+0d>",
-          "id": "<id-6>",
+          "id": "<id-4>",
           "line_count": 3,
           "source": "MANUAL",
           "status": "RECEIVED",
@@ -67,9 +47,9 @@
           "vendor_id": "<vendor>"
         },
         {
-          "branch_id": "<id-7>",
+          "branch_id": "<id-5>",
           "created_at": "<ts+0d>",
-          "id": "<id-8>",
+          "id": "<id-6>",
           "line_count": 3,
           "source": "MANUAL",
           "status": "SENT",
@@ -80,7 +60,7 @@
         {
           "branch_id": "<id-1>",
           "created_at": "<ts+0d>",
-          "id": "<id-9>",
+          "id": "<id-7>",
           "line_count": 3,
           "source": "MANUAL",
           "status": "SENT",
@@ -91,7 +71,7 @@
         {
           "branch_id": "<id-1>",
           "created_at": "<ts+0d>",
-          "id": "<id-10>",
+          "id": "<id-8>",
           "line_count": 3,
           "source": "MANUAL",
           "status": "SENT",
@@ -100,9 +80,9 @@
           "vendor_id": "<vendor>"
         },
         {
-          "branch_id": "<id-7>",
+          "branch_id": "<id-5>",
           "created_at": "<ts+0d>",
-          "id": "<id-11>",
+          "id": "<id-9>",
           "line_count": 3,
           "source": "MANUAL",
           "status": "SENT",
@@ -111,9 +91,9 @@
           "vendor_id": "<vendor>"
         },
         {
-          "branch_id": "<id-12>",
+          "branch_id": "<id-10>",
           "created_at": "<ts+0d>",
-          "id": "<id-13>",
+          "id": "<id-11>",
           "line_count": 4,
           "source": "MANUAL",
           "status": "DRAFT",
@@ -122,9 +102,9 @@
           "vendor_id": "<vendor>"
         },
         {
-          "branch_id": "<id-12>",
+          "branch_id": "<id-10>",
           "created_at": "<ts+0d>",
-          "id": "<id-14>",
+          "id": "<id-12>",
           "line_count": 4,
           "source": "MANUAL",
           "status": "PARTIAL",
@@ -135,7 +115,7 @@
         {
           "branch_id": "<id-1>",
           "created_at": "<ts+0d>",
-          "id": "<id-15>",
+          "id": "<id-13>",
           "line_count": 5,
           "source": "MANUAL",
           "status": "RECEIVED",
@@ -144,9 +124,9 @@
           "vendor_id": "<vendor>"
         },
         {
-          "branch_id": "<id-12>",
+          "branch_id": "<id-10>",
           "created_at": "<ts+0d>",
-          "id": "<id-16>",
+          "id": "<id-14>",
           "line_count": 6,
           "source": "MANUAL",
           "status": "RECEIVED",
@@ -155,9 +135,9 @@
           "vendor_id": "<vendor>"
         },
         {
-          "branch_id": "<id-12>",
+          "branch_id": "<id-10>",
           "created_at": "<ts+0d>",
-          "id": "<id-17>",
+          "id": "<id-15>",
           "line_count": 6,
           "source": "MANUAL",
           "status": "SENT",
@@ -166,9 +146,9 @@
           "vendor_id": "<vendor>"
         },
         {
-          "branch_id": "<id-12>",
+          "branch_id": "<id-10>",
           "created_at": "<ts+0d>",
-          "id": "<id-18>",
+          "id": "<id-16>",
           "line_count": 6,
           "source": "MANUAL",
           "status": "SENT",
