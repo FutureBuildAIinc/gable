@@ -66,17 +66,6 @@ export const TILE_ICONS: Record<string, Parameters<typeof icon>[0]> = {
   techadmin: Settings,
 };
 
-/** Consecutive tiles of one category become one section (tilesFor already groups them). */
-function groupByCategory(tiles: DoorTile[]): { category: string; tiles: DoorTile[] }[] {
-  const groups: { category: string; tiles: DoorTile[] }[] = [];
-  for (const tile of tiles) {
-    const last = groups[groups.length - 1];
-    if (last !== undefined && last.category === tile.category) last.tiles.push(tile);
-    else groups.push({ category: tile.category, tiles: [tile] });
-  }
-  return groups;
-}
-
 function initialsFor(name: string): string {
   const parts = name.trim().split(/[\s@.]+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -310,15 +299,8 @@ export class GableFrontDoor extends LitElement {
         <h1 class="text-2xl font-semibold text-white">Good to see you${this._userName ? html`, <span class="text-gable-green">${this._userName}</span>` : nothing}</h1>
         <p class="text-sm text-zinc-400">The enabled apps your roles admit. A tile opens the app inside the desk.</p>
       </div>
-      <div class="space-y-8">
-        ${groupByCategory(tiles).map((group) => html`
-          <section aria-label=${group.category}>
-            <h2 class="mb-3 text-xs uppercase tracking-wider text-muted-foreground font-mono">${group.category}</h2>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
-              ${group.tiles.map((tile) => this._renderTile(tile))}
-            </div>
-          </section>
-        `)}
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
+        ${tiles.map((tile) => this._renderTile(tile))}
       </div>
     `;
   }
