@@ -195,6 +195,7 @@ paths:
         is the handler's fixed 500 today.
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -245,6 +246,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -270,6 +272,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalRefusal"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/orders/{id}/project:
@@ -672,6 +676,7 @@ paths:
         handler's fallback status for this route is 400.
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -748,6 +753,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The accepted quote.
@@ -767,6 +773,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalRefusal"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/quotes/{id}/decline:
@@ -784,6 +792,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The declined quote.
@@ -803,6 +812,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalRefusal"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/cart:
@@ -835,6 +846,7 @@ paths:
         today (the handler's status is fixed).
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -947,6 +959,7 @@ paths:
         today (the handler's status is fixed).
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -1032,6 +1045,7 @@ paths:
         (the handler's status is fixed).
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true

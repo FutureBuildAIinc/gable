@@ -1981,6 +1981,7 @@ paths:
         Creates a new DRAFT order from the source order's lines. Every service failure, including a source order the caller does not own, is the handler's fixed 500 today.
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -2025,6 +2026,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -2050,6 +2052,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalRefusal"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/orders/{id}/project:
@@ -2432,6 +2436,7 @@ paths:
         A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400.
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -2504,6 +2509,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The accepted quote.
@@ -2523,6 +2529,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalRefusal"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/quotes/{id}/decline:
@@ -2540,6 +2548,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The declined quote.
@@ -2559,6 +2568,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalRefusal"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/cart:
@@ -2589,6 +2600,7 @@ paths:
         Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed).
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -2696,6 +2708,7 @@ paths:
         Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed).
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -2778,6 +2791,7 @@ paths:
         Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed).
       security:
         - PortalSession: []
+      parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -3117,6 +3131,8 @@ paths:
         An empty name is a 500 today (the handler's status is fixed). The project starts Active.
       security:
         - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3134,6 +3150,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/projects/{id}:
@@ -3180,6 +3204,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3197,6 +3222,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/quotes:
@@ -3444,13 +3477,12 @@ paths:
       tags: [uploads]
       summary: Serve an uploaded file
       description: >-
-        Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension (go's http.DetectContentType, which checks the extension first and falls back to content sniffing); Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404.
+        Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles do not include admin, owner or user is a 403; a machine key is a 403 on this path whatever scope it holds.
       security:
         - BearerJWT: []
-        - MachineKey: []
       responses:
         "200":
-          description: The file bytes; Content-Type is derived from the file extension.
+          description: The file bytes; Content-Type is derived from the file extension, then sniffed.
           content:
             application/octet-stream:
               schema:
@@ -3482,12 +3514,6 @@ components:
       name: portal_token
       description: >-
         The portal JWT issued by POST /api/portal/v1/login, presented as the portal_token cookie (HttpOnly) or as an Authorization: Bearer header; the middleware accepts either, cookie first. Verified against PORTAL_JWT_SECRET (HS256). AUTH_MODE=dev bypasses the check and injects the demo customer's claims instead.
-    MachineKey:
-      type: http
-      scheme: bearer
-      bearerFormat: machine-key
-      description: >-
-        A machine key (the sk_live_ shape GenerateKey mints). Validated against the api_keys table; needs scope for the route module, uploads:read for GET and HEAD and uploads:write for other methods. Machine keys are accepted on the same Authorization: Bearer header as the user JWT; the auth layer dispatches by token shape before the JWT parser runs.
   parameters:
     Limit:
       name: limit
