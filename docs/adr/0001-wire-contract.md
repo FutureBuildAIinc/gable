@@ -470,17 +470,42 @@ answered from its access logs.
 
 ### 11. Revision concurrency and preconditions
 
-Every mutable document carries `revision`, an int64 incremented on every
-write, and every read of the document writes the revision's ETag. Updates
-and transitions require the client's revision, through an `If-Match`
-header or a `revision` field in the body. A mismatch is 409
-`stale_revision`; a write carrying neither is 428 `precondition_required`.
-Without this rule, two editors of one document, a person and an agent
-among them, silently overwrite each other's work, and the quote update
-every module copies would seed that failure across the surface; fixing it
-in a later cycle would be the second breaking pass this ADR exists to
-avoid. Drafts (cycle 5) use the same mechanism. The package carries the
-helpers: write the ETag, parse `If-Match`, and resolve the precondition.
+Every mutable document carries `revision`, an int64 that starts at 1 on
+create and increments on every write. Every read of the document writes
+the revision's ETag, and every successful write returns the new revision
+in the body and its ETag on the response, so a client always leaves with
+the revision it must send back. Updates and transitions require the
+client's revision, through an `If-Match` header or a `revision` field in
+the body. A mismatch is 409 `stale_revision`; a write carrying neither
+is 428 `precondition_required`. Without this rule, two editors of one
+document, a person and an agent among them, silently overwrite each
+other's work, and the quote update every module copies would seed that
+failure across the surface; fixing it in a later cycle would be the
+second breaking pass this ADR exists to avoid. Drafts (cycle 5) use the
+same mechanism. The package carries the helpers: write the ETag, parse
+`If-Match`, and resolve the precondition.
+
+The revision check and the write are one database act, never a check
+followed by a write: a second writer between the two would pass the same
+check. The write is conditional, `UPDATE ... SET revision = revision + 1
+... WHERE id = $1 AND revision = $2`; zero rows updated means re-read
+the row to tell a 404 (no such document) from a 409 `stale_revision`
+(the document moved past the client's revision), or lock the row with
+`SELECT ... FOR UPDATE` inside the transaction and check the revision
+there.
+
+`If-Match` carries one revision in quotes, `"3"`. The weak form `W/"3"`
+is accepted too: proxies and caches rewrite strong ETags into weak ones
+on the way back, and the number is all this contract reads. `*` (any
+current version) and a list of tags say things a revision is not, and
+are a 400.
+
+A lifecycle transition is one write and takes the same preconditions:
+`POST /<entities>/{id}/transitions` with body `{"to": "<target status>",
+"revision": n}`, honoring `If-Match` and an idempotency key like every
+mutating request (section 9). A transition the document's lifecycle does
+not allow from its current state is 409 `invalid_state_transition`
+(section 3).
 
 ### 12. Field names, timestamps and dates
 
