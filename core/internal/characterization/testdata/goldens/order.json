@@ -257,6 +257,7 @@
       "path": "/api/v1/orders/<id-4>",
       "body": {
         "customer_id": "<id-1>",
+        "customer_po": "GOLD-PO-1",
         "delivery_type": "delivery",
         "lines": [
           {
@@ -277,7 +278,7 @@
         "currency": "USD",
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
-        "customer_po": null,
+        "customer_po": "GOLD-PO-1",
         "delivery_type": "delivery",
         "hold_note": null,
         "hold_reason": null,
@@ -424,7 +425,7 @@
             "currency": "USD",
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
-            "customer_po": null,
+            "customer_po": "GOLD-PO-1",
             "delivery_type": "delivery",
             "hold_note": null,
             "hold_reason": null,
@@ -551,7 +552,7 @@
             "currency": "USD",
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
-            "customer_po": null,
+            "customer_po": "GOLD-PO-1",
             "delivery_type": "delivery",
             "hold_note": null,
             "hold_reason": null,
@@ -834,25 +835,21 @@
     "request": {
       "method": "POST",
       "path": "/api/v1/orders/<id-4>/transitions",
+      "headers": {
+        "If-Match": "\"2\""
+      },
       "body": {
         "reason": "not yet",
-        "revision": "2",
         "to": "fulfilled"
       }
     },
     "response": {
-      "status": 400,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "validation_failed",
-          "details": [
-            {
-              "field": "revision",
-              "message": "must be an integer (no decimal point, exponent or quotes)"
-            }
-          ],
-          "message": "one or more fields failed validation"
+          "code": "invalid_state_transition",
+          "message": "cannot transition from draft to fulfilled"
         },
         "meta": {
           "request_id": "<id-20>"

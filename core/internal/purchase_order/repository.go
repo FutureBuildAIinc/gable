@@ -213,6 +213,7 @@ func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, e
 		SELECT id, po_id, product_id, description, quantity, COALESCE(qty_received, 0), cost, linked_so_line_id
 		FROM purchase_order_lines
 		WHERE po_id = $1
+		ORDER BY created_at, description, id
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, linesQuery, id)
 	if err != nil {

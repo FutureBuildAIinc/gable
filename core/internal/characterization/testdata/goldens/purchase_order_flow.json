@@ -2098,15 +2098,6 @@
         "id": "<id-73>",
         "lines": [
           {
-            "cost": 20,
-            "description": "r1b c sheet goods",
-            "id": "<id-74>",
-            "po_id": "<id-73>",
-            "product_id": "<id-54>",
-            "qty_received": 0,
-            "quantity": 10
-          },
-          {
             "cost": 8,
             "description": "r1b c lumber",
             "id": "<id-75>",
@@ -2114,6 +2105,15 @@
             "product_id": "<id-33>",
             "qty_received": 0,
             "quantity": 5
+          },
+          {
+            "cost": 20,
+            "description": "r1b c sheet goods",
+            "id": "<id-74>",
+            "po_id": "<id-73>",
+            "product_id": "<id-54>",
+            "qty_received": 0,
+            "quantity": 10
           }
         ],
         "source": "MANUAL",
@@ -2467,15 +2467,6 @@
         "id": "<id-73>",
         "lines": [
           {
-            "cost": 20,
-            "description": "r1b c sheet goods",
-            "id": "<id-74>",
-            "po_id": "<id-73>",
-            "product_id": "<id-54>",
-            "qty_received": 4,
-            "quantity": 10
-          },
-          {
             "cost": 8,
             "description": "r1b c lumber",
             "id": "<id-75>",
@@ -2483,6 +2474,15 @@
             "product_id": "<id-33>",
             "qty_received": 0,
             "quantity": 5
+          },
+          {
+            "cost": 20,
+            "description": "r1b c sheet goods",
+            "id": "<id-74>",
+            "po_id": "<id-73>",
+            "product_id": "<id-54>",
+            "qty_received": 4,
+            "quantity": 10
           }
         ],
         "source": "MANUAL",
@@ -2706,15 +2706,6 @@
         "id": "<id-73>",
         "lines": [
           {
-            "cost": 20,
-            "description": "r1b c sheet goods",
-            "id": "<id-74>",
-            "po_id": "<id-73>",
-            "product_id": "<id-54>",
-            "qty_received": 10,
-            "quantity": 10
-          },
-          {
             "cost": 8,
             "description": "r1b c lumber",
             "id": "<id-75>",
@@ -2722,6 +2713,15 @@
             "product_id": "<id-33>",
             "qty_received": 0,
             "quantity": 5
+          },
+          {
+            "cost": 20,
+            "description": "r1b c sheet goods",
+            "id": "<id-74>",
+            "po_id": "<id-73>",
+            "product_id": "<id-54>",
+            "qty_received": 10,
+            "quantity": 10
           }
         ],
         "source": "MANUAL",
