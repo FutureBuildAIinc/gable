@@ -154,8 +154,8 @@ func (s *idempotencyStore) complete(ctx context.Context, principal, key, claimID
 	_, err := s.db.Pool.Exec(ctx, `
 		UPDATE idempotency_keys
 		SET state = $3, status_code = $4, content_type = $5, location = $6, body = $7, expires_at = $8
-		WHERE principal = $1 AND key = $2 AND state = $9`,
-		principal, key, idempotencyStateComplete, status, contentType, location, body, retainUntil, idempotencyStateInProgress)
+		WHERE principal = $1 AND key = $2 AND state = $9 AND claim_id = $10`,
+		principal, key, idempotencyStateComplete, status, contentType, location, body, retainUntil, idempotencyStateInProgress, claimID)
 	return err
 }
 
@@ -167,8 +167,8 @@ func (s *idempotencyStore) complete(ctx context.Context, principal, key, claimID
 func (s *idempotencyStore) release(ctx context.Context, principal, key, claimID string) error {
 	_, err := s.db.Pool.Exec(ctx, `
 		DELETE FROM idempotency_keys
-		WHERE principal = $1 AND key = $2 AND state = 'in_progress'`,
-		principal, key)
+		WHERE principal = $1 AND key = $2 AND state = 'in_progress' AND claim_id = $3`,
+		principal, key, claimID)
 	return err
 }
 
