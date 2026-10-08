@@ -178,7 +178,7 @@ describe('error envelope', () => {
 describe('orderRequestFromQuotePayload', () => {
   it('maps price_each_cents and a decimal quantity onto the unconverted orders route', () => {
     const req = orderRequestFromQuotePayload({
-      customer_id: 'c', quote_id: 'q',
+      customer_id: 'c', quote_id: 'q', revision: 2,
       lines: [{ product_id: 'p', quantity: '12.5', uom: 'PCS', price_each_cents: 550 }],
     })
     expect(req.lines[0]).toEqual({ product_id: 'p', quantity: 12.5, price_each: 550 })
@@ -186,7 +186,7 @@ describe('orderRequestFromQuotePayload', () => {
 
   it('refuses special order lines rather than dropping them', () => {
     expect(() => orderRequestFromQuotePayload({
-      customer_id: 'c', quote_id: 'q',
+      customer_id: 'c', quote_id: 'q', revision: 2,
       lines: [{ product_id: null, quantity: '1', uom: 'EA', price_each_cents: 100 }],
     })).toThrow()
   })
