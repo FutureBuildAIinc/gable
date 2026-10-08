@@ -15,6 +15,7 @@ ADR-011, which lives in the FutureBuild infra repository, not here.
 | [0003](0003-events-outbox.md) | The transactional outbox and the events read API | R1-12 |
 | 0004 | Web session custody | R1-8 |
 | [0005](0005-sales-and-money-core.md) | The sales and money core | C2-0 |
+| [0008](0008-inventory-identity-and-vendor-intake.md) | Inventory identity and vendor intake | C4-0 |
 
 ## Writing one
 
