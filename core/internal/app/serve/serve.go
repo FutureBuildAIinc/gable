@@ -277,7 +277,10 @@ func Run() {
 	pimHandler := pim.NewHandler(pimSvc)
 	pimHandler.RegisterRoutes(mux, scoped("admin", "owner"))
 
-	locationSvc := location.NewService(location.NewRepository(db))
+	locationSvc := location.NewService(location.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog)
 	locationUserRepo := location.NewUserRepository(db)
 	locationHandler := location.NewHandler(
 		locationSvc,
@@ -351,14 +354,19 @@ func Run() {
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
-	pricingSvc := pricing.NewService(pricingRepo)
+	pricingSvc := pricing.NewService(pricingRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(pricingAuditAdapter{l: auditLog})
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
 	pricingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
 		catPricingRepo := pricing.NewCategoryRepository(db)
-		catPricingSvc := pricing.NewCategoryPricingService(catPricingRepo).WithTxRunner(db)
+		catPricingSvc := pricing.NewCategoryPricingService(catPricingRepo).WithTxRunner(db).
+			WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+			WithAudit(pricingAuditAdapter{l: auditLog})
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
 		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
@@ -1256,6 +1264,22 @@ func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, produc
 		}
 	}
 	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, vendorID, desc, quantity, unitCost)
+}
+
+// pricingAuditAdapter bridges the pricing package's mirrored audit entries
+// to the platform audit logger (the pricing package does not import pkg/audit,
+// exposure_scanner.go's note): a pricing write's audit row joins the write's
+// transaction through the logger's own executor resolution.
+type pricingAuditAdapter struct{ l *audit.Logger }
+
+func (a pricingAuditAdapter) Log(ctx context.Context, e pricing.AuditEntry) error {
+	id, err := uuid.Parse(e.EntityID)
+	if err != nil {
+		return fmt.Errorf("pricing audit entry with a non uuid entity id: %w", err)
+	}
+	return a.l.Log(ctx, audit.Entry{
+		Action: e.Action, EntityType: e.EntityType, EntityID: id, UserID: e.UserID, Changes: e.Changes,
+	})
 }
 
 // posCalcAdapter bridges pricing.Service + customer.Service to pos.PriceCalculator.

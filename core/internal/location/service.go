@@ -5,19 +5,105 @@ package location
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
+// EventRecorder writes a domain event into the transactional outbox; the
+// service calls it as the LAST statement of the mutation's transaction
+// (ADR 0003 section 2). *outbox.Writer satisfies it.
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
+
+// TxRunner runs fn inside one transaction, joining the caller's when ctx
+// already carries one. *database.DB satisfies it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// AuditLogger writes an audit row for a location write; *audit.Logger
+// satisfies it.
+type AuditLogger interface {
+	Log(ctx context.Context, entry audit.Entry) error
+}
+
+// Event types the module writes to the outbox.
+const (
+	EventLocationCreated  = "location.created"
+	EventLocationUpdated  = "location.updated"
+	EventLocationArchived = "location.archived"
+)
+
 type Service struct {
-	repo Repository
+	repo   Repository
+	events EventRecorder // optional; nil records nothing (unit tests)
+	tx     TxRunner      // optional; nil runs each write unwrapped (unit tests)
+	audits AuditLogger   // optional; nil writes no audit rows (unit tests)
 }
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// WithOutbox wires the recorder of the location events.
+func (s *Service) WithOutbox(events EventRecorder) *Service {
+	s.events = events
+	return s
+}
+
+// WithTxRunner wires the transaction wrapper every write uses, so the write,
+// its revision move, its audit row and its event are one transactional fact.
+func (s *Service) WithTxRunner(tx TxRunner) *Service {
+	s.tx = tx
+	return s
+}
+
+// WithAudit wires the audit rows of the location writes.
+func (s *Service) WithAudit(a AuditLogger) *Service {
+	s.audits = a
+	return s
+}
+
+// inTx runs fn in one transaction when a runner is wired.
+func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
+}
+
+// record writes the location write's audit row and its outbox event, inside
+// the caller's transaction; the event is the transaction's last statement
+// (ADR 0003 section 2). A failed audit write fails the mutation (the
+// recipe's rule).
+func (s *Service) record(ctx context.Context, loc *Location, action, eventType string) error {
+	typeWire := strings.ToLower(string(loc.Type))
+	if s.audits != nil {
+		changes := map[string]any{"code": loc.Code, "type": typeWire, "revision": loc.Revision, "active": loc.Active}
+		if err := s.audits.Log(ctx, audit.Entry{
+			Action: action, EntityType: "location", EntityID: loc.ID, Changes: changes,
+		}); err != nil {
+			return err
+		}
+	}
+	if s.events == nil {
+		return nil
+	}
+	raw, err := json.Marshal(map[string]any{"code": loc.Code, "type": typeWire, "revision": loc.Revision})
+	if err != nil {
+		return err
+	}
+	return s.events.Write(ctx, outbox.Event{
+		Type: eventType, EntityType: "location", EntityID: loc.ID, Data: raw,
+	})
 }
 
 // CreateLocation validates and persists a new location. Branch rows must be
@@ -60,7 +146,13 @@ func (s *Service) CreateLocation(ctx context.Context, loc *Location) error {
 	// The default is applied at the HTTP boundary instead, where
 	// createLocationRequest.Active is a *bool — see handler.go.
 
-	return s.repo.CreateLocation(ctx, loc)
+	// The create, its audit row and its event are one transactional fact.
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.CreateLocation(ctx, loc); err != nil {
+			return err
+		}
+		return s.record(ctx, loc, EventLocationCreated, EventLocationCreated)
+	})
 }
 
 func lower(s string) string {
@@ -89,11 +181,29 @@ func (s *Service) UpdateLocation(ctx context.Context, loc *Location, revision in
 	if err := v.Err(); err != nil {
 		return err
 	}
-	return resolveWrite(s.repo.UpdateLocation(ctx, loc, revision))
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := resolveWrite(s.repo.UpdateLocation(ctx, loc, revision)); err != nil {
+			return err
+		}
+		return s.record(ctx, loc, EventLocationUpdated, EventLocationUpdated)
+	})
 }
 
+// DeleteLocation archives the location (active=false) with its audit row and
+// its event in the same transaction.
 func (s *Service) DeleteLocation(ctx context.Context, id uuid.UUID, revision int64) error {
-	return resolveWrite(s.repo.DeleteLocation(ctx, id, revision))
+	return s.inTx(ctx, func(ctx context.Context) error {
+		old, err := s.repo.GetLocation(ctx, id)
+		if err != nil {
+			return resolveWrite(err)
+		}
+		if err := resolveWrite(s.repo.DeleteLocation(ctx, id, revision)); err != nil {
+			return err
+		}
+		old.Active = false
+		old.Revision++
+		return s.record(ctx, old, EventLocationArchived, EventLocationArchived)
+	})
 }
 
 // resolveWrite maps the repository's two write refusals to the boundary

@@ -5,21 +5,59 @@ package pricing
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
+)
+
+// Event types the module writes to the outbox.
+const (
+	EventRuleCreated = "pricing_rule.created"
 )
 
 type Service struct {
 	repo   Repository
 	catSvc *CategoryPricingService
+	events EventRecorder // optional; nil records nothing (unit tests)
+	tx     TxRunner      // optional; nil runs each write unwrapped (unit tests)
+	audits AuditLogger   // optional; nil writes no audit rows (unit tests)
 }
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// WithOutbox wires the recorder of the pricing rule events.
+func (s *Service) WithOutbox(events EventRecorder) *Service {
+	s.events = events
+	return s
+}
+
+// WithTxRunner wires the transaction wrapper the rule writes use, so the
+// write, its audit row and its event are one transactional fact.
+func (s *Service) WithTxRunner(tx TxRunner) *Service {
+	s.tx = tx
+	return s
+}
+
+// WithAudit wires the audit rows of the pricing rule writes.
+func (s *Service) WithAudit(a AuditLogger) *Service {
+	s.audits = a
+	return s
+}
+
+// inTx runs fn in one transaction when a runner is wired.
+func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
 }
 
 // WithCategoryPricing enables the category-aware pricing engine.
@@ -330,8 +368,37 @@ func selectRule(rules []PricingRule, base *big.Rat) (PricingRule, *big.Rat, stri
 	return best, bestPrice, bestDetails, true
 }
 
+// CreateRule writes a new pricing rule with its audit row and its
+// pricing_rule.created event in one transaction: a failed audit or event
+// write fails the create (the recipe's rule).
 func (s *Service) CreateRule(ctx context.Context, rule *PricingRule) error {
-	return s.repo.CreateRule(ctx, rule)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.CreateRule(ctx, rule); err != nil {
+			return err
+		}
+		if s.audits != nil {
+			changes := map[string]any{
+				"name": rule.Name, "rule_type": strings.ToLower(string(rule.RuleType)), "revision": rule.Revision,
+			}
+			if err := s.audits.Log(ctx, AuditEntry{
+				Action: EventRuleCreated, EntityType: "pricing_rule", EntityID: rule.ID.String(), Changes: changes,
+			}); err != nil {
+				return err
+			}
+		}
+		if s.events == nil {
+			return nil
+		}
+		raw, err := json.Marshal(map[string]any{
+			"name": rule.Name, "rule_type": strings.ToLower(string(rule.RuleType)), "revision": rule.Revision,
+		})
+		if err != nil {
+			return err
+		}
+		return s.events.Write(ctx, outbox.Event{
+			Type: EventRuleCreated, EntityType: "pricing_rule", EntityID: rule.ID, Data: raw,
+		})
+	})
 }
 
 func (s *Service) ListRules(ctx context.Context) ([]PricingRule, error) {

@@ -5,6 +5,7 @@ package pricing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -25,15 +27,50 @@ type Precondition struct {
 	Revision *int64
 }
 
+// AuditLogger writes an audit row for a pricing write, inside the caller's
+// transaction: a failed write fails the mutation (the recipe's rule), so
+// unlike the exposure scanner's fire-and-forget AuditWriter the error
+// returns. Implemented by an adapter over pkg/audit.Logger in serve.go, as
+// the package mirrors audit entries rather than importing pkg/audit
+// (exposure_scanner.go's note); the outbox EventRecorder seam is the
+// scanner's own declaration, reused by these writes.
+type AuditLogger interface {
+	Log(ctx context.Context, e AuditEntry) error
+}
+
+// Event types the module writes to the outbox.
+const (
+	EventCategoryCreated     = "category.created"
+	EventCategoryUpdated     = "category.updated"
+	EventCategoryRuleCreated = "category_rule.created"
+	EventCategoryRuleUpdated = "category_rule.updated"
+	EventCategoryRuleDeleted = "category_rule.deleted"
+)
+
 // CategoryPricingService implements the 5-step category-aware pricing resolution.
 type CategoryPricingService struct {
 	catRepo CategoryRepository
-	tx      TxRunner // optional; nil runs each write unwrapped (tests)
+	tx      TxRunner      // optional; nil runs each write unwrapped (tests)
+	events  EventRecorder // optional; nil records nothing (tests)
+	audits  AuditLogger   // optional; nil writes no audit rows (tests)
 }
 
 // NewCategoryPricingService creates a new CategoryPricingService.
 func NewCategoryPricingService(catRepo CategoryRepository) *CategoryPricingService {
 	return &CategoryPricingService{catRepo: catRepo}
+}
+
+// WithOutbox wires the recorder of the category and category rule events.
+func (s *CategoryPricingService) WithOutbox(events EventRecorder) *CategoryPricingService {
+	s.events = events
+	return s
+}
+
+// WithAudit wires the audit rows of the category writes (a category rule's
+// audit trail is its own category_pricing_audit table).
+func (s *CategoryPricingService) WithAudit(a AuditLogger) *CategoryPricingService {
+	s.audits = a
+	return s
 }
 
 // ResolveEffectivePrice runs the 5-step resolution algorithm:
@@ -164,14 +201,72 @@ func (s *CategoryPricingService) ListCategoriesTree(ctx context.Context) ([]Prod
 	return buildCategoryTree(flat), nil
 }
 
-// CreateCategory creates a new product category.
+// CreateCategory creates a new product category with its audit row and its
+// category.created event in one transaction.
 func (s *CategoryPricingService) CreateCategory(ctx context.Context, c *ProductCategory) error {
-	return s.catRepo.CreateCategory(ctx, c)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.catRepo.CreateCategory(ctx, c); err != nil {
+			return err
+		}
+		return s.recordCategory(ctx, c, EventCategoryCreated)
+	})
 }
 
-// UpdateCategory updates an existing product category.
+// UpdateCategory updates an existing product category with its audit row and
+// its category.updated event in one transaction.
 func (s *CategoryPricingService) UpdateCategory(ctx context.Context, c *ProductCategory) error {
-	return s.catRepo.UpdateCategory(ctx, c)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.catRepo.UpdateCategory(ctx, c); err != nil {
+			return err
+		}
+		return s.recordCategory(ctx, c, EventCategoryUpdated)
+	})
+}
+
+// recordCategory writes a category write's audit row and outbox event inside
+// the caller's transaction, the event last.
+func (s *CategoryPricingService) recordCategory(ctx context.Context, c *ProductCategory, action string) error {
+	if s.audits != nil {
+		if err := s.audits.Log(ctx, AuditEntry{
+			Action: action, EntityType: "category", EntityID: c.ID.String(),
+			Changes: map[string]any{"slug": c.Slug, "name": c.Name, "path": c.Path},
+		}); err != nil {
+			return err
+		}
+	}
+	return s.recordCategoryEvent(ctx, c, action)
+}
+
+func (s *CategoryPricingService) recordCategoryEvent(ctx context.Context, c *ProductCategory, eventType string) error {
+	if s.events == nil {
+		return nil
+	}
+	raw, err := json.Marshal(map[string]any{"slug": c.Slug, "name": c.Name, "path": c.Path})
+	if err != nil {
+		return err
+	}
+	return s.events.Write(ctx, outbox.Event{
+		Type: eventType, EntityType: "category", EntityID: c.ID, Data: raw,
+	})
+}
+
+// recordRuleEvent writes a category rule's event inside the caller's
+// transaction. The rule's audit trail is its own category_pricing_audit
+// table; the event is the transaction's last statement.
+func (s *CategoryPricingService) recordRuleEvent(ctx context.Context, ruleID uuid.UUID, eventType string, data map[string]any) error {
+	if s.events == nil {
+		return nil
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return s.events.Write(ctx, outbox.Event{
+		Type: eventType, EntityType: "category_rule", EntityID: ruleID, Data: raw,
+	})
 }
 
 // --- Rule Management ---
@@ -194,13 +289,19 @@ func (s *CategoryPricingService) inTx(ctx context.Context, fn func(ctx context.C
 }
 
 // CreateCategoryRule creates a new category pricing rule and its audit entry
-// in one transaction: a failed audit write fails the create.
+// in one transaction: a failed audit write fails the create. The rule's
+// category_rule.created event is the transaction's last statement.
 func (s *CategoryPricingService) CreateCategoryRule(ctx context.Context, r *CategoryPricingRule) error {
 	return s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.catRepo.CreateCategoryRule(ctx, r); err != nil {
 			return err
 		}
-		return s.logAudit(ctx, r.ID, "CREATE", nil, r)
+		if err := s.logAudit(ctx, r.ID, "CREATE", nil, r); err != nil {
+			return err
+		}
+		return s.recordRuleEvent(ctx, r.ID, EventCategoryRuleCreated, map[string]any{
+			"rule_type": strings.ToLower(string(r.RuleType)), "is_active": r.IsActive, "priority": r.Priority,
+		})
 	})
 }
 
@@ -225,7 +326,17 @@ func (s *CategoryPricingService) UpdateCategoryRule(ctx context.Context, r *Cate
 		if err := s.catRepo.UpdateCategoryRule(ctx, r, old.Revision); err != nil {
 			return resolveRuleWrite(err)
 		}
-		return s.logAudit(ctx, r.ID, "UPDATE", old, r)
+		if err := s.logAudit(ctx, r.ID, "UPDATE", old, r); err != nil {
+			return err
+		}
+		stored, err := s.catRepo.GetCategoryRule(ctx, r.ID)
+		if err != nil {
+			return err
+		}
+		return s.recordRuleEvent(ctx, r.ID, EventCategoryRuleUpdated, map[string]any{
+			"rule_type": strings.ToLower(string(stored.RuleType)), "is_active": stored.IsActive,
+			"priority": stored.Priority, "revision": stored.Revision,
+		})
 	})
 }
 
@@ -283,7 +394,10 @@ func (s *CategoryPricingService) DeleteCategoryRule(ctx context.Context, id uuid
 		if err := s.catRepo.DeleteCategoryRule(ctx, id); err != nil {
 			return err
 		}
-		return s.logAudit(ctx, id, "DELETE", old, nil)
+		if err := s.logAudit(ctx, id, "DELETE", old, nil); err != nil {
+			return err
+		}
+		return s.recordRuleEvent(ctx, id, EventCategoryRuleDeleted, nil)
 	})
 }
 
@@ -363,6 +477,7 @@ func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []Ca
 		if err := s.catRepo.BulkUpsertRules(ctx, rules); err != nil {
 			return err
 		}
+		storedRules := make([]*CategoryPricingRule, len(rules))
 		for i := range rules {
 			old := existing[rules[i].ID]
 			action := "CREATE"
@@ -373,7 +488,23 @@ func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []Ca
 			if err != nil {
 				return err
 			}
+			storedRules[i] = stored
 			if err := s.logAudit(ctx, rules[i].ID, action, old, stored); err != nil {
+				return err
+			}
+		}
+		// Per-row events at the transaction's end (ADR 0003 section 2: a
+		// bulk writer never holds the event lock through its statements).
+		for i := range storedRules {
+			eventType := EventCategoryRuleCreated
+			if existing[rules[i].ID] != nil {
+				eventType = EventCategoryRuleUpdated
+			}
+			if err := s.recordRuleEvent(ctx, rules[i].ID, eventType, map[string]any{
+				"rule_type": strings.ToLower(string(storedRules[i].RuleType)),
+				"is_active": storedRules[i].IsActive, "priority": storedRules[i].Priority,
+				"revision": storedRules[i].Revision,
+			}); err != nil {
 				return err
 			}
 		}
@@ -400,6 +531,12 @@ func (s *CategoryPricingService) BulkDeleteRules(ctx context.Context, ids []uuid
 		}
 		for _, old := range oldRules {
 			if err := s.logAudit(ctx, old.ID, "DELETE", old, nil); err != nil {
+				return err
+			}
+		}
+		// Per-row events at the transaction's end, as the bulk upsert does.
+		for _, old := range oldRules {
+			if err := s.recordRuleEvent(ctx, old.ID, EventCategoryRuleDeleted, nil); err != nil {
 				return err
 			}
 		}

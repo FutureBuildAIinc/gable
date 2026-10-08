@@ -345,11 +345,11 @@ func TestKitComponentsPut_FaultPartwayLeavesTheKitUnchanged(t *testing.T) {
 	if err := db.Pool.QueryRow(context.Background(), `SELECT is_kit FROM products WHERE id = $1`, kitID).Scan(&isKit); err != nil || !isKit {
 		t.Errorf("is_kit = %v (%v) after a rolled back replace, want true", isKit, err)
 	}
-	if n := f.countAudit(kitID); n != 1 {
-		t.Errorf("%d audit rows for the kit product, want the 1 of the good write", n)
+	if n := f.countUpdated(kitID, "audit_log", "action"); n != 1 {
+		t.Errorf("%d product.updated audit rows for the kit product, want the 1 of the good write (the create's product.created rolled back with it)", n)
 	}
-	if n := f.countEvents(kitID); n != 1 {
-		t.Errorf("%d events for the kit product, want the 1 of the good write", n)
+	if n := f.countUpdated(kitID, "events_outbox", "type"); n != 1 {
+		t.Errorf("%d product.updated events for the kit product, want the 1 of the good write", n)
 	}
 }
 
@@ -364,19 +364,12 @@ func compsAfter(res resp, productID string) string {
 	return ""
 }
 
-func (f *kitFixture) countAudit(id string) int {
+// countUpdated counts the kit PUT's own rows (product.updated); the create
+// writes product.created rows for the same product beside them.
+func (f *kitFixture) countUpdated(id, table, column string) int {
 	var n int
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM audit_log WHERE entity_type = 'product' AND entity_id = $1`, id).Scan(&n); err != nil {
-		f.t.Fatal(err)
-	}
-	return n
-}
-
-func (f *kitFixture) countEvents(id string) int {
-	var n int
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM events_outbox WHERE entity_type = 'product' AND entity_id = $1`, id).Scan(&n); err != nil {
+		`SELECT count(*) FROM `+table+` WHERE entity_type = 'product' AND entity_id = $1 AND `+column+` = 'product.updated'`, id).Scan(&n); err != nil {
 		f.t.Fatal(err)
 	}
 	return n
@@ -399,7 +392,7 @@ func TestKitComponentsPut_WritesAuditAndEvent(t *testing.T) {
 
 	var auditActions []string
 	rows, err := f.db.Pool.Query(context.Background(),
-		`SELECT action FROM audit_log WHERE entity_type = 'product' AND entity_id = $1`, kitID)
+		`SELECT action FROM audit_log WHERE entity_type = 'product' AND entity_id = $1 AND action = 'product.updated'`, kitID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,9 +410,9 @@ func TestKitComponentsPut_WritesAuditAndEvent(t *testing.T) {
 
 	var eventType, data string
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT type, data::text FROM events_outbox WHERE entity_type = 'product' AND entity_id = $1`, kitID).
+		`SELECT type, data::text FROM events_outbox WHERE entity_type = 'product' AND entity_id = $1 AND type = 'product.updated'`, kitID).
 		Scan(&eventType, &data); err != nil {
-		t.Fatalf("no event for the kit write: %v", err)
+		t.Fatalf("no product.updated event for the kit write: %v", err)
 	}
 	if eventType != "product.updated" {
 		t.Errorf("event type = %q, want product.updated", eventType)
@@ -515,12 +508,13 @@ func (g *gatedTxRunner) RunInTx(ctx context.Context, fn func(ctx context.Context
 func TestKitComponentsPut_SaturationNeedsNoSecondConnection(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
-	repo := product.NewRepository(db)
-	svc := product.NewService(repo).
+	// The seed runs through a plain fixture (its writes must not pass the
+	// gate); only the contenders' PUTs run inside the gated transactions.
+	f := newKitFixture(t, nil, db)
+	svc := product.NewService(product.NewRepository(db)).
 		WithOutbox(kitOutboxWriter(t, db)).
 		WithTxRunner(newGatedKitTx(db, 4)).
 		WithAudit(kitAuditLogger(t, db))
-	f := newKitFixture(t, svc, db)
 
 	kits := make([][3]string, 4)
 	for i := range kits {

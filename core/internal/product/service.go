@@ -103,7 +103,10 @@ func (s *Service) recordEvent(ctx context.Context, id uuid.UUID, sku string, rev
 	if s.events == nil {
 		return nil
 	}
-	data := map[string]any{"sku": sku, "revision": revision, "parts": parts}
+	data := map[string]any{"sku": sku, "revision": revision}
+	if len(parts) > 0 {
+		data["parts"] = parts
+	}
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -175,7 +178,17 @@ func (s *Service) CreateProduct(ctx context.Context, p *Product) error {
 		}
 	}
 
-	return s.repo.CreateProduct(ctx, p)
+	// The create, its audit row and its event are one transactional fact
+	// (the recipe's rule): a failed audit or event write fails the create.
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.CreateProduct(ctx, p); err != nil {
+			return err
+		}
+		if err := s.auditChange(ctx, p.ID, p.SKU, p.Revision, EventProductCreated, nil); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, p.ID, p.SKU, p.Revision, EventProductCreated)
+	})
 }
 
 // ListProducts returns all products (the reorder scheduler's read)
@@ -213,9 +226,24 @@ func (s *Service) ListBelowReorder(ctx context.Context) ([]ReorderAlert, error) 
 	return s.repo.ListBelowReorder(ctx)
 }
 
-// UpdateAverageCost updates the average unit cost for a product
+// UpdateAverageCost updates the average unit cost for a product (a receipt
+// or a return moves it), with its audit row and event in the same
+// transaction. The caller may already hold the transaction (the purchase
+// order receive does); the nested runner joins it.
 func (s *Service) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error {
-	return s.repo.UpdateAverageCost(ctx, id, avgCost)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.UpdateAverageCost(ctx, id, avgCost); err != nil {
+			return err
+		}
+		p, err := s.repo.GetProduct(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := s.auditChange(ctx, id, p.SKU, p.Revision, EventProductUpdated, map[string]any{"parts": []string{"average_cost"}}); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, id, p.SKU, p.Revision, EventProductUpdated, "average_cost")
+	})
 }
 
 // resolveRevision turns a repository write refusal into the boundary error:
@@ -233,16 +261,45 @@ func resolveRevision(err error) error {
 	}
 }
 
-// UpdateMarginRules updates the target margin and commission rate for a product
+// UpdateMarginRules updates the target margin and commission rate for a
+// product, with its audit row and event in the same transaction.
 func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64, revision int64) (int64, error) {
-	newRevision, err := s.repo.UpdateMarginRules(ctx, id, targetMargin, commissionRate, revision)
-	return newRevision, resolveRevision(err)
+	var newRevision int64
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		p, err := s.repo.GetProduct(ctx, id)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		newRevision, err = s.repo.UpdateMarginRules(ctx, id, targetMargin, commissionRate, revision)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		if err := s.auditChange(ctx, id, p.SKU, newRevision, EventProductUpdated, map[string]any{"parts": []string{"margins"}}); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, id, p.SKU, newRevision, EventProductUpdated, "margins")
+	})
+	return newRevision, err
 }
 
-// UpdateReorderTargets writes new reorder_point and reorder_qty for a product.
-// Used by the purchase_order package's RefreshReorderTargets job.
+// UpdateReorderTargets writes new reorder_point and reorder_qty for a product
+// (the purchase_order package's RefreshReorderTargets job), with its audit
+// row and event in the same transaction. The scheduler is a system writer
+// and carries no revision.
 func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
-	return s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty)
+	return s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty); err != nil {
+			return err
+		}
+		p, err := s.repo.GetProduct(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := s.auditChange(ctx, id, p.SKU, p.Revision, EventProductUpdated, map[string]any{"parts": []string{"reorder_targets"}}); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, id, p.SKU, p.Revision, EventProductUpdated, "reorder_targets")
+	})
 }
 
 // UpdateLeadTime publishes (or clears) the dealer's lead time for a product.
@@ -257,8 +314,22 @@ func (s *Service) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays
 		return 0, httpx.BadRequest("one or more fields failed validation",
 			httpx.FieldError{Field: "lead_time_days", Message: "must be zero or positive"})
 	}
-	newRevision, err := s.repo.UpdateLeadTime(ctx, id, leadTimeDays, revision)
-	return newRevision, resolveRevision(err)
+	var newRevision int64
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		p, err := s.repo.GetProduct(ctx, id)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		newRevision, err = s.repo.UpdateLeadTime(ctx, id, leadTimeDays, revision)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		if err := s.auditChange(ctx, id, p.SKU, newRevision, EventProductUpdated, map[string]any{"parts": []string{"lead_time"}}); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, id, p.SKU, newRevision, EventProductUpdated, "lead_time")
+	})
+	return newRevision, err
 }
 
 // UpdateDimensions writes the parametric 3D geometry (inches) for a product.
@@ -290,6 +361,20 @@ func (s *Service) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry
 		src := GeometrySourceParametric
 		g.GeometrySource = &src
 	}
-	newRevision, err := s.repo.UpdateDimensions(ctx, id, g, revision)
-	return newRevision, resolveRevision(err)
+	var newRevision int64
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		p, err := s.repo.GetProduct(ctx, id)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		newRevision, err = s.repo.UpdateDimensions(ctx, id, g, revision)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		if err := s.auditChange(ctx, id, p.SKU, newRevision, EventProductUpdated, map[string]any{"parts": []string{"dimensions"}}); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, id, p.SKU, newRevision, EventProductUpdated, "dimensions")
+	})
+	return newRevision, err
 }
