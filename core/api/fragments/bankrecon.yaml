@@ -1,0 +1,488 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The bank reconciliation module, transcribed from internal/bankrecon/
+# handler.go, model.go, service.go and repository.go as they behave today.
+# Quirks the transcription preserves: response money is int64 cents while the
+# session create request takes statement_balance in float dollars; the lists
+# are bare JSON arrays (the handlers coerce nil to []) with no paging and an
+# unparseable bank_account_id filter silently dropped; GET a session maps
+# every service failure to 404 and complete maps every failure (unknown id,
+# already completed) to 422; create, import, match and unmatch validation and
+# database failures are 500; import answers 200 with counts even when every
+# row was skipped; the account_number and routing_number are returned in
+# full. Every error body is the standard envelope. Every route sits behind
+# RequireRole("admin","owner","finance"), registered in
+# internal/app/serve/serve.go.
+paths:
+  /api/v1/bankrecon/accounts:
+    get:
+      operationId: bankreconAccountList
+      tags: [bankrecon]
+      summary: List bank accounts
+      description: Role guard admin, owner or finance. Never null.
+      responses:
+        "200":
+          description: The bank accounts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BankreconBankAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: bankreconAccountCreate
+      tags: [bankrecon]
+      summary: Create a bank account
+      description: >-
+        Role guard admin, owner or finance. Always created active. Only an
+        undecodable body is a 400; a database refusal such as an unknown
+        gl_account_id is a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconCreateBankAccountRequest"
+      responses:
+        "201":
+          description: The created bank account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconBankAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/import:
+    post:
+      operationId: bankreconImport
+      tags: [bankrecon]
+      summary: Import a bank statement CSV
+      description: >-
+        Role guard admin, owner or finance. csv_content is the CSV text; the
+        first line is skipped as a header and rows are date, amount,
+        description, reference. Unparseable rows are counted as skipped, not
+        refused, and unmatched transactions are then auto matched to posted
+        journal entries within a day and a half and equal amount. Always 200
+        once the body decodes.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconImportRequest"
+      responses:
+        "200":
+          description: The import counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconImportResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/match:
+    post:
+      operationId: bankreconMatch
+      tags: [bankrecon]
+      summary: Match a bank transaction to a journal entry
+      description: >-
+        Role guard admin, owner or finance. An unknown transaction or journal
+        entry is a 500, not a 404.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconMatchRequest"
+      responses:
+        "200":
+          description: Matched. The body is a one key object with status "matched".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/unmatch:
+    post:
+      operationId: bankreconUnmatch
+      tags: [bankrecon]
+      summary: Clear the match on a bank transaction
+      description: >-
+        Role guard admin, owner or finance. An unknown transaction is a 500,
+        not a 404.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconUnmatchRequest"
+      responses:
+        "200":
+          description: Unmatched. The body is a one key object with status "unmatched".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/sessions:
+    get:
+      operationId: bankreconSessionList
+      tags: [bankrecon]
+      summary: List reconciliation sessions
+      description: >-
+        Role guard admin, owner or finance. Optional bank_account_id filter
+        (an unparseable value is ignored). No paging. Never null. Transactions
+        are not included.
+      parameters:
+        - name: bank_account_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BankreconSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: bankreconSessionCreate
+      tags: [bankrecon]
+      summary: Start a reconciliation session
+      description: >-
+        Role guard admin, owner or finance. statement_balance is float
+        dollars today, stored as int64 cents. The session starts IN_PROGRESS.
+        Only an undecodable body is a 400; malformed period dates or a
+        database refusal are 500. The echo omits bank_account_name.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconCreateSessionRequest"
+      responses:
+        "201":
+          description: The created session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/sessions/{id}:
+    get:
+      operationId: bankreconSessionGet
+      tags: [bankrecon]
+      summary: Get a session with its transactions
+      description: >-
+        Role guard admin, owner or finance. Any service failure, not only a
+        missing row, is a 404. The cleared and outstanding summary is
+        recalculated from the transactions on every read. transactions is
+        omitted when the session has none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/bankrecon/sessions/{id}/complete:
+    post:
+      operationId: bankreconSessionComplete
+      tags: [bankrecon]
+      summary: Complete a reconciliation session
+      description: >-
+        Role guard admin, owner or finance. No body. completed_by is the
+        caller's JWT subject when it parses as a UUID, else omitted. Every
+        service failure, including an unknown id or an already completed
+        session, is a 422.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The completed session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+components:
+  schemas:
+    BankreconBankAccount:
+      type: object
+      required: [id, name, account_number, routing_number, gl_account_id, is_active, created_at]
+      description: A bank account linked to a GL cash account (bankrecon.BankAccount).
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        account_number:
+          type: string
+        routing_number:
+          type: string
+        gl_account_id:
+          type: string
+          format: uuid
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    BankreconTransaction:
+      type: object
+      required: [id, bank_account_id, transaction_date, amount, description, reference, status, created_at]
+      description: One imported statement row (bankrecon.BankTransaction). amount is int64 cents, positive for a deposit and negative for a withdrawal.
+      properties:
+        id:
+          type: string
+          format: uuid
+        bank_account_id:
+          type: string
+          format: uuid
+        reconciliation_id:
+          type: string
+          format: uuid
+        transaction_date:
+          type: string
+          format: date-time
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        description:
+          type: string
+        reference:
+          type: string
+        matched_journal_entry_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [UNMATCHED, MATCHED, EXCLUDED]
+        created_at:
+          type: string
+          format: date-time
+    BankreconSession:
+      type: object
+      required: [id, bank_account_id, period_start, period_end, statement_balance, gl_balance, cleared_count, cleared_total, outstanding_count, outstanding_total, difference, status, created_at]
+      description: A reconciliation session (bankrecon.ReconciliationSession). Every balance and total is int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        bank_account_id:
+          type: string
+          format: uuid
+        bank_account_name:
+          type: string
+          description: Joined on reads; omitted on the create echo.
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        statement_balance:
+          type: integer
+          format: int64
+          description: Cents.
+        gl_balance:
+          type: integer
+          format: int64
+          description: Cents.
+        cleared_count:
+          type: integer
+        cleared_total:
+          type: integer
+          format: int64
+          description: Cents.
+        outstanding_count:
+          type: integer
+        outstanding_total:
+          type: integer
+          format: int64
+          description: Cents.
+        difference:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+          enum: [IN_PROGRESS, COMPLETED]
+        completed_by:
+          type: string
+          format: uuid
+        completed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        transactions:
+          type: array
+          description: Present on the single read only, and only when the session has transactions.
+          items:
+            $ref: "#/components/schemas/BankreconTransaction"
+    BankreconImportResult:
+      type: object
+      required: [total_rows, imported_rows, skipped_rows, auto_matched]
+      description: The CSV import summary (bankrecon.ImportResult).
+      properties:
+        total_rows:
+          type: integer
+        imported_rows:
+          type: integer
+        skipped_rows:
+          type: integer
+        auto_matched:
+          type: integer
+    BankreconStatusResult:
+      type: object
+      required: [status]
+      description: The one key acknowledgement match and unmatch write.
+      properties:
+        status:
+          type: string
+          enum: [matched, unmatched]
+    BankreconCreateBankAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        account_number:
+          type: string
+        routing_number:
+          type: string
+        gl_account_id:
+          type: string
+          format: uuid
+    BankreconCreateSessionRequest:
+      type: object
+      description: Period dates are YYYY-MM-DD; statement_balance is float dollars today.
+      properties:
+        bank_account_id:
+          type: string
+          format: uuid
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type: string
+          format: date
+        statement_balance:
+          type: number
+          description: Float dollars today.
+    BankreconImportRequest:
+      type: object
+      properties:
+        bank_account_id:
+          type: string
+          format: uuid
+        reconciliation_id:
+          type: string
+          format: uuid
+        csv_content:
+          type: string
+    BankreconMatchRequest:
+      type: object
+      properties:
+        bank_transaction_id:
+          type: string
+          format: uuid
+        journal_entry_id:
+          type: string
+          format: uuid
+    BankreconUnmatchRequest:
+      type: object
+      properties:
+        bank_transaction_id:
+          type: string
+          format: uuid

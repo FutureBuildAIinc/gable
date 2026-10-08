@@ -1,0 +1,251 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The tax module, transcribed from internal/tax (handler.go, model.go,
+# service.go, exemptions.go) as it behaves today. Quirks kept: all tax money
+# is int64 cents with float rates; the exemption routes use two different
+# path parameter names on the same path shape ({customerID} for the GET,
+# {id} for the DELETE), exactly as registered; delete answers 204 for an
+# unknown id; a bad expiry_date is a 500, not a 400; effective_date is
+# serialized as a full timestamp. Roles admin, owner and finance guard
+# every route; there is no branch middleware.
+paths:
+  /api/v1/tax/exemptions:
+    post:
+      operationId: taxExemptionCreate
+      tags: [tax]
+      summary: Create a tax exemption
+      description: >-
+        Roles admin, owner, finance. customer_id and exempt_reason are
+        required (400). The exemption is created active and effective now.
+        expiry_date is a YYYY-MM-DD string; any other format is a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxExemptionCreateRequest"
+      responses:
+        "201":
+          description: The created exemption.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxExemption"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/tax/exemptions/{customerID}:
+    get:
+      operationId: taxExemptionList
+      tags: [tax]
+      summary: List a customer's tax exemptions
+      description: >-
+        Roles admin, owner, finance. Every exemption of the customer, active
+        or not, newest first; an array that is empty, never null, for an
+        unknown customer.
+      parameters:
+        - name: customerID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The exemptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaxExemption"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/tax/exemptions/{id}:
+    delete:
+      operationId: taxExemptionDelete
+      tags: [tax]
+      summary: Delete a tax exemption
+      description: >-
+        Roles admin, owner, finance. A hard delete. An unknown id still
+        answers 204.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The exemption is gone (or never existed).
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/tax/preview:
+    post:
+      operationId: taxPreview
+      tags: [tax]
+      summary: Preview tax on a cart or invoice
+      description: >-
+        Roles admin, owner, finance. At least one line is required (400).
+        document_type defaults to SalesInvoice. An exempt customer gets a
+        zero tax result; otherwise Avalara is used when configured and a
+        flat rate estimate (is_estimate true) when not. Amounts are int64
+        cents.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxPreviewRequest"
+      responses:
+        "200":
+          description: The tax result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  schemas:
+    TaxExemption:
+      type: object
+      required: [id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date, is_active, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        exempt_reason:
+          type: string
+          description: For example RESALE, GOVERNMENT or CONTRACTOR (not validated).
+        certificate_number: { type: string }
+        issuing_state:
+          type: string
+          description: A state code (not validated).
+        effective_date:
+          type: string
+          format: date-time
+          description: A full timestamp today, not a date.
+        expiry_date:
+          type: string
+          format: date-time
+          description: Absent when the exemption does not expire.
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+    TaxExemptionCreateRequest:
+      type: object
+      required: [customer_id, exempt_reason]
+      properties:
+        customer_id: { type: string, format: uuid }
+        exempt_reason: { type: string }
+        certificate_number: { type: string }
+        issuing_state: { type: string }
+        expiry_date:
+          type: string
+          format: date
+          description: YYYY-MM-DD.
+    TaxAddress:
+      type: object
+      required: [line1, city, state, postal_code, country]
+      properties:
+        line1: { type: string }
+        line2: { type: string }
+        city: { type: string }
+        state: { type: string }
+        postal_code: { type: string }
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2.
+    TaxLineInput:
+      type: object
+      properties:
+        line_number: { type: integer }
+        item_code: { type: string }
+        description: { type: string }
+        quantity: { type: number }
+        amount:
+          type: integer
+          format: int64
+          description: Pre-tax line total in cents.
+        tax_code:
+          type: string
+          description: Avalara tax code.
+    TaxPreviewRequest:
+      type: object
+      required: [lines]
+      properties:
+        customer_id: { type: string, format: uuid }
+        ship_from:
+          $ref: "#/components/schemas/TaxAddress"
+        ship_to:
+          $ref: "#/components/schemas/TaxAddress"
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/TaxLineInput"
+        document_type:
+          type: string
+          description: SalesInvoice (default) or ReturnInvoice.
+        rate_hint:
+          type: number
+          description: Caller resolved fallback rate for the flat rate path; zero means the configured rate.
+    TaxLine:
+      type: object
+      required: [line_number, item_code, description, quantity, amount, tax_amount, tax_rate, jurisdiction, tax_code, exempt]
+      properties:
+        line_number: { type: integer }
+        item_code: { type: string }
+        description: { type: string }
+        quantity: { type: number }
+        amount:
+          type: integer
+          format: int64
+          description: Pre-tax amount in cents.
+        tax_amount:
+          type: integer
+          format: int64
+          description: Tax in cents.
+        tax_rate:
+          type: number
+          description: Effective rate as a fraction (0.0825 is 8.25 percent).
+        jurisdiction: { type: string }
+        tax_code: { type: string }
+        exempt: { type: boolean }
+    TaxResult:
+      type: object
+      required: [total_amount, total_tax, grand_total, lines, is_estimate]
+      properties:
+        document_code:
+          type: string
+          description: The Avalara document code; absent for estimates.
+        total_amount:
+          type: integer
+          format: int64
+          description: Pre-tax total in cents.
+        total_tax:
+          type: integer
+          format: int64
+          description: Tax in cents.
+        grand_total:
+          type: integer
+          format: int64
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxLine"
+        is_estimate:
+          type: boolean
+          description: True when the flat rate fallback was used.
