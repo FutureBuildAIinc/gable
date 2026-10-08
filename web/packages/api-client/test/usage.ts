@@ -81,7 +81,7 @@ async function _happy() {
     { revision: kitRevision, components: [{ component_product_id: kit.body.kit_product_id, quantity: "2" }] },
     { path: { id: kit.body.kit_product_id } },
   );
-  const replacedRevision: number = replacedKit.body.revision;
+  const _replacedRevision: number = replacedKit.body.revision;
   const stockUom: string | undefined = products.body.items[0]?.stock_uom;
   const basePrice: number | undefined = products.body.items[0]?.base_price_ten_thousandths;
   const available: string | undefined = products.body.items[0]?.available;
