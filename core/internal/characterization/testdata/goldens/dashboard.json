@@ -21,17 +21,8 @@
           "alert_type": "LOW_STOCK",
           "current_qty": 12,
           "location_id": "<id-2>",
-          "name": "Simpson Strong-Tie LUS28",
-          "product_id": "<id-3>",
-          "reorder_qty": 150,
-          "sku": "SIMP-LUS28"
-        },
-        {
-          "alert_type": "LOW_STOCK",
-          "current_qty": 12,
-          "location_id": "<id-2>",
           "name": "Flashing J 6 X 6 X 10",
-          "product_id": "<id-4>",
+          "product_id": "<id-3>",
           "reorder_qty": 20,
           "sku": "CORN2006"
         },
@@ -40,9 +31,18 @@
           "current_qty": 12,
           "location_id": "<id-2>",
           "name": "Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX",
-          "product_id": "<id-5>",
+          "product_id": "<id-4>",
           "reorder_qty": 40,
           "sku": "CORNSHTGR49"
+        },
+        {
+          "alert_type": "LOW_STOCK",
+          "current_qty": 12,
+          "location_id": "<id-2>",
+          "name": "Simpson Strong-Tie LUS28",
+          "product_id": "<id-5>",
+          "reorder_qty": 150,
+          "sku": "SIMP-LUS28"
         },
         {
           "alert_type": "LOW_STOCK",
@@ -75,17 +75,8 @@
           "alert_type": "LOW_STOCK",
           "current_qty": 17,
           "location_id": "<id-2>",
-          "name": "Ice & Water Shield 65'",
-          "product_id": "<id-9>",
-          "reorder_qty": 20,
-          "sku": "RF-ICE-65"
-        },
-        {
-          "alert_type": "LOW_STOCK",
-          "current_qty": 17,
-          "location_id": "<id-2>",
           "name": "Vented Soffit Hardie Textured 1/4 X 24 X 8",
-          "product_id": "<id-10>",
+          "product_id": "<id-9>",
           "reorder_qty": 20,
           "sku": "CORNSFT2408V"
         },
@@ -93,10 +84,19 @@
           "alert_type": "LOW_STOCK",
           "current_qty": 17,
           "location_id": "<id-2>",
-          "name": "3\" Deck Screws (2.5kg)",
+          "name": "2x4x8 SPF Premium",
+          "product_id": "<id-10>",
+          "reorder_qty": 200,
+          "sku": "LUM-248-PREM"
+        },
+        {
+          "alert_type": "LOW_STOCK",
+          "current_qty": 17,
+          "location_id": "<id-2>",
+          "name": "Ice & Water Shield 65'",
           "product_id": "<id-11>",
-          "reorder_qty": 40,
-          "sku": "SCR-DECK-3-5"
+          "reorder_qty": 20,
+          "sku": "RF-ICE-65"
         }
       ]
     }
