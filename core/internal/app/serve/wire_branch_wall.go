@@ -10,6 +10,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/database"
@@ -62,4 +63,11 @@ func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {
 	h.WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "purchasing"))
+}
+
+// matching mounts the 3-way match routes: both act on a purchase order
+// addressed by its path id, so they run behind the branch middleware and the
+// purchase order is held to the caller's wall before the matcher runs.
+func (w *branchWall) matching(mux *http.ServeMux, svc *matching.Service) {
+	matching.NewHandler(svc).WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "finance"))
 }

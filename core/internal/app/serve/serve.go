@@ -528,8 +528,7 @@ func Run() {
 	// 3-Way PO Matching Module
 	matchingRepo := matching.NewRepository(db)
 	matchingSvc := matching.NewService(db, matchingRepo, poSvc, apSvc, logger)
-	matchingHandler := matching.NewHandler(matchingSvc).WithBranchGuard(wall.guard)
-	matchingHandler.RegisterRoutes(mux, wall.scoped("admin", "owner", "finance"))
+	wall.matching(mux, matchingSvc)
 
 	// Bank Reconciliation Module
 	bankreconRepo := bankrecon.NewRepository(db)
