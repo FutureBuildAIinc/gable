@@ -54,7 +54,7 @@ Never "fix" a doc by making it read better. Fix it by making it **true**.
 **If it's a command**, run it:
 
 ```bash
-make up && make migrate && DEMO_SEED=1 make seed
+make db && make migrate && DEMO_SEED=1 make seed
 cd core && go run ./cmd/server
 cd web/apps/desk && npm install && npm run dev
 ```

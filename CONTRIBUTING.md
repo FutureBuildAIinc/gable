@@ -14,8 +14,8 @@ issues, do **not** open a public issue — follow [SECURITY.md](./SECURITY.md).
 (via Docker or your own instance).
 
 ```bash
-# 1. Boot Postgres (docker compose maps it to localhost:5434)
-make up
+# 1. Boot Postgres alone (docker compose maps it to localhost:5434)
+make db
 
 # 2. Apply database migrations
 make migrate
@@ -138,7 +138,7 @@ still go red. Before pushing anything that touches SQL, migrations, or
 repository code, run the real thing:
 
 ```bash
-make up && make migrate     # boots Postgres on localhost:5434 and migrates
+make db && make migrate     # boots Postgres on localhost:5434 and migrates
 make test
 ```
 

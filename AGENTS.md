@@ -147,13 +147,13 @@ npx tsc --noEmit     # type-check only
 make up              # the whole local stack: Postgres (:5434), migrate and seed, core serve,
                      # core worker, web (front door and desk) on http://127.0.0.1:8080; waits healthy
 make smoke           # scripts/smoke.sh: exit test step 3 against the running stack, stops at the first failure
-make down            # stops and removes the containers AND their volumes
+make down            # stops and removes the stack's containers AND its volume (not the `make db` volume)
 make db              # Postgres alone, for running core from source
 make logs
 make ps
-make pg-shell        # psql into the gable_postgres container
+make pg-shell        # psql into the `make db` Postgres (the stack's: COMPOSE_PROJECT_NAME=gable-stack make pg-shell)
 ```
-The stack runs `AUTH_MODE=dev` (local only, published on 127.0.0.1) and the web image is built with `VITE_AUTH_DEV_MODE=true`. Migrate and seed run once as a one shot service that serve and worker wait for, so the seed (which truncates transactional tables) repaves the demo data on every `make up`. `GABLE_WEB_PORT`, `GABLE_PG_PORT` and `GABLE_PG_CONTAINER` override the host ports and the Postgres container name. CI runs `make up && make smoke && make down` as the "Local stack" job. `make smoke` needs the stack up and uses only curl, jq (or python3) and psql inside the Postgres container.
+The stack runs `AUTH_MODE=dev` (local only, published on 127.0.0.1) and the web image is built with `VITE_AUTH_DEV_MODE=true`. Migrate and seed run once as a one shot service that serve and worker wait for, so the seed (which truncates transactional tables) repaves the demo data on every `make up`; the stack runs in its own compose project (`gable-stack`, volume `gable-stack_postgres_data`, container `gable_stack_postgres`) so the `make db` volume is never truncated or removed. `GABLE_WEB_PORT`, `GABLE_PG_PORT` and `GABLE_PG_CONTAINER` override the host ports and the Postgres container name. CI runs `make up && make smoke && make down` as the "Local stack" job. `make smoke` needs the stack up and requires curl and python3 on the host and uses psql inside the Postgres container.
 
 ## The Tauri shell (`tauri/gable-desk`)
 

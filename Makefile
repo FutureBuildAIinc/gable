@@ -44,26 +44,40 @@ help:
 # worker and the web image (front door and desk on one origin). AUTH_MODE=dev,
 # local only. Builds one image at a time, then waits until every service is
 # healthy. http://127.0.0.1:$${GABLE_WEB_PORT:-8080}
-up:
-	COMPOSE_PARALLEL_LIMIT=1 docker compose up -d --build --wait --wait-timeout 600
+#
+# The stack runs in its own compose project (gable-stack), so its Postgres volume
+# is gable-stack_postgres_data and its Postgres container gable_stack_postgres.
+# The seed repaves the demo data on every `make up` and `make down` deletes the
+# volume, so the stack must never share a volume with the Postgres alone
+# workflow (`make db`, whose volume is named after the checkout's directory):
+# that data is never truncated or removed by `make up` or `make down`.
+# Why a separate project and not a guard: a guard has to tell a developer's data
+# from the stack's own, which is a heuristic; two volumes cannot collide.
+STACK_PROJECT ?= gable-stack
+STACK_ENV = COMPOSE_PROJECT_NAME=$(STACK_PROJECT) GABLE_PG_CONTAINER=$${GABLE_PG_CONTAINER:-gable_stack_postgres}
 
-# Postgres alone (localhost:5434), for running core from source.
+up:
+	$(STACK_ENV) COMPOSE_PARALLEL_LIMIT=1 docker compose up -d --build --wait --wait-timeout 600
+
+# Postgres alone (localhost:5434), for running core from source. Uses the
+# checkout's own compose project and volume, never the stack's.
 db:
 	docker compose up -d --wait postgres
 
-# Stop and remove the containers AND their volumes (the Postgres data).
+# Stop and remove the stack's containers AND its volume (the stack's Postgres
+# data only; `make db` data is in another volume and is not touched).
 down:
-	docker compose down -v
+	$(STACK_ENV) docker compose down -v
 
 # The exit test's step 3 against the running stack (scripts/smoke.sh).
 smoke:
-	bash scripts/smoke.sh
+	$(STACK_ENV) bash scripts/smoke.sh
 
 logs:
-	docker compose logs -f
+	$(STACK_ENV) docker compose logs -f
 
 ps:
-	docker compose ps
+	$(STACK_ENV) docker compose ps
 
 pg-shell:
 	docker exec -it gable_postgres psql -U gable_user -d gable_db
@@ -111,7 +125,7 @@ build:
 vet:
 	cd core && go vet ./...
 
-# The full suite, exactly as CI runs it. Needs Postgres — `make up && make
+# The full suite, exactly as CI runs it. Needs Postgres — `make db && make
 # migrate` first, or point DATABASE_URL at your own instance.
 test:
 	cd core && go test -race ./...

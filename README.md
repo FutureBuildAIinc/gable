@@ -91,7 +91,9 @@ desk everywhere else, `/api` proxied to core), then waits until each is healthy.
 Open <http://127.0.0.1:8080>. `make smoke` checks the running stack end to end
 (`scripts/smoke.sh`), and `make down` removes the containers **and** their
 volumes. The stack runs with `AUTH_MODE=dev` and publishes on `127.0.0.1` only:
-local use, never a reachable host. If 8080 or 5434 is taken, set `GABLE_WEB_PORT`
+local use, never a reachable host. The stack has its own Docker volume
+(compose project `gable-stack`), so `make up`, its seed and `make down` never
+touch the data of a Postgres started with `make db`. If 8080 or 5434 is taken, set `GABLE_WEB_PORT`
 or `GABLE_PG_PORT`.
 
 ## Behind a reverse proxy
