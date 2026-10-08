@@ -96,6 +96,12 @@ type ParsedUpdate struct {
 	Active   *bool
 }
 
+// empty reports whether the update carries no field to apply: the grants'
+// idempotent no-op rule, where a write that changes nothing writes nothing.
+func (u *ParsedUpdate) empty() bool {
+	return u == nil || (u.Email == nil && u.FullName == nil && u.StaffNo == nil && u.Role == nil && u.Active == nil)
+}
+
 // Parse validates the update. A staff_no of null clears the number (it is
 // optional on the wire); an email or full_name, when sent, must be valid.
 func (r *UpdateStaffInput) Parse() (*ParsedUpdate, *int64, error) {

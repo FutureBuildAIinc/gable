@@ -144,6 +144,13 @@ func TestConcurrency_Pool4ThreeContenders(t *testing.T) {
 	if n := countRows(t, db, `SELECT count(DISTINCT number) FROM rfcs WHERE id = ANY($1)`, ids); n != contenders {
 		t.Errorf("%d distinct numbers for %d creates", n, contenders)
 	}
+	// One event each: a concurrent create writes exactly one rfc.created.
+	for _, id := range ids {
+		if n := countRows(t, db,
+			`SELECT count(*) FROM events_outbox WHERE entity_type = 'rfc' AND entity_id = $1 AND type = 'rfc.created'`, id); n != 1 {
+			t.Errorf("rfc %s wrote %d rfc.created events, want 1", id, n)
+		}
+	}
 
 	target := ids[0]
 	var winners, stale int

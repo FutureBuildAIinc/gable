@@ -20,6 +20,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -91,7 +92,71 @@ func TestFailedEventWriteRollsBackEveryWrite(t *testing.T) {
 	if n := countRows(t, db, `SELECT count(*) FROM module_grants WHERE staff_id = $1`, created.ID); n != 0 {
 		t.Error("the grant survived a rolled back write")
 	}
+
+	// The revoke: a grant made for real, then a revoke whose event write
+	// fails, leaves the grant in place and the revision unmoved.
+	if _, err := good.GrantModule(ctx, created.ID, "ai_lm", "", staff.Precondition{Revision: &rev}); err != nil {
+		t.Fatal(err)
+	}
+	rev++ // the grant moved the document to 2
+	if _, err := bad.RevokeModule(ctx, created.ID, "ai_lm", staff.Precondition{Revision: &rev}); err == nil {
+		t.Fatal("RevokeModule succeeded though its event could not be written")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM module_grants WHERE staff_id = $1 AND module_id = 'ai_lm'`, created.ID); n != 1 {
+		t.Error("the grant did not survive a rolled back revoke")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM staff WHERE id = $1 AND revision <> 2`, created.ID); n != 0 {
+		t.Error("the revision moved on a rolled back revoke")
+	}
+
+	// The kill switch: a failed event write leaves the flag and its revision
+	// anchor exactly as they were.
+	flagRev := int64(1) // a missing anchor row reads as revision 1
+	_ = db.Pool.QueryRow(ctx, `SELECT revision FROM admin_revisions WHERE resource = 'admin.modules.ai_lm'`).Scan(&flagRev)
+	if _, err := bad.SetModuleEnabled(ctx, "ai_lm", false, staff.Precondition{Revision: &flagRev}); err == nil {
+		t.Fatal("SetModuleEnabled succeeded though its event could not be written")
+	}
+	if n := countRows(t, db,
+		`SELECT count(*) FROM system_settings WHERE key = 'modules.ai_lm.enabled' AND value = 'true'`); n != 1 {
+		t.Error("the module flag moved on a rolled back toggle")
+	}
+	if n := countRows(t, db,
+		`SELECT count(*) FROM admin_revisions WHERE resource = 'admin.modules.ai_lm' AND revision <> $1`, flagRev); n != 0 {
+		t.Error("the module revision anchor moved on a rolled back toggle")
+	}
 }
+
+// The audit row rides in the transaction with the act: a grant whose audit
+// write fails leaves no grant row.
+func TestFailedAuditWriteRollsBackTheGrant(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	good := seedStaff(t, db)
+	created, err := good.CreateStaff(ctx, mkCreate("tx-audit-"+uuid.NewString()[:8]+"@example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dropStaff(t, db, created.ID) })
+
+	rev := created.Revision
+	bad := staff.NewService(staff.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAuditLog(errAudit{})
+	if _, err := bad.GrantModule(ctx, created.ID, "ai_lm", "", staff.Precondition{Revision: &rev}); err == nil {
+		t.Fatal("GrantModule succeeded though its audit row could not be written")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM module_grants WHERE staff_id = $1`, created.ID); n != 0 {
+		t.Error("the grant survived a rolled back audit write")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM staff WHERE id = $1 AND revision <> 1`, created.ID); n != 0 {
+		t.Error("the revision moved on a rolled back audit write")
+	}
+}
+
+// errAudit is an audit sink whose every write fails.
+type errAudit struct{}
+
+func (errAudit) Log(context.Context, audit.Entry) error { return errors.New("audit insert failed") }
 
 func dropStaff(t *testing.T, db *database.DB, id uuid.UUID) {
 	t.Helper()

@@ -281,7 +281,8 @@ func moduleIDsJoined() string {
 // --- Global module enable flag ---
 
 func (h *Handler) ListModules(w http.ResponseWriter, r *http.Request) {
-	if _, err := httpx.StrictQuery(r, "cursor", "limit", "include"); err != nil {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include")
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -289,6 +290,19 @@ func (h *Handler) ListModules(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	// include is declared, so it is honored: total counts the whole catalog,
+	// like every list route (ADR 0001 section 1).
+	var opts []httpx.ListOption
+	if vals := q["include"]; len(vals) > 0 {
+		set, ierr := httpx.ParseInclude(vals[0])
+		if ierr != nil {
+			httpx.WriteError(w, r, ierr)
+			return
+		}
+		if set.Has(httpx.IncludeTotal) {
+			opts = append(opts, httpx.WithTotal(int64(len(knownModules))))
+		}
 	}
 	mods, err := h.svc.ListModules(r.Context())
 	if err != nil {
@@ -324,7 +338,7 @@ func (h *Handler) ListModules(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	httpx.WriteList(w, items, next, page.Limit)
+	httpx.WriteList(w, items, next, page.Limit, opts...)
 }
 
 func (h *Handler) SetModuleEnabled(w http.ResponseWriter, r *http.Request) {

@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -260,7 +261,7 @@ func TestWire_CreateStaffValidation(t *testing.T) {
 // RULE: a duplicate email is a 409 naming the field, not a 500.
 func TestWire_DuplicateEmailIs409(t *testing.T) {
 	f := newFixture(t)
-	email := "wire-dup-"+uuid.NewString()[:8]+"@example.com"
+	email := "wire-dup-" + uuid.NewString()[:8] + "@example.com"
 	f.createStaff(t, email)
 	r := f.do("POST", "/api/v1/admin/staff", map[string]any{"email": email, "full_name": "Second"})
 	if r.status != http.StatusConflict {
@@ -605,4 +606,249 @@ func (v staffKeyValidator) ValidateKey(ctx context.Context, rawKey string) (midd
 		return middleware.KeyPrincipal{}, err
 	}
 	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
+}
+
+// RULE (ADR 0001 section 9): the same create twice with one idempotency key
+// replays the stored response and makes one row and one event; the same key
+// with another body is 422 idempotency_key_reused.
+func TestWire_CreateStaffIdempotency(t *testing.T) {
+	f := newFixture(t)
+	body := map[string]any{"email": "idem-" + uuid.NewString()[:8] + "@example.com", "full_name": "Idem Staff"}
+	idemKey := "idem-staff-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM idempotency_keys WHERE key = $1`, idemKey)
+	})
+	first := f.do("POST", "/api/v1/admin/staff", body, "Idempotency-Key", idemKey)
+	if first.status != http.StatusCreated {
+		t.Fatalf("first create = %d: %s", first.status, first.raw)
+	}
+	second := f.do("POST", "/api/v1/admin/staff", body, "Idempotency-Key", idemKey)
+	if second.status != http.StatusCreated {
+		t.Fatalf("replayed create = %d: %s", second.status, second.raw)
+	}
+	if v := second.header.Get("Idempotency-Replayed"); v != "true" {
+		t.Errorf("Idempotency-Replayed = %q, want true", v)
+	}
+	if first.body["id"] != second.body["id"] {
+		t.Errorf("the replay minted a second row: %v then %v", first.body["id"], second.body["id"])
+	}
+	id, _ := first.body["id"].(string)
+	if ev := eventsFor(t, f.db, id); len(ev) != 1 || ev[0] != "staff.created" {
+		t.Errorf("events = %v, want one staff.created (a replay must not create again)", ev)
+	}
+
+	other := f.do("POST", "/api/v1/admin/staff",
+		map[string]any{"email": "idem-other@example.com", "full_name": "Other"},
+		"Idempotency-Key", idemKey)
+	if other.status != http.StatusUnprocessableEntity {
+		t.Fatalf("same key other body = %d: %s", other.status, other.raw)
+	}
+	if code, _, _ := errorOf(t, other); code != "idempotency_key_reused" {
+		t.Errorf("code = %q, want idempotency_key_reused", code)
+	}
+}
+
+// RULE: a PUT whose body sets no field is an idempotent no-op (the grants'
+// rule): the current document comes back, the revision does not move, and no
+// staff.updated event is written; a PUT that sets a field moves both.
+func TestWire_NoOpUpdateWritesNothing(t *testing.T) {
+	f := newFixture(t)
+	id, _ := f.createStaff(t, "noop-"+uuid.NewString()[:8]+"@example.com")
+
+	r := f.do("PUT", "/api/v1/admin/staff/"+id, map[string]any{"revision": 1})
+	if r.status != http.StatusOK {
+		t.Fatalf("no-op update = %d: %s", r.status, r.raw)
+	}
+	if rev := bodyNum(t, r.body, "revision"); rev != 1 {
+		t.Errorf("a no-op update moved the revision to %d", rev)
+	}
+	if ev := eventsFor(t, f.db, id); len(ev) != 1 {
+		t.Errorf("events = %v, want only staff.created after a no-op update", ev)
+	}
+
+	r = f.do("PUT", "/api/v1/admin/staff/"+id, map[string]any{"active": false, "revision": 1})
+	if r.status != http.StatusOK {
+		t.Fatalf("real update = %d: %s", r.status, r.raw)
+	}
+	if rev := bodyNum(t, r.body, "revision"); rev != 2 {
+		t.Errorf("revision = %d, want 2", rev)
+	}
+	if ev := eventsFor(t, f.db, id); len(ev) != 2 || ev[1] != "staff.updated" {
+		t.Errorf("events = %v, want staff.created then staff.updated", ev)
+	}
+}
+
+// RULE: include is declared on the modules list, so it is honored (total
+// counts the whole catalog) and an unknown name is refused.
+func TestWire_ListModulesIncludeTotal(t *testing.T) {
+	f := newFixture(t)
+	plain := f.do("GET", "/api/v1/admin/modules", nil)
+	if plain.status != http.StatusOK {
+		t.Fatalf("modules = %d: %s", plain.status, plain.raw)
+	}
+	want := int64(len(plain.body["items"].([]any)))
+	r := f.do("GET", "/api/v1/admin/modules?include=total", nil)
+	if r.status != http.StatusOK {
+		t.Fatalf("include=total = %d: %s", r.status, r.raw)
+	}
+	if got := bodyNum(t, r.body, "total"); got != want {
+		t.Errorf("total = %d, want %d", got, want)
+	}
+	r = f.do("GET", "/api/v1/admin/modules?include=bogus", nil)
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("include=bogus = %d: %s", r.status, r.raw)
+	}
+	if code, _, details := errorOf(t, r); code != "validation_failed" || details[0]["field"] != "include" {
+		t.Errorf("code=%q details=%v, want include named", code, details)
+	}
+}
+
+// RULE: limit and cursor are validated, never clamped or ignored.
+func TestWire_ListStrictness(t *testing.T) {
+	f := newFixture(t)
+	for _, tc := range []struct {
+		url   string
+		field string
+		code  string
+	}{
+		{"/api/v1/admin/staff?limit=0", "limit", "validation_failed"},
+		{"/api/v1/admin/staff?limit=999999", "limit", "validation_failed"},
+		{"/api/v1/admin/staff?cursor=not-a-cursor", "cursor", "bad_request"},
+	} {
+		r := f.do("GET", tc.url, nil)
+		if r.status != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400: %s", tc.url, r.status, r.raw)
+			continue
+		}
+		code, _, details := errorOf(t, r)
+		if code != tc.code || len(details) == 0 || details[0]["field"] != tc.field {
+			t.Errorf("%s: code=%q details=%v, want %s named", tc.url, code, details, tc.field)
+		}
+	}
+}
+
+// RULE (ADR 0002 section 5): a valid key's scope refusal writes one audit row
+// attributed to the key, naming the finer scope it lacked (ADR 0009).
+func TestWire_MachineKeyRefusalWritesAuditRow(t *testing.T) {
+	f := newFixture(t)
+	db := f.db
+	keySvc := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
+	validator := staffKeyValidator{svc: keySvc, db: db}
+	auth := middleware.NewMachineKeyAuth(validator, audit.NewLogger(db), nil, nil)
+	svc := staff.NewService(staff.NewRepository(db)).WithTxRunner(db)
+	mux := http.NewServeMux()
+	staff.NewHandler(svc).RegisterRoutes(mux)
+	srv := httptest.NewServer(auth.Handler(mux))
+	defer srv.Close()
+
+	raw, key, err := keySvc.GenerateKey(context.Background(), "staff refusal key", []string{"admin:settings"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM audit_log WHERE actor_id = $1`, key.ID)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id = $1`, key.ID)
+	})
+
+	req, err := http.NewRequest("GET", srv.URL+"/api/v1/admin/staff", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+raw)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("key with admin:settings on staff = %d, want 403", res.StatusCode)
+	}
+
+	var scope string
+	err = db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'scope' FROM audit_log
+		  WHERE action = 'key.scope_refused' AND actor_kind = 'key' AND actor_id = $1`, key.ID,
+	).Scan(&scope)
+	if err != nil {
+		t.Fatalf("no key.scope_refused audit row for the key: %v", err)
+	}
+	if scope != "admin:staff" {
+		t.Errorf("refused scope = %q, want admin:staff (the finer name, ADR 0009)", scope)
+	}
+}
+
+// RULE: the kill switch suspends a module without deleting any grant, so
+// turning it back on restores the roster (the deleted handler test's
+// invariant, restored as a wire fact).
+func TestWire_DisablingModulePreservesGrants(t *testing.T) {
+	f := newFixture(t)
+	id, rev := f.createStaff(t, "kill-"+uuid.NewString()[:8]+"@example.com")
+
+	r := f.do("POST", "/api/v1/admin/staff/"+id+"/modules", map[string]any{"module_id": "ai_lm", "revision": rev})
+	if r.status != http.StatusOK {
+		t.Fatalf("grant = %d: %s", r.status, r.raw)
+	}
+	rev = bodyNum(t, r.body, "revision")
+
+	list := f.do("GET", "/api/v1/admin/modules", nil)
+	if list.status != http.StatusOK {
+		t.Fatalf("modules = %d: %s", list.status, list.raw)
+	}
+	flagRev := int64(1)
+	for _, it := range list.body["items"].([]any) {
+		if m := it.(map[string]any); m["id"] == "ai_lm" {
+			flagRev = bodyNum(t, m, "revision")
+		}
+	}
+	r = f.do("PUT", "/api/v1/admin/modules/ai_lm", map[string]any{"enabled": false, "revision": flagRev})
+	if r.status != http.StatusOK {
+		t.Fatalf("disable = %d: %s", r.status, r.raw)
+	}
+
+	after := f.do("GET", "/api/v1/admin/staff/"+id, nil)
+	if after.status != http.StatusOK {
+		t.Fatalf("staff after disable = %d", after.status)
+	}
+	if mods := after.body["modules"].([]any); len(mods) != 1 || mods[0] != "ai_lm" {
+		t.Errorf("the disable deleted the grant: modules = %v", after.body["modules"])
+	}
+
+	r = f.do("PUT", "/api/v1/admin/modules/ai_lm", map[string]any{"enabled": true, "revision": flagRev + 1})
+	if r.status != http.StatusOK {
+		t.Fatalf("re-enable = %d: %s", r.status, r.raw)
+	}
+	restored := f.do("GET", "/api/v1/admin/staff/"+id, nil)
+	if mods := restored.body["modules"].([]any); len(mods) != 1 || mods[0] != "ai_lm" {
+		t.Errorf("the re-enable did not restore the grant: modules = %v", restored.body["modules"])
+	}
+}
+
+// RULE: production mounts every staff and module route behind
+// RequireRole("admin", "owner") (wire_staff.go); a signed-in caller without
+// either role is refused on each of them, in the ADR error envelope. This
+// restores the role-guard coverage the old handler tests carried.
+func TestWire_AdminRoutesRejectNonAdminRole(t *testing.T) {
+	f := newFixture(t)
+	mux := http.NewServeMux()
+	staff.NewHandler(staff.NewService(staff.NewRepository(f.db)).WithTxRunner(f.db)).RegisterRoutes(mux)
+	guarded := middleware.RequireRole("admin", "owner")(mux)
+
+	// The guard reads the claims from the request context, so the probe calls
+	// it in process (a context value does not cross a real HTTP hop).
+	do := func(method, path, role string) int {
+		req := httptest.NewRequest(method, path, nil)
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey,
+			&middleware.UserClaims{Roles: []string{role}})
+		rec := httptest.NewRecorder()
+		guarded.ServeHTTP(rec, req.WithContext(ctx))
+		return rec.Code
+	}
+	for _, role := range []string{"sales", "counter", ""} {
+		if c := do("GET", "/api/v1/admin/staff", role); c != http.StatusForbidden {
+			t.Errorf("role %q on the staff routes = %d, want 403", role, c)
+		}
+	}
+	if c := do("GET", "/api/v1/admin/modules", "owner"); c != http.StatusOK {
+		t.Errorf("role owner on the modules routes = %d, want 200", c)
+	}
 }

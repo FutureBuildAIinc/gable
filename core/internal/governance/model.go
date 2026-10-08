@@ -37,7 +37,11 @@ func ParseStatus(name string) (RFCStatus, bool) {
 func StatusNames() []string { return append([]string{}, statusNames...) }
 
 // RFCSummary is the list item: everything but the body, so a list page never
-// drags the content along.
+// drags the content along. AuthorID is a soft reference: users are identity
+// provider subjects with no row in this database (the seed writes a synthetic
+// demo UUID), so no table constrains it and existence is not checked at
+// create; it names the author for people, it is not a foreign key the module
+// can 400 on.
 type RFCSummary struct {
 	ID        uuid.UUID       `json:"id"`
 	Number    string          `json:"number"`

@@ -135,17 +135,13 @@ func (r *PostgresRepository) CountKeys(ctx context.Context) (int64, error) {
 }
 
 func (r *PostgresRepository) RevokeKey(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
+	// The service locks and reads the row first, so a revoke that affects no
+	// row is a concurrent revoke that won it: nothing left to do, and the
+	// service's audit row and event are skipped by its own already-revoked
+	// read.
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`UPDATE api_keys SET revoked_at = $1 WHERE id = $2 AND revoked_at IS NULL`, time.Now(), id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		// The caller locks and reads first, so this is a concurrent revoke
-		// that won the row: nothing left to do.
-		return nil
-	}
-	return nil
+	return err
 }
 
 func (r *PostgresRepository) UpdateLastUsed(ctx context.Context, id uuid.UUID) error {

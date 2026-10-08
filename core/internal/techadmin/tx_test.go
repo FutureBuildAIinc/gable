@@ -103,6 +103,59 @@ func TestSaveSettings_FailedEventWriteRollsBackTheSave(t *testing.T) {
 	}
 }
 
+// The same rule on the revoke: a failed event write leaves the key unrevoked
+// and writes no audit row.
+func TestRevokeKey_FailedEventWriteRollsBackTheRevoke(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	good := techadmin.NewService(techadmin.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	_, key, err := good.GenerateKey(context.Background(), "revoke rollback me", []string{"quotes:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'api_key' AND entity_id = $1`, key.ID)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id = $1`, key.ID)
+	})
+	svc := techadmin.NewService(techadmin.NewRepository(db)).
+		WithOutbox(failingEvents{}).WithTxRunner(db).WithAuditLog(audit.NewLogger(db))
+	if _, err := svc.RevokeKey(context.Background(), key.ID); err == nil {
+		t.Fatal("RevokeKey succeeded though its event could not be written")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM api_keys WHERE id = $1 AND revoked_at IS NOT NULL`, key.ID); n != 0 {
+		t.Errorf("the revoke survived a rolled back event write")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM audit_log WHERE action = 'key.revoked' AND entity_id = $1`, key.ID); n != 0 {
+		t.Errorf("%d key.revoked audit rows survived the rollback", n)
+	}
+}
+
+// And on the settings delete: a failed event write leaves the override rows
+// and the revision anchor exactly as they were.
+func TestDeleteSettings_FailedEventWriteRollsBackTheDelete(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	cleanSettings(t, db)
+	good := techadmin.NewService(techadmin.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	one := int64(1)
+	if _, err := good.SaveAISettings(context.Background(), "sk-or-keep", nil, techadmin.Precondition{Revision: &one}); err != nil {
+		t.Fatal(err)
+	}
+	svc := techadmin.NewService(techadmin.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db)
+	two := int64(2)
+	if err := svc.DeleteAISettings(context.Background(), techadmin.Precondition{Revision: &two}); err == nil {
+		t.Fatal("DeleteAISettings succeeded though its event could not be written")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM system_settings WHERE key = 'openrouter_api_key'`); n != 1 {
+		t.Errorf("the api key row did not survive a rolled back delete (count = %d, want 1)", n)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM admin_revisions WHERE resource = 'admin.settings.ai' AND revision = 2`); n != 1 {
+		t.Errorf("the revision anchor moved on a rolled back delete (rows at revision 2 = %d, want 1)", n)
+	}
+}
+
 // A failed audit write fails the mutation too: the row is part of the act.
 func TestCreateKey_FailedAuditWriteFailsTheMint(t *testing.T) {
 	testutil.LockOutboxTables(t)
@@ -364,5 +417,3 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 		return s.DeleteRoutingSettings(ctx, techadmin.Precondition{Revision: &rev})
 	})
 }
-
-func int64Ptr(n int64) *int64 { return &n }

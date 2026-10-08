@@ -263,6 +263,51 @@ func TestWire_CreateKeyValidation(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0001 section 9): the same create twice with one idempotency key
+// replays the stored response and makes one row and one event; the same key
+// with another body is 422 idempotency_key_reused.
+func TestWire_MintKeyIdempotency(t *testing.T) {
+	f := newFixture(t)
+	body := map[string]any{"name": "idem key", "scopes": []string{"quotes:read"}}
+	idemKey := "idem-mint-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM idempotency_keys WHERE key = $1`, idemKey)
+	})
+	first := f.do("POST", "/api/v1/admin/keys", body, "Idempotency-Key", idemKey)
+	if first.status != http.StatusCreated {
+		t.Fatalf("first create = %d: %s", first.status, first.raw)
+	}
+	second := f.do("POST", "/api/v1/admin/keys", body, "Idempotency-Key", idemKey)
+	if second.status != http.StatusCreated {
+		t.Fatalf("replayed create = %d: %s", second.status, second.raw)
+	}
+	if v := second.header.Get("Idempotency-Replayed"); v != "true" {
+		t.Errorf("Idempotency-Replayed = %q, want true", v)
+	}
+	if first.body["api_key"] != second.body["api_key"] {
+		t.Errorf("the replay returned a different key: %v then %v", first.body["api_key"], second.body["api_key"])
+	}
+	k, _ := first.body["key"].(map[string]any)
+	id, _ := k["id"].(string)
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'api_key' AND entity_id = $1`, id)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id = $1`, id)
+	})
+	if n := len(eventsFor(t, f.db, "api_key", id)); n != 1 {
+		t.Errorf("%d key.created events, want 1 (a replay must not mint again)", n)
+	}
+
+	other := f.do("POST", "/api/v1/admin/keys",
+		map[string]any{"name": "idem key other", "scopes": []string{"quotes:read"}},
+		"Idempotency-Key", idemKey)
+	if other.status != http.StatusUnprocessableEntity {
+		t.Fatalf("same key other body = %d: %s", other.status, other.raw)
+	}
+	if code, _, _ := errorOf(t, other); code != "idempotency_key_reused" {
+		t.Errorf("code = %q, want idempotency_key_reused", code)
+	}
+}
+
 // RULE: the list is the cursor envelope, items never null, and the cursor
 // walks every row once; include=total carries the count.
 func TestWire_KeyListCursor(t *testing.T) {

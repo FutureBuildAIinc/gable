@@ -198,7 +198,8 @@ func (s *Service) CreateStaff(ctx context.Context, in *ParsedCreate) (*Staff, er
 // UpdateStaff applies the non-nil fields on the client's revision: the row
 // is locked, the revision checked, the write and the revision move are one
 // database act, and the audit row and staff.updated ride in the same
-// transaction.
+// transaction. A body with no field set is an idempotent no-op: the current
+// document comes back and nothing is written, the grants' rule.
 func (s *Service) UpdateStaff(ctx context.Context, id uuid.UUID, in *ParsedUpdate, pre Precondition) (*Staff, error) {
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
@@ -215,6 +216,10 @@ func (s *Service) UpdateStaff(ctx context.Context, id uuid.UUID, in *ParsedUpdat
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if in.empty() {
+			out = cur
+			return nil
+		}
 		st, err := s.repo.Update(ctx, id, in)
 		if err != nil {
 			return err
@@ -224,13 +229,10 @@ func (s *Service) UpdateStaff(ctx context.Context, id uuid.UUID, in *ParsedUpdat
 		}); err != nil {
 			return err
 		}
-		if err := s.record(ctx, "staff.updated", "staff", id, map[string]any{
-			"email": st.Email, "revision": st.Revision,
-		}); err != nil {
-			return err
-		}
 		out = st
-		return nil
+		return s.record(ctx, "staff.updated", "staff", id, map[string]any{
+			"email": st.Email, "revision": st.Revision,
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -296,18 +298,19 @@ func (s *Service) GrantModule(ctx context.Context, staffID uuid.UUID, moduleID, 
 		if err := s.repo.BumpStaffRevision(ctx, staffID); err != nil {
 			return err
 		}
+		// Re-read for the response before the sinks, so the event stays the
+		// transaction's LAST statement.
+		if out, err = s.repo.Get(ctx, staffID); err != nil {
+			return err
+		}
 		if err := s.audit(ctx, "staff.module_granted", staffID, "staff", map[string]any{
 			"module_id": moduleID, "granted_by": grantedBy, "revision": cur.Revision + 1,
 		}); err != nil {
 			return err
 		}
-		if err := s.record(ctx, "staff.module_granted", "staff", staffID, map[string]any{
+		return s.record(ctx, "staff.module_granted", "staff", staffID, map[string]any{
 			"module_id": moduleID, "revision": cur.Revision + 1,
-		}); err != nil {
-			return err
-		}
-		out, err = s.repo.Get(ctx, staffID)
-		return err
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -344,18 +347,19 @@ func (s *Service) RevokeModule(ctx context.Context, staffID uuid.UUID, moduleID 
 		if err := s.repo.BumpStaffRevision(ctx, staffID); err != nil {
 			return err
 		}
+		// Re-read for the response before the sinks, so the event stays the
+		// transaction's LAST statement.
+		if out, err = s.repo.Get(ctx, staffID); err != nil {
+			return err
+		}
 		if err := s.audit(ctx, "staff.module_revoked", staffID, "staff", map[string]any{
 			"module_id": moduleID, "revision": cur.Revision + 1,
 		}); err != nil {
 			return err
 		}
-		if err := s.record(ctx, "staff.module_revoked", "staff", staffID, map[string]any{
+		return s.record(ctx, "staff.module_revoked", "staff", staffID, map[string]any{
 			"module_id": moduleID, "revision": cur.Revision + 1,
-		}); err != nil {
-			return err
-		}
-		out, err = s.repo.Get(ctx, staffID)
-		return err
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -414,6 +418,7 @@ func (s *Service) SetModuleEnabled(ctx context.Context, moduleID string, enabled
 	if !IsKnownModule(moduleID) {
 		return nil, notFound(ErrNotFound)
 	}
+	var out *Module
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		rev, err := s.repo.LockModuleRevision(ctx, moduleID)
 		if err != nil {
@@ -427,10 +432,17 @@ func (s *Service) SetModuleEnabled(ctx context.Context, moduleID string, enabled
 			return err
 		}
 		if !changed {
-			return nil
+			out, err = s.ModuleByID(ctx, moduleID)
+			return err
 		}
 		next := rev + 1
 		if err := s.repo.BumpModuleRevision(ctx, moduleID, next); err != nil {
+			return err
+		}
+		// Re-read for the response inside the transaction, so the returned
+		// revision is the one this write produced and the event stays the
+		// transaction's LAST statement.
+		if out, err = s.ModuleByID(ctx, moduleID); err != nil {
 			return err
 		}
 		if err := s.audit(ctx, "module.flag_changed", moduleEntityID(moduleID), "module", map[string]any{
@@ -449,5 +461,5 @@ func (s *Service) SetModuleEnabled(ctx context.Context, moduleID string, enabled
 	if err != nil {
 		return nil, err
 	}
-	return s.ModuleByID(ctx, moduleID)
+	return out, nil
 }

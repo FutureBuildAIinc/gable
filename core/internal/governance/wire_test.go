@@ -22,6 +22,7 @@ import (
 	"github.com/gablelbm/gable/internal/governance"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -467,4 +468,163 @@ func (v govKeyValidator) ValidateKey(ctx context.Context, rawKey string) (middle
 		return middleware.KeyPrincipal{}, err
 	}
 	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
+}
+
+// RULE: the lifecycle's other half: review may reject, a rejected RFC may be
+// reopened to draft, and each edge writes its own event in order.
+func TestWire_RejectedAndReopenEdges(t *testing.T) {
+	f := newFixture(t)
+	id, _, _ := f.createRFC(t)
+
+	mustTransition := func(to string, rev int64) {
+		t.Helper()
+		r := f.do("POST", "/api/v1/governance/rfcs/"+id+"/transitions", map[string]any{"to": to, "revision": rev})
+		if r.status != http.StatusOK || r.body["status"] != to {
+			t.Fatalf("transition to %s = %d %v: %s", to, r.status, r.body["status"], r.raw)
+		}
+	}
+	mustTransition("review", 1)
+	mustTransition("rejected", 2)
+	mustTransition("draft", 3) // the reopen
+	// A reopened draft refuses a jump to approved, like a fresh one.
+	r := f.do("POST", "/api/v1/governance/rfcs/"+id+"/transitions", map[string]any{"to": "approved", "revision": 4})
+	if r.status != http.StatusConflict {
+		t.Fatalf("draft -> approved after reopen = %d, want 409", r.status)
+	}
+	if code, _, _ := errorOf(t, r); code != "invalid_state_transition" {
+		t.Errorf("code = %q", code)
+	}
+	ev := eventsFor(t, f.db, id)
+	want := []string{"rfc.created", "rfc.review", "rfc.rejected", "rfc.reopened"}
+	if strings.Join(ev, ",") != strings.Join(want, ",") {
+		t.Errorf("events = %v, want %v", ev, want)
+	}
+}
+
+// RULE: a transition is a write (ADR 0001 section 11): 428 without a
+// precondition, a weak If-Match honoured, header and body revision in
+// disagreement refused, stale refused with 409.
+func TestWire_TransitionsPreconditions(t *testing.T) {
+	f := newFixture(t)
+	id, _, _ := f.createRFC(t)
+
+	r := f.do("POST", "/api/v1/governance/rfcs/"+id+"/transitions", map[string]any{"to": "review"})
+	if r.status != http.StatusPreconditionRequired {
+		t.Fatalf("no precondition = %d, want 428: %s", r.status, r.raw)
+	}
+	if code, _, _ := errorOf(t, r); code != "precondition_required" {
+		t.Errorf("code = %q", code)
+	}
+	r = f.do("POST", "/api/v1/governance/rfcs/"+id+"/transitions", map[string]any{"to": "review"}, "If-Match", `W/"1"`)
+	if r.status != http.StatusOK {
+		t.Fatalf("weak If-Match = %d: %s", r.status, r.raw)
+	}
+	if bodyNum(t, r.body, "revision") != 2 {
+		t.Errorf("revision = %v, want 2", r.body["revision"])
+	}
+	// The next edge: header says 2, body says 3: a disagreement is a 400.
+	r = f.do("POST", "/api/v1/governance/rfcs/"+id+"/transitions",
+		map[string]any{"to": "approved", "revision": 3}, "If-Match", `"2"`)
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("header/body disagreement = %d, want 400: %s", r.status, r.raw)
+	}
+	r = f.do("POST", "/api/v1/governance/rfcs/"+id+"/transitions", map[string]any{"to": "approved"}, "If-Match", `"1"`)
+	if r.status != http.StatusConflict {
+		t.Fatalf("stale If-Match = %d, want 409", r.status)
+	}
+	if code, _, _ := errorOf(t, r); code != "stale_revision" {
+		t.Errorf("code = %q", code)
+	}
+}
+
+// RULE (ADR 0002 section 5): a valid key's scope refusal writes one audit row
+// attributed to the key, naming the scope it lacked.
+func TestWire_MachineKeyRefusalWritesAuditRow(t *testing.T) {
+	f := newFixture(t)
+	techSvc := techadmin.NewService(techadmin.NewRepository(f.db)).WithTxRunner(f.db)
+	raw, key, err := techSvc.GenerateKey(context.Background(), "gov refusal key", []string{"governance:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM audit_log WHERE actor_id = $1`, key.ID)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id = $1`, key.ID)
+	})
+	validator := govKeyValidator{svc: techSvc}
+	auth := middleware.NewMachineKeyAuth(validator, audit.NewLogger(f.db), nil, nil)
+	svc := governance.NewService(governance.NewRepository(f.db), governance.NewTemplateAIProvider()).WithTxRunner(f.db)
+	mux := http.NewServeMux()
+	governance.NewHandler(svc).RegisterRoutes(mux)
+	srv := httptest.NewServer(auth.Handler(mux))
+	defer srv.Close()
+
+	get := func(method, path string) int {
+		req, _ := http.NewRequest(method, srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+raw)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if c := get("GET", "/api/v1/governance/rfcs"); c != http.StatusOK {
+		t.Fatalf("governance:read on the list = %d, want 200", c)
+	}
+	if c := get("POST", "/api/v1/governance/rfcs"); c != http.StatusForbidden {
+		t.Fatalf("governance:read on a create = %d, want 403", c)
+	}
+
+	var scope string
+	err = f.db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'scope' FROM audit_log
+		  WHERE action = 'key.scope_refused' AND actor_kind = 'key' AND actor_id = $1`, key.ID,
+	).Scan(&scope)
+	if err != nil {
+		t.Fatalf("no key.scope_refused audit row for the key: %v", err)
+	}
+	if scope != "governance:write" {
+		t.Errorf("refused scope = %q, want governance:write", scope)
+	}
+}
+
+// RULE: limit, cursor and the status filter are validated, never clamped or
+// ignored; a valid status value no row holds serves an empty page whose items
+// are [] in the bytes, never null.
+func TestWire_ListStrictness(t *testing.T) {
+	f := newFixture(t)
+	for _, tc := range []struct {
+		url   string
+		field string
+		code  string
+	}{
+		{"/api/v1/governance/rfcs?limit=0", "limit", "validation_failed"},
+		{"/api/v1/governance/rfcs?limit=999999", "limit", "validation_failed"},
+		{"/api/v1/governance/rfcs?cursor=garbage", "cursor", "bad_request"},
+		{"/api/v1/governance/rfcs?status=APPROVED", "status", "validation_failed"},
+		{"/api/v1/governance/rfcs?flavour=x", "flavour", "unsupported_query_parameter"},
+	} {
+		r := f.do("GET", tc.url, nil)
+		if r.status != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400: %s", tc.url, r.status, r.raw)
+			continue
+		}
+		code, _, details := errorOf(t, r)
+		if code != tc.code || len(details) == 0 || details[0]["field"] != tc.field {
+			t.Errorf("%s: code=%q details=%v, want %s named", tc.url, code, details, tc.field)
+		}
+	}
+
+	// rejected is a valid status the seed does not use, so the page is empty;
+	// this test's own rejected RFCs are dropped by createRFC's cleanup.
+	empty := f.do("GET", "/api/v1/governance/rfcs?status=rejected", nil)
+	if empty.status != http.StatusOK {
+		t.Fatalf("empty page = %d: %s", empty.status, empty.raw)
+	}
+	if items, ok := empty.body["items"].([]any); !ok || len(items) != 0 {
+		t.Errorf("empty page items = %#v (%s), want []", empty.body["items"], empty.raw)
+	}
+	if !bytes.Contains(empty.raw, []byte(`"items":[]`)) {
+		t.Errorf("empty page body %s does not carry items as []", empty.raw)
+	}
 }

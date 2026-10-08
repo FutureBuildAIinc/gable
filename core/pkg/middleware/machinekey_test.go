@@ -24,6 +24,7 @@ import (
 	"github.com/gablelbm/gable/pkg/middleware"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 // --- test doubles -----------------------------------------------------------
@@ -628,7 +629,7 @@ func (v techadminValidator) ValidateKey(ctx context.Context, rawKey string) (mid
 		}
 		return middleware.KeyPrincipal{}, err
 	}
-	return middleware.KeyPrincipal{ID: k.ID, Scopes: k.Scopes}, nil
+	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
 }
 
 func newDBAuth(t *testing.T, db *database.DB) *middleware.MachineKeyAuth {
@@ -644,7 +645,7 @@ func createKey(t *testing.T, db *database.DB, scopes ...string) (raw string, id 
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
-	return raw, key.ID
+	return raw, key.ID.String()
 }
 
 func TestRealKeyRoundTrip(t *testing.T) {
@@ -784,9 +785,14 @@ func TestRevokedRealKeyRefused401(t *testing.T) {
 	db := testutil.RequireDB(t)
 
 	raw, id := createKey(t, db, "quotes:write")
+	keyID, err := uuid.Parse(id)
+	if err != nil {
+		t.Fatalf("parse key id %q: %v", id, err)
+	}
 	svc := techadmin.NewService(techadmin.NewRepository(db))
-	if err := svc.RevokeKey(context.Background(), id); err != nil {
-		t.Fatalf("RevokeKey: %v", err)
+	revoked, err := svc.RevokeKey(context.Background(), keyID)
+	if err != nil || !revoked {
+		t.Fatalf("RevokeKey: revoked=%v err=%v", revoked, err)
 	}
 
 	h := &okHandler{}

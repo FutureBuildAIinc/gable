@@ -355,6 +355,12 @@ func (s *Service) SaveAISettings(ctx context.Context, apiKey string, baseURL *st
 		if err := s.repo.BumpRevision(ctx, ResourceAISettings, next); err != nil {
 			return err
 		}
+		// Re-read for the response before the sinks, so the event stays the
+		// transaction's LAST statement (the recipe's service order).
+		out, err = s.GetAISettings(ctx)
+		if err != nil {
+			return err
+		}
 		changes := map[string]any{"resource": ResourceAISettings, "revision": next}
 		if baseURL != nil {
 			changes["base_url_cleared"] = *baseURL == ""
@@ -369,11 +375,7 @@ func (s *Service) SaveAISettings(ctx context.Context, apiKey string, baseURL *st
 				return err
 			}
 		}
-		if err := s.record(ctx, "admin_settings.saved", "admin_settings", settingsEntityID(ResourceAISettings), changes, next); err != nil {
-			return err
-		}
-		out, err = s.GetAISettings(ctx)
-		return err
+		return s.record(ctx, "admin_settings.saved", "admin_settings", settingsEntityID(ResourceAISettings), changes, next)
 	})
 	if err != nil {
 		return nil, err
@@ -463,6 +465,12 @@ func (s *Service) SaveRoutingSettings(ctx context.Context, apiKey string, pre Pr
 		if err := s.repo.BumpRevision(ctx, ResourceRoutingSettings, next); err != nil {
 			return err
 		}
+		// Re-read for the response before the sinks, so the event stays the
+		// transaction's LAST statement (the recipe's service order).
+		out, err = s.GetRoutingSettings(ctx)
+		if err != nil {
+			return err
+		}
 		changes := map[string]any{"resource": ResourceRoutingSettings, "revision": next}
 		if s.audit != nil {
 			if err := s.audit.Log(ctx, audit.Entry{
@@ -474,11 +482,7 @@ func (s *Service) SaveRoutingSettings(ctx context.Context, apiKey string, pre Pr
 				return err
 			}
 		}
-		if err := s.record(ctx, "admin_settings.saved", "admin_settings", settingsEntityID(ResourceRoutingSettings), changes, next); err != nil {
-			return err
-		}
-		out, err = s.GetRoutingSettings(ctx)
-		return err
+		return s.record(ctx, "admin_settings.saved", "admin_settings", settingsEntityID(ResourceRoutingSettings), changes, next)
 	})
 	if err != nil {
 		return nil, err

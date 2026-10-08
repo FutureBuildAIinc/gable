@@ -140,9 +140,9 @@ func TestMigration095_BackfillsRowsThatExist(t *testing.T) {
 	}
 	if n := scalar095[int](t, conn, `SELECT count(*) FROM staff WHERE revision <> 1`); n != 0 {
 		t.Errorf("%d staff rows with a revision other than 1", n)
-		if n := scalar095[int](t, conn, `SELECT count(*) FROM api_keys WHERE created_at IS NULL`); n != 0 {
-			t.Errorf("%d api keys with a NULL created_at", n)
-		}
+	}
+	if n := scalar095[int](t, conn, `SELECT count(*) FROM api_keys WHERE created_at IS NULL`); n != 0 {
+		t.Errorf("%d api keys with a NULL created_at", n)
 	}
 
 	// 2. Numbers: the older RFC carries the lower number, the newer the next;
