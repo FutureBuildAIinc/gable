@@ -61,7 +61,7 @@ paths:
             type: string
       responses:
         "200":
-          description: The vendor invoices, newest first as the repository orders them.
+          description: The vendor invoices, ordered by due_date ascending (earliest due first).
           content:
             application/json:
               schema:

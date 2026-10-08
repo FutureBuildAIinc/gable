@@ -6248,7 +6248,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The vendor invoices, newest first as the repository orders them. */
+            /** @description The vendor invoices, ordered by due_date ascending (earliest due first). */
             200: {
                 headers: {
                     [name: string]: unknown;
