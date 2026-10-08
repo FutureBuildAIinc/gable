@@ -940,6 +940,19 @@ func TestRemoveCartItem_FailureIsReturned(t *testing.T) {
 // --- Checkout ------------------------------------------------------------
 
 // cartWith builds a cart of (quantity, unitPrice) lines for the checkout tests.
+
+// pricedCartWith is cartWith over products the rig knows, so the checkout's
+// server side pricing (the order looks every product up) finds them.
+func pricedCartWith(rig *portalRig, lines ...[2]float64) *CartDTO {
+	cart := cartWith(lines...)
+	for i := range cart.Items {
+		id := uuid.New()
+		rig.withProduct(id, "CART-"+id.String()[:6], cart.Items[i].UnitPrice)
+		cart.Items[i].ProductID = id
+	}
+	return cart
+}
+
 func cartWith(lines ...[2]float64) *CartDTO {
 	cart := &CartDTO{ID: uuid.New(), Items: make([]CartItemDTO, 0, len(lines))}
 	for _, l := range lines {
@@ -1008,7 +1021,7 @@ func TestCheckout_FilesAgainstTheSessionCustomerAndClearsTheCart(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
-	rig.repo.cart = cartWith([2]float64{2, 4.75})
+	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	cartID := rig.repo.cart.ID
 
 	if _, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{}); err != nil {
@@ -1051,7 +1064,7 @@ func TestCheckout_ForeignProjectIsRefusedBeforeTheOrderExists(t *testing.T) {
 	rig := newPortalRig(t)
 	me, theirProject := uuid.New(), uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
-	rig.repo.cart = cartWith([2]float64{2, 4.75})
+	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.projectOwned = false
 
 	_, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{ProjectID: &theirProject})
@@ -1078,7 +1091,7 @@ func TestCheckout_OwnedProjectIsAttachedToTheNewOrder(t *testing.T) {
 	rig := newPortalRig(t)
 	me, myProject := uuid.New(), uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
-	rig.repo.cart = cartWith([2]float64{2, 4.75})
+	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 
 	resp, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{ProjectID: &myProject})
 	if err != nil {
@@ -1106,7 +1119,7 @@ func TestCheckout_ProjectAttachFailureIsNotFatal(t *testing.T) {
 	rig := newPortalRig(t)
 	me, myProject := uuid.New(), uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
-	rig.repo.cart = cartWith([2]float64{2, 4.75})
+	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.setProjErr = errors.New("failed to set order project")
 
 	resp, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{ProjectID: &myProject})
@@ -1128,7 +1141,7 @@ func TestCheckout_ClearFailureIsNotFatal(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
-	rig.repo.cart = cartWith([2]float64{2, 4.75})
+	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.clearErr = errors.New("failed to clear cart")
 
 	resp, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{})
@@ -1146,9 +1159,10 @@ func TestCheckout_OrderFailureLeavesTheCartIntact(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
+	// The cart's product is not in the rig's catalog (plain cartWith), so the
+	// order service cannot look it up and the create fails before any row is
+	// written: the failure the ERP-refusal path models.
 	rig.repo.cart = cartWith([2]float64{2, 4.75})
-	// A product the order service cannot find: the create fails before any
-	// row is written, the failure the ERP-refusal path models.
 
 	if _, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{}); err == nil {
 		t.Fatal("a failed order was reported as a successful checkout")
@@ -1168,7 +1182,7 @@ func TestCheckout_DeliveryAndPaymentFieldsAreNotPersisted(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
-	rig.repo.cart = cartWith([2]float64{2, 4.75})
+	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 
 	if _, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{
 		DeliveryMethod:  "PICKUP",
