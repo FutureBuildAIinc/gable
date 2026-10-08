@@ -65,6 +65,34 @@ func visionGroups() []groupDef {
 	}}
 }
 
+// idempotencyGroups pins the wire envelope of an answer written by middleware
+// rather than a handler: the idempotency layer's 422 when an Idempotency-Key
+// is reused with a different body. The first step's 200 is stored under the
+// key; the second reuses the key with another body.
+func idempotencyGroups() []groupDef {
+	key := map[string]string{"Idempotency-Key": "golden-idempotency-key-1"}
+	return []groupDef{{
+		name: "idempotency",
+		steps: []stepDef{
+			{
+				name: "idempotency.first", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": "Wall: 2x4 studs at 16in OC"},
+				headers: key,
+			},
+			{
+				name: "idempotency.key_reused", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": "Wall: 2x6 studs at 24in OC"},
+				headers: key,
+			},
+			{
+				name: "idempotency.key_malformed", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": ""},
+				headers: map[string]string{"Idempotency-Key": "bad key with\ttab"},
+			},
+		},
+	}}
+}
+
 func millworkGroups() []groupDef {
 	return []groupDef{{
 		name: "millwork",
