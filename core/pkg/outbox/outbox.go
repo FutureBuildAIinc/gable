@@ -84,6 +84,13 @@ func NewWriter(db *database.DB, org string) *Writer {
 // transaction scoped and never outlives the write on a pooled connection.
 // Callers inside a transaction propagate the error: a mutation whose event
 // cannot be recorded does not silently pretend it happened.
+//
+// Inside a transaction, Write must be the transaction's LAST statement
+// (ADR 0003 section 2): the advisory lock is held to commit, so statements
+// after it serialize every other event writer behind this transaction, and
+// a writer that updates rows after Write can deadlock against another event
+// writer touching the same rows. Bulk transactions write per-row events at
+// their end, or one summary event, never per-row events as they go.
 func (w *Writer) Write(ctx context.Context, ev Event) error {
 	if ev.Type == "" {
 		return errors.New("outbox: event type is required")
@@ -125,10 +132,13 @@ func (w *Writer) Write(ctx context.Context, ev Event) error {
 }
 
 // insert takes the advisory lock and inserts the row through the caller's
-// executor. The lock must be taken before the position is drawn (that is,
-// before the INSERT runs its DEFAULT nextval), and it must be transaction
-// scoped: both hold here whether the caller supplied the transaction or
-// Write opened one for the write.
+// executor. The lock must be taken before the position is drawn, and it must
+// be transaction scoped: both hold here whether the caller supplied the
+// transaction or Write opened one for the write. Migration 089 enforces the
+// same rule in the database (a BEFORE INSERT trigger takes the lock and
+// assigns the position, and the column has no default), so an insert that
+// bypasses Write keeps the ordering; the trigger's lock re-acquire inside
+// this transaction is a no-op.
 func (w *Writer) insert(ctx context.Context, ev Event) error {
 	ex := w.db.GetExecutor(ctx)
 	if _, err := ex.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, AdvisoryLockKey); err != nil {

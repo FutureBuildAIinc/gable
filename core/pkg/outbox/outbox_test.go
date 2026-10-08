@@ -99,13 +99,13 @@ func testEvent(t *testing.T, typ string) Event {
 	}
 }
 
-// cleanOutbox empties both tables so every test starts from a known feed:
-// the drain reads from position 0 for a fresh subscriber, and a test's
+// cleanOutbox empties all three tables so every test starts from a known
+// feed: the drain reads from position 0 for a fresh subscriber, and a test's
 // assertions about counts and deliveries must not see a prior run's rows.
 func cleanOutbox(t *testing.T, db *database.DB) {
 	t.Helper()
 	if _, err := db.Pool.Exec(context.Background(),
-		`TRUNCATE events_outbox, event_subscriber_cursors`); err != nil {
+		`TRUNCATE events_outbox, event_subscriber_cursors, event_subscriber_parked`); err != nil {
 		t.Fatalf("truncate outbox: %v", err)
 	}
 }

@@ -16,20 +16,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// ExposureNotifier is the eventbus subscriber that turns lumber-index price
-// exposure events into salesperson alerts and customer notices. It is
-// registered against the quote.exposure.> subject in cmd/server/main.go.
+// ExposureNotifier is the subscriber that turns lumber-index price exposure
+// events into salesperson alerts and customer notices. Its handler is
+// registered on the outbox drain for the quote.exposure.> subject in
+// cmd/server/wire_exposure.go.
 //
 // Routing:
 //   - FLAGGED / ESCALATED / ACK_REQUIRED → email the assigned salesperson.
 //   - ESCALATED / ACKNOWLEDGED          → email the customer.
 //
-// Email addresses are resolved from sales_team / customers at handle time.
-// Handling is idempotent on the event ID via a bounded seen-cache. The
-// in-process bus is at-most-once and never redelivers, so today the cache only
-// catches an accidental double-publish of the same event ID — but it is the
-// property that lets the bus be swapped for an at-least-once broker without
-// this consumer double-sending email.
+// Email addresses are resolved from sales_team / customers at handle time
+// through the caller's executor (inside the drain's pass transaction, the
+// seam resolves that transaction). Handling is idempotent on the outbox
+// event_id via a bounded seen-cache: the drain is at-least-once (a crash
+// between the handler and the cursor commit replays the window), so the
+// cache collapses replays within this process. It is deliberately not
+// durable in v1: a restart during a replay can send a duplicate email,
+// which ADR 0003 records as accepted for v1.
 type ExposureNotifier struct {
 	email  EmailService
 	db     *database.DB
@@ -74,9 +77,11 @@ func (n *ExposureNotifier) markSeen(id string) (already bool) {
 	return false
 }
 
-// Handle is the eventbus.Handler. It is idempotent and best-effort: a returned
-// error lets a durable backend redeliver, but the seen-cache guards against
-// double-sends across redeliveries within this process.
+// Handle is the subscriber handler the outbox drain calls synchronously, one
+// committed row at a time, with the row's event_id as the event id. It is
+// idempotent and best-effort: a returned error makes the drain count the
+// attempt and retry the row on later passes, and the seen-cache guards
+// against double-sends across those redeliveries within this process.
 func (n *ExposureNotifier) Handle(ctx context.Context, e eventbus.Event) error {
 	if e.EventID != "" && n.markSeen(e.EventID) {
 		n.logger.Debug("exposure notifier: duplicate event ignored", "event_id", e.EventID, "subject", e.Subject)

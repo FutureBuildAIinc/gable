@@ -535,7 +535,7 @@ func main() {
 	// per-customer threshold, applies the snapshotted policy, and gates order
 	// confirm/fulfil and delivery route assignment. Notification events are
 	// recorded in the transactional outbox inside the mutation's transaction
-	// and the drain republishes them onto the in-process bus; see
+	// and the drain delivers the committed rows to the subscribers; see
 	// cmd/server/wire_exposure.go and pkg/outbox. Must come after
 	// deliverySvc, its last dependency.
 	exposureWiring := wireExposure(exposureDeps{
@@ -549,14 +549,15 @@ func main() {
 		OrderSvc:      orderSvc,
 		DeliverySvc:   deliverySvc,
 		EmailSvc:      emailSvc,
+		EventsOrg:     cfg.EventsOrg,
 	})
 
-	// Outbox drain: republish committed events to the in-process bus, past
-	// each subscriber's cursor. Runs in the server for now (as the idempotency
-	// purge does); item R1-4 moves it into the worker role. Stopped by
-	// ExposureWiring.Shutdown in step 3.7, before the bus and pool close.
+	// Outbox drain: deliver committed events to the registered subscribers,
+	// past each subscriber's cursor. Runs in the server for now (as the
+	// idempotency purge does); item R1-4 moves it into the worker role.
+	// Stopped by ExposureWiring.Shutdown in step 3.7, before the pool closes.
 	if err := exposureWiring.Drain.Start(context.Background()); err != nil {
-		logger.Error("outbox drain failed to start; bus subscribers receive no events until it runs", "error", err)
+		logger.Error("outbox drain failed to start; event subscribers receive nothing until it runs", "error", err)
 	}
 
 	// SMS Notification Service
