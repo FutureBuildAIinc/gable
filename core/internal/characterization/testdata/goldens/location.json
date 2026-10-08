@@ -1,0 +1,735 @@
+[
+  {
+    "name": "branch.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/branches"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "active": true,
+          "address": "2450 Enterprise Way",
+          "branch_id": "<id-1>",
+          "city": "Kelowna",
+          "code": "KEL-MAIN",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "Kelowna Main Yard",
+          "id": "<id-1>",
+          "name": "Kelowna Main Yard",
+          "path": "KEL-MAIN",
+          "phone": "250-555-1000",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V1X 7K2"
+        },
+        {
+          "active": true,
+          "address": "11852 Kilnyard Rd",
+          "branch_id": "<id-2>",
+          "city": "Lake Country",
+          "code": "LK",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "Lake Country Outpost",
+          "id": "<id-2>",
+          "name": "Lake Country Outpost",
+          "path": "LK",
+          "phone": "250-555-1200",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V4V 1E2"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-3>",
+          "code": "MAIN",
+          "created_at": "<ts+0d>",
+          "description": "Default branch created by migration 059",
+          "id": "<id-3>",
+          "name": "Main Branch",
+          "path": "Main",
+          "timezone": "America/New_York",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "address": "2475 Sawkerf Rd",
+          "branch_id": "<id-4>",
+          "city": "West Kelowna",
+          "code": "WK",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "West Kelowna Satellite",
+          "id": "<id-4>",
+          "name": "West Kelowna Satellite",
+          "path": "WK",
+          "phone": "250-555-1100",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V4T 2E9"
+        }
+      ]
+    }
+  },
+  {
+    "name": "branch.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/branches",
+      "body": {
+        "address": "2 Golden Way",
+        "city": "Kelowna",
+        "code": "GOLD",
+        "name": "Golden Branch",
+        "state": "BC",
+        "timezone": "America/Vancouver",
+        "zip": "V1X 7K2"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "address": "2 Golden Way",
+        "branch_id": "<id-5>",
+        "city": "Kelowna",
+        "code": "GOLD",
+        "created_at": "<ts+0d>",
+        "id": "<id-5>",
+        "name": "Golden Branch",
+        "path": "Golden Branch",
+        "state": "BC",
+        "timezone": "America/Vancouver",
+        "type": "BRANCH",
+        "updated_at": "<ts+0d>",
+        "zip": "V1X 7K2"
+      }
+    }
+  },
+  {
+    "name": "branch.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/branches/<id-5>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "address": "2 Golden Way",
+        "branch_id": "<id-5>",
+        "city": "Kelowna",
+        "code": "GOLD",
+        "created_at": "<ts+0d>",
+        "id": "<id-5>",
+        "name": "Golden Branch",
+        "path": "Golden Branch",
+        "state": "BC",
+        "timezone": "America/Vancouver",
+        "type": "BRANCH",
+        "updated_at": "<ts+0d>",
+        "zip": "V1X 7K2"
+      }
+    }
+  },
+  {
+    "name": "branch.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/branches/<id-5>",
+      "body": {
+        "code": "GOLD",
+        "name": "Golden Branch Renamed"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": false,
+        "branch_id": "<id-5>",
+        "code": "GOLD",
+        "created_at": "<ts+0d>",
+        "id": "<id-5>",
+        "name": "Golden Branch Renamed",
+        "path": "",
+        "timezone": "America/Vancouver",
+        "type": "BRANCH",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "location.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/locations"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "active": false,
+          "branch_id": "<id-5>",
+          "code": "GOLD",
+          "created_at": "<ts+0d>",
+          "id": "<id-5>",
+          "name": "Golden Branch Renamed",
+          "path": "",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-1>",
+          "code": "KEL-A",
+          "created_at": "<ts+0d>",
+          "description": "Lumber Storage Zone A",
+          "id": "<id-6>",
+          "parent_id": "<id-1>",
+          "path": "KEL-A",
+          "timezone": "America/New_York",
+          "type": "ZONE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-1>",
+          "code": "KEL-B",
+          "created_at": "<ts+0d>",
+          "description": "Sheet Goods Zone B",
+          "id": "<id-7>",
+          "parent_id": "<id-1>",
+          "path": "KEL-B",
+          "timezone": "America/New_York",
+          "type": "ZONE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-1>",
+          "code": "KEL-C",
+          "created_at": "<ts+0d>",
+          "description": "Hardware & Fasteners Zone C",
+          "id": "<id-8>",
+          "parent_id": "<id-1>",
+          "path": "KEL-C",
+          "timezone": "America/New_York",
+          "type": "ZONE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-1>",
+          "code": "KEL-D",
+          "created_at": "<ts+0d>",
+          "description": "Roofing & Insulation Zone D",
+          "id": "<id-9>",
+          "parent_id": "<id-1>",
+          "path": "KEL-D",
+          "timezone": "America/New_York",
+          "type": "ZONE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "address": "2450 Enterprise Way",
+          "branch_id": "<id-1>",
+          "city": "Kelowna",
+          "code": "KEL-MAIN",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "Kelowna Main Yard",
+          "id": "<id-1>",
+          "name": "Kelowna Main Yard",
+          "path": "KEL-MAIN",
+          "phone": "250-555-1000",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V1X 7K2"
+        },
+        {
+          "active": true,
+          "address": "11852 Kilnyard Rd",
+          "branch_id": "<id-2>",
+          "city": "Lake Country",
+          "code": "LK",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "Lake Country Outpost",
+          "id": "<id-2>",
+          "name": "Lake Country Outpost",
+          "path": "LK",
+          "phone": "250-555-1200",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V4V 1E2"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-2>",
+          "code": "LK-A",
+          "created_at": "<ts+0d>",
+          "description": "Outpost General Storage",
+          "id": "<id-10>",
+          "parent_id": "<id-2>",
+          "path": "LK-A",
+          "timezone": "America/New_York",
+          "type": "ZONE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-3>",
+          "code": "MAIN",
+          "created_at": "<ts+0d>",
+          "description": "Default branch created by migration 059",
+          "id": "<id-3>",
+          "name": "Main Branch",
+          "path": "Main",
+          "timezone": "America/New_York",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "address": "2475 Sawkerf Rd",
+          "branch_id": "<id-4>",
+          "city": "West Kelowna",
+          "code": "WK",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "West Kelowna Satellite",
+          "id": "<id-4>",
+          "name": "West Kelowna Satellite",
+          "path": "WK",
+          "phone": "250-555-1100",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V4T 2E9"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-4>",
+          "code": "WK-A",
+          "created_at": "<ts+0d>",
+          "description": "Treated Lumber Storage",
+          "id": "<id-11>",
+          "parent_id": "<id-4>",
+          "path": "WK-A",
+          "timezone": "America/New_York",
+          "type": "ZONE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-4>",
+          "code": "WK-B",
+          "created_at": "<ts+0d>",
+          "description": "Millwork & Doors",
+          "id": "<id-12>",
+          "parent_id": "<id-4>",
+          "path": "WK-B",
+          "timezone": "America/New_York",
+          "type": "ZONE",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "location.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/locations",
+      "body": {
+        "code": "GOLD-YARD",
+        "name": "Golden Yard",
+        "parent_id": "<id-5>",
+        "type": "YARD"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "branch_id": "<id-5>",
+        "code": "GOLD-YARD",
+        "created_at": "<ts+0d>",
+        "id": "<id-13>",
+        "name": "Golden Yard",
+        "parent_id": "<id-5>",
+        "path": "",
+        "timezone": "America/New_York",
+        "type": "YARD",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "location.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/locations/<id-13>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "branch_id": "<id-5>",
+        "code": "GOLD-YARD",
+        "created_at": "<ts+0d>",
+        "id": "<id-13>",
+        "name": "Golden Yard",
+        "parent_id": "<id-5>",
+        "path": "",
+        "timezone": "America/New_York",
+        "type": "YARD",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "branch.get.not_a_branch",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/branches/<id-13>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "me.branches",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/me/branches"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "active": true,
+          "code": "KEL-MAIN",
+          "id": "<id-1>",
+          "is_home": true,
+          "name": "Kelowna Main Yard",
+          "timezone": "America/Vancouver"
+        },
+        {
+          "active": true,
+          "code": "LK",
+          "id": "<id-2>",
+          "name": "Lake Country Outpost",
+          "timezone": "America/Vancouver"
+        },
+        {
+          "active": true,
+          "code": "MAIN",
+          "id": "<id-3>",
+          "name": "Main Branch",
+          "timezone": "America/New_York"
+        },
+        {
+          "active": true,
+          "code": "WK",
+          "id": "<id-4>",
+          "name": "West Kelowna Satellite",
+          "timezone": "America/Vancouver"
+        }
+      ]
+    }
+  },
+  {
+    "name": "users.list_empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/users"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "users.grant",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/users/golden-user-1/branches",
+      "body": {
+        "branch_id": "<id-5>",
+        "is_home": true
+      }
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "users.branches",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/users/golden-user-1/branches"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "users.home_branch",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/users/golden-user-1/home-branch",
+      "body": {
+        "branch_id": "<id-5>"
+      }
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "users.list_after_grant",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/users"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        "golden-user-1"
+      ]
+    }
+  },
+  {
+    "name": "users.grant.not_a_branch",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/users/golden-user-1/branches",
+      "body": {
+        "branch_id": "<id-13>"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "users.home_branch.no_grant",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/users/golden-user-2/home-branch",
+      "body": {
+        "branch_id": "<id-5>"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "branch.users",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/branches/<id-5>/users"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "branch_id": "<id-5>",
+          "granted_at": "<ts+0d>",
+          "is_home": true,
+          "user_sub": "golden-user-1"
+        }
+      ]
+    }
+  },
+  {
+    "name": "users.revoke",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/users/golden-user-1/branches/<id-5>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "branch.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/branches/<id-5>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "branch.list_after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/branches"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "active": true,
+          "address": "2450 Enterprise Way",
+          "branch_id": "<id-1>",
+          "city": "Kelowna",
+          "code": "KEL-MAIN",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "Kelowna Main Yard",
+          "id": "<id-1>",
+          "name": "Kelowna Main Yard",
+          "path": "KEL-MAIN",
+          "phone": "250-555-1000",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V1X 7K2"
+        },
+        {
+          "active": true,
+          "address": "11852 Kilnyard Rd",
+          "branch_id": "<id-2>",
+          "city": "Lake Country",
+          "code": "LK",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "Lake Country Outpost",
+          "id": "<id-2>",
+          "name": "Lake Country Outpost",
+          "path": "LK",
+          "phone": "250-555-1200",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V4V 1E2"
+        },
+        {
+          "active": true,
+          "branch_id": "<id-3>",
+          "code": "MAIN",
+          "created_at": "<ts+0d>",
+          "description": "Default branch created by migration 059",
+          "id": "<id-3>",
+          "name": "Main Branch",
+          "path": "Main",
+          "timezone": "America/New_York",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "active": true,
+          "address": "2475 Sawkerf Rd",
+          "branch_id": "<id-4>",
+          "city": "West Kelowna",
+          "code": "WK",
+          "created_at": "<ts+0d>",
+          "default_tax_rate": 0.12,
+          "description": "West Kelowna Satellite",
+          "id": "<id-4>",
+          "name": "West Kelowna Satellite",
+          "path": "WK",
+          "phone": "250-555-1100",
+          "state": "BC",
+          "tax_jurisdiction_code": "BC",
+          "timezone": "America/Vancouver",
+          "type": "BRANCH",
+          "updated_at": "<ts+0d>",
+          "zip": "V4T 2E9"
+        }
+      ]
+    }
+  }
+]

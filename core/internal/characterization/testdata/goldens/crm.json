@@ -1,0 +1,66 @@
+[
+  {
+    "name": "crm.activity.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-1>/activities",
+      "body": {
+        "activity_type": "NOTE",
+        "description": "golden characterisation note"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-2>\",\"customer_id\":\"<id-1>\",\"activity_type\":\"NOTE\",\"description\":\"golden characterisation note\",\"activity_date\":\"<ts+0d>\",\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+      }
+    }
+  },
+  {
+    "name": "crm.activity.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/activities"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "activity_date": "<ts+0d>",
+          "activity_type": "NOTE",
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-1>",
+          "description": "golden characterisation note",
+          "id": "<id-2>",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "crm.activity.bad_type",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-1>/activities",
+      "body": {
+        "activity_type": "SMOKE_SIGNAL",
+        "description": "x"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  }
+]

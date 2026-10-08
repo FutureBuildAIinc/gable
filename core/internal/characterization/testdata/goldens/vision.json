@@ -1,0 +1,52 @@
+[
+  {
+    "name": "vision.scan",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/vision/scan",
+      "body": {
+        "blueprint_text": "Wall: 2x4 studs at 16in OC, 92-5/8in studs, SPF species",
+        "config_selections": {
+          "Grade": "#2",
+          "Species": "SPF"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "extracted_dimensions": {
+          "cross_section": "2x4",
+          "spacing": "16\" OC",
+          "species": "SPF"
+        },
+        "mismatches": [],
+        "summary": "Blueprint analysis complete. 3 dimensions extracted. No mismatches found."
+      }
+    }
+  },
+  {
+    "name": "vision.scan.empty",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/vision/scan",
+      "body": {
+        "blueprint_text": ""
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  }
+]
