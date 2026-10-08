@@ -146,7 +146,7 @@ func seed097(t *testing.T, conn *pgx.Conn) {
 		INSERT INTO orders (id, customer_id, status, total_amount, branch_id, currency, delivery_type, created_at)
 			VALUES ('%[5]s','%[1]s','FULFILLED',55,%[2]s,'USD','PICKUP', now() - interval '10 days');
 		INSERT INTO order_lines (id, order_id, product_id, quantity, unit_price, description, uom, price_uom, uom_qty, price_uom_qty, line_total, priced_unit_price, override_reason, price_adjusted_by, position, created_at)
-			VALUES ('%[6]s','%[5]s','%[4]s',10,5.5,'stud','PCS','PCS',1,1,55,5.25,'matched a quote','amy',0,now());
+			VALUES ('%[6]s','%[5]s','%[4]s',10,5.5,'stud','PCS','PCS',1,1,55,5.25,'matched a quote','clerk',0,now());
 		INSERT INTO invoices (id, order_id, customer_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, branch_id, created_at, updated_at) VALUES
 			('%[7]s','%[5]s','%[1]s','UNPAID',100,100,0,'NET30', now() + interval '20 days', %[2]s, now() - interval '9 days', now()),
 			('%[8]s',NULL,'%[1]s','OVERDUE',100,100,0,'Net 45', now() - interval '10 days', %[2]s, now() - interval '8 days', now()),
@@ -244,7 +244,7 @@ func TestMigration097_BackfillsRowsThatExist(t *testing.T) {
 	if got := scalar[bool](t, conn, `SELECT voided_at IS NOT NULL AND voided_on IS NOT NULL AND revision = 1 FROM invoices WHERE id = $1`, m97Void); !got {
 		t.Error("the void invoice has no void columns")
 	}
-	if got := scalar[string](t, conn, `SELECT priced_unit_price::text || '/' || override_reason || '/' || price_adjusted_by FROM invoice_lines WHERE invoice_id = $1`, m97Unpaid); got != "5.2500/matched a quote/amy" {
+	if got := scalar[string](t, conn, `SELECT priced_unit_price::text || '/' || override_reason || '/' || price_adjusted_by FROM invoice_lines WHERE invoice_id = $1`, m97Unpaid); got != "5.2500/matched a quote/clerk" {
 		t.Errorf("invoice line audit trail = %q, want it copied from the order line", got)
 	}
 
