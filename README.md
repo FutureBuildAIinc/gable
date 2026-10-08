@@ -92,8 +92,14 @@ send it. If a load balancer or reverse proxy fronts the server, set
 single addresses, IPv4 or IPv6), for example `TRUSTED_PROXIES=10.0.0.0/8,fd00::/8`.
 When the peer is inside one of them, `X-Forwarded-For` is read from the right,
 trusted hops are skipped, and the first untrusted address is the client.
-Without it, every caller behind the proxy shares the proxy's budget. A malformed
-entry stops the server at boot. `X-Real-IP` is never read.
+Without it, every caller behind the proxy shares the proxy's budget, and the
+server says so: it logs the setting's state at boot, and warns (at most once an
+hour) when `X-Forwarded-For` arrives from a peer outside `TRUSTED_PROXIES`.
+A chain made only of trusted hops has no client to find, so those callers key
+on the proxy peer and share one budget. IPv6 callers are counted per /64, so
+rotating addresses inside one /64 draws on a single budget. A malformed entry
+(including a zone identifier or an IPv4-mapped prefix shorter than /96) stops
+the server at boot. `X-Real-IP` is never read.
 
 ## Documentation
 
