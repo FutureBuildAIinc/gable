@@ -217,6 +217,10 @@ func Run() {
 	// the user_locations grant table. Controlled by system_settings keys
 	// `multi_branch_enabled` (kill switch) and `default_branch_required`.
 	branchMw := middleware.NewBranchMiddleware(db).Handler
+	// branchGuard holds a branch a request body names to the caller's branch
+	// grants (ADR 0007 section 2.3), so a body cannot move a write across the
+	// branch wall.
+	branchGuard := middleware.NewBranchGuard(db)
 
 	// scoped composes a role guard with the branch middleware. Use this for
 	// any module group whose entities carry a branch_id.
@@ -320,7 +324,8 @@ func Run() {
 	// last statement.
 	quoteSvc := quote.NewService(quoteRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db)
+		WithTxRunner(db).
+		WithBranchGuard(branchGuard)
 	quoteHandler := quote.NewHandler(quoteSvc)
 	quoteHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 
