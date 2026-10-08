@@ -611,6 +611,23 @@ func (r *PostgresRepository) GetOriginalFile(ctx context.Context, id uuid.UUID) 
 	return data, filename, contentType, nil
 }
 
+// analyticsBranchFilters is the three arm branch predicate of the analytics
+// count and days to close queries, the listFilters form with the branch and
+// the grants sub as the query's first two parameters (ADR 0007 section 2.3):
+// a context branch counts its own quotes; with no context branch a bound
+// non-admin user counts the branches granted to the user, none granted
+// counting none; an administrator without a header, an unbound key and the
+// single-branch switch count every branch's. The trend query writes the same
+// arms into its join (qualified with q) so a day with no matching quote
+// still reports its zero row.
+const analyticsBranchFilters = `
+	  AND (
+	    ($1::uuid IS NOT NULL AND branch_id = $1)
+	    OR ($1::uuid IS NULL AND $2::text IS NOT NULL AND branch_id IN
+	        (SELECT branch_id FROM user_locations WHERE user_sub = $2))
+	    OR ($1::uuid IS NULL AND $2::text IS NULL)
+	  )`
+
 // GetQuoteAnalytics returns aggregated quote analytics.
 func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnalytics, error) {
 	a := &QuoteAnalytics{}
@@ -633,10 +650,10 @@ func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnaly
 			COUNT(*) FILTER (WHERE COALESCE(source, 'manual') != 'ai' AND state = 'ACCEPTED') as manual_accepted,
 			COUNT(*) FILTER (WHERE COALESCE(source, 'manual') != 'ai') as manual_count
 		FROM quotes
-		WHERE created_at >= NOW() - INTERVAL '90 days'
-	`
+		WHERE created_at >= NOW() - INTERVAL '90 days'` + analyticsBranchFilters
 	var aiAccepted, manualAccepted, manualCount int
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(
 		&a.TotalQuotes, &a.DraftCount, &a.SentCount, &a.AcceptedCount, &a.RejectedCount, &a.ExpiredCount,
 		&a.TotalQuoteValueCents, &a.TotalAcceptedCents,
 		&a.AvgMarginAcceptedCents, &a.AvgMarginRejectedCents,
@@ -663,9 +680,9 @@ func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnaly
 		SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (accepted_at - created_at)) / 86400), 0)
 		FROM quotes
 		WHERE state = 'ACCEPTED' AND accepted_at IS NOT NULL
-		AND created_at >= NOW() - INTERVAL '90 days'
-	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, daysQuery).Scan(&a.AvgDaysToClose)
+		AND created_at >= NOW() - INTERVAL '90 days'` + analyticsBranchFilters
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, daysQuery,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&a.AvgDaysToClose)
 	if err != nil {
 		a.AvgDaysToClose = 0
 	}
@@ -685,10 +702,17 @@ func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnaly
 			'1 day'::interval
 		) d
 		LEFT JOIN quotes q ON q.created_at::date = d::date
+		  AND (
+		    ($1::uuid IS NOT NULL AND q.branch_id = $1)
+		    OR ($1::uuid IS NULL AND $2::text IS NOT NULL AND q.branch_id IN
+		        (SELECT branch_id FROM user_locations WHERE user_sub = $2))
+		    OR ($1::uuid IS NULL AND $2::text IS NULL)
+		  )
 		GROUP BY d::date
 		ORDER BY d::date
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, trendQuery)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, trendQuery,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trend data: %w", err)
 	}

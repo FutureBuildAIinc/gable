@@ -891,3 +891,84 @@ func TestBranchWall_PORecommendationScoping(t *testing.T) {
 		}
 	}
 }
+
+// quoteAnalytics is the part of the analytics response the test reads.
+type quoteAnalytics struct {
+	TotalQuotes          int   `json:"total_quotes"`
+	DraftCount           int   `json:"draft_count"`
+	TotalQuoteValueCents int64 `json:"total_quote_value_cents"`
+	TrendData            []struct {
+		Created int `json:"created"`
+	} `json:"trend_data"`
+}
+
+// The quote analytics route reads the same table as the quote list, so its
+// three queries carry the same three arm branch predicate (ADR 0007 section
+// 2.3): a caller held to branch A counts branch A's quotes only, through its
+// context branch or, with none, through its grants; a bound user with no
+// grants counts none; an administrator without a header counts every
+// branch's, and the other packages' quotes mean its count is at least the
+// fixture's two, never assumed exact.
+func TestBranchWall_QuoteAnalytics(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLQ-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLQ-"+quoteB.String()[:8])
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+
+	read := func(t *testing.T, body []byte) quoteAnalytics {
+		t.Helper()
+		var a quoteAnalytics
+		if err := json.Unmarshal(body, &a); err != nil {
+			t.Fatalf("analytics body: %v\n%s", err, body)
+		}
+		return a
+	}
+	trendCreated := func(a quoteAnalytics) int {
+		n := 0
+		for _, d := range a.TrendData {
+			n += d.Created
+		}
+		return n
+	}
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantTotal               int
+		wantTotalLowerBound     bool
+	}{
+		{"sales, header A", "sales", "u-a", A, 1, false},
+		{"sales, no header", "sales", "u-a", "", 1, false},
+		{"sales u-none, no header", "sales", "u-none", "", 0, false},
+		{"admin, no header", "admin", "boss", "", 2, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/quotes/analytics", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("quote analytics, %s: %d, want 200", c.name, status)
+			continue
+		}
+		a := read(t, body)
+		if c.wantTotalLowerBound {
+			if a.TotalQuotes < c.wantTotal {
+				t.Errorf("quote analytics, %s: total_quotes = %d, want at least %d", c.name, a.TotalQuotes, c.wantTotal)
+			}
+			continue
+		}
+		if a.TotalQuotes != c.wantTotal {
+			t.Errorf("quote analytics, %s: total_quotes = %d, want %d", c.name, a.TotalQuotes, c.wantTotal)
+		}
+		if a.DraftCount != c.wantTotal {
+			t.Errorf("quote analytics, %s: draft_count = %d, want %d", c.name, a.DraftCount, c.wantTotal)
+		}
+		if want := int64(c.wantTotal) * 1000; a.TotalQuoteValueCents != want {
+			t.Errorf("quote analytics, %s: total_quote_value_cents = %d, want %d", c.name, a.TotalQuoteValueCents, want)
+		}
+		if got := trendCreated(a); got != c.wantTotal {
+			t.Errorf("quote analytics, %s: trend created total = %d, want %d", c.name, got, c.wantTotal)
+		}
+	}
+}
