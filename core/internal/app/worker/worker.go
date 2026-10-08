@@ -52,6 +52,12 @@ func Run() {
 
 	logger.Info("Starting worker...", "log_level", cfg.LogLevel)
 
+	// Register the signal channel before any job starts, so a stop signal
+	// that arrives during startup is buffered rather than taking the
+	// process's default disposition.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	db, err := database.Connect(cfg.DatabaseURL, database.PoolConfig{
 		MaxConns:          cfg.DBMaxConns,
 		MinConns:          cfg.DBMinConns,
@@ -79,9 +85,6 @@ func Run() {
 
 	logger.Info("Worker started", "jobs", "idempotency-purge")
 
-	// Wait for interrupt signal using a buffered channel
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
 
