@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // normaliseTranscript rewrites every value that legitimately varies between
@@ -26,9 +27,19 @@ import (
 //   - UUIDs (primary keys, request ids, dev-mode POS cashier ids) become
 //     <id-1>, <id-2>, ... in order of first appearance anywhere in the
 //     transcript, so an id read back in a later step keeps its placeholder.
-//   - RFC 3339 timestamps and bare calendar dates become <ts> and <date>.
-//     Seeded rows are dated relative to the seed clock, so absolute times are
-//     per-run; their day granularity is normalised the same way.
+//   - Timestamps become <ts+Nd> / <ts-Nd>: the placeholder is emitted only
+//     after the match itself has asserted the RFC 3339 (or Postgres text)
+//     shape - a timestamp that changes format can no longer hide behind it -
+//     and it carries the value's day offset from the seed day, so date
+//     arithmetic carried in timestamp fields (net-30 due dates, quote
+//     expiry) is pinned while the within-day time, which rides on run
+//     timing, stays free.
+//   - Calendar dates become their day offset from the seed day: <day+30> for
+//     a month ahead, <day-45> for six weeks back, <day+0> for the seed day
+//     itself. Absolute times are per-run (the seed dates everything relative
+//     to its own clock), but their day arithmetic is behaviour: a net-30 due
+//     date that becomes net-0, or a 30-day quote expiry that becomes 31,
+//     changes the placeholder and fails the golden.
 //   - Generated secrets and tokens (sk_live_ keys, JWTs) become placeholders;
 //     their values are random by construction.
 //   - Elapsed-time measurements (parse_time_ms) become <ms>; a duration is
@@ -37,7 +48,7 @@ import (
 // Everything else - money, statuses, field names, error text, null versus
 // empty array - is real behaviour and is compared byte for byte.
 func normaliseTranscript(steps []capturedStep) []capturedStep {
-	n := &normaliser{ids: map[string]string{}}
+	n := &normaliser{ids: map[string]string{}, seedDay: seedDay}
 	for i := range steps {
 		steps[i].Request.Path = n.string(steps[i].Request.Path)
 		steps[i].Request.Body = n.value(steps[i].Request.Body, "")
@@ -50,8 +61,9 @@ func normaliseTranscript(steps []capturedStep) []capturedStep {
 }
 
 type normaliser struct {
-	ids   map[string]string
-	count int
+	ids     map[string]string
+	count   int
+	seedDay string // UTC day of the seed, "2006-01-02"; dates normalise to offsets from it
 }
 
 var (
@@ -64,19 +76,52 @@ var (
 	rePDFDT = regexp.MustCompile(`D:\d{14}Z?`)
 )
 
-// timingFields are response fields that measure elapsed time. Their values
-// vary with machine speed, not behaviour.
-var timingFields = map[string]bool{
-	"parse_time_ms": true,
+// volatileNumberFields are response fields whose numeric values measure the
+// run, not the behaviour: elapsed time, the readiness pool census taken at
+// request time (pool_max stays pinned; it is configured, not observed), and
+// the quote analytics average days-to-close, which at this base averages
+// only the quotes the script itself closes milliseconds after creating them
+// (the seeded book has none), so its value is sub-second run timing.
+var volatileNumberFields = map[string]string{
+	"parse_time_ms":     "<ms>",
+	"pool_total":        "<poolstat>",
+	"pool_idle":         "<poolstat>",
+	"pool_in_use":       "<poolstat>",
+	"avg_days_to_close": "<days>",
+}
+
+// volatileStringFields are response fields whose string values are random by
+// construction: /healthz/ready's uptime is a duration since process start,
+// and an exposure event's idempotency key is a hash over its creation
+// instant.
+var volatileStringFields = map[string]string{
+	"uptime":          "<uptime>",
+	"idempotency_key": "<idem-key>",
+}
+
+// seedFixedDateFields carry fixed calendar dates in the demo seed's vehicle
+// fixture: hardcoded calendar values, unlike every other date in the seed,
+// which is drawn relative to the seed clock. A seed-day offset for them would
+// drift by one every day the calendar advances, so they normalise to the
+// plain timestamp placeholder (the shape check still applies).
+var seedFixedDateFields = map[string]bool{
+	"insurance_expiry":  true,
+	"next_service_date": true,
 }
 
 func (n *normaliser) value(v any, key string) any {
 	switch x := v.(type) {
 	case string:
+		if ph, ok := volatileStringFields[key]; ok {
+			return ph
+		}
+		if seedFixedDateFields[key] && (reTS.MatchString(x) || rePgTS.MatchString(x)) {
+			return "<ts>"
+		}
 		return n.string(x)
 	case json.Number:
-		if timingFields[key] {
-			return "<ms>"
+		if ph, ok := volatileNumberFields[key]; ok {
+			return ph
 		}
 		return x
 	case map[string]any:
@@ -117,10 +162,52 @@ func (n *normaliser) string(s string) string {
 		n.ids[m] = ph
 		return ph
 	})
-	s = reTS.ReplaceAllStringFunc(s, func(string) string { return "<ts>" })
-	s = rePgTS.ReplaceAllStringFunc(s, func(string) string { return "<ts>" })
-	s = reDate.ReplaceAllStringFunc(s, func(string) string { return "<date>" })
+	s = reTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
+	s = rePgTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
+	s = reDate.ReplaceAllStringFunc(s, n.dayOffset)
 	return s
+}
+
+// tsPlaceholder rewrites one timestamp as <ts+Nd> / <ts-Nd>: N is the value's
+// day offset from the seed day (taken from the leading date; the within-day
+// time is run timing). The regex has already asserted the shape; a parse
+// failure is a harness bug and keeps the raw value (loudly failing every
+// comparison) rather than silently degrading.
+func (n *normaliser) tsPlaceholder(m string) string {
+	d, err := time.Parse(dayLayout, m[:10])
+	if err != nil {
+		return "<ts>"
+	}
+	off := int(d.Sub(parseSeedDay(n.seedDay)).Hours() / 24)
+	if off >= 0 {
+		return fmt.Sprintf("<ts+%dd>", off)
+	}
+	return fmt.Sprintf("<ts%dd>", off)
+}
+
+// dayOffset rewrites one calendar date as its day offset from the seed day.
+// The regex guarantees the "2006-01-02" shape, so a parse failure is a harness
+// bug and keeps the raw date (loudly failing every comparison) rather than
+// silently degrading to a placeholder.
+func (n *normaliser) dayOffset(m string) string {
+	d, err := time.Parse(dayLayout, m)
+	if err != nil {
+		return "<date>"
+	}
+	off := int(d.Sub(parseSeedDay(n.seedDay)).Hours() / 24)
+	if off >= 0 {
+		return fmt.Sprintf("<day+%d>", off)
+	}
+	return fmt.Sprintf("<day%d>", off)
+}
+
+// parseSeedDay parses the seed day; only TestMain writes it, in dayLayout.
+func parseSeedDay(s string) time.Time {
+	d, err := time.Parse(dayLayout, s)
+	if err != nil {
+		panic("goldens: seed day not in " + dayLayout + ": " + s)
+	}
+	return d
 }
 
 // binarySummary describes a non-text body: its byte length and a hash over
@@ -132,7 +219,7 @@ func (n *normaliser) string(s string) string {
 // normalisation applied: it pins what the document says, not where each glyph
 // sits.
 func binarySummary(raw []byte) map[string]any {
-	n := &normaliser{ids: map[string]string{}}
+	n := &normaliser{ids: map[string]string{}, seedDay: seedDay}
 	text := pdfText(raw)
 	sum := sha256.Sum256([]byte(n.string(text)))
 	return map[string]any{
@@ -253,6 +340,12 @@ func compareGoldens(t *testing.T, group string, steps []capturedStep) {
 	actual := canonical(t, steps)
 
 	if *updateGoldens {
+		// Re-recording is a deliberate, reviewed act (it needs an entry in
+		// docs/refactor/CONTRACT-CHANGES.md); CI only ever compares, so the
+		// flag is refused outright there rather than trusted to stay unset.
+		if os.Getenv("CI") != "" {
+			t.Fatalf("-update refuses to run under CI: re-recording goldens is a local, reviewed act")
+		}
 		if err := os.MkdirAll(goldenDir, 0o755); err != nil {
 			t.Fatalf("mkdir goldens: %v", err)
 		}
@@ -273,6 +366,35 @@ func compareGoldens(t *testing.T, group string, steps []capturedStep) {
 		return
 	}
 	t.Errorf("golden %s drifted from recorded behaviour:\n%s", path, diffSnippet(string(want), string(actual)))
+}
+
+// TestGoldenFilesMatchCurrentGroups pins the golden directory to the script:
+// every group must have its file, and every file must belong to a live group.
+// Without this, deleting a scenario (or renaming a group) leaves a stale
+// golden behind that still passes `go test -run nothing` and quietly rots.
+// The check is pure bookkeeping and runs without DATABASE_URL.
+func TestGoldenFilesMatchCurrentGroups(t *testing.T) {
+	inScript := map[string]bool{}
+	for _, g := range allGroups() {
+		inScript[g.name] = true
+		if _, err := os.Stat(goldenPath(g.name)); err != nil {
+			t.Errorf("group %q has no golden file; record it with -update", g.name)
+		}
+	}
+
+	entries, err := os.ReadDir(goldenDir)
+	if err != nil {
+		t.Fatalf("read golden dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json")
+		if !inScript[name] {
+			t.Errorf("golden file %s matches no group in the script; delete it", e.Name())
+		}
+	}
 }
 
 // diffSnippet renders a compact line diff between two transcripts.

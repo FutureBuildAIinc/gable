@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -53,13 +54,137 @@ type harness struct {
 	backendRoot string
 }
 
-func TestCharacterisationGoldens(t *testing.T) {
+// goldensDBURL is the throwaway database this binary's harness runs against,
+// set up once by TestMain (empty when DATABASE_URL is unset and the suite
+// skips). A package-level handle is the one shape that survives a test
+// timeout: t.Cleanup never runs on the timeout panic path, TestMain's
+// teardown does.
+var (
+	goldensDBURL  string
+	goldensDBName string
+
+	// seedDay is the UTC day the harness seeded on, captured once before the
+	// seed binary runs. Every calendar date in a transcript normalises to its
+	// offset from this day, and the end-of-run guard fails the run if UTC
+	// midnight was crossed between seed and script.
+	seedDay string
+)
+
+const dayLayout = "2006-01-02"
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+
+	teardown := setupGoldensDatabase()
+	defer teardown() // runs when a timeout panic unwinds out of m.Run
+
+	code := m.Run()
+	teardown() // os.Exit below skips defers, so call it on the normal path too
+	os.Exit(code)
+}
+
+// setupGoldensDatabase creates this run's throwaway database and returns a
+// teardown that drops it. It first sweeps stale gv1_goldens_* databases left
+// behind by earlier runs whose cleanup never ran (a `go test -timeout` panic
+// skips t.Cleanup, which is where the drop used to live). A database is
+// treated as stale only when no backend is connected to it: a live harness
+// always holds its admin connection plus the server's pool, so a concurrent
+// run's database is never touched.
+func setupGoldensDatabase() func() {
 	baseDBURL := os.Getenv("DATABASE_URL")
 	if baseDBURL == "" {
+		return func() {}
+	}
+
+	admin, err := sql.Open("pgx", baseDBURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goldens: open admin connection: %v\n", err)
+		os.Exit(1)
+	}
+
+	sweepStaleGoldensDBs(admin)
+
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		fmt.Fprintf(os.Stderr, "goldens: generate db name: %v\n", err)
+		os.Exit(1)
+	}
+	dbName := "gv1_goldens_" + hex.EncodeToString(suffix)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(`CREATE DATABASE %q`, dbName)); err != nil {
+		fmt.Fprintf(os.Stderr, "goldens: create database %s: %v\n", dbName, err)
+		os.Exit(1)
+	}
+
+	freshURL, err := rewriteDBPath(baseDBURL, dbName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goldens: rewrite DATABASE_URL: %v\n", err)
+		os.Exit(1)
+	}
+	goldensDBURL = freshURL
+	goldensDBName = dbName
+	seedDay = time.Now().UTC().Format(dayLayout)
+
+	var dropped bool
+	return func() {
+		if dropped || goldensDBName == "" {
+			return
+		}
+		dropped = true
+		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer dropCancel()
+		if _, err := admin.ExecContext(dropCtx, fmt.Sprintf(`DROP DATABASE %q WITH (FORCE)`, goldensDBName)); err != nil {
+			fmt.Fprintf(os.Stderr, "goldens: drop database %s: %v\n", goldensDBName, err)
+		}
+		admin.Close()
+	}
+}
+
+// sweepStaleGoldensDBs drops every gv1_goldens_* database with no connected
+// backend. See setupGoldensDatabase for why "no backend" is the staleness
+// test.
+func sweepStaleGoldensDBs(admin *sql.DB) {
+	rows, err := admin.Query(`SELECT datname FROM pg_database WHERE datname LIKE 'gv1_goldens_%'`)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goldens: sweep query: %v\n", err)
+		return
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return
+	}
+
+	for _, name := range names {
+		var backends int
+		if err := admin.QueryRow(`SELECT COUNT(*) FROM pg_stat_activity WHERE datname = $1`, name).Scan(&backends); err != nil {
+			continue // unreadable: leave it alone, the operator can drop it
+		}
+		if backends > 0 {
+			continue // a live harness owns it
+		}
+		if _, err := admin.Exec(fmt.Sprintf(`DROP DATABASE %q WITH (FORCE)`, name)); err != nil {
+			fmt.Fprintf(os.Stderr, "goldens: sweep drop %s: %v\n", name, err)
+		}
+	}
+}
+
+func TestCharacterisationGoldens(t *testing.T) {
+	if goldensDBURL == "" {
 		t.Skip(skipReason)
 	}
 
-	h := newHarness(t, baseDBURL)
+	h := newHarness(t, goldensDBURL)
 	for _, g := range allGroups() {
 		g := g
 		t.Run(g.name, func(t *testing.T) {
@@ -67,52 +192,30 @@ func TestCharacterisationGoldens(t *testing.T) {
 			compareGoldens(t, g.name, steps)
 		})
 	}
+
+	// Date-relative goldens are only meaningful when every request ran on the
+	// day the seed ran: a run that crosses UTC midnight mid-script sees bucket
+	// windows and day-offset dates shift under it. Fail loudly instead of
+	// recording (or comparing against) a transcript that straddles the day
+	// boundary; re-running gives a clean run.
+	if today := time.Now().UTC().Format(dayLayout); today != seedDay {
+		t.Fatalf("run crossed UTC midnight (seeded on %s, now %s): date-relative goldens are unreliable across the boundary; re-run the harness", seedDay, today)
+	}
 }
 
-func newHarness(t *testing.T, baseDBURL string) *harness {
+func newHarness(t *testing.T, freshURL string) *harness {
 	t.Helper()
 
-	// The database this harness uses is created fresh for every run and
-	// dropped at the end, so parallel `go test ./...` packages (which share
-	// the CI DATABASE_URL database) can never collide with it.
-	admin, err := sql.Open("pgx", baseDBURL)
-	if err != nil {
-		t.Fatalf("open admin connection: %v", err)
-	}
-	// Closed after the drop cleanup (cleanups run LIFO; registered first,
-	// runs last).
-	t.Cleanup(func() { admin.Close() })
-
-	suffix := make([]byte, 6)
-	if _, err := rand.Read(suffix); err != nil {
-		t.Fatalf("generate db name: %v", err)
-	}
-	dbName := "gv1_goldens_" + hex.EncodeToString(suffix)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(`CREATE DATABASE %q`, dbName)); err != nil {
-		t.Fatalf("create database %s: %v", dbName, err)
-	}
-	t.Cleanup(func() {
-		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer dropCancel()
-		if _, err := admin.ExecContext(dropCtx, fmt.Sprintf(`DROP DATABASE %q WITH (FORCE)`, dbName)); err != nil {
-			t.Errorf("drop database %s: %v", dbName, err)
-		}
-	})
-
-	freshURL, err := rewriteDBPath(baseDBURL, dbName)
-	if err != nil {
-		t.Fatalf("rewrite DATABASE_URL: %v", err)
-	}
-
+	// The database this harness uses was created by TestMain and is dropped by
+	// its teardown, so parallel `go test ./...` packages (which share the CI
+	// DATABASE_URL database) can never collide with it, and a test timeout
+	// cannot leak it.
 	_, thisFile, _, _ := runtime.Caller(0)
 	charDir := filepath.Dir(thisFile)
 	backendRoot := filepath.Join(charDir, "..", "..")
 
 	buildDir := t.TempDir()
-	run(t, backendRoot, os.Environ(), "go", "",
+	run(t, backendRoot, subprocessEnv(nil), "go", "",
 		"build", "-o", buildDir+string(os.PathSeparator),
 		"./cmd/migrate", "./cmd/seed", "./cmd/server")
 
@@ -122,11 +225,11 @@ func newHarness(t *testing.T, baseDBURL string) *harness {
 	// deterministic seed the sequence is fixed, so the same seed data lands
 	// every time. TZ is pinned so date values derived from time.Now() roll
 	// over at the same instant on every machine.
-	run(t, backendRoot, subEnv(os.Environ(), map[string]string{
+	run(t, backendRoot, subprocessEnv(map[string]string{
 		"DATABASE_URL": freshURL,
 	}), buildDir+"/migrate", "")
 
-	run(t, backendRoot, subEnv(os.Environ(), map[string]string{
+	run(t, backendRoot, subprocessEnv(map[string]string{
 		"DATABASE_URL": freshURL,
 		"DEMO_SEED":    "1",
 		"GODEBUG":      "randautoseed=0",
@@ -150,18 +253,30 @@ func rewriteDBPath(dbURL, dbName string) (string, error) {
 	return u.String(), nil
 }
 
-func subEnv(base []string, overrides map[string]string) []string {
-	out := make([]string, 0, len(base)+len(overrides))
-	for _, kv := range base {
-		k, _, _ := strings.Cut(kv, "=")
-		if _, hit := overrides[k]; hit {
-			continue
+// envAllowList is the complete set of variable names a harness subprocess may
+// inherit from the caller's environment. Everything else a developer's shell
+// might hold (INTEGRATION_API_KEY, RUN_PAYMENTS_*, AVALARA_*, OPENROUTER_API_KEY,
+// TWILIO_*, CORS_ORIGINS, ...) changes the server's configured behaviour and
+// with it the goldens, so it never reaches the subprocess: the explicit map is
+// the only other source, and it carries only harness-chosen values.
+var envAllowList = []string{
+	"PATH", "HOME", "GOCACHE", "GOMODCACHE", "GOFLAGS", "GOPATH", "TMPDIR",
+}
+
+// subprocessEnv builds the environment for every subprocess the harness runs
+// (go build, migrate, seed, server): the allow list above, plus the explicit
+// per-command values, and nothing else — never os.Environ().
+func subprocessEnv(explicit map[string]string) []string {
+	out := make([]string, 0, len(envAllowList)+len(explicit))
+	for _, k := range envAllowList {
+		if v, ok := os.LookupEnv(k); ok {
+			out = append(out, k+"="+v)
 		}
-		out = append(out, kv)
 	}
-	for k, v := range overrides {
+	for k, v := range explicit {
 		out = append(out, k+"="+v)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -207,7 +322,7 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 
 	cmd := exec.Command(filepath.Join(buildDir, "server"))
 	cmd.Dir = srvDir
-	cmd.Env = subEnv(os.Environ(), map[string]string{
+	cmd.Env = subprocessEnv(map[string]string{
 		"PORT":           strconv.Itoa(port),
 		"DATABASE_URL":   dbURL,
 		"AUTH_MODE":      "dev",
@@ -217,7 +332,7 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 	})
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = serverProcAttr()
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -326,7 +441,10 @@ func seedVars(t *testing.T, dbURL string) map[string]string {
 	one("vehicle", `SELECT id FROM vehicles WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("driver", `SELECT id FROM drivers WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("marketIndex", `SELECT id FROM market_indices WHERE index_code = 'RL_SPF_2X4'`)
-	vars["today"] = time.Now().UTC().Format("2006-01-02")
+	// The seed day captured by TestMain, not "now at request time": the two
+	// can only differ if the run crossed UTC midnight, which the end-of-run
+	// guard rejects anyway.
+	vars["today"] = seedDay
 	return vars
 }
 
@@ -356,15 +474,16 @@ type capturedResponse struct {
 
 type capturedStep struct {
 	Name string `json:"name"`
-	// SortBodyArrays, when true, sorts every JSON array in the response body
-	// (recursively) before comparison. It is recorded in the golden so a
-	// reader can see that this step pins content, not wire order. Used only
-	// where the base's own ordering is unstable: the AI_LM orders feed is
-	// ORDER BY (created_at, id, ...) over fixture rows that all share one
-	// created_at, so the tiebreak rides on the random row ids.
-	SortBodyArrays bool             `json:"sort_body_arrays,omitempty"`
-	Request        capturedRequest  `json:"request"`
-	Response       capturedResponse `json:"response"`
+	// SortPrimaryArray, when true, sorts only the response's primary array
+	// (the body's top-level array, or the data array of a paged envelope)
+	// before comparison; arrays nested inside each element keep their wire
+	// order and stay pinned. It is recorded in the golden so a reader can
+	// see what is and is not pinned. Used only where the base's own ordering
+	// is unstable: a list whose ORDER BY tiebreaks on random row ids (the
+	// dispatch-day fixture rows all share one created_at).
+	SortPrimaryArray bool             `json:"sort_primary_array,omitempty"`
+	Request          capturedRequest  `json:"request"`
+	Response         capturedResponse `json:"response"`
 }
 
 // doStep executes one scenario step: substitute {vars}, send, capture the
@@ -458,9 +577,17 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		ContentType: resp.Header.Get("Content-Type"),
 		Body:        captureBody(resp.Header.Get("Content-Type"), raw),
 	}
-	step.SortBodyArrays = s.sortBodyArrays
-	if s.sortBodyArrays {
-		sortJSONArrays(step.Response.Body)
+	step.SortPrimaryArray = s.sortPrimaryArray
+	if s.sortPrimaryArray {
+		switch body := step.Response.Body.(type) {
+		case []any:
+			sortPrimaryArray(body)
+		case map[string]any:
+			// Paged envelopes: the primary array sits one level down.
+			if data, ok := body["data"].([]any); ok {
+				sortPrimaryArray(data)
+			}
+		}
 	}
 	t.Logf("step %s: %s %s -> %d (%s)", s.name, s.method, path, resp.StatusCode, resp.Header.Get("Content-Type"))
 
@@ -513,6 +640,21 @@ func (h *harness) runGroup(t *testing.T, g groupDef) []capturedStep {
 // Small helpers
 // ---------------------------------------------------------------------------
 
+// reTodayToken matches {today+N} / {today-N} in scenario paths and bodies:
+// clock-window scenarios ask for explicit windows relative to the seed day
+// without the script pre-computing a var per offset.
+var reTodayToken = regexp.MustCompile(`\{today([+-]\d+)\}`)
+
+func expandTodayTokens(s string) string {
+	return reTodayToken.ReplaceAllStringFunc(s, func(m string) string {
+		off, err := strconv.Atoi(reTodayToken.FindStringSubmatch(m)[1])
+		if err != nil {
+			return m
+		}
+		return parseSeedDay(seedDay).AddDate(0, 0, off).Format(dayLayout)
+	})
+}
+
 func (h *harness) subst(s string) string {
 	return substAny(s, h.vars).(string)
 }
@@ -521,7 +663,7 @@ func (h *harness) subst(s string) string {
 func substAny(v any, vars map[string]string) any {
 	switch x := v.(type) {
 	case string:
-		s := x
+		s := expandTodayTokens(x)
 		for name, val := range vars {
 			s = strings.ReplaceAll(s, "{"+name+"}", val)
 		}
@@ -549,27 +691,20 @@ func substAny(v any, vars map[string]string) any {
 	}
 }
 
-// sortJSONArrays recursively sorts every array in a decoded JSON value by the
-// canonical encoding of its elements with volatile values (uuids, dates,
-// timestamps, keys) masked to constants: the raw ids differ per run, so
-// sorting on them would itself be random. Sorting runs before normalisation
-// assigns placeholders, so numbering follows the sorted order deterministically.
-func sortJSONArrays(v any) {
-	switch x := v.(type) {
-	case map[string]any:
-		for _, vv := range x {
-			sortJSONArrays(vv)
-		}
-	case []any:
-		for _, vv := range x {
-			sortJSONArrays(vv)
-		}
-		sort.SliceStable(x, func(i, j int) bool {
-			bi, _ := json.Marshal(maskVolatile(x[i]))
-			bj, _ := json.Marshal(maskVolatile(x[j]))
-			return bytes.Compare(bi, bj) < 0
-		})
-	}
+// sortPrimaryArray sorts one response array (the body's top-level array, or
+// the data array of a paged envelope) by the canonical encoding of its
+// elements with volatile values (uuids, dates, timestamps, keys) masked to
+// constants: the raw ids differ per run, so sorting on them would itself be
+// random. Only the passed-in array is sorted - arrays nested inside each
+// element keep their wire order, so a line-order regression still fails the
+// golden. Sorting runs before normalisation assigns placeholders, so
+// numbering follows the sorted order deterministically.
+func sortPrimaryArray(arr []any) {
+	sort.SliceStable(arr, func(i, j int) bool {
+		bi, _ := json.Marshal(maskVolatile(arr[i]))
+		bj, _ := json.Marshal(maskVolatile(arr[j]))
+		return bytes.Compare(bi, bj) < 0
+	})
 }
 
 // maskVolatile copies a decoded JSON value with run-varying strings replaced
@@ -596,12 +731,17 @@ func maskVolatile(v any) any {
 }
 
 func maskString(s string) string {
+	n := &normaliser{ids: map[string]string{}, seedDay: seedDay}
 	s = reJWT.ReplaceAllString(s, "<jwt>")
 	s = reKey.ReplaceAllString(s, "<api-key>")
 	s = reUUID.ReplaceAllString(s, "<uuid>")
-	s = reTS.ReplaceAllString(s, "<ts>")
-	s = rePgTS.ReplaceAllString(s, "<ts>")
-	s = reDate.ReplaceAllString(s, "<date>")
+	// Timestamps and dates mask to their seed-day offsets, matching the
+	// normaliser: two elements with different dates must order
+	// deterministically, not tie on a shared placeholder and fall back to
+	// the unstable wire order.
+	s = reTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
+	s = rePgTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
+	s = reDate.ReplaceAllStringFunc(s, n.dayOffset)
 	return s
 }
 

@@ -4,25 +4,33 @@
 package characterization
 
 // The scenario script: an ordered list of groups, each group one golden file
-// under testdata/goldens/. The order is load-bearing in three ways.
+// under testdata/goldens/. The order is load-bearing in more than one way.
 //
 //  1. Writes run in a fixed order, so sequence-derived numbers (order
 //     numbers, journal entry numbers) land on the same values every run.
 //  2. A later step can reference a value extracted from an earlier response
 //     ({order}, {invoice}, ...), substituted at run time and normalised onto
 //     the same stable id in the golden.
-//  3. The gl group runs before the flows that post to the general ledger
+//  3. The location group runs first, before anything else writes audit rows:
+//     GET /api/v1/users is the union of user_locations and audit_log
+//     subjects, and its empty answer is part of the contract.
+//  4. The gl group runs before the flows that post to the general ledger
 //     (invoice fulfilment, payments, deposits), so its account balances show
 //     the seeded chart alone; and the governance and millwork groups run
 //     before the apps group toggles the governance app off and on again.
+//  5. The exposure group runs after the quote group (it reuses that group's
+//     quote), and the clock group runs last so its windows aggregate every
+//     other group's writes.
 func allGroups() []groupDef {
 	return concat(
+		locationGroups(),
 		healthGroups(),
 		productGroups(),
 		customerGroups(),
 		salesGroups(),
 		glGroups(),
 		quoteGroups(),
+		exposureGroups(),
 		orderGroups(),
 		invoiceGroups(),
 		paymentGroups(),
@@ -55,6 +63,7 @@ func allGroups() []groupDef {
 		staffGroups(),
 		appsGroups(),
 		integrationGroups(),
+		clockGroups(),
 	)
 }
 
@@ -65,9 +74,9 @@ type stepDef struct {
 	body    any
 	headers map[string]string
 	extract map[string]string // var name -> JSON pointer into the response
-	// sortBodyArrays marks steps whose response arrays are sorted before
-	// comparison (see capturedStep.SortBodyArrays).
-	sortBodyArrays bool
+	// sortPrimaryArray marks steps whose top-level response array is sorted
+	// before comparison (see capturedStep.SortPrimaryArray).
+	sortPrimaryArray bool
 }
 
 type groupDef struct {

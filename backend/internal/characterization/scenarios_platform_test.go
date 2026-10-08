@@ -248,11 +248,12 @@ func integrationGroups() []groupDef {
 			{name: "integration.products", method: "GET", path: "/api/integration/products?category=Lumber", headers: withKey},
 			// The date filter is the seeded dispatch-day fixture's date.
 			// The fixture's orders all share one created_at, so the handler's
-			// ORDER BY tiebreaks on random row ids: array order on the wire
-			// is not stable, and this step pins content instead (the flag is
-			// recorded in the golden).
+			// ORDER BY tiebreaks on random row ids: the top-level array's
+			// order on the wire is not stable, and this step pins the content
+			// of every order while each order's own line arrays keep their
+			// wire order (the flag is recorded in the golden).
 			{name: "integration.orders", method: "GET", path: "/api/integration/orders?date={today}",
-				headers: withKey, sortBodyArrays: true},
+				headers: withKey, sortPrimaryArray: true},
 			{
 				name:    "integration.quote.create",
 				method:  "POST",
@@ -262,6 +263,29 @@ func integrationGroups() []groupDef {
 					"customer_id": "{customer}",
 					"lines":       []map[string]any{{"product_id": "{product}", "quantity": 12, "unit_price": 550}},
 				},
+				extract: map[string]string{"myAIQuote": "/id"},
+			},
+			// Bulk pricing for the same customer: prices in cents per item.
+			{
+				name:    "integration.quotes.bulk_price",
+				method:  "POST",
+				path:    "/api/integration/quotes/bulk-price",
+				headers: withKey,
+				body: map[string]any{
+					"customer_id": "{customer}",
+					"items": []map[string]any{
+						{"product_id": "{product}", "quantity": 10},
+						{"product_id": "{productSheet}", "quantity": 40},
+					},
+				},
+			},
+			// Accept the quote created above and convert it: the order is
+			// created AND confirmed in one call.
+			{
+				name:    "integration.quotes.accept_and_convert",
+				method:  "POST",
+				path:    "/api/integration/quotes/{myAIQuote}/accept-and-convert",
+				headers: withKey,
 			},
 			{
 				name:    "integration.validate_staff",

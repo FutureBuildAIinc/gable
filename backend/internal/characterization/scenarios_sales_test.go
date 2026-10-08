@@ -3,6 +3,8 @@
 
 package characterization
 
+import "strings"
+
 // Sales and logistics groups: platform health, product, customer, sales team,
 // CRM, quotes, orders (with the exposure gate), invoices (created through the
 // order confirm/fulfil flow), payments, AR accounts, deposits, delivery,
@@ -14,8 +16,22 @@ func healthGroups() []groupDef {
 		steps: []stepDef{
 			{name: "health.live", method: "GET", path: "/healthz/live"},
 			{name: "health.legacy", method: "GET", path: "/health"},
+			// Readiness: status, database pool census and uptime. The pool
+			// counts and the uptime string measure the run, not behaviour, so
+			// they normalise; pool_max stays pinned (configured, observed).
+			{name: "health.ready", method: "GET", path: "/healthz/ready"},
 			// net/http's own method mismatch answer: text/plain, not JSON.
 			{name: "health.method_not_allowed", method: "DELETE", path: "/healthz/live"},
+			// The A2A purchase-order receiver mounts only when FB Brain is
+			// enabled with a public key; the harness environment configures
+			// neither, so today's answer is the unmuxed 404. That is the
+			// mount-gated shape at this base, recorded as it is.
+			{
+				name:   "a2a.purchase_order.unmounted",
+				method: "POST",
+				path:   "/api/v1/a2a/purchase-order",
+				body:   map[string]any{"external_id": "GOLD-A2A-1", "vendor_name": "Golden Vendor Co"},
+			},
 		},
 	}}
 }
@@ -126,26 +142,103 @@ func glGroups() []groupDef {
 }
 
 func quoteGroups() []groupDef {
-	return []groupDef{{
-		name: "quote",
-		steps: []stepDef{
-			{
-				name:   "quote.create",
-				method: "POST",
-				path:   "/api/v1/quotes",
-				body: map[string]any{
-					"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
-					"lines": []map[string]any{{
-						"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
-						"quantity": 10, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
-					}},
-				},
-				extract: map[string]string{"myQuote": "/id"},
+	steps := []stepDef{
+		{
+			name:   "quote.create",
+			method: "POST",
+			path:   "/api/v1/quotes",
+			body: map[string]any{
+				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
+				"lines": []map[string]any{{
+					"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
+					"quantity": 10, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
+				}},
 			},
-			{name: "quote.get", method: "GET", path: "/api/v1/quotes/{myQuote}"},
-			{name: "quote.list", method: "GET", path: "/api/v1/quotes?limit=1"},
+			extract: map[string]string{"myQuote": "/id"},
 		},
+		{name: "quote.get", method: "GET", path: "/api/v1/quotes/{myQuote}"},
+		{name: "quote.list", method: "GET", path: "/api/v1/quotes?limit=1"},
+		// PUT on a DRAFT quote: the editable window. The doubled line
+		// quantity is the observable difference.
+		{
+			name:   "quote.update",
+			method: "PUT",
+			path:   "/api/v1/quotes/{myQuote}",
+			body: map[string]any{
+				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
+				"lines": []map[string]any{{
+					"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
+					"quantity": 20, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
+				}},
+			},
+		},
+		{name: "quote.state.draft_to_sent", method: "PUT", path: "/api/v1/quotes/{myQuote}/state",
+			body: map[string]any{"state": "SENT"}},
+		// Convert out of SENT: returns the order payload the frontend is
+		// meant to POST, and marks the quote ACCEPTED.
+		{name: "quote.convert", method: "POST", path: "/api/v1/quotes/{myQuote}/convert"},
+		// ACCEPTED is terminal: the refused transition, with the
+		// service's own error text.
+		{name: "quote.state.refused_from_accepted", method: "PUT", path: "/api/v1/quotes/{myQuote}/state",
+			body: map[string]any{"state": "SENT"}},
+	}
+	// The remaining allowed transitions, each on its own fresh quote so the
+	// source state is exactly what the transition map requires. Together
+	// with the steps above, every allowed edge of the state machine is
+	// pinned exactly once.
+	steps = append(steps, appendSteps(
+		quoteTransitionSteps("to_accepted", "ACCEPTED"),
+		quoteTransitionSteps("rejected_reopened", "REJECTED", "DRAFT"),
+		quoteTransitionSteps("expired_reopened", "EXPIRED", "DRAFT"),
+		quoteTransitionSteps("sent_accepted", "SENT", "ACCEPTED"),
+		quoteTransitionSteps("sent_rejected", "SENT", "REJECTED"),
+		quoteTransitionSteps("sent_expired", "SENT", "EXPIRED"),
+	)...)
+	// Window aggregates over the whole quote book as this group leaves it
+	// (deterministic: the group's writes are ordered).
+	steps = append(steps,
+		stepDef{name: "quote.analytics", method: "GET", path: "/api/v1/quotes/analytics"})
+	return []groupDef{{name: "quote", steps: steps}}
+}
+
+// quoteTransitionSteps builds the steps for one fresh quote walked through
+// the given states in order, starting from DRAFT. The quote's {var} is named
+// after the whole sequence, so several transition quotes can live in one
+// script without colliding.
+func quoteTransitionSteps(sequence string, states ...string) []stepDef {
+	quoteVar := "quote_" + sequence
+	steps := []stepDef{{
+		name:   "quote.create." + sequence,
+		method: "POST",
+		path:   "/api/v1/quotes",
+		body: map[string]any{
+			"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
+			"lines": []map[string]any{{
+				"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
+				"quantity": 5, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
+			}},
+		},
+		extract: map[string]string{quoteVar: "/id"},
 	}}
+	from := "draft"
+	for _, target := range states {
+		steps = append(steps, stepDef{
+			name:   "quote.state." + from + "_to_" + strings.ToLower(target),
+			method: "PUT",
+			path:   "/api/v1/quotes/{" + quoteVar + "}/state",
+			body:   map[string]any{"state": target},
+		})
+		from = strings.ToLower(target)
+	}
+	return steps
+}
+
+func appendSteps(groups ...[]stepDef) []stepDef {
+	var out []stepDef
+	for _, g := range groups {
+		out = append(out, g...)
+	}
+	return out
 }
 
 func orderGroups() []groupDef {
@@ -167,6 +260,37 @@ func orderGroups() []groupDef {
 			{name: "order.get", method: "GET", path: "/api/v1/orders/{myOrder}"},
 			// No source quote on this order: the gate fails open.
 			{name: "order.exposure_gate", method: "GET", path: "/api/v1/orders/{myOrder}/exposure-gate"},
+			// Paged list envelope. The demo seed draws each customer's order
+			// book from the global rand source inside a map-iteration loop,
+			// so WHICH customer owns which drawn order is random per run;
+			// only aggregate counts are stable. A limit=1 page is therefore
+			// the deterministic read: the newest order is this script's own
+			// (seeded orders are dated in the past), and the total counts
+			// the whole book.
+			{name: "order.list", method: "GET", path: "/api/v1/orders?limit=1"},
+			// A second order, cancelled in this group: the order above stays
+			// live for the invoice group's confirm/fulfil flow.
+			{
+				name:   "order.create.for_cancel",
+				method: "POST",
+				path:   "/api/v1/orders",
+				body: map[string]any{
+					"customer_id": "{myCustomer}",
+					"lines": []map[string]any{
+						{"product_id": "{product}", "quantity": 1, "price_each": 550},
+					},
+				},
+				extract: map[string]string{"myCancelOrder": "/id"},
+			},
+			{name: "order.cancel", method: "POST", path: "/api/v1/orders/{myCancelOrder}/cancel",
+				body: map[string]any{"reason": "golden characterisation cancel"}},
+			// Cancelling twice: the state machine's 409 refusal.
+			{name: "order.cancel.already_cancelled", method: "POST", path: "/api/v1/orders/{myCancelOrder}/cancel",
+				body: map[string]any{"reason": "second attempt"}},
+			// Owner override of the pre-ship gate on a clear order: the
+			// write succeeds and records the event even without a block.
+			{name: "order.exposure_override", method: "POST", path: "/api/v1/orders/{myOrder}/exposure-override",
+				body: map[string]any{"notes": "golden characterisation override"}},
 			{name: "order.get.not_found", method: "GET", path: "/api/v1/orders/00000000-0000-0000-0000-0000000000aa"},
 		},
 	}}

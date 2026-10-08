@@ -113,7 +113,9 @@ func rebateGroups() []groupDef {
 					"program": map[string]any{
 						"vendor_id": "{myVendor}", "name": "Golden Volume Rebate",
 						"program_type": "VOLUME", "start_date": "{today}T00:00:00Z",
-						"end_date": "2030-01-01T00:00:00Z", "is_active": true,
+						// The end date is seed-relative: a fixed calendar date would
+						// normalise to a different seed-day offset every day.
+						"end_date": "{today+730}T00:00:00Z", "is_active": true,
 					},
 					"tiers": []map[string]any{{"min_volume": 100, "rebate_pct": 2.0}},
 				},
