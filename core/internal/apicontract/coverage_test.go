@@ -48,9 +48,20 @@ func TestContractCoversCensus(t *testing.T) {
 
 	var problems []string
 	censusKeys := map[string]bool{}
+	// wildcardMounts collects every path that has a wildcard (*) method in the
+	// census; a mount (like /uploads/) registers as * to mean "any method".
+	wildcardMounts := map[string]bool{}
 	for _, r := range census {
 		censusKeys[r.Key()] = true
+		if r.Method == "*" {
+			wildcardMounts[r.Pattern] = true
+		}
 		if spec.Has(r.Method, r.Pattern) {
+			continue
+		}
+		// A wildcard census entry (a mount) is satisfied by any operation on
+		// that path, since the mount accepts every HTTP method.
+		if r.Method == "*" && specHasAnyMethod(spec, r.Pattern) {
 			continue
 		}
 		if !pendingSet[r.Key()] {
@@ -69,10 +80,16 @@ func TestContractCoversCensus(t *testing.T) {
 		}
 	}
 	for _, op := range spec.Operations() {
-		if !censusKeys[op.Method+" "+op.Path] {
-			problems = append(problems, "operation backs no census route: "+op.Method+" "+op.Path+
-				" ("+op.ID+"); the pattern must match ROUTES.txt byte for byte")
+		key := op.Method + " " + op.Path
+		if censusKeys[key] {
+			continue
 		}
+		// A wildcard mount backs any operation on its path.
+		if wildcardMounts[op.Path] {
+			continue
+		}
+		problems = append(problems, "operation backs no census route: "+key+
+			" ("+op.ID+"); the pattern must match ROUTES.txt byte for byte")
 	}
 
 	if len(problems) > 0 {
