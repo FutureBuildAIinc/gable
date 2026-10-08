@@ -235,15 +235,23 @@ not survive module conversion: the inputs document a live failure where
 `?status=sent` returned drafts because the filter was never implemented and
 the parameter was ignored.
 
-### 6. Status enums
+### 6. Enums and closed vocabularies
 
-The wire field is named `status`, and its values are lowercase snake_case
-strings: `draft`, `sent`, `accepted`, `on_hold`, `in_progress`. Database
-CHECK vocabularies stay as they are (uppercase); the mapping happens at the
-module boundary. A module whose column is named `state` (quotes today)
-exposes it as `status` on the wire. There is exactly one field name and one
-casing convention for lifecycle state across every transactional entity, so
-clients stop carrying per-entity lowercasing normalizers.
+The lifecycle field is named `status`, and its values are lowercase
+snake_case strings: `draft`, `sent`, `accepted`, `on_hold`, `in_progress`.
+Every closed vocabulary the product owns follows the same rule, in and out:
+customer tier, transaction type, purchase order source, and the rest are
+lowercase snake_case on the wire, and input in any other case is a 400
+`validation_failed`. Database CHECK vocabularies stay as they are
+(uppercase); the mapping happens at the module boundary. A module whose
+column is named `state` (quotes today) exposes it as `status` on the wire.
+There is exactly one field name and one casing convention across every
+vocabulary, so clients stop carrying per-entity normalizers.
+
+Codes from external standards keep their standard form and are never
+rewritten: units of measure (`PCS`, `EA`, `LF`, `BF`, `MBF`), ISO currency
+codes, and country and region codes. The product owns its vocabularies; it
+does not own the standards.
 
 ### 7. Money
 
@@ -375,6 +383,36 @@ Known outside clients (the desk and portal apps in this repository, the
 generated `gable-sdk`, the frozen agentic UI experiment) break knowingly:
 the desk and portal are updated with each module conversion, and the SDK
 regenerates from the contract after the contract item completes.
+
+### 11. Revision concurrency and preconditions
+
+Every mutable document carries `revision`, an int64 incremented on every
+write, and every read of the document writes the revision's ETag. Updates
+and transitions require the client's revision, through an `If-Match`
+header or a `revision` field in the body. A mismatch is 409
+`stale_revision`; a write carrying neither is 428 `precondition_required`.
+Without this rule, two editors of one document, a person and an agent
+among them, silently overwrite each other's work, and the quote update
+every module copies would seed that failure across the surface; fixing it
+in a later cycle would be the second breaking pass this ADR exists to
+avoid. Drafts (cycle 5) use the same mechanism. The package carries the
+helpers: write the ETag, parse `If-Match`, and resolve the precondition.
+
+### 12. Field names, timestamps and dates
+
+Field names are snake_case on every route and in every event, the
+envelope included: `event_id`, `branch_id`, `org`, `entity`, `data`,
+`at`, `type`. Nearly all of today's JSON tags already are; the one
+deliberate change is the events envelope, which the refactor inputs
+specify in camelCase (`eventId`, `branchId`). This ADR adopts snake_case
+on purpose, so the product never ships two casings on one surface, and
+the events feed's casing change is recorded as a contract change in the
+row of the item that ships that feed.
+
+Timestamps are RFC 3339 UTC with the `Z`. Business dates (delivery, due,
+expiry) are `YYYY-MM-DD` in the branch's local calendar. Optional fields
+are present with `null`, never omitted: a client reads one shape per
+document, and an absent key is not a third state between set and empty.
 
 ## Alternatives considered
 
