@@ -23,7 +23,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Idempotency-Key, X-Request-ID")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Idempotency-Key, X-Request-ID, X-Acting-As, X-Agent-Tool")
 			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 			w.Header().Set("Access-Control-Max-Age", "86400") // Cache preflight for 24h
 
