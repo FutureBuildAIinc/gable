@@ -88,7 +88,7 @@ func (w *Writer) Write(ctx context.Context, ev Event) error {
 	if ev.Type == "" {
 		return errors.New("outbox: event type is required")
 	}
-	if !validType(ev.Type) {
+	if !ValidType(ev.Type) {
 		return fmt.Errorf("outbox: event type %q is not a dot-delimited lowercase type", ev.Type)
 	}
 	if ev.EntityType == "" {
@@ -145,12 +145,14 @@ func (w *Writer) insert(ctx context.Context, ev Event) error {
 	return nil
 }
 
-// validType accepts the dot-delimited lowercase event types the product
+// ValidType accepts the dot-delimited lowercase event types the product
 // uses (quote.exposure.flagged, order.confirmed): one or more tokens of
 // ASCII lowercase letters, digits, underscore or hyphen, each one to 64
 // bytes, the whole name bounded. The type doubles as a bus subject, so a
-// value outside this shape could not be routed anyway.
-func validType(t string) bool {
+// value outside this shape could not be routed anyway. The events read API
+// validates its types filter with the same rule, so the feed accepts
+// exactly the vocabulary the writer records.
+func ValidType(t string) bool {
 	if t == "" || len(t) > 200 {
 		return false
 	}
