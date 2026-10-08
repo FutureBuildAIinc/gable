@@ -5,6 +5,7 @@ package httpx
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -146,6 +147,70 @@ func TestCursorIsDeterministic(t *testing.T) {
 	}
 	if a != b {
 		t.Errorf("same inputs minted %q and %q", a, b)
+	}
+}
+
+// RULE: MintCursor refuses to mint a cursor DecodeCursor would refuse on
+// size. The bound is checked on the marshalled payload, not on the raw
+// parts: many parts, or characters JSON escapes, grow the payload past the
+// decode bound even when every part alone is within its own.
+func TestMintCursorRefusesPayloadPastTheDecodeBound(t *testing.T) {
+	parts := make([]string, maxCursorKeyParts)
+	for i := range parts {
+		parts[i] = strings.Repeat("a", maxCursorKeyPartBytes)
+	}
+	if _, err := MintCursor(testScope, parts...); err == nil {
+		t.Error("eight full-size parts minted; the marshalled payload is past the decode bound")
+	}
+	// Each < becomes six bytes once JSON escapes it, so a 200 character key
+	// marshals far past the bound while staying under the per-part limit.
+	if _, err := MintCursor(testScope, strings.Repeat("<", 200)); err == nil {
+		t.Error("escape-heavy key minted; the marshalled payload is past the decode bound")
+	}
+}
+
+// RULE: the largest keyset the per-part rules allow that still fits the
+// decoded bound mints, decodes, and hands back the same keyset: the mint
+// and decode bounds agree.
+func TestMintCursorLargestFittingKeyRoundTrips(t *testing.T) {
+	fullParts := func(n int) []string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = strings.Repeat("a", maxCursorKeyPartBytes)
+		}
+		return parts
+	}
+	fits := 0
+	for p := 1; p <= maxCursorKeyParts; p++ {
+		payload, err := json.Marshal(cursorPayload{V: cursorVersion, O: testScope, K: fullParts(p)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(payload) > maxCursorDecodedBytes {
+			break
+		}
+		fits = p
+	}
+	if fits == 0 {
+		t.Fatal("not even one full-size part fits the decoded bound")
+	}
+
+	parts := fullParts(fits)
+	raw, err := MintCursor(testScope, parts...)
+	if err != nil {
+		t.Fatalf("largest fitting keyset did not mint: %v", err)
+	}
+	key, err := DecodeCursor(raw, testScope)
+	if err != nil {
+		t.Fatalf("largest fitting keyset did not decode: %v", err)
+	}
+	if len(key) != fits {
+		t.Fatalf("key has %d parts, want %d", len(key), fits)
+	}
+	for i, part := range key {
+		if part != parts[i] {
+			t.Errorf("key[%d] differs from the minted part", i)
+		}
 	}
 }
 

@@ -88,6 +88,13 @@ func MintCursor(scope string, key ...string) (string, error) {
 		return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
 			Message: "cursor payload cannot be encoded"}
 	}
+	// The payload bound is what DecodeCursor enforces, so it is checked here
+	// on the marshalled bytes: many parts, or characters JSON escapes, grow
+	// the payload past the bound even when every part alone is within its own.
+	if len(payload) > maxCursorDecodedBytes {
+		return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+			Message: "cursor payload is past the decoded size bound"}
+	}
 	return base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
