@@ -608,11 +608,14 @@ func (s *Service) checkPayloadBranch(ctx context.Context, d *Draft) error {
 // checkQuoteBranch is the record branch rule (ADR 0007 section 2.3) for a
 // quote a path id addresses: the quote's branch must be one the caller may
 // target, the same rule the create applies to the body's branch_id, else 403
-// forbidden naming id. A caller with no branch context passes: the portal and
-// the integration seam call these methods without the branch middleware, and
-// every HTTP route that reaches them has had one settled.
+// forbidden naming id. The check fails closed: a caller with no branch
+// context is refused unless it marked itself a system caller with
+// branchctx.WithSystem. The two context-free callers are marked: the portal's
+// quote decision and the integration seam (ADR 0007 section 5.5 admits an
+// unbound key to any branch), so a route mounted without the branch
+// middleware can no longer reach these methods unwalled.
 func (s *Service) checkQuoteBranch(ctx context.Context, q *Quote) error {
-	if s.branches == nil || middleware.BranchFromContext(ctx) == nil {
+	if s.branches == nil {
 		return nil
 	}
 	err := s.branches.CheckPayloadBranch(ctx, q.BranchID)
