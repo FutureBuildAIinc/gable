@@ -19,25 +19,59 @@ import (
 type Handler struct {
 	service *Service
 	recSvc  *RecommendationService
-	guard   LocationGuard // optional; nil leaves a payload location unchecked (unit tests)
+	guard   BranchGuard // optional; nil leaves a payload location and a path id unchecked (unit tests)
 }
 
 func NewHandler(service *Service, recSvc *RecommendationService) *Handler {
 	return &Handler{service: service, recSvc: recSvc}
 }
 
-// LocationGuard applies the payload branch rule (ADR 0007 section 2.3) to a
-// location id a body names. *middleware.BranchGuard satisfies it.
-type LocationGuard interface {
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3) to a
+// branch or location a request names, in the body or behind a path id.
+// *middleware.BranchGuard satisfies it.
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
 	CheckPayloadLocation(ctx context.Context, locationID uuid.UUID) error
 }
 
 // WithBranchGuard makes receiving refuse a location whose branch the caller
-// may not target. Without it a payload location is not checked, so serve
+// may not target, and makes every path id route refuse a purchase order of a
+// branch the caller may not target. Without it neither is checked, so serve
 // always sets it.
-func (h *Handler) WithBranchGuard(g LocationGuard) *Handler {
+func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
 	h.guard = g
 	return h
+}
+
+// checkPOBranch holds a purchase order addressed by its path id to the
+// caller's branch wall (ADR 0007 section 2.3): the record's branch must be
+// one the caller may target, the same rule a branch named in a body is held
+// to. A purchase order that does not exist belongs to no branch and passes;
+// the service answers for it. A refusal is a 403 in the legacy error shape
+// every other error on these unconverted routes carries (the refusal naming
+// id goes to the module's conversion record). It reports whether the request
+// may proceed.
+func (h *Handler) checkPOBranch(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
+	if h.guard == nil {
+		return true
+	}
+	branch, err := h.service.GetPOBranch(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+		return false
+	}
+	if branch == nil {
+		return true
+	}
+	if err := h.guard.CheckPayloadBranch(r.Context(), *branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httputil.RespondError(w, r, "purchase order is outside the branches this caller may target", http.StatusForbidden, err)
+			return false
+		}
+		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+		return false
+	}
+	return true
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -128,13 +162,15 @@ func (h *Handler) HandleGetPO(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
+	if !h.checkPOBranch(w, r, id) {
+		return
+	}
 
 	po, err := h.service.GetPO(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get purchase order", http.StatusNotFound, err)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(po)
 }
@@ -144,6 +180,9 @@ func (h *Handler) HandleSubmitPO(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
+		return
+	}
+	if !h.checkPOBranch(w, r, id) {
 		return
 	}
 
@@ -172,6 +211,9 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
+		return
+	}
+	if !h.checkPOBranch(w, r, id) {
 		return
 	}
 
@@ -309,6 +351,9 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
 		return
 	}
+	if !h.checkPOBranch(w, r, poID) {
+		return
+	}
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		httputil.RespondError(w, r, "File too large or invalid form data", http.StatusBadRequest, err)
@@ -354,6 +399,9 @@ func (h *Handler) HandleApplyFreight(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
 		return
 	}
+	if !h.checkPOBranch(w, r, poID) {
+		return
+	}
 
 	freightID, err := uuid.Parse(r.PathValue("freightId"))
 	if err != nil {
@@ -375,6 +423,9 @@ func (h *Handler) HandleListFreight(w http.ResponseWriter, r *http.Request) {
 	poID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
+		return
+	}
+	if !h.checkPOBranch(w, r, poID) {
 		return
 	}
 

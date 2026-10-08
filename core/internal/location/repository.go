@@ -35,6 +35,7 @@ type Repository interface {
 	UpdateLocation(ctx context.Context, loc *Location) error
 	DeleteLocation(ctx context.Context, id uuid.UUID) error // soft delete: active=false
 	ListLocations(ctx context.Context) ([]Location, error)
+	ListLocationsInBranches(ctx context.Context, branches []uuid.UUID) ([]Location, error)
 	ListBranches(ctx context.Context, includeInactive bool) ([]Location, error)
 	GetBranchTree(ctx context.Context, branchID uuid.UUID) ([]Location, error)
 	IsBranch(ctx context.Context, id uuid.UUID) (bool, error)
@@ -159,6 +160,19 @@ func (r *PostgresRepository) DeleteLocation(ctx context.Context, id uuid.UUID) e
 
 func (r *PostgresRepository) ListLocations(ctx context.Context) ([]Location, error) {
 	return r.listWhere(ctx, ``)
+}
+
+// ListLocationsInBranches lists every location whose denormalized branch_id
+// is one of the given branches. For each branch that covers the branch row
+// itself and all of its descendants: a BRANCH row's branch_id is its own id
+// and every other row's is copied from its parent (migration 058).
+func (r *PostgresRepository) ListLocationsInBranches(ctx context.Context, branches []uuid.UUID) ([]Location, error) {
+	query := `SELECT ` + locationColumns + ` FROM locations WHERE branch_id = ANY($1) ORDER BY path ASC`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branches)
+	if err != nil {
+		return nil, fmt.Errorf("list locations in branches: %w", err)
+	}
+	return scanLocations(rows)
 }
 
 func (r *PostgresRepository) ListBranches(ctx context.Context, includeInactive bool) ([]Location, error) {

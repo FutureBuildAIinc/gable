@@ -17,6 +17,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -265,7 +266,10 @@ func (h *Handler) CreateQuote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expires := httpx.TimestampOf(time.Now().AddDate(0, 0, 30))
-	q, err := h.quoteSvc.Create(r.Context(), &quote.Draft{
+	// The quote payload and record checks fail closed on a branch-free
+	// context; this seam authenticates with its own integration key and acts
+	// for the platform, so it calls the quote service as a system caller.
+	q, err := h.quoteSvc.Create(branchctx.WithSystem(r.Context()), &quote.Draft{
 		CustomerID:   customerID,
 		DeliveryType: quote.DeliveryPickup,
 		Source:       "manual",
@@ -306,8 +310,9 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 	// 1. Convert in one act: the quote is accepted and the order created in
 	//    one transaction (ADR 0005 5.8), the pair and the scale 4 price
 	//    carried without loss. This seam's wire is frozen byte for byte; only
-	//    the calls inside the handler changed.
-	o, err := h.quoteSvc.ConvertInProcess(ctx, quoteID)
+	//    the calls inside the handler changed. The seam's key authentication
+	//    admits it to any branch, so the convert runs as a system caller.
+	o, err := h.quoteSvc.ConvertInProcess(branchctx.WithSystem(ctx), quoteID)
 	if err != nil {
 		slog.Error("failed to convert quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
 		var herr *httpx.Error
@@ -324,7 +329,7 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 	//    today's body, while the order holds with its order.hold event
 	//    (ADR 0005 5.8); an order that lands backordered reports CONFIRMED,
 	//    the vocabulary this seam's callers know.
-	confirmed, err := h.orderSvc.ConfirmInProcess(ctx, o.ID)
+	confirmed, err := h.orderSvc.ConfirmInProcess(branchctx.WithSystem(ctx), o.ID)
 	if err != nil {
 		slog.Error("order created but not confirmed", "order_id", o.ID, "error", err)
 		writeError(w, http.StatusConflict, "order "+o.ID.String()+" created from quote but could not be confirmed: "+err.Error())
