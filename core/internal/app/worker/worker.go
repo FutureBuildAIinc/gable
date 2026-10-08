@@ -19,7 +19,10 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/notification"
+	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/eventbus"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -91,7 +94,8 @@ func Run() {
 	// subscriber today; it dedups on the outbox event id. The drain runs only
 	// here, so serve replicas never contend for the cursors. A start failure
 	// is logged, not fatal, as for the scheduler above.
-	drain := newOutboxDrain(db, logger)
+	orderSvc := newOrderService(db, cfg)
+	drain := newOutboxDrain(db, logger, orderSvc)
 	drainErr := drain.Start(context.Background())
 	if drainErr != nil {
 		logger.Error("outbox drain failed to start; event subscribers receive nothing until it runs", "error", drainErr)
@@ -111,7 +115,13 @@ func Run() {
 		logger.Error("outbox purge failed to start; the outbox grows until it runs", "error", err)
 	}
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge")
+	// The order queues (ADR 0005 5.4): the back order release, served oldest
+	// first, one order per transaction. It runs only here, beside the drain
+	// whose subscriber fills it, never in serve.
+	allocation := newQueueRunner("order-allocation", orderSvc.ServeAllocationRequest, logger)
+	allocation.Start()
+
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,order-allocation")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -119,6 +129,8 @@ func Run() {
 	// Step 1: stop the background jobs. Same reasoning as serve's job stops:
 	// no purge statement may start against a draining pool, and an in-flight
 	// batch (or drain window) finishes before step 2 closes it.
+	logger.Info("Shutdown step 1/2: stopping the order queue jobs...")
+	allocation.Stop()
 	logger.Info("Shutdown step 1/2: stopping outbox purge...")
 	purge.Stop()
 	logger.Info("Shutdown step 1/2: outbox purge stopped")
@@ -140,11 +152,29 @@ func Run() {
 // newOutboxDrain builds the drain with its subscribers registered. The
 // exposure notifier receives every quote.exposure.* event; its email service
 // is the log-only LogEmailService, as in serve, until a real sender exists.
-func newOutboxDrain(db *database.DB, logger *slog.Logger) *outbox.DrainRunner {
+func newOutboxDrain(db *database.DB, logger *slog.Logger, orderSvc *order.Service) *outbox.DrainRunner {
 	drain := outbox.NewDrainRunner(db, logger)
 	notifier := notification.NewExposureNotifier(notification.NewLogEmailService(logger), db, logger)
 	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
+	// The order module's subscriber for purchase_order.received queues the
+	// back ordered orders that wait on the received products and does nothing
+	// else (ADR 0005 5.4).
+	drain.Subscribe(order.SubjectPurchaseOrderReceived, "order-allocation-requests",
+		func(ctx context.Context, ev eventbus.Event) error {
+			return orderSvc.HandlePurchaseOrderReceived(ctx, ev)
+		})
 	return drain
+}
+
+// newOrderService builds the order service the worker's queue jobs and
+// subscriber use: the outbox, the transaction runner, the audit log and the
+// inventory, with no HTTP surface.
+func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
+	return order.NewService(order.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAuditLog(audit.NewLogger(db)).
+		WithInventory(inventory.NewService(inventory.NewRepository(db)))
 }
 
 // newOutboxPurge builds the retention job from the configured age in days.

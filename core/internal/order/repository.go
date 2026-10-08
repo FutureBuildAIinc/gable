@@ -89,6 +89,10 @@ type Repository interface {
 	// SaveLineQuantities writes the allocated, back ordered and fulfilled
 	// quantities of the lines (ADR 0005 5.4); the caller holds the order lock.
 	SaveLineQuantities(ctx context.Context, lines []OrderLine) error
+	// The allocation request queue (ADR 0005 5.4).
+	QueueAllocationRequests(ctx context.Context, branchID uuid.UUID, productIDs []uuid.UUID) (int, error)
+	ClaimAllocationRequest(ctx context.Context) (uuid.UUID, bool, error)
+	DeleteAllocationRequest(ctx context.Context, orderID uuid.UUID) error
 	OrderExistsForQuote(ctx context.Context, quoteID uuid.UUID) (bool, error)
 }
 
@@ -467,10 +471,14 @@ func ptrCents(v *int64) *httpx.Cents {
 	return &c
 }
 
+// LockOrder takes the order row FOR NO KEY UPDATE: it serializes every act on
+// the order (a second lock waits) while staying compatible with the FOR KEY
+// SHARE a foreign key insert takes on the row, so the allocation subscriber's
+// request insert never waits behind a confirm (ADR 0003 section 2, ADR 0005 5.4).
 func (r *PostgresRepository) LockOrder(ctx context.Context, id uuid.UUID) error {
 	var locked uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT id FROM orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2) FOR UPDATE`,
+		`SELECT id FROM orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2) FOR NO KEY UPDATE`,
 		id, middleware.BranchIDForQuery(ctx)).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -1004,6 +1012,51 @@ func (r *PostgresRepository) SaveLineQuantities(ctx context.Context, lines []Ord
 			l.ID, int64(l.QuantityAllocated), int64(l.QuantityBackordered), int64(l.QuantityFulfilled)); err != nil {
 			return fmt.Errorf("failed to write the line quantities: %w", err)
 		}
+	}
+	return nil
+}
+
+// QueueAllocationRequests inserts one request for each back ordered order of
+// the branch with a back ordered line on one of the products, in the orders'
+// (confirmed_at, id) order so position carries that order, ON CONFLICT DO
+// NOTHING. It takes no lock but the request rows' own and reads through the
+// caller's transaction.
+func (r *PostgresRepository) QueueAllocationRequests(ctx context.Context, branchID uuid.UUID, productIDs []uuid.UUID) (int, error) {
+	if len(productIDs) == 0 {
+		return 0, nil
+	}
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO order_allocation_requests (order_id)
+		SELECT o.id FROM orders o
+		WHERE o.status = 'BACKORDERED' AND o.branch_id = $1
+		  AND EXISTS (SELECT 1 FROM order_lines l
+		              WHERE l.order_id = o.id AND l.product_id = ANY($2) AND l.quantity_backordered > 0)
+		ORDER BY o.confirmed_at, o.id
+		ON CONFLICT (order_id) DO NOTHING`, branchID, productIDs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to queue allocation requests: %w", err)
+	}
+	return int(ct.RowsAffected()), nil
+}
+
+// ClaimAllocationRequest takes the lowest position request nobody holds, row
+// locked FOR UPDATE SKIP LOCKED (lock order step 0).
+func (r *PostgresRepository) ClaimAllocationRequest(ctx context.Context) (uuid.UUID, bool, error) {
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT order_id FROM order_allocation_requests ORDER BY position LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("failed to claim an allocation request: %w", err)
+	}
+	return id, true, nil
+}
+
+func (r *PostgresRepository) DeleteAllocationRequest(ctx context.Context, orderID uuid.UUID) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM order_allocation_requests WHERE order_id = $1`, orderID); err != nil {
+		return fmt.Errorf("failed to delete the allocation request: %w", err)
 	}
 	return nil
 }

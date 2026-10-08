@@ -1058,7 +1058,7 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		}
 		// Allocation: a release allocates when the order never was (a credit
 		// hold lands before allocation); a manual hold kept its allocations.
-		if neverAllocated(cur) {
+		if neverAllocated(cur) || hasBackorders(cur) {
 			if _, err := s.allocateLines(ctx, cur); err != nil {
 				return nil, err
 			}

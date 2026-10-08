@@ -40,6 +40,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/orders/{id}", guard(h.HandleGetOrder))
 	mux.HandleFunc("PUT /api/v1/orders/{id}", guard(h.HandleUpdateOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/transitions", guard(h.HandleTransition))
+	mux.HandleFunc("POST /api/v1/orders/{id}/allocate", guard(h.HandleAllocate))
 	mux.HandleFunc("GET /api/v1/orders/{id}/exposure-gate", guard(h.HandleExposureGate))
 	mux.HandleFunc("POST /api/v1/orders/{id}/exposure-override", guard(h.HandleExposureOverride))
 }
@@ -416,4 +417,48 @@ func writeExposureConflict(w http.ResponseWriter, r *http.Request, payload map[s
 	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
 		Message: "the order's source quote has unresolved index exposure",
 		Details: details})
+}
+
+// AllocateRequest is the body of POST /orders/{id}/allocate: the revision
+// precondition (beside If-Match).
+type AllocateRequest struct {
+	Revision json.RawMessage `json:"revision"`
+}
+
+// HandleAllocate runs the allocation for one order on demand (ADR 0005 5.4):
+// the desk's retry for a back order. 200 with the order.
+func (h *Handler) HandleAllocate(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req AllocateRequest
+	// The body is optional: the precondition may ride in If-Match alone.
+	if r.ContentLength != 0 && r.Body != http.NoBody {
+		if err := httpx.DecodeJSON(r, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	v := &httpx.Validator{}
+	var revision *int64
+	if n, ok := v.Int("revision", req.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		revision = &n
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	o, err := h.service.AllocateOrder(r.Context(), id, Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeOrder(w, http.StatusOK, o)
 }

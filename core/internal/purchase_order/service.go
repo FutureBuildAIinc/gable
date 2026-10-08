@@ -5,6 +5,7 @@ package purchase_order
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +31,19 @@ type salesVelocityLister interface {
 	ListSalesVelocity(ctx context.Context, lookbackDays int) ([]SalesVelocity, error)
 }
 
+// EventRecorder writes a domain event into the transactional outbox, as the
+// last statement of the act's transaction (ADR 0003 section 2).
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
+
+// EventReceived is the event a purchase order receive writes (ADR 0005 5.4
+// and 12): the order module's drain subscriber queues the back ordered orders
+// that wait on the received products.
+const EventReceived = "purchase_order.received"
+
 type Service struct {
+	events       EventRecorder
 	repo         *Repository
 	db           *database.DB
 	edi          *edi.Service
@@ -42,6 +56,13 @@ type Service struct {
 
 func NewService(repo *Repository, db *database.DB, ediSvc *edi.Service, inventorySvc *inventory.Service, productSvc *product.Service, vendorSvc *vendor.Service) *Service {
 	return &Service{repo: repo, db: db, edi: ediSvc, inventorySvc: inventorySvc, productSvc: productSvc, vendorSvc: vendorSvc}
+}
+
+// WithOutbox wires the outbox the receive writes purchase_order.received to.
+// Optional: nil writes no event (unit tests).
+func (s *Service) WithOutbox(events EventRecorder) *Service {
+	s.events = events
+	return s
 }
 
 // WithVelocityRepo wires the sales-velocity reader used by both
@@ -429,6 +450,7 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		rl         ReceiveLineInput
 	}
 	var parsed []parsedLine
+	var parsedProducts []uuid.UUID
 	for _, rl := range receivedLines {
 		lineID, err := uuid.Parse(rl.LineID)
 		if err != nil {
@@ -446,6 +468,9 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		}
 
 		parsed = append(parsed, parsedLine{lineID: lineID, locationID: locationID, poLine: poLine, rl: rl})
+		if poLine.ProductID != nil && rl.QtyReceived > 0 {
+			parsedProducts = append(parsedProducts, *poLine.ProductID)
+		}
 	}
 
 	return s.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -516,6 +541,12 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		}
 
 		if err := s.repo.UpdatePO(txCtx, po); err != nil {
+			return err
+		}
+
+		// The event is the last write of the receive's own work: what it
+		// received, for the order module's back order release (ADR 0005 5.4).
+		if err := s.recordReceived(txCtx, po, parsedProducts); err != nil {
 			return err
 		}
 
@@ -933,4 +964,30 @@ func groupAlertsByVendor(
 		byVendor[*unknownID] = append(byVendor[*unknownID], a)
 	}
 	return byVendor, nil
+}
+
+// recordReceived writes purchase_order.received: the purchase order id, its
+// branch and the distinct product ids this receipt put on hand.
+func (s *Service) recordReceived(ctx context.Context, po *PurchaseOrder, products []uuid.UUID) error {
+	if s.events == nil {
+		return nil
+	}
+	seen := map[uuid.UUID]bool{}
+	ids := make([]uuid.UUID, 0, len(products))
+	for _, p := range products {
+		if !seen[p] {
+			seen[p] = true
+			ids = append(ids, p)
+		}
+	}
+	raw, err := json.Marshal(map[string]any{
+		"purchase_order_id": po.ID, "branch_id": po.BranchID, "status": po.Status, "product_ids": ids,
+	})
+	if err != nil {
+		return err
+	}
+	branch := po.BranchID
+	return s.events.Write(ctx, outbox.Event{
+		Type: EventReceived, EntityType: "purchase_order", EntityID: po.ID, BranchID: &branch, Data: raw,
+	})
 }

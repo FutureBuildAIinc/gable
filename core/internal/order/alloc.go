@@ -367,3 +367,13 @@ func (s *Service) allocateAndDerive(ctx context.Context, cur *Order, actor strin
 	}
 	return out, true, nil
 }
+
+// hasBackorders reports whether any line still owes stock.
+func hasBackorders(cur *Order) bool {
+	for i := range cur.Lines {
+		if cur.Lines[i].QuantityBackordered > 0 {
+			return true
+		}
+	}
+	return false
+}
