@@ -12,43 +12,48 @@ import (
 
 // CumulativeTotal is the extension of the first qty units of a line (ADR 0005
 // sections 2.4 and 5.6): the line's price, pair and discount applied to qty
-// as if qty were the line's quantity, with an amount discount prorated by
-// qty over the line's ordered quantity, rounded half away from zero once.
+// as if qty were the line's quantity, with an amount discount's NET (the
+// extension less the discount) prorated by qty over the line's ordered
+// quantity, rounded half away from zero once.
 //
 // A partial invoice bills the difference of two cumulative totals, the one
 // after and the one before, so the invoices of a line sum to the order line's
-// own total to the cent, whatever order the quantities ship in: the telescoping
-// sum has no rounding residue. At qty equal to the line's quantity it equals
-// the line's LineTotal.
+// own total to the cent, whatever order and size the quantities ship in: the
+// telescoping sum has no rounding residue. Because every cumulative figure is
+// one rounding of a quantity-proportional amount, the cumulative total never
+// runs backwards, so no billed piece can go negative (a piece of -1 cent on
+// dust lines, which PostEntry refuses as a negative revenue leg). At qty
+// equal to the line's quantity it equals the line's LineTotal.
 func CumulativeTotal(l *Line, qty httpx.Quantity) (httpx.Cents, error) {
 	if qty <= 0 {
 		return 0, nil
 	}
 	uq, pq := derefQty(l.UOMQty), derefQty(l.PriceUOMQty)
 	price := derefPrice(l.UnitPrice)
-	ext, err := httpx.Extend(qty, uq, pq, price)
-	if err != nil {
-		return 0, err
-	}
 	switch {
 	case l.DiscountPercent != nil:
 		return httpx.ExtendDiscounted(qty, uq, pq, price, *l.DiscountPercent)
 	case l.DiscountAmount != nil:
 		ordered := derefQty(l.Quantity)
 		if ordered <= 0 {
-			return ext, nil
+			return httpx.Extend(qty, uq, pq, price)
 		}
+		whole, err := httpx.Extend(ordered, uq, pq, price)
+		if err != nil {
+			return 0, err
+		}
+		net := whole - *l.DiscountAmount
 		if qty >= ordered {
-			return ext - *l.DiscountAmount, nil
+			return net, nil
 		}
-		// prorated: round_half_away(D x qty / ordered)
-		n := new(big.Int).Mul(big.NewInt(int64(*l.DiscountAmount)), big.NewInt(int64(qty)))
+		// the net, prorated: round_half_away(net x qty / ordered)
+		n := new(big.Int).Mul(big.NewInt(int64(net)), big.NewInt(int64(qty)))
 		d := big.NewInt(int64(ordered))
 		n.Add(n, new(big.Int).Rsh(d, 1))
 		n.Div(n, d)
-		return ext - httpx.Cents(n.Int64()), nil
+		return httpx.Cents(n.Int64()), nil
 	default:
-		return ext, nil
+		return httpx.Extend(qty, uq, pq, price)
 	}
 }
 

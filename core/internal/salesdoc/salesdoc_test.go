@@ -5,6 +5,9 @@ package salesdoc
 
 import (
 	"encoding/json"
+	"fmt"
+	"math/rand"
+	"slices"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -479,4 +482,87 @@ func mustP(t *testing.T, s string) httpx.Price {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// RULE (PR 43 review round 1, P3-2): no billed piece of a line may go
+// negative, whatever fractional prices, pairs, discounts and split sizes a
+// dealer's dust lines produce, and the pieces still sum to the line's own
+// total exactly. The reviewer's probe found pieces of -1 cent on amount
+// discounts over fractional prices (2 at 2.51 per 1000, a 1 cent discount on
+// a 1 cent extension) which PostEntry then refuses as a negative revenue leg.
+func TestBilledTotalPiecesStayNonNegative(t *testing.T) {
+	rng := rand.New(rand.NewSource(43))
+	negative := 0
+	for i := 0; i < 200000; i++ {
+		qty := mustQ(t, fmt.Sprintf("%d.%04d", 1+rng.Intn(9), rng.Intn(10000)))
+		uq := mustQ(t, "1")
+		pq := mustQ(t, []string{"1", "0.001", "0.01", "0.1", "2", "1.5", "0.0007"}[rng.Intn(7)])
+		price := mustP(t, fmt.Sprintf("%d.%04d", 1+rng.Intn(4000), rng.Intn(10000)))
+		l := &Line{LineType: LineProduct, Quantity: &qty, UOMQty: &uq, PriceUOMQty: &pq, UnitPrice: &price}
+		whole, err := httpx.Extend(qty, uq, pq, price)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch rng.Intn(3) {
+		case 0: // no discount
+		case 1:
+			pct := mustQ(t, fmt.Sprintf("%d.%02d", 1+rng.Intn(99), rng.Intn(100)))
+			l.DiscountPercent = &pct
+		default:
+			if whole < 1 {
+				continue
+			}
+			d := httpx.Cents(1 + rng.Int63n(int64(whole)))
+			l.DiscountAmount = &d
+		}
+		want, err := CumulativeTotal(l, qty)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Random splits of the ordered quantity (fractional, uneven, and
+		// sometimes just one whole piece).
+		var cuts []httpx.Quantity
+		for n := rng.Intn(4); n > 0; n-- {
+			cut := httpx.Quantity(1 + rng.Int63n(int64(qty)-1))
+			cuts = append(cuts, cut)
+		}
+		slices.SortFunc(cuts, func(a, b httpx.Quantity) int { return int(a - b) })
+		prev := httpx.Quantity(0)
+		sum := httpx.Cents(0)
+		split := append(cuts, qty)
+		for _, next := range split {
+			if next <= prev || next > qty {
+				continue
+			}
+			piece, err := BilledTotal(l, prev, next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if piece < 0 {
+				negative++
+				if negative < 4 {
+					t.Errorf("piece %d..%d of qty %d pair %d/%d price %d discount %+v = %d cents, want at or above zero",
+						prev, next, qty, uq, pq, price, l.DiscountAmount, piece)
+				}
+			}
+			sum += piece
+			prev = next
+		}
+		if prev != qty {
+			piece, err := BilledTotal(l, prev, qty)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if piece < 0 {
+				negative++
+			}
+			sum += piece
+		}
+		if sum != want {
+			t.Fatalf("pieces of qty %d pair %d/%d price %d discount %+v sum %d, want the line's %d", qty, uq, pq, price, l.DiscountAmount, sum, want)
+		}
+	}
+	if negative > 0 {
+		t.Errorf("%d of 200000 random lines billed a negative piece", negative)
+	}
 }
