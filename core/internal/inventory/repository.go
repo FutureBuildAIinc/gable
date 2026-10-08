@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -95,16 +96,31 @@ func (r *PostgresRepository) UpdateInventory(ctx context.Context, inv *Inventory
 	return nil
 }
 
+// ListInventoryByProduct returns inventory rows for a product, scoped to the
+// caller's branches via the joined location row's branch_id (ADR 0007
+// section 2.3, the list form of the record rule): a context branch lists its
+// own rows; with no context branch a bound non-admin user lists the branches
+// granted to the user, none granted listing none; an administrator without a
+// header, an unbound key, the single-branch switch, dev mode and callers
+// with no branch context at all (portal, background jobs) list every
+// branch's.
 func (r *PostgresRepository) ListInventoryByProduct(ctx context.Context, productID uuid.UUID) ([]Inventory, error) {
 	query := `
-        SELECT i.id, i.product_id, i.location_id, 
-               COALESCE(l.path, i.location, '') as location_name, 
+        SELECT i.id, i.product_id, i.location_id,
+               COALESCE(l.path, i.location, '') as location_name,
                i.quantity, i.allocated, i.updated_at
         FROM inventory i
         LEFT JOIN locations l ON i.location_id = l.id
         WHERE i.product_id = $1
+          AND (
+            ($2::uuid IS NOT NULL AND l.branch_id = $2)
+            OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND l.branch_id IN
+                (SELECT branch_id FROM user_locations WHERE user_sub = $3))
+            OR ($2::uuid IS NULL AND $3::text IS NULL)
+          )
     `
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, err
 	}
