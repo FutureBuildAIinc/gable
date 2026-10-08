@@ -3,8 +3,7 @@
     "name": "events.list",
     "mask_fields": [
       "quote_short_id",
-      "salesperson_name",
-      "customer_name"
+      "salesperson_name"
     ],
     "request": {
       "method": "GET",
@@ -20,7 +19,7 @@
             "branch_id": null,
             "data": {
               "customer_id": "<id-1>",
-              "customer_name": "<masked>",
+              "customer_name": "",
               "event_type": "ACK_REQUIRED",
               "quote_id": "<id-2>",
               "quote_short_id": "<masked>",
@@ -45,8 +44,7 @@
     "name": "events.list.types",
     "mask_fields": [
       "quote_short_id",
-      "salesperson_name",
-      "customer_name"
+      "salesperson_name"
     ],
     "request": {
       "method": "GET",
@@ -62,7 +60,7 @@
             "branch_id": null,
             "data": {
               "customer_id": "<id-1>",
-              "customer_name": "<masked>",
+              "customer_name": "",
               "event_type": "ACK_REQUIRED",
               "quote_id": "<id-2>",
               "quote_short_id": "<masked>",

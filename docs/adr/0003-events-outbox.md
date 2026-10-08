@@ -333,6 +333,12 @@ The one outside effect: an outside consumer of `GET /api/v1/events` that falls
 further behind than the retention age finds the oldest events gone and
 resumes from the oldest retained one. The age is the consumer's replay window.
 
+The same holds inside the process. A subscriber that normally starts at the
+head never needs rows older than its cursor, and a replay subscriber
+(`SubscribeReplay`, cursor at 0) can replay only what is still retained, not
+the full history: replay is bounded by the retention age, and once a row has
+aged out and the other cursors have passed it, no registration brings it back.
+
 ## Alternatives considered
 
 **The reader-side xid8 horizon** is recorded in section 2 with the

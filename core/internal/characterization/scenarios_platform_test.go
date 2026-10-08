@@ -325,8 +325,8 @@ func eventsGroups() []groupDef {
 	return []groupDef{{
 		name: "events",
 		steps: []stepDef{
-			{name: "events.list", method: "GET", path: "/api/v1/events?limit=2", maskFields: []string{"quote_short_id", "salesperson_name", "customer_name"}},
-			{name: "events.list.types", method: "GET", path: "/api/v1/events?limit=2&types=quote.exposure.ack_required", maskFields: []string{"quote_short_id", "salesperson_name", "customer_name"}},
+			{name: "events.list", method: "GET", path: "/api/v1/events?limit=2", maskFields: []string{"quote_short_id", "salesperson_name"}},
+			{name: "events.list.types", method: "GET", path: "/api/v1/events?limit=2&types=quote.exposure.ack_required", maskFields: []string{"quote_short_id", "salesperson_name"}},
 			{name: "events.list.empty", method: "GET", path: "/api/v1/events?types=nothing.matches.this"},
 			{name: "events.list.bad_param", method: "GET", path: "/api/v1/events?status=sent"},
 			{name: "events.list.bad_cursor", method: "GET", path: "/api/v1/events?cursor=not-a-cursor"},

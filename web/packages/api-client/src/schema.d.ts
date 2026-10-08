@@ -984,7 +984,7 @@ export interface paths {
         };
         /**
          * Read the event feed
-         * @description Events in commit order, paged by cursor. Role gated admin and owner; the feed is not branch scoped. Query parameters are exactly cursor, limit, types and include: any other name is a 400 unsupported_query_parameter, and a repeated include is a 400.
+         * @description Events in commit order, paged by cursor. Role gated admin and owner; a machine key holding the events:read scope also reaches the feed (the role guard passes any key that clears the scope check). The feed is not branch scoped. Query parameters are exactly cursor, limit, types and include: any other name is a 400 unsupported_query_parameter, and a repeated include is a 400.
          */
         get: operations["eventsList"];
         put?: never;

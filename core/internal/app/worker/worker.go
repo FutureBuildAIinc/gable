@@ -92,15 +92,22 @@ func Run() {
 	// here, so serve replicas never contend for the cursors. A start failure
 	// is logged, not fatal, as for the scheduler above.
 	drain := newOutboxDrain(db, logger)
-	if err := drain.Start(context.Background()); err != nil {
-		logger.Error("outbox drain failed to start; event subscribers receive nothing until it runs", "error", err)
+	drainErr := drain.Start(context.Background())
+	if drainErr != nil {
+		logger.Error("outbox drain failed to start; event subscribers receive nothing until it runs", "error", drainErr)
 	}
 
 	// Outbox retention: delete events_outbox rows past OUTBOX_RETENTION_DAYS
 	// that every subscriber cursor has moved beyond and no parked entry
-	// names. Runs only here, beside the drain whose cursors it reads.
+	// names. Runs only here, beside the drain whose cursors it reads. When
+	// the drain failed to start no cursor may exist yet, and with no cursor
+	// age alone decides, so the purge is skipped rather than risk deleting
+	// rows a subscriber has not seen; the outbox grows until the worker
+	// restarts with a working drain.
 	purge := newOutboxPurge(db, cfg, logger)
-	if err := purge.Start(context.Background()); err != nil {
+	if drainErr != nil {
+		logger.Error("outbox purge skipped because the outbox drain did not start; the outbox grows until the worker restarts")
+	} else if err := purge.Start(context.Background()); err != nil {
 		logger.Error("outbox purge failed to start; the outbox grows until it runs", "error", err)
 	}
 

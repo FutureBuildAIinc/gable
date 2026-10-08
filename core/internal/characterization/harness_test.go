@@ -527,10 +527,11 @@ type capturedStep struct {
 	MaskOrderCount bool `json:"mask_order_count,omitempty"`
 	// MaskFields names response keys whose values are replaced with
 	// "<masked>" before comparison, wherever they sit in the body. Used on the
-	// events feed, whose exposure event payloads carry a quote's short id (the
-	// first characters of a random uuid) and a salesperson name drawn at seed
-	// time: both vary per run, the rest of the payload does not. Recorded in
-	// the golden, like the other mask flags.
+	// events feed, whose exposure event payloads carry two values that vary
+	// per run: quote_short_id (the first characters of a random uuid) and
+	// salesperson_name (a name drawn at seed time). Nothing else is masked;
+	// customer_name is a constant empty string in these payloads and stays
+	// pinned. Recorded in the golden, like the other mask flags.
 	MaskFields []string         `json:"mask_fields,omitempty"`
 	Request    capturedRequest  `json:"request"`
 	Response   capturedResponse `json:"response"`
