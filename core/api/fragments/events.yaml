@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The events feed (R1-12, ADR 0003), transcribed from internal/events/handler.go.
+# The route is already on the ADR 0001 wire: the list envelope {items,
+# next_cursor, limit} (total only under include=total) with ONE exception, the
+# feed's next_cursor is always a string (ADR 0003 section 5), the snake_case
+# event envelope, and the lowercase error envelope (WireError in _shared). The
+# 401 and 403 are the auth middleware's and the role guard's; they answer the
+# same lowercase envelope on every route, so the shared Unauthorized and
+# Forbidden responses are WireError.
+paths:
+  /api/v1/events:
+    get:
+      operationId: eventsList
+      tags: [events]
+      summary: Read the event feed
+      description: >-
+        Events in commit order, paged by cursor. Role gated admin and owner;
+        a machine key holding the events:read scope also reaches the feed
+        (the role guard passes any key that clears the scope check). The feed
+        is not branch scoped. Query parameters are exactly cursor,
+        limit, types and include: any other name is a 400
+        unsupported_query_parameter, and a repeated include is a 400.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: >-
+            The opaque next_cursor of an earlier page (ordering scope
+            events.position). Absent means the first page; present but
+            malformed is a 400 naming cursor.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Page size, 1 to 200. Malformed or out of range is a 400 naming limit.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: types
+          in: query
+          required: false
+          description: >-
+            Exact event types, comma separated and repeatable, each name once
+            and dot-delimited lowercase (quote.exposure.flagged). A name that
+            is malformed or repeated is a 400 validation_failed naming types;
+            a filter matching nothing is an empty page.
+          schema:
+            type: string
+        - name: include
+          in: query
+          required: false
+          description: Comma separated expansions; only total is known. total adds the count of matching events.
+          schema:
+            type: string
+            enum: [total]
+      responses:
+        "200":
+          description: One page of events, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+components:
+  schemas:
+    EventPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: >-
+        The ADR 0001 list envelope with the feed's exception: next_cursor is
+        always a string, the last served position or the request's cursor
+        echoed back when the page is empty, so a poller keeps its place.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        next_cursor:
+          type: string
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+          description: Present only under include=total.
+    Event:
+      type: object
+      required: [event_id, type, org, branch_id, entity, data, at]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          description: Dot-delimited lowercase event type.
+        org:
+          type: string
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+        entity:
+          $ref: "#/components/schemas/EventEntity"
+        data:
+          description: The event's summary payload, any JSON value (an object in practice).
+        at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC at microsecond precision.
+    EventEntity:
+      type: object
+      required: [kind, id]
+      properties:
+        kind:
+          type: string
+        id:
+          type: string
+          format: uuid

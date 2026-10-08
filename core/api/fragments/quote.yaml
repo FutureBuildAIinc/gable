@@ -15,22 +15,22 @@ paths:
         Offset paged quote list. No filters are implemented; any query
         parameter other than limit and offset is silently ignored.
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The page of quotes.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuotePage"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/QuotePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       operationId: quoteCreate
       tags: [quote]
@@ -40,49 +40,55 @@ paths:
         original upload. Validation is loose: a line without a unit of
         measure fails at the database cast and surfaces as a 500.
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuoteCreateRequest"
+              $ref: '#/components/schemas/QuoteCreateRequest'
       responses:
-        "201":
+        '201':
           description: The created quote, echoed with server filled fields.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/analytics:
     get:
       operationId: quoteAnalytics
       tags: [quote]
       summary: Quote analytics aggregates
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: Aggregated quote analytics.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuoteAnalytics"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/QuoteAnalytics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}:
     get:
       operationId: quoteGet
@@ -95,22 +101,22 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The quote.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       operationId: quoteUpdate
       tags: [quote]
@@ -126,29 +132,35 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuoteCreateRequest"
+              $ref: '#/components/schemas/QuoteCreateRequest'
       responses:
-        "200":
+        '200':
           description: The updated quote with lines.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/state:
     put:
       operationId: quoteUpdateState
@@ -165,29 +177,35 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuoteStateUpdate"
+              $ref: '#/components/schemas/QuoteStateUpdate'
       responses:
-        "200":
+        '200':
           description: The updated quote.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Quote"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/convert:
     post:
       operationId: quoteConvertToOrderPayload
@@ -205,25 +223,31 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "200":
+        '200':
           description: The order creation payload for the client to POST.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuoteOrderPayload"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/QuoteOrderPayload'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/quotes/exposure:
     get:
       operationId: exposureList
@@ -288,7 +312,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure:
@@ -318,7 +342,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/request-ack:
@@ -344,13 +368,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureRequestAckResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/acknowledge:
@@ -384,13 +412,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureAcknowledgeResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/override:
@@ -424,13 +456,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureOverrideResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/escalate-now:
@@ -456,11 +492,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/EscalateNowResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/file:
@@ -479,23 +521,23 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The file bytes; the stored content type is echoed.
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   schemas:
     QuoteState:

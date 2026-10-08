@@ -17,7 +17,6 @@ shape: 1
 app: gable
 name: Gable
 runtimes: [core, web, tauri]
-planned: [tauri]   # runtimes not landed yet: the Tauri shell is item R1-9
 
 # One Postgres database per dealer; client data never shares a database.
 tenancy: multi-org

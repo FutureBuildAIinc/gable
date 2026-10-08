@@ -31,6 +31,8 @@ env:
   NODE_VERSION: "20"
   GOVULNCHECK_VERSION: "v1.1.4"
   REUSE_VERSION: "6.2.0"
+  RUST_VERSION: "1.90.0"
+  TAURI_CLI_VERSION: "2.12.1"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -233,6 +235,79 @@ jobs:
 
       - name: App Shape check
         run: bash scripts/check-shape.sh
+
+  # The Tauri desktop shell (R1-9, tauri/gable-desk): builds the front door,
+  # runs the shell's unit tests, builds a Linux debug bundle and smoke-tests
+  # the binary under a virtual display (it must load the door and exit 0).
+  tauri:
+    name: Tauri shell
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The shell embeds web/apps/front-door/dist, so the door is built first.
+      - name: Build the front door
+        working-directory: web
+        run: |
+          npm ci
+          npm run build --workspace @gable/front-door
+
+      - name: Install Linux prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config file \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            xvfb dbus
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "${RUST_VERSION}" --profile minimal --component rustfmt
+          rustup default "${RUST_VERSION}"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tauri/gable-desk/target
+          key: tauri-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('tauri/gable-desk/Cargo.lock') }}
+          restore-keys: tauri-${{ runner.os }}-${{ env.RUST_VERSION }}-
+
+      - uses: actions/cache@v4
+        id: tauri-cli
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: cargo-tauri-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ env.TAURI_CLI_VERSION }}
+
+      - name: Install tauri-cli
+        if: steps.tauri-cli.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "${TAURI_CLI_VERSION}" --locked
+
+      - name: Format
+        working-directory: tauri/gable-desk
+        run: cargo fmt --check
+
+      - name: Unit tests
+        working-directory: tauri/gable-desk
+        run: cargo test --locked
+
+      - name: Build the debug bundle
+        working-directory: tauri/gable-desk
+        run: cargo tauri build --debug --bundles deb --ci
+
+      - name: Smoke test
+        working-directory: tauri/gable-desk
+        run: scripts/smoke.sh
 
   license:
     name: License (REUSE)

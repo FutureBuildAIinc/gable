@@ -50,7 +50,7 @@ run:
    runs in its own process group, stopped by that group number even when the
    test fails, and carries `Pdeathsig=SIGKILL` on Linux so a killed test
    process takes the server with it.
-4. **Script.** It replays a fixed, ordered script of 981 steps across 100
+4. **Script.** It replays a fixed, ordered script of 991 steps across 100
    groups (one golden file per group; 202 steps in the first 44 groups, the
    rest added by R1-1b). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
@@ -204,7 +204,7 @@ without a recorded step" at the end of this document, each with its reason.
 ## R1-1b: depth additions
 
 R1-1b added a recorded step for every route in `core/api/ROUTES.txt` but one
-(56 new groups, 779 new steps). The new groups all run after the clock group,
+(56 new groups, 789 new steps). The new groups all run after the clock group,
 so none of their writes can move an earlier golden: the first 44 golden files
 are byte-identical to their R1-1 recording. The harness gained the following,
 each used only where a route needed it.
@@ -252,7 +252,7 @@ each used only where a route needed it.
 - **A step can mask named response fields** (`maskFields`, recorded in the
   golden as `mask_fields`, like the older mask flags): used where one field is
   derived from a per-run id or the calendar and everything else on the step
-  stays pinned. Today: `photo_url` on proof of delivery photos (the stored file name
+  stays pinned. Today: `quote_short_id` and `salesperson_name` on the events feed pages (a random uuid's first characters, a name drawn at seed time), `photo_url` on proof of delivery photos (the stored file name
   carries eight random hex characters), `vendor_id` on the purchase order list
   (the seed assigns vendors from rand draws consumed inside map iteration, so
   the rows tie on the sort key and the placeholder numbering would shift), and
@@ -277,8 +277,8 @@ each used only where a route needed it.
 | Group | What it pins |
 |---|---|
 | `machine_key` | The server's machine key wiring under `AUTH_MODE=dev`. A key minted with scope `quotes:read` reads a quote (200); `PUT /quotes/{id}/state` is refused 403 (`machine key lacks required scope quotes:write`, the ADR error envelope); the refusal's audit row is read through the probe step; `GET /admin/keys` is refused 403 (user only); an unknown `sk_live_` key is 401. The raw key never appears: the normaliser replaces it with `<api-key>` in the request header. |
-| `events` | `GET /api/v1/events` after a real quote exposure acknowledgement: the fixture quote's exposure, the acknowledge (200), the feed filtered to `quote.exposure.acknowledged` (one item, the cursor, the envelope), an unknown type (400) and an unknown parameter (400). |
-| `idempotency` | One `POST /api/v1/vendors` with `Idempotency-Key`: the first answer (201), the replay (same body and vendor id, `Idempotency-Replayed: true`, no second vendor), and the same key with a different body (422 `idempotency_key_reused`). |
+| `events` | `GET /api/v1/events`: the feed before the fixture (a first page of two and the same page filtered by type, with two per run values masked by `mask_fields`; an empty page 200; an unknown parameter and a broken cursor 400), a key without the events scope refused 403 (the shared WireError), then after a real quote exposure acknowledgement: the fixture quote's exposure, the acknowledge (200), the feed filtered to `quote.exposure.acknowledged` (one item, the cursor, the envelope), an unknown type (400) and an unknown parameter (400). |
+| `idempotency` | `POST /api/v1/vendors` with `Idempotency-Key`: the first answer (201), the replay (same body and vendor id, `Idempotency-Replayed: true`, no second vendor), and the same key with a different body (422 `idempotency_key_reused`); then `POST /api/v1/vision/scan` with a key: the first request (200), the same key with a different body (422 `idempotency_key_reused`) and a malformed key (400 `validation_failed`). The middleware answers pin the ADR 0001 envelope. |
 
 ## Recorded oddities (not defects of the goldens)
 
@@ -437,7 +437,7 @@ last).
 | project | `portal_projects` | GET /api/portal/v1/projects; PUT /api/portal/v1/projects/{id} |
 | machine keys | `machine_key` | see Cross-cutting groups |
 | events | `events` | GET /api/v1/events |
-| idempotency | `idempotency` | POST /api/v1/vendors replayed |
+| idempotency | `idempotency` | POST /api/v1/vendors replayed; POST /api/v1/vision/scan key reuse and a malformed key |
 
 Modules without routes of their own (notification, ai, domain, config,
 testutil, the x12 and gl integration libraries) are exercised through the

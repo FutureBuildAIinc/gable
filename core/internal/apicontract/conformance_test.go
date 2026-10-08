@@ -417,7 +417,7 @@ var placeholderRe = regexp.MustCompile(`^<[a-z][a-z0-9-]*>([+-][0-9]+d?)?$`)
 // numericPlaceholders are the normaliser's placeholders for volatile numeric
 // fields (volatileNumberFields in the characterisation harness): they stand
 // where a number was recorded, every other placeholder where a string was.
-var numericPlaceholders = map[string]bool{"<ms>": true, "<poolstat>": true, "<days>": true}
+var numericPlaceholders = map[string]bool{"<ms>": true, "<poolstat>": true, "<days>": true, "<orders>": true}
 
 // collectPlaceholders records, as NUL joined paths mapped to the placeholder
 // text, every leaf of the instance whose value is exactly a normaliser

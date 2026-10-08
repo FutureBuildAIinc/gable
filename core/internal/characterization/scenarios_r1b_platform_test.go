@@ -19,6 +19,8 @@ import (
 //   - events: the events feed after a real quote exposure acknowledgement.
 //   - idempotency: the replay of one POST carrying an Idempotency-Key.
 
+var eventsMask = map[string]any{"quote_short_id": "<masked>", "salesperson_name": "<masked>"}
+
 func r1bPlatformGroups() []groupDef {
 	bearer := func() map[string]string { return map[string]string{"Authorization": "Bearer {machineKey}"} }
 
@@ -71,6 +73,34 @@ func r1bPlatformGroups() []groupDef {
 	}, {
 		name: "events",
 		steps: []stepDef{
+			// The feed before the fixture quote: the exposure scans of the
+			// earlier groups wrote outbox rows. The first page is small so
+			// the golden stays short; the types filter, the empty page, the
+			// unknown parameter and the broken cursor pin the feed's strict
+			// query posture and its always-present next_cursor. Two values in
+			// an exposure payload vary per run (the first characters of a
+			// random quote uuid, a name drawn at seed time) and are masked;
+			// customer_name is a constant and stays pinned.
+			{name: "events.list", method: "GET", path: "/api/v1/events?limit=2", maskFields: eventsMask},
+			{name: "events.list.types", method: "GET", path: "/api/v1/events?limit=2&types=quote.exposure.ack_required", maskFields: eventsMask},
+			{name: "events.list.empty", method: "GET", path: "/api/v1/events?types=nothing.matches.this"},
+			{name: "events.list.bad_param", method: "GET", path: "/api/v1/events?status=sent"},
+			{name: "events.list.bad_cursor", method: "GET", path: "/api/v1/events?cursor=not-a-cursor"},
+			// A machine key holding no events scope: the auth layer refuses it
+			// with the wire envelope (the 403 every route shares).
+			{
+				name:    "events.key.create",
+				method:  "POST",
+				path:    "/api/v1/admin/keys",
+				body:    map[string]any{"name": "golden-events-denied", "scopes": []any{"quotes:read"}},
+				extract: map[string]string{"eventsKey": "/api_key"},
+			},
+			{
+				name:    "events.list.forbidden",
+				method:  "GET",
+				path:    "/api/v1/events",
+				headers: map[string]string{"Authorization": "Bearer {eventsKey}"},
+			},
 			{
 				name:   "events.fixture_quote_exposure",
 				method: "GET",
@@ -121,6 +151,24 @@ func r1bPlatformGroups() []groupDef {
 				captureHeaders: []string{"Idempotency-Replayed"},
 			},
 			{name: "idempotency.vendor_count", method: "GET", path: "/api/v1/vendors?limit=1"},
+			// The middleware's own answers on a route that is not a vendor
+			// write: a stored 200 under a key, the same key reused with
+			// another body (422), and a malformed key.
+			{
+				name: "idempotency.scan_first", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": "Wall: 2x4 studs at 16in OC"},
+				headers: map[string]string{"Idempotency-Key": "golden-idempotency-key-1"},
+			},
+			{
+				name: "idempotency.scan_key_reused", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": "Wall: 2x6 studs at 24in OC"},
+				headers: map[string]string{"Idempotency-Key": "golden-idempotency-key-1"},
+			},
+			{
+				name: "idempotency.key_malformed", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": ""},
+				headers: map[string]string{"Idempotency-Key": "bad key with\ttab"},
+			},
 		},
 	}}
 }
