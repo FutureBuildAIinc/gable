@@ -1,0 +1,465 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The accounts payable module, transcribed from internal/ap/handler.go,
+# model.go, service.go and repository.go as they behave today. Quirks the
+# transcription preserves: response money is int64 cents but the create
+# requests take float dollars (tax_amount, unit_price, amount) and convert on
+# the way in; the lists are bare JSON arrays (the handlers coerce nil to []),
+# with no limit or offset (a ?limit= is silently ignored) and unparseable
+# vendor_id filters silently dropped; service validation failures (bad dates,
+# unknown invoice) surface as 500, while approve maps every failure to 422 and
+# an unauthenticated approve is a 401 raised by the handler itself; create
+# echoes omit vendor_name and lines, which only the reads carry. Every error
+# body is the standard envelope. Every route sits behind
+# RequireRole("admin","owner","finance"), registered in
+# internal/app/serve/serve.go.
+paths:
+  /api/v1/ap/invoices:
+    get:
+      operationId: apInvoiceList
+      tags: [ap]
+      summary: List vendor invoices
+      description: >-
+        Role guard admin, owner or finance. Optional filters vendor_id (an
+        unparseable value is ignored, not refused) and status (free text,
+        compared as given). No paging parameters exist; limit and offset are
+        silently ignored. Never null. Lines are not included.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          description: Invoice status filter, for example PENDING, APPROVED, PARTIAL, PAID or VOIDED.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The vendor invoices, newest first as the repository orders them.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApVendorInvoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: apInvoiceCreate
+      tags: [ap]
+      summary: Enter a vendor invoice
+      description: >-
+        Role guard admin, owner or finance. The request carries float
+        dollars; subtotal, tax and line amounts are converted to int64 cents.
+        The invoice starts PENDING with nothing paid. Only an undecodable
+        body is a 400; a malformed invoice_date or due_date or any database
+        refusal (unknown vendor, duplicate number) is a 500. The echo omits
+        vendor_name and lines.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApCreateVendorInvoiceRequest"
+      responses:
+        "201":
+          description: The created invoice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApVendorInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/ap/invoices/{id}:
+    get:
+      operationId: apInvoiceGet
+      tags: [ap]
+      summary: Get one vendor invoice with lines
+      description: >-
+        Role guard admin, owner or finance. Any service failure, not only a
+        missing row, is a 404. lines is omitted when the invoice has none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice with vendor_name and lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApVendorInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/ap/invoices/{id}/approve:
+    post:
+      operationId: apInvoiceApprove
+      tags: [ap]
+      summary: Approve a pending vendor invoice
+      description: >-
+        Role guard admin, owner or finance. No body. The approver is the
+        subject of the caller's JWT claims; with no claims, or a subject that
+        is not a UUID, the handler answers 401 itself (so in AUTH_MODE=dev,
+        which carries no claims, this route is always 401). Only a PENDING
+        invoice can be approved. Every service failure, including an unknown
+        id, a non pending status or a failed GL sync, is a 422. The response
+        carries vendor_name, approved_by and approved_at but not lines.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The approved invoice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApVendorInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ap/payments:
+    get:
+      operationId: apPaymentList
+      tags: [ap]
+      summary: List vendor payments
+      description: >-
+        Role guard admin, owner or finance. Optional vendor_id filter (an
+        unparseable value is ignored). No paging. Never null.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The vendor payments.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApPayment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: apPaymentCreate
+      tags: [ap]
+      summary: Pay a vendor
+      description: >-
+        Role guard admin, owner or finance. The amount is float dollars,
+        converted to int64 cents. The payment is created COMPLETE and applied
+        in order to the listed invoices up to each one's outstanding
+        balance, then synced to the GL. Only an undecodable body is a 400;
+        a malformed payment_date, an unknown invoice or any GL failure is a
+        500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApCreatePaymentRequest"
+      responses:
+        "201":
+          description: The created payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApPayment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/ap/aging:
+    get:
+      operationId: apAging
+      tags: [ap]
+      summary: AP aging by vendor
+      description: >-
+        Role guard admin, owner or finance. One row per vendor with open
+        balances in int64 cents buckets. Never null.
+      responses:
+        "200":
+          description: The aging rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApAgingSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    ApVendorInvoice:
+      type: object
+      required: [id, vendor_id, invoice_number, invoice_date, due_date, subtotal, tax_amount, total, amount_paid, status, created_at]
+      description: A vendor bill (ap.VendorInvoice). Every money field is int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        vendor_id:
+          type: string
+          format: uuid
+        vendor_name:
+          type: string
+          description: Joined from the vendor on reads and approve; omitted on the create echo.
+        invoice_number:
+          type: string
+        invoice_date:
+          type: string
+          format: date-time
+        due_date:
+          type: string
+          format: date-time
+        po_id:
+          type: string
+          format: uuid
+        subtotal:
+          type: integer
+          format: int64
+          description: Cents.
+        tax_amount:
+          type: integer
+          format: int64
+          description: Cents.
+        total:
+          type: integer
+          format: int64
+          description: Cents.
+        amount_paid:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+          enum: [PENDING, APPROVED, PARTIAL, PAID, VOIDED]
+        approved_by:
+          type: string
+          format: uuid
+        approved_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          description: Present on the single read only.
+          items:
+            $ref: "#/components/schemas/ApVendorInvoiceLine"
+    ApVendorInvoiceLine:
+      type: object
+      required: [id, invoice_id, description, quantity, unit_price, line_total, created_at]
+      description: A vendor invoice line (ap.VendorInvoiceLine). unit_price and line_total are int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: number
+        unit_price:
+          type: integer
+          format: int64
+          description: Cents.
+        line_total:
+          type: integer
+          format: int64
+          description: Cents.
+        gl_account_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    ApPayment:
+      type: object
+      required: [id, vendor_id, amount, method, payment_date, status, created_at]
+      description: A payment to a vendor (ap.APPayment). amount is int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        vendor_id:
+          type: string
+          format: uuid
+        vendor_name:
+          type: string
+        batch_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        method:
+          type: string
+          enum: [CHECK, ACH, WIRE]
+        check_number:
+          type: string
+        reference:
+          type: string
+        payment_date:
+          type: string
+          format: date-time
+        status:
+          type: string
+          description: PENDING, COMPLETE or VOIDED.
+        created_at:
+          type: string
+          format: date-time
+    ApAgingSummary:
+      type: object
+      required: [vendor_id, vendor_name, current, past_30, past_60, past_90, total]
+      description: Aging buckets for one vendor (ap.APAgingSummary). Every bucket is int64 cents.
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+        vendor_name:
+          type: string
+        current:
+          type: integer
+          format: int64
+          description: Cents.
+        past_30:
+          type: integer
+          format: int64
+          description: Cents.
+        past_60:
+          type: integer
+          format: int64
+          description: Cents.
+        past_90:
+          type: integer
+          format: int64
+          description: Cents.
+        total:
+          type: integer
+          format: int64
+          description: Cents.
+    ApCreateVendorInvoiceRequest:
+      type: object
+      description: The create body. Dates are YYYY-MM-DD; tax_amount and line unit_price are float dollars today.
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+        invoice_number:
+          type: string
+        invoice_date:
+          type: string
+          format: date
+        due_date:
+          type: string
+          format: date
+        po_id:
+          type: string
+          format: uuid
+        tax_amount:
+          type: number
+          description: Float dollars today.
+        notes:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApCreateVendorInvoiceLineRequest"
+    ApCreateVendorInvoiceLineRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        quantity:
+          type: number
+        unit_price:
+          type: number
+          description: Float dollars today.
+        gl_account_id:
+          type: string
+          format: uuid
+    ApCreatePaymentRequest:
+      type: object
+      description: The pay body. payment_date is YYYY-MM-DD; amount is float dollars today.
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          description: Float dollars today.
+        method:
+          type: string
+          enum: [CHECK, ACH, WIRE]
+        check_number:
+          type: string
+        reference:
+          type: string
+        payment_date:
+          type: string
+          format: date
+        invoice_ids:
+          type: array
+          description: Invoices this payment is applied to, in order.
+          items:
+            type: string
+            format: uuid

@@ -16,20 +16,489 @@ info:
 security:
   - BearerJWT: []
 tags:
+  - name: ap
+  - name: bankrecon
   - name: customer
+  - name: edi
+  - name: gl
   - name: health
   - name: integration
   - name: invoice
   - name: location
+  - name: marketIndex
+  - name: matching
   - name: order
   - name: partner
   - name: payment
   - name: portal
+  - name: pricing
   - name: product
   - name: project
+  - name: purchaseOrder
   - name: quote
+  - name: tax
   - name: uploads
 paths:
+  /api/v1/ap/invoices:
+    get:
+      operationId: apInvoiceList
+      tags: [ap]
+      summary: List vendor invoices
+      description: >-
+        Role guard admin, owner or finance. Optional filters vendor_id (an unparseable value is ignored, not refused) and status (free text, compared as given). No paging parameters exist; limit and offset are silently ignored. Never null. Lines are not included.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          description: Invoice status filter, for example PENDING, APPROVED, PARTIAL, PAID or VOIDED.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The vendor invoices, newest first as the repository orders them.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApVendorInvoice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: apInvoiceCreate
+      tags: [ap]
+      summary: Enter a vendor invoice
+      description: >-
+        Role guard admin, owner or finance. The request carries float dollars; subtotal, tax and line amounts are converted to int64 cents. The invoice starts PENDING with nothing paid. Only an undecodable body is a 400; a malformed invoice_date or due_date or any database refusal (unknown vendor, duplicate number) is a 500. The echo omits vendor_name and lines.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApCreateVendorInvoiceRequest"
+      responses:
+        "201":
+          description: The created invoice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApVendorInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/ap/invoices/{id}:
+    get:
+      operationId: apInvoiceGet
+      tags: [ap]
+      summary: Get one vendor invoice with lines
+      description: >-
+        Role guard admin, owner or finance. Any service failure, not only a missing row, is a 404. lines is omitted when the invoice has none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice with vendor_name and lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApVendorInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/ap/invoices/{id}/approve:
+    post:
+      operationId: apInvoiceApprove
+      tags: [ap]
+      summary: Approve a pending vendor invoice
+      description: >-
+        Role guard admin, owner or finance. No body. The approver is the subject of the caller's JWT claims; with no claims, or a subject that is not a UUID, the handler answers 401 itself (so in AUTH_MODE=dev, which carries no claims, this route is always 401). Only a PENDING invoice can be approved. Every service failure, including an unknown id, a non pending status or a failed GL sync, is a 422. The response carries vendor_name, approved_by and approved_at but not lines.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The approved invoice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApVendorInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ap/payments:
+    get:
+      operationId: apPaymentList
+      tags: [ap]
+      summary: List vendor payments
+      description: >-
+        Role guard admin, owner or finance. Optional vendor_id filter (an unparseable value is ignored). No paging. Never null.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The vendor payments.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApPayment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: apPaymentCreate
+      tags: [ap]
+      summary: Pay a vendor
+      description: >-
+        Role guard admin, owner or finance. The amount is float dollars, converted to int64 cents. The payment is created COMPLETE and applied in order to the listed invoices up to each one's outstanding balance, then synced to the GL. Only an undecodable body is a 400; a malformed payment_date, an unknown invoice or any GL failure is a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApCreatePaymentRequest"
+      responses:
+        "201":
+          description: The created payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApPayment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/ap/aging:
+    get:
+      operationId: apAging
+      tags: [ap]
+      summary: AP aging by vendor
+      description: >-
+        Role guard admin, owner or finance. One row per vendor with open balances in int64 cents buckets. Never null.
+      responses:
+        "200":
+          description: The aging rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApAgingSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/accounts:
+    get:
+      operationId: bankreconAccountList
+      tags: [bankrecon]
+      summary: List bank accounts
+      description: Role guard admin, owner or finance. Never null.
+      responses:
+        "200":
+          description: The bank accounts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BankreconBankAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: bankreconAccountCreate
+      tags: [bankrecon]
+      summary: Create a bank account
+      description: >-
+        Role guard admin, owner or finance. Always created active. Only an undecodable body is a 400; a database refusal such as an unknown gl_account_id is a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconCreateBankAccountRequest"
+      responses:
+        "201":
+          description: The created bank account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconBankAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/import:
+    post:
+      operationId: bankreconImport
+      tags: [bankrecon]
+      summary: Import a bank statement CSV
+      description: >-
+        Role guard admin, owner or finance. csv_content is the CSV text; the first line is skipped as a header and rows are date, amount, description, reference. Unparseable rows are counted as skipped, not refused, and unmatched transactions are then auto matched to posted journal entries within a day and a half and equal amount. Always 200 once the body decodes.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconImportRequest"
+      responses:
+        "200":
+          description: The import counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconImportResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/match:
+    post:
+      operationId: bankreconMatch
+      tags: [bankrecon]
+      summary: Match a bank transaction to a journal entry
+      description: >-
+        Role guard admin, owner or finance. An unknown transaction or journal entry is a 500, not a 404.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconMatchRequest"
+      responses:
+        "200":
+          description: Matched. The body is a one key object with status "matched".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/unmatch:
+    post:
+      operationId: bankreconUnmatch
+      tags: [bankrecon]
+      summary: Clear the match on a bank transaction
+      description: >-
+        Role guard admin, owner or finance. An unknown transaction is a 500, not a 404.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconUnmatchRequest"
+      responses:
+        "200":
+          description: Unmatched. The body is a one key object with status "unmatched".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/sessions:
+    get:
+      operationId: bankreconSessionList
+      tags: [bankrecon]
+      summary: List reconciliation sessions
+      description: >-
+        Role guard admin, owner or finance. Optional bank_account_id filter (an unparseable value is ignored). No paging. Never null. Transactions are not included.
+      parameters:
+        - name: bank_account_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BankreconSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: bankreconSessionCreate
+      tags: [bankrecon]
+      summary: Start a reconciliation session
+      description: >-
+        Role guard admin, owner or finance. statement_balance is float dollars today, stored as int64 cents. The session starts IN_PROGRESS. Only an undecodable body is a 400; malformed period dates or a database refusal are 500. The echo omits bank_account_name.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankreconCreateSessionRequest"
+      responses:
+        "201":
+          description: The created session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/bankrecon/sessions/{id}:
+    get:
+      operationId: bankreconSessionGet
+      tags: [bankrecon]
+      summary: Get a session with its transactions
+      description: >-
+        Role guard admin, owner or finance. Any service failure, not only a missing row, is a 404. The cleared and outstanding summary is recalculated from the transactions on every read. transactions is omitted when the session has none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/bankrecon/sessions/{id}/complete:
+    post:
+      operationId: bankreconSessionComplete
+      tags: [bankrecon]
+      summary: Complete a reconciliation session
+      description: >-
+        Role guard admin, owner or finance. No body. completed_by is the caller's JWT subject when it parses as a UUID, else omitted. Every service failure, including an unknown id or an already completed session, is a 422.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The completed session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankreconSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/customers:
     get:
       operationId: customerList
@@ -374,6 +843,629 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/edi/partners:
+    get:
+      operationId: ediPartnerList
+      tags: [edi]
+      summary: List trading partners
+      description: Roles admin, owner. Ordered by name, unpaged, never null.
+      responses:
+        "200":
+          description: The trading partners.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EdiTradingPartner"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: ediPartnerCreate
+      tags: [edi]
+      summary: Create a trading partner
+      description: >-
+        Roles admin, owner. name is required (400 when empty). Defaults filled when empty: transport_config "{}", edi_version "004010", transport_type "SFTP", supported_documents ["832","846","850"]. A transport_config that is not valid JSON fails at the database cast and is a 500. is_active defaults to false.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EdiTradingPartner"
+      responses:
+        "201":
+          description: The created partner with server filled id and timestamps.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdiTradingPartner"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/edi/partners/{id}:
+    delete:
+      operationId: ediPartnerDelete
+      tags: [edi]
+      summary: Delete a trading partner
+      description: >-
+        Roles admin, owner. A hard delete. An unknown id still answers 204.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The partner is gone (or never existed).
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    get:
+      operationId: ediPartnerGet
+      tags: [edi]
+      summary: Get one trading partner
+      description: Roles admin, owner. Adds the count of catalog entries.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The partner with its catalog count.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdiTradingPartnerDetail"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      operationId: ediPartnerUpdate
+      tags: [edi]
+      summary: Replace a trading partner
+      description: >-
+        Roles admin, owner. A full replace of every field; an omitted field is written as its zero value, and an empty transport_config fails the JSON cast and is a 500. The response echoes the submitted body with the path id and a fresh updated_at; created_at is whatever the body carried (the zero time when omitted) and an omitted supported_documents echoes as null. An unknown id is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EdiTradingPartner"
+      responses:
+        "200":
+          description: The echoed partner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdiTradingPartner"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/edi/partners/{id}/catalog:
+    get:
+      operationId: ediPartnerCatalogList
+      tags: [edi]
+      summary: List a partner's catalog entries
+      description: >-
+        Roles admin, owner. Ordered by vendor_sku, capped at 200, never null. An unknown partner answers an empty array.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The catalog entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EdiCatalogEntry"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/edi/partners/{id}/import-catalog:
+    post:
+      operationId: ediPartnerCatalogImport
+      tags: [edi]
+      summary: Import a catalog file for a partner
+      description: >-
+        Roles admin, owner. The request body is the raw file (50 MiB limit), not multipart. format=x12 (default, an 832 document) or format=csv; any other value is treated as x12 but echoed back as given. An unreadable file is a 422. The partner id is not checked for existence. Entries upsert on (partner, vendor_sku).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            default: x12
+            description: x12 or csv.
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Counts of parsed and saved entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [partner_id, format, parsed_count, saved_count]
+                properties:
+                  partner_id:
+                    type: string
+                    format: uuid
+                  format:
+                    type: string
+                  parsed_count:
+                    type: integer
+                  saved_count:
+                    type: integer
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/gl/accounts:
+    get:
+      operationId: glAccountList
+      tags: [gl]
+      summary: List the chart of accounts
+      description: >-
+        Every account ordered by code, with the posted balance (debit minus credit, cents) computed per account. Role guard admin or owner. The body is null when the chart is empty.
+      responses:
+        "200":
+          description: The chart of accounts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccountList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: glAccountCreate
+      tags: [gl]
+      summary: Create a GL account
+      description: >-
+        Role guard admin or owner. A missing code, a missing name, an invalid type, or a database refusal such as a duplicate code is a 400. A missing normal_balance defaults from the type (DEBIT for ASSET and EXPENSE, CREDIT otherwise). The account is always created active.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlAccountRequest"
+      responses:
+        "201":
+          description: The created account (balance is 0).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/accounts/{id}:
+    put:
+      operationId: glAccountUpdate
+      tags: [gl]
+      summary: Replace a GL account
+      description: >-
+        Role guard admin or owner. Full replace of the editable columns; the account is always written active (is_active cannot be set false here). The row is not checked for existence: an unknown id still answers 200, echoing the request with a zero created_at (0001-01-01T00:00:00Z) and a zero balance. A non UUID id or an undecodable body is a 400; a database refusal is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlAccountRequest"
+      responses:
+        "200":
+          description: The account as written, not re-read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/journal-entries:
+    get:
+      operationId: glJournalEntryList
+      tags: [gl]
+      summary: List journal entries
+      description: >-
+        Every entry, newest entry_date first then highest entry_number. No filters or paging. Headers only: lines are omitted. Role guard admin or owner. The body is null when there are no entries.
+      responses:
+        "200":
+          description: The journal entry headers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlJournalEntryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: glJournalEntryCreate
+      tags: [gl]
+      summary: Create a draft manual journal entry
+      description: >-
+        Role guard admin or owner. The request carries float dollars; each amount is multiplied by 100 and rounded to int64 cents. Source is always MANUAL and status DRAFT. entry_date is optional (today when absent) and must be YYYY-MM-DD. Refused with 400: undecodable body, malformed entry_date, a negative debit or credit, a non UUID account_id, fewer than 2 lines, debits not equal to credits, all zero amounts, or a database refusal such as an unknown account.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlJournalEntryRequest"
+      responses:
+        "201":
+          description: The created entry with its lines (account_code and account_name are omitted on the echo).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlJournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/journal-entries/{id}:
+    get:
+      operationId: glJournalEntryGet
+      tags: [gl]
+      summary: Get one journal entry with lines
+      description: >-
+        Role guard admin or owner. Lines carry account_code and account_name. Any repository failure, not only a missing row, answers 404. reverses_entry_id is never present on this read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The entry with lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlJournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/gl/journal-entries/{id}/post:
+    post:
+      operationId: glJournalEntryPost
+      tags: [gl]
+      summary: Post a draft journal entry
+      description: >-
+        Role guard admin or owner. No body. Only a DRAFT entry whose date does not fall in a CLOSED fiscal period can post. Every refusal, including an unknown id, is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Posted. The body is a one key object with status "posted".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/journal-entries/{id}/reverse:
+    post:
+      operationId: glJournalEntryReverse
+      tags: [gl]
+      summary: Reverse a posted journal entry
+      description: >-
+        Role guard admin or owner. Books a posted, net-zero reversing entry dated today and linked by reverses_entry_id. The optional body reason is appended to the memo; an undecodable or absent body is ignored. Only a POSTED entry that has not already been reversed and has at least 2 lines can be reversed. Every refusal, including an unknown id, is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlReverseRequest"
+      responses:
+        "200":
+          description: The id of the new reversal entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlReverseResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/journal-entries/{id}/void:
+    post:
+      operationId: glJournalEntryVoid
+      tags: [gl]
+      summary: Void a posted journal entry
+      description: >-
+        Role guard admin or owner. No body. Only a POSTED entry can be voided; every refusal, including an unknown id, is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Voided. The body is a one key object with status "voided".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/trial-balance:
+    get:
+      operationId: glTrialBalance
+      tags: [gl]
+      summary: Trial balance
+      description: >-
+        Role guard admin or owner. Posted activity up to and including as_of (default today), for active accounts with any activity, ordered by code. A malformed as_of is a 400. The body is null when no account has activity.
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          description: Cut-off date, YYYY-MM-DD. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The trial balance rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlTrialBalance"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/profit-and-loss:
+    get:
+      operationId: glProfitAndLoss
+      tags: [gl]
+      summary: Profit and loss statement
+      description: >-
+        Role guard admin or owner. start defaults to the first of the current month and end to today; both are YYYY-MM-DD and inclusive. A malformed date or an end before the start is a 400. The three sections are never null.
+      parameters:
+        - name: start
+          in: query
+          required: false
+          description: First day, YYYY-MM-DD. Defaults to the first of the current month.
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: false
+          description: Last day, YYYY-MM-DD. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The income statement in cents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlProfitAndLossReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/balance-sheet:
+    get:
+      operationId: glBalanceSheet
+      tags: [gl]
+      summary: Balance sheet
+      description: >-
+        Role guard admin or owner. as_of defaults to today; a malformed value is a 400. retained_earnings is already included in total_equity. The three sections are never null.
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          description: Statement date, YYYY-MM-DD. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The statement of financial position in cents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlBalanceSheetReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/fiscal-periods:
+    get:
+      operationId: glFiscalPeriodList
+      tags: [gl]
+      summary: List fiscal periods
+      description: >-
+        Role guard admin or owner. All periods ordered by start date; the body is null when there are none.
+      responses:
+        "200":
+          description: The fiscal periods.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlFiscalPeriodList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/fiscal-periods/{id}/close:
+    post:
+      operationId: glFiscalPeriodClose
+      tags: [gl]
+      summary: Close an open fiscal period
+      description: >-
+        Role guard admin or owner. No body. A period that does not exist or is not OPEN is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Closed. The body is a one key object with status "closed".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/fiscal-periods/{id}/reopen:
+    post:
+      operationId: glFiscalPeriodReopen
+      tags: [gl]
+      summary: Reopen a closed fiscal period
+      description: >-
+        Role guard admin or owner. No body. A period that does not exist or is not CLOSED is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Reopened. The body is a one key object with status "reopened".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /healthz/live:
     get:
       operationId: healthLive
@@ -1329,6 +2421,117 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/matching/config:
+    get:
+      operationId: matchingConfigGet
+      tags: [matching]
+      summary: Get the match tolerances
+      description: Roles admin, owner, finance.
+      responses:
+        "200":
+          description: The tolerance configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingConfig"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    put:
+      operationId: matchingConfigUpdate
+      tags: [matching]
+      summary: Update the match tolerances
+      description: >-
+        Roles admin, owner, finance. Partial: only the fields sent change. dollar_tolerance is read as float dollars and stored and returned as int64 cents.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchingConfigUpdateRequest"
+      responses:
+        "200":
+          description: The updated configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingConfig"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/matching/exceptions:
+    get:
+      operationId: matchingExceptionList
+      tags: [matching]
+      summary: List match exceptions
+      description: >-
+        Roles admin, owner, finance. Results in EXCEPTION or PARTIAL status, newest first, unpaged, never null.
+      responses:
+        "200":
+          description: The exceptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MatchingException"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/matching/results/{po_id}:
+    get:
+      operationId: matchingResultGet
+      tags: [matching]
+      summary: Get the match result of an order
+      description: >-
+        Roles admin, owner, finance. Every lookup failure, not only a missing result, is a 404.
+      parameters:
+        - name: po_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The match result with per line details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingResult"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/matching/run/{po_id}:
+    post:
+      operationId: matchingRun
+      tags: [matching]
+      summary: Run the three way match for an order
+      description: >-
+        Roles admin, owner, finance. Compares ordered, received and invoiced quantities and prices. An unknown order, an order with no lines and every other failure are 500.
+      parameters:
+        - name: po_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The match outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingResult"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/orders:
     get:
       operationId: orderList
@@ -2906,6 +4109,783 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/calculate:
+    get:
+      operationId: pricingCalculate
+      tags: [pricing]
+      summary: Calculate a customer price for a product
+      description: >-
+        Guarded admin or owner. customer_id and product_id are required UUIDs. A non positive or unparseable quantity silently falls back to 1 and an unparseable job_id is silently ignored. A customer or product lookup failure of any kind (not only a missing row) answers 404.
+      parameters:
+        - name: customer_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: quantity
+          in: query
+          required: false
+          description: Volume pricing quantity; default 1.
+          schema: {type: number}
+        - name: job_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The calculated price.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingCalculatedPrice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rules:
+    get:
+      operationId: pricingRuleList
+      tags: [pricing]
+      summary: List pricing rules
+      description: Guarded admin or owner. A bare array, unpaged; null when the table is empty.
+      responses:
+        "200":
+          description: Every pricing rule.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingRule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingRuleCreate
+      tags: [pricing]
+      summary: Create a pricing rule
+      description: >-
+        Guarded admin or owner. Only name and rule_type are validated. The server assigns id and both timestamps; is_active is not defaulted, so an omitted is_active is stored and echoed as false. Unknown rule_type values fail at the database and answer 500.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingRuleCreateRequest"
+      responses:
+        "201":
+          description: The created rule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/calculate-escalation:
+    post:
+      operationId: pricingCalculateEscalation
+      tags: [pricing]
+      summary: Calculate an escalated future price
+      description: >-
+        Guarded admin or owner. The body is capped at 1 MiB. base_price must be positive; escalation_type must be PERCENTAGE or INDEX_DELTA; both dates are required. A date that is not YYYY-MM-DD, or an index lookup failure, answers 500. A target on or before the effective date returns the base price with months_out 0. For INDEX_DELTA the escalation_rate field carries the base index value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingEscalationRequest"
+      responses:
+        "200":
+          description: The escalation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingEscalationResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/categories:
+    get:
+      operationId: pricingCategoryList
+      tags: [pricing]
+      summary: List product categories
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. The only pricing route with no role guard (any authenticated caller). view=flat returns the flat list; any other value, or none, returns the nested tree (children populated). Null when there are no categories.
+      parameters:
+        - name: view
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: The categories, flat or as a tree.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingProductCategory"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingCategoryCreate
+      tags: [pricing]
+      summary: Create a product category
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. name, slug and path are required. Duplicate slugs or paths fail at the database and answer 500.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingProductCategory"
+      responses:
+        "201":
+          description: The created category, echoed with server filled fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingProductCategory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/categories/{id}:
+    put:
+      operationId: pricingCategoryUpdate
+      tags: [pricing]
+      summary: Update a product category
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Updates name, slug, sort_order and is_active only (path and parent are not changed). There is no existence check: an unknown id still answers 200 with the echoed body.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingProductCategory"
+      responses:
+        "200":
+          description: The body echoed with the path id and a fresh updated_at.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingProductCategory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules:
+    get:
+      operationId: pricingCategoryRuleList
+      tags: [pricing]
+      summary: List category pricing rules
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. When either limit or offset is present in the query the answer is the {data,total,limit,offset} page (limit non positive becomes 50, above 200 becomes 200, negative offset becomes 0); otherwise it is a bare array of every matching rule. Filters with an unparseable UUID are silently ignored; is_active is not a filter.
+      parameters:
+        - name: target_type
+          in: query
+          required: false
+          schema: {type: string, enum: [ACCOUNT, TIER]}
+        - name: tier
+          in: query
+          required: false
+          schema: {type: string}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: category_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer}
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer}
+      responses:
+        "200":
+          description: A bare array, or the page when limit or offset was supplied.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/PricingCategoryRule"
+                  - $ref: "#/components/schemas/PricingCategoryRulePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingCategoryRuleCreate
+      tags: [pricing]
+      summary: Create a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. Validation: target_type ACCOUNT or TIER; customer_id required for ACCOUNT; tier required for TIER; category_id required; rule_type one of MARKUP, MARKDOWN, FIXED, MARGIN. A duplicate answers 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingCategoryRule"
+      responses:
+        "201":
+          description: The created rule, echoed with server filled fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingCategoryRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules/bulk:
+    post:
+      operationId: pricingCategoryRuleBulkUpsert
+      tags: [pricing]
+      summary: Bulk upsert category pricing rules
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The body is a bare JSON array of 1 to 500 rules, each validated as on single create; any failure rejects the whole batch with 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              maxItems: 500
+              items:
+                $ref: "#/components/schemas/PricingCategoryRule"
+      responses:
+        "200":
+          description: The number of rules submitted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingBulkCount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: pricingCategoryRuleBulkDelete
+      tags: [pricing]
+      summary: Bulk delete category pricing rules
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. DELETE with a JSON body of ids; at least one is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingBulkDeleteRequest"
+      responses:
+        "204":
+          description: Deleted; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules/{id}:
+    put:
+      operationId: pricingCategoryRuleUpdate
+      tags: [pricing]
+      summary: Update a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. No validation and no existence check: the decoded body is stored against the path id and echoed with 200.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingCategoryRule"
+      responses:
+        "200":
+          description: The body echoed with the path id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingCategoryRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: pricingCategoryRuleDelete
+      tags: [pricing]
+      summary: Delete a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. No existence check: an unknown id still answers 204.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "204":
+          description: Deleted; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules/{id}/audit:
+    get:
+      operationId: pricingCategoryRuleAudit
+      tags: [pricing]
+      summary: List audit entries for a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. A bare array, always an array (empty when none).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PricingCategoryRuleAudit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/matrix:
+    get:
+      operationId: pricingMatrix
+      tags: [pricing]
+      summary: Get the category by tier pricing matrix
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner.
+      responses:
+        "200":
+          description: The matrix.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingMatrix"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/resolve:
+    get:
+      operationId: pricingResolve
+      tags: [pricing]
+      summary: Preview the effective category price for a product
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. product_id is required. An unparseable customer_id is silently ignored (treated as none). When tier is absent it is taken from the customer, else RETAIL. A product with no category resolves to match_type none with an empty category_path, with 200.
+      parameters:
+        - name: product_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: tier
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: The resolution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingResolvedCategoryPrice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs:
+    get:
+      operationId: pricingRebateProgramList
+      tags: [pricing]
+      summary: List rebate programs
+      description: >-
+        Guarded admin or owner. Optional vendor_id filter (an unparseable value is silently ignored). A bare array with tiers populated; null when no program matches.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The programs.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingRebateProgram"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingRebateProgramCreate
+      tags: [pricing]
+      summary: Create a rebate program with tiers
+      description: >-
+        Guarded admin or owner. The body wraps the program and its tiers. Only program.vendor_id and program.name are validated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingRebateProgramCreateRequest"
+      responses:
+        "201":
+          description: The created program, reloaded with its tiers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRebateProgram"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs/{id}:
+    get:
+      operationId: pricingRebateProgramGet
+      tags: [pricing]
+      summary: Get a rebate program with tiers
+      description: Guarded admin or owner.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRebateProgram"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs/{id}/claims:
+    get:
+      operationId: pricingRebateClaimList
+      tags: [pricing]
+      summary: List claims for a rebate program
+      description: >-
+        Guarded admin or owner. A bare array; null when the program has no claims. An unknown program id is not an error.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The claims.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingRebateClaim"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs/{id}/claims/calculate:
+    post:
+      operationId: pricingRebateClaimCalculate
+      tags: [pricing]
+      summary: Calculate a rebate claim for a period
+      description: >-
+        Guarded admin or owner. Answers 200, not 201. The qualifying volume is the caller supplied mock_volume (there is no ledger query yet). An unknown program, like any service failure, answers 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingRebateClaimCalculateRequest"
+      responses:
+        "200":
+          description: The calculated claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRebateClaim"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices:
+    get:
+      operationId: marketIndexList
+      tags: [marketIndex]
+      summary: List market indices
+      description: Guarded admin or owner. A bare unpaged array, always an array.
+      responses:
+        "200":
+          description: Every market index.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MarketIndex"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}:
+    put:
+      operationId: marketIndexUpdateMetadata
+      tags: [marketIndex]
+      summary: Update market index metadata
+      description: >-
+        Guarded admin or owner. An empty or omitted name or description keeps the stored value; an omitted is_active keeps the stored flag. Always refreshes last_updated_at.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketIndexMetadataRequest"
+      responses:
+        "200":
+          description: The index re-read after the update.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndex"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}/history:
+    get:
+      operationId: marketIndexHistory
+      tags: [marketIndex]
+      summary: Get a market index value history
+      description: >-
+        Guarded admin or owner. The window ends now and starts days back. days outside 1 to 730, or unparseable, silently falls back to 90. An unknown index id is not an error (empty points).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: days
+          in: query
+          required: false
+          description: Window length in days; default 90, accepted 1 to 730.
+          schema: {type: integer}
+      responses:
+        "200":
+          description: The time series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndexHistoryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}/refresh:
+    post:
+      operationId: marketIndexRefresh
+      tags: [marketIndex]
+      summary: Apply a new market index value
+      description: >-
+        Guarded admin or owner. new_value must be positive. Source defaults to MANUAL. Updates the index and appends a history point in one transaction, then kicks the exposure scanner; a scanner failure does not fail the call and shows as scan_kicked false.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketIndexRefreshRequest"
+      responses:
+        "200":
+          description: The updated index, the new history id and the scan flag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndexRefreshResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}/refresh/preview:
+    post:
+      operationId: marketIndexRefreshPreview
+      tags: [marketIndex]
+      summary: Preview the exposure of a new market index value
+      description: >-
+        Guarded admin or owner. A dry run: nothing is written. new_value must be positive. top_customers lists at most five customers by exposure and is null when no active escalator carries a base index.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketIndexRefreshRequest"
+      responses:
+        "200":
+          description: The exposure preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndexRefreshPreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/products:
     get:
       operationId: productList
@@ -3232,6 +5212,363 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/purchase-orders:
+    get:
+      operationId: purchaseOrderList
+      tags: [purchaseOrder]
+      summary: List purchase orders
+      description: >-
+        Roles admin, owner, purchasing. Unpaged, newest first, scoped to the caller's branch. Headers only (no lines); line_count and total_cost are filled. A bare array that is JSON null when there are no orders.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The purchase orders, or null when there are none.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PurchaseOrder"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: purchaseOrderCreate
+      tags: [purchaseOrder]
+      summary: Create a manual purchase order
+      description: >-
+        Roles admin, owner, purchasing. Creates a DRAFT order with source MANUAL. A vendor_id that is not a UUID is a 400. Any service failure (unknown vendor, bad line product id) is a 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseOrderCreateRequest"
+      responses:
+        "201":
+          description: The created purchase order with its lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrder"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/purchase-orders/recommendations:
+    get:
+      operationId: purchaseOrderRecommendations
+      tags: [purchaseOrder]
+      summary: Purchasing recommendations
+      description: >-
+        Roles admin, owner, purchasing. Velocity based reorder suggestions. 503 when the recommendation service is not wired.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The recommendation summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrderRecommendationSummary"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /api/v1/purchase-orders/refresh-reorder-targets:
+    post:
+      operationId: purchaseOrderRefreshReorderTargets
+      tags: [purchaseOrder]
+      summary: Recompute product reorder targets
+      description: >-
+        Roles admin, owner, purchasing. The body is optional and a body that fails to decode is ignored. dry_run defaults to true when absent, so a bare call previews only. Failures (including an unwired velocity repository) are 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseOrderRefreshRequest"
+      responses:
+        "200":
+          description: The refresh result with up to 100 proposals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrderRefreshResult"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/purchase-orders/reorder-check:
+    post:
+      operationId: purchaseOrderReorderCheck
+      tags: [purchaseOrder]
+      summary: Create reorder purchase orders
+      description: >-
+        Roles admin, owner, purchasing. Raises DRAFT orders for products below their reorder point, grouped by vendor.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The count of orders created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, count]
+                properties:
+                  status:
+                    type: string
+                    enum: [success]
+                  count:
+                    type: integer
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/purchase-orders/reorder-runs:
+    get:
+      operationId: purchaseOrderReorderRuns
+      tags: [purchaseOrder]
+      summary: Recent reorder cron runs
+      description: Roles admin, owner, purchasing. The last 50 runs, never null.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The runs, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PurchaseOrderReorderRun"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/purchase-orders/source-summary:
+    get:
+      operationId: purchaseOrderSourceSummary
+      tags: [purchaseOrder]
+      summary: Purchase order counts by source
+      description: >-
+        Roles admin, owner, purchasing. A map from source (MANUAL, REORDER, SPECIAL_ORDER, A2A) to count; sources with no orders are absent. Counts are not branch scoped.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Counts keyed by source.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: integer
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/purchase-orders/{id}:
+    get:
+      operationId: purchaseOrderGet
+      tags: [purchaseOrder]
+      summary: Get one purchase order with lines
+      description: >-
+        Roles admin, owner, purchasing. Every lookup failure, not only a missing row, is a 404 today.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The purchase order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrder"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/purchase-orders/{id}/freight:
+    get:
+      operationId: purchaseOrderFreightList
+      tags: [purchaseOrder]
+      summary: List freight charges of an order
+      description: Roles admin, owner, purchasing. A bare array, never null.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The freight charges, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PurchaseOrderFreightCharge"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: purchaseOrderFreightUpload
+      tags: [purchaseOrder]
+      summary: Upload a freight invoice
+      description: >-
+        Roles admin, owner, purchasing. Multipart form with a file field, 10 MiB limit. The order must be RECEIVED or PARTIAL and AI extraction must be configured. Every service failure (wrong status, no AI, bad extraction, nothing received) is a 400, not a 500. Returns 200, not 201.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: The pending freight charge and its cost weighted allocations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrderFreightUploadResponse"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/purchase-orders/{id}/freight/{freightId}/apply:
+    post:
+      operationId: purchaseOrderFreightApply
+      tags: [purchaseOrder]
+      summary: Apply a freight charge to product costs
+      description: >-
+        Roles admin, owner, purchasing. Every service failure is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: freightId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The charge was applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [applied]
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/v1/purchase-orders/{id}/receive:
+    post:
+      operationId: purchaseOrderReceive
+      tags: [purchaseOrder]
+      summary: Receive goods against an order
+      description: >-
+        Roles admin, owner, purchasing. Bad line or location ids, an unknown order and every other service failure are 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseOrderReceiveRequest"
+      responses:
+        "200":
+          description: The goods were received.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [received]
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/purchase-orders/{id}/submit:
+    post:
+      operationId: purchaseOrderSubmit
+      tags: [purchaseOrder]
+      summary: Submit a purchase order to the vendor
+      description: >-
+        Roles admin, owner, purchasing. Every service failure (unknown order, wrong status, vendor send failure) is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order was submitted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [submitted]
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/quotes:
     get:
       operationId: quoteList
@@ -3471,6 +5808,106 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/tax/exemptions:
+    post:
+      operationId: taxExemptionCreate
+      tags: [tax]
+      summary: Create a tax exemption
+      description: >-
+        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxExemptionCreateRequest"
+      responses:
+        "201":
+          description: The created exemption.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxExemption"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/exemptions/{customerID}:
+    get:
+      operationId: taxExemptionList
+      tags: [tax]
+      summary: List a customer's tax exemptions
+      description: >-
+        Roles admin, owner, finance. Every exemption of the customer, active or not, newest first; an array that is empty, never null, for an unknown customer.
+      parameters:
+        - name: customerID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The exemptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaxExemption"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/exemptions/{id}:
+    delete:
+      operationId: taxExemptionDelete
+      tags: [tax]
+      summary: Delete a tax exemption
+      description: >-
+        Roles admin, owner, finance. A hard delete. An unknown id still answers 204.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The exemption is gone (or never existed).
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/preview:
+    post:
+      operationId: taxPreview
+      tags: [tax]
+      summary: Preview tax on a cart or invoice
+      description: >-
+        Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxPreviewRequest"
+      responses:
+        "200":
+          description: The tax result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxResult"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /uploads/:
     get:
       operationId: uploadsFile
@@ -3716,6 +6153,419 @@ components:
             last_checked_at:
               type: [string, "null"]
               format: date-time
+    ApVendorInvoice:
+      type: object
+      required: [id, vendor_id, invoice_number, invoice_date, due_date, subtotal, tax_amount, total, amount_paid, status, created_at]
+      description: A vendor bill (ap.VendorInvoice). Every money field is int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        vendor_id:
+          type: string
+          format: uuid
+        vendor_name:
+          type: string
+          description: Joined from the vendor on reads and approve; omitted on the create echo.
+        invoice_number:
+          type: string
+        invoice_date:
+          type: string
+          format: date-time
+        due_date:
+          type: string
+          format: date-time
+        po_id:
+          type: string
+          format: uuid
+        subtotal:
+          type: integer
+          format: int64
+          description: Cents.
+        tax_amount:
+          type: integer
+          format: int64
+          description: Cents.
+        total:
+          type: integer
+          format: int64
+          description: Cents.
+        amount_paid:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+          enum: [PENDING, APPROVED, PARTIAL, PAID, VOIDED]
+        approved_by:
+          type: string
+          format: uuid
+        approved_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          description: Present on the single read only.
+          items:
+            $ref: "#/components/schemas/ApVendorInvoiceLine"
+    ApVendorInvoiceLine:
+      type: object
+      required: [id, invoice_id, description, quantity, unit_price, line_total, created_at]
+      description: A vendor invoice line (ap.VendorInvoiceLine). unit_price and line_total are int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: number
+        unit_price:
+          type: integer
+          format: int64
+          description: Cents.
+        line_total:
+          type: integer
+          format: int64
+          description: Cents.
+        gl_account_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    ApPayment:
+      type: object
+      required: [id, vendor_id, amount, method, payment_date, status, created_at]
+      description: A payment to a vendor (ap.APPayment). amount is int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        vendor_id:
+          type: string
+          format: uuid
+        vendor_name:
+          type: string
+        batch_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        method:
+          type: string
+          enum: [CHECK, ACH, WIRE]
+        check_number:
+          type: string
+        reference:
+          type: string
+        payment_date:
+          type: string
+          format: date-time
+        status:
+          type: string
+          description: PENDING, COMPLETE or VOIDED.
+        created_at:
+          type: string
+          format: date-time
+    ApAgingSummary:
+      type: object
+      required: [vendor_id, vendor_name, current, past_30, past_60, past_90, total]
+      description: Aging buckets for one vendor (ap.APAgingSummary). Every bucket is int64 cents.
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+        vendor_name:
+          type: string
+        current:
+          type: integer
+          format: int64
+          description: Cents.
+        past_30:
+          type: integer
+          format: int64
+          description: Cents.
+        past_60:
+          type: integer
+          format: int64
+          description: Cents.
+        past_90:
+          type: integer
+          format: int64
+          description: Cents.
+        total:
+          type: integer
+          format: int64
+          description: Cents.
+    ApCreateVendorInvoiceRequest:
+      type: object
+      description: The create body. Dates are YYYY-MM-DD; tax_amount and line unit_price are float dollars today.
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+        invoice_number:
+          type: string
+        invoice_date:
+          type: string
+          format: date
+        due_date:
+          type: string
+          format: date
+        po_id:
+          type: string
+          format: uuid
+        tax_amount:
+          type: number
+          description: Float dollars today.
+        notes:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApCreateVendorInvoiceLineRequest"
+    ApCreateVendorInvoiceLineRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        quantity:
+          type: number
+        unit_price:
+          type: number
+          description: Float dollars today.
+        gl_account_id:
+          type: string
+          format: uuid
+    ApCreatePaymentRequest:
+      type: object
+      description: The pay body. payment_date is YYYY-MM-DD; amount is float dollars today.
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          description: Float dollars today.
+        method:
+          type: string
+          enum: [CHECK, ACH, WIRE]
+        check_number:
+          type: string
+        reference:
+          type: string
+        payment_date:
+          type: string
+          format: date
+        invoice_ids:
+          type: array
+          description: Invoices this payment is applied to, in order.
+          items:
+            type: string
+            format: uuid
+    BankreconBankAccount:
+      type: object
+      required: [id, name, account_number, routing_number, gl_account_id, is_active, created_at]
+      description: A bank account linked to a GL cash account (bankrecon.BankAccount).
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        account_number:
+          type: string
+        routing_number:
+          type: string
+        gl_account_id:
+          type: string
+          format: uuid
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    BankreconTransaction:
+      type: object
+      required: [id, bank_account_id, transaction_date, amount, description, reference, status, created_at]
+      description: One imported statement row (bankrecon.BankTransaction). amount is int64 cents, positive for a deposit and negative for a withdrawal.
+      properties:
+        id:
+          type: string
+          format: uuid
+        bank_account_id:
+          type: string
+          format: uuid
+        reconciliation_id:
+          type: string
+          format: uuid
+        transaction_date:
+          type: string
+          format: date-time
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        description:
+          type: string
+        reference:
+          type: string
+        matched_journal_entry_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [UNMATCHED, MATCHED, EXCLUDED]
+        created_at:
+          type: string
+          format: date-time
+    BankreconSession:
+      type: object
+      required: [id, bank_account_id, period_start, period_end, statement_balance, gl_balance, cleared_count, cleared_total, outstanding_count, outstanding_total, difference, status, created_at]
+      description: A reconciliation session (bankrecon.ReconciliationSession). Every balance and total is int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        bank_account_id:
+          type: string
+          format: uuid
+        bank_account_name:
+          type: string
+          description: Joined on reads; omitted on the create echo.
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        statement_balance:
+          type: integer
+          format: int64
+          description: Cents.
+        gl_balance:
+          type: integer
+          format: int64
+          description: Cents.
+        cleared_count:
+          type: integer
+        cleared_total:
+          type: integer
+          format: int64
+          description: Cents.
+        outstanding_count:
+          type: integer
+        outstanding_total:
+          type: integer
+          format: int64
+          description: Cents.
+        difference:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+          enum: [IN_PROGRESS, COMPLETED]
+        completed_by:
+          type: string
+          format: uuid
+        completed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        transactions:
+          type: array
+          description: Present on the single read only, and only when the session has transactions.
+          items:
+            $ref: "#/components/schemas/BankreconTransaction"
+    BankreconImportResult:
+      type: object
+      required: [total_rows, imported_rows, skipped_rows, auto_matched]
+      description: The CSV import summary (bankrecon.ImportResult).
+      properties:
+        total_rows:
+          type: integer
+        imported_rows:
+          type: integer
+        skipped_rows:
+          type: integer
+        auto_matched:
+          type: integer
+    BankreconStatusResult:
+      type: object
+      required: [status]
+      description: The one key acknowledgement match and unmatch write.
+      properties:
+        status:
+          type: string
+          enum: [matched, unmatched]
+    BankreconCreateBankAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        account_number:
+          type: string
+        routing_number:
+          type: string
+        gl_account_id:
+          type: string
+          format: uuid
+    BankreconCreateSessionRequest:
+      type: object
+      description: Period dates are YYYY-MM-DD; statement_balance is float dollars today.
+      properties:
+        bank_account_id:
+          type: string
+          format: uuid
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type: string
+          format: date
+        statement_balance:
+          type: number
+          description: Float dollars today.
+    BankreconImportRequest:
+      type: object
+      properties:
+        bank_account_id:
+          type: string
+          format: uuid
+        reconciliation_id:
+          type: string
+          format: uuid
+        csv_content:
+          type: string
+    BankreconMatchRequest:
+      type: object
+      properties:
+        bank_transaction_id:
+          type: string
+          format: uuid
+        journal_entry_id:
+          type: string
+          format: uuid
+    BankreconUnmatchRequest:
+      type: object
+      properties:
+        bank_transaction_id:
+          type: string
+          format: uuid
     Customer:
       type: object
       required: [id, primary_branch_id, name, account_number, tier, credit_limit, balance_due, is_active, created_at, updated_at]
@@ -3861,6 +6711,412 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/Contact"
+    EdiTradingPartner:
+      type: object
+      required:
+        - id
+        - name
+        - isa_sender_id
+        - isa_sender_qualifier
+        - isa_receiver_id
+        - isa_receiver_qualifier
+        - gs_sender_id
+        - gs_receiver_id
+        - edi_version
+        - transport_type
+        - transport_config
+        - supported_documents
+        - is_active
+        - notes
+        - created_at
+        - updated_at
+      description: >-
+        A trading partner. Used as the create and update request body and as the response body; on a request the id and timestamps are ignored or overwritten by the server.
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        isa_sender_id: {type: string}
+        isa_sender_qualifier: {type: string}
+        isa_receiver_id: {type: string}
+        isa_receiver_qualifier: {type: string}
+        gs_sender_id: {type: string}
+        gs_receiver_id: {type: string}
+        edi_version: {type: string}
+        transport_type:
+          type: string
+          description: SFTP, AS2 or FILE (not validated).
+        transport_config:
+          type: string
+          description: A JSON document carried as a string, "{}" by default.
+        supported_documents:
+          type: [array, "null"]
+          description: Null only on an update echo that omitted the field.
+          items:
+            type: string
+        is_active: {type: boolean}
+        notes: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    EdiTradingPartnerDetail:
+      description: A trading partner plus the number of catalog entries it holds.
+      allOf:
+        - $ref: "#/components/schemas/EdiTradingPartner"
+        - type: object
+          required: [catalog_count]
+          properties:
+            catalog_count: {type: integer}
+    EdiCatalogEntry:
+      type: object
+      required: [id, partner_id, vendor_sku, description, unit_cost, uom, min_order_qty, pack_qty, synced_at]
+      properties:
+        id: {type: string, format: uuid}
+        partner_id: {type: string, format: uuid}
+        vendor_sku: {type: string}
+        internal_product_id: {type: string, format: uuid}
+        description: {type: string}
+        unit_cost:
+          type: number
+          description: Float dollars today.
+        uom: {type: string}
+        effective_date: {type: string, format: date-time}
+        expiry_date: {type: string, format: date-time}
+        min_order_qty: {type: number}
+        pack_qty: {type: number}
+        synced_at: {type: string, format: date-time}
+    GlAccount:
+      type: object
+      required: [id, code, name, type, subtype, normal_balance, is_active, description, balance, created_at, updated_at]
+      description: One chart of accounts row (gl.GLAccount). balance is int64 cents (debit minus credit of posted lines).
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE]
+        subtype:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+        normal_balance:
+          type: string
+          enum: [DEBIT, CREDIT]
+        is_active:
+          type: boolean
+        description:
+          type: string
+        balance:
+          type: integer
+          format: int64
+          description: Cents.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GlAccountList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlAccount"
+    GlAccountRequest:
+      type: object
+      required: [code, name, type]
+      description: The create and update body for an account. Unknown keys are ignored.
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE]
+        subtype:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+        normal_balance:
+          type: string
+          enum: [DEBIT, CREDIT]
+        description:
+          type: string
+    GlJournalEntry:
+      type: object
+      required: [id, entry_number, entry_date, memo, source, status, posted_by, total_debit, total_credit, created_at, updated_at]
+      description: A journal entry header (gl.JournalEntry), with lines on the single read and the create echo. total_debit and total_credit are int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        entry_number:
+          type: integer
+        entry_date:
+          type: string
+          format: date-time
+        memo:
+          type: string
+        source:
+          type: string
+          description: MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN or DEPOSIT.
+        source_ref_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [DRAFT, POSTED, VOID]
+        posted_by:
+          type: string
+        reverses_entry_id:
+          type: string
+          format: uuid
+        total_debit:
+          type: integer
+          format: int64
+          description: Cents.
+        total_credit:
+          type: integer
+          format: int64
+          description: Cents.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlJournalLine"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GlJournalEntryList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlJournalEntry"
+    GlJournalLine:
+      type: object
+      required: [id, journal_entry_id, account_id, description, debit, credit]
+      description: One debit or credit line (gl.JournalLine). debit and credit are int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        journal_entry_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        account_code:
+          type: string
+        account_name:
+          type: string
+        description:
+          type: string
+        debit:
+          type: integer
+          format: int64
+          description: Cents.
+        credit:
+          type: integer
+          format: int64
+          description: Cents.
+    GlJournalEntryRequest:
+      type: object
+      description: >-
+        The create body. entry_date is YYYY-MM-DD and defaults to today. debit and credit are float dollars today, rounded to cents on the way in.
+      properties:
+        entry_date:
+          type: string
+          format: date
+        memo:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlJournalLineRequest"
+    GlJournalLineRequest:
+      type: object
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        debit:
+          type: number
+          description: Float dollars today; must be >= 0.
+        credit:
+          type: number
+          description: Float dollars today; must be >= 0.
+    GlReverseRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+    GlReverseResult:
+      type: object
+      required: [reversal_entry_id]
+      properties:
+        reversal_entry_id:
+          type: string
+          format: uuid
+    GlStatusResult:
+      type: object
+      required: [status]
+      description: The one key acknowledgement the status routes write.
+      properties:
+        status:
+          type: string
+          enum: [posted, voided, closed, reopened]
+    GlFiscalPeriod:
+      type: object
+      required: [id, name, start_date, end_date, status, created_at]
+      description: An accounting period (gl.FiscalPeriod). closed_at and closed_by are omitted while the period is open.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+        closed_at:
+          type: string
+          format: date-time
+        closed_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    GlFiscalPeriodList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlFiscalPeriod"
+    GlTrialBalanceRow:
+      type: object
+      required: [account_id, account_code, account_name, account_type, debit, credit]
+      description: One trial balance row (gl.TrialBalanceRow). debit and credit are int64 cents.
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        account_code:
+          type: string
+        account_name:
+          type: string
+        account_type:
+          type: string
+        debit:
+          type: integer
+          format: int64
+          description: Cents.
+        credit:
+          type: integer
+          format: int64
+          description: Cents.
+    GlTrialBalance:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlTrialBalanceRow"
+    GlAccountLineItem:
+      type: object
+      required: [account_id, account_code, account_name, amount]
+      description: One account's signed balance on a statement (gl.AccountLineItem). amount is int64 cents.
+      properties:
+        account_id:
+          type: string
+        account_code:
+          type: string
+        account_name:
+          type: string
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+    GlProfitAndLossReport:
+      type: object
+      required: [start_date, end_date, revenue, cogs, expenses, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
+      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents.
+      properties:
+        start_date:
+          type: string
+          description: YYYY-MM-DD.
+        end_date:
+          type: string
+          description: YYYY-MM-DD.
+        revenue:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        cogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        total_revenue:
+          type: integer
+          format: int64
+        total_cogs:
+          type: integer
+          format: int64
+        gross_profit:
+          type: integer
+          format: int64
+        total_expenses:
+          type: integer
+          format: int64
+          description: Cents, excludes COGS.
+        net_income:
+          type: integer
+          format: int64
+    GlBalanceSheetReport:
+      type: object
+      required: [as_of_date, assets, liabilities, equity, total_assets, total_liabilities, total_equity, retained_earnings]
+      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents.
+      properties:
+        as_of_date:
+          type: string
+          description: YYYY-MM-DD.
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        liabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        equity:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        total_assets:
+          type: integer
+          format: int64
+        total_liabilities:
+          type: integer
+          format: int64
+        total_equity:
+          type: integer
+          format: int64
+          description: Cents, includes retained_earnings.
+        retained_earnings:
+          type: integer
+          format: int64
     HealthReadyOK:
       type: object
       required: [status, uptime, checks]
@@ -4538,6 +7794,98 @@ components:
       type: [array, "null"]
       items:
         type: string
+    MatchingStatus:
+      type: string
+      enum: [PENDING, MATCHED, PARTIAL, EXCEPTION]
+    MatchingResult:
+      type: object
+      required: [id, po_id, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        po_id: {type: string, format: uuid}
+        vendor_invoice_id: {type: string, format: uuid}
+        status:
+          $ref: "#/components/schemas/MatchingStatus"
+        matched_at: {type: string, format: date-time}
+        matched_by: {type: string, format: uuid}
+        notes: {type: string}
+        created_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchingLineDetail"
+    MatchingLineDetail:
+      type: object
+      required:
+        - id
+        - match_result_id
+        - po_line_id
+        - description
+        - po_qty
+        - received_qty
+        - invoiced_qty
+        - po_unit_cost
+        - invoice_unit_price
+        - qty_variance_pct
+        - price_variance_pct
+        - line_status
+        - created_at
+      properties:
+        id: {type: string, format: uuid}
+        match_result_id: {type: string, format: uuid}
+        po_line_id: {type: string, format: uuid}
+        description: {type: string}
+        po_qty: {type: number}
+        received_qty: {type: number}
+        invoiced_qty: {type: number}
+        po_unit_cost:
+          type: integer
+          format: int64
+          description: Cents.
+        invoice_unit_price:
+          type: integer
+          format: int64
+          description: Cents.
+        qty_variance_pct: {type: number}
+        price_variance_pct: {type: number}
+        line_status:
+          $ref: "#/components/schemas/MatchingStatus"
+        created_at: {type: string, format: date-time}
+    MatchingConfig:
+      type: object
+      required: [id, qty_tolerance_pct, price_tolerance_pct, dollar_tolerance, auto_approve_on_match, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        qty_tolerance_pct: {type: number}
+        price_tolerance_pct: {type: number}
+        dollar_tolerance:
+          type: integer
+          format: int64
+          description: Cents. The update request sends float dollars under the same name.
+        auto_approve_on_match: {type: boolean}
+        updated_at: {type: string, format: date-time}
+    MatchingConfigUpdateRequest:
+      type: object
+      properties:
+        qty_tolerance_pct: {type: number}
+        price_tolerance_pct: {type: number}
+        dollar_tolerance:
+          type: number
+          description: Float dollars; converted to cents on write.
+        auto_approve_on_match: {type: boolean}
+    MatchingException:
+      type: object
+      required: [match_result_id, po_id, status, created_at, line_count, exception_count]
+      properties:
+        match_result_id: {type: string, format: uuid}
+        po_id: {type: string, format: uuid}
+        vendor_invoice_id: {type: string, format: uuid}
+        status:
+          $ref: "#/components/schemas/MatchingStatus"
+        notes: {type: string}
+        created_at: {type: string, format: date-time}
+        line_count: {type: integer}
+        exception_count: {type: integer}
     OrderStatus:
       type: string
       enum: [DRAFT, CONFIRMED, FULFILLED, CANCELLED, ON_HOLD]
@@ -5588,6 +8936,379 @@ components:
         status:
           type: string
           enum: [Active, Inactive]
+    PricingSource:
+      type: string
+      enum: [CONTRACT, TIER, RETAIL, QUANTITY_BREAK, JOB_OVERRIDE, PROMOTIONAL, CATEGORY_TIER, CATEGORY_ACCOUNT]
+    PricingRuleType:
+      type: string
+      enum: [QUANTITY_BREAK, JOB_OVERRIDE, PROMOTIONAL]
+    PricingCalculatedPrice:
+      type: object
+      required: [product_id, original_price, final_price, discount_pct, source, details]
+      properties:
+        product_id: {type: string, format: uuid}
+        original_price: {type: number, description: Base retail price.}
+        final_price: {type: number}
+        discount_pct: {type: number}
+        source:
+          $ref: "#/components/schemas/PricingSource"
+        details:
+          type: string
+          description: Free text such as "Gold Tier (15%)".
+    PricingRule:
+      type: object
+      required: [id, name, rule_type, min_quantity, is_active, priority, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        rule_type:
+          $ref: "#/components/schemas/PricingRuleType"
+        product_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        category:
+          type: string
+          description: Empty (and omitted) means unscoped.
+        fixed_price: {type: number}
+        discount_pct: {type: number}
+        markup_pct: {type: number}
+        min_quantity: {type: number}
+        max_quantity: {type: number}
+        margin_floor_pct: {type: number}
+        starts_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        is_active: {type: boolean}
+        priority: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PricingRuleCreateRequest:
+      type: object
+      required: [name, rule_type]
+      description: The pricing rule body the create handler decodes. id and both timestamps are overwritten or filled by the server.
+      properties:
+        name: {type: string, minLength: 1}
+        rule_type:
+          $ref: "#/components/schemas/PricingRuleType"
+        product_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        category: {type: string}
+        fixed_price: {type: number}
+        discount_pct: {type: number}
+        markup_pct: {type: number}
+        min_quantity: {type: number}
+        max_quantity: {type: number}
+        margin_floor_pct: {type: number}
+        starts_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        is_active: {type: boolean, description: Not defaulted; omitted stores false.}
+        priority: {type: integer}
+    PricingEscalationRequest:
+      type: object
+      required: [base_price, escalation_type, effective_date, target_date]
+      properties:
+        base_price: {type: number, exclusiveMinimum: 0}
+        escalation_type:
+          type: string
+          enum: [PERCENTAGE, INDEX_DELTA]
+        escalation_rate:
+          type: number
+          description: Percent per month for PERCENTAGE; the base index value for INDEX_DELTA.
+        effective_date: {type: string, format: date}
+        target_date: {type: string, format: date}
+        market_index_id: {type: string, format: uuid}
+    PricingEscalationResult:
+      type: object
+      required: [base_price, future_price, price_delta, delta_percent, months_out, is_stale, escalation_type, is_expired]
+      properties:
+        base_price: {type: number}
+        future_price: {type: number}
+        price_delta: {type: number}
+        delta_percent: {type: number}
+        months_out: {type: integer}
+        is_stale: {type: boolean}
+        stale_delta_pct: {type: number}
+        current_index: {type: number}
+        base_index: {type: number}
+        escalation_type: {type: string}
+        expiration_date: {type: string}
+        is_expired: {type: boolean}
+    PricingProductCategory:
+      type: object
+      required: [id, name, slug, path, sort_order, is_active, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        path:
+          type: string
+          description: ltree path such as lumber.framing.
+        parent_id: {type: string, format: uuid}
+        sort_order: {type: integer}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingProductCategory"
+    PricingCategoryRule:
+      type: object
+      required: [id, target_type, category_id, rule_type, rule_value, is_active, priority, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        target_type:
+          type: string
+          enum: [ACCOUNT, TIER]
+        customer_id: {type: string, format: uuid}
+        tier: {type: string}
+        category_id: {type: string, format: uuid}
+        rule_type:
+          type: string
+          enum: [MARKUP, MARKDOWN, FIXED, MARGIN]
+        rule_value: {type: number}
+        margin_floor_pct: {type: number}
+        starts_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        is_active: {type: boolean}
+        priority: {type: integer}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        category_name: {type: string, description: Joined on reads.}
+        category_path: {type: string, description: Joined on reads.}
+        customer_name: {type: string, description: Joined on reads.}
+    PricingCategoryRulePage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingCategoryRule"
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    PricingCategoryRuleAudit:
+      type: object
+      required: [id, rule_id, action, performed_by, performed_at]
+      properties:
+        id: {type: string, format: uuid}
+        rule_id: {type: string, format: uuid}
+        action: {type: string}
+        old_values: {type: object, additionalProperties: true}
+        new_values: {type: object, additionalProperties: true}
+        performed_by: {type: string}
+        performed_at: {type: string, format: date-time}
+        category_id: {type: string, format: uuid}
+        target_type: {type: string}
+        tier: {type: string}
+        customer_id: {type: string, format: uuid}
+    PricingBulkCount:
+      type: object
+      required: [count]
+      properties:
+        count: {type: integer}
+    PricingBulkDeleteRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          items: {type: string, format: uuid}
+    PricingMatrixCell:
+      type: object
+      required: [category_id, category_name, category_path, tier, inherited]
+      properties:
+        category_id: {type: string, format: uuid}
+        category_name: {type: string}
+        category_path: {type: string}
+        tier: {type: string}
+        rule:
+          $ref: "#/components/schemas/PricingCategoryRule"
+        inherited: {type: boolean}
+        source_path: {type: string}
+    PricingMatrix:
+      type: object
+      required: [categories, tiers, cells]
+      properties:
+        categories:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/PricingProductCategory"
+        tiers:
+          type: [array, "null"]
+          items: {type: string}
+        cells:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/PricingMatrixCell"
+    PricingResolvedCategoryPrice:
+      type: object
+      required: [match_type, category_path, cost_price]
+      properties:
+        rule:
+          $ref: "#/components/schemas/PricingCategoryRule"
+        match_type:
+          type: string
+          enum: [account_exact, account_ancestor, tier_exact, tier_ancestor, none]
+        category_path: {type: string}
+        cost_price:
+          type: number
+          description: The product average unit cost, used by MARKUP and MARGIN rules.
+    PricingRebateTier:
+      type: object
+      required: [id, program_id, min_volume, max_volume, rebate_pct, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        program_id: {type: string, format: uuid}
+        min_volume: {type: integer, format: int64}
+        max_volume: {type: [integer, "null"], format: int64}
+        rebate_pct: {type: number}
+        created_at: {type: string, format: date-time}
+    PricingRebateProgram:
+      type: object
+      required: [id, vendor_id, name, program_type, start_date, end_date, is_active, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        vendor_id: {type: string, format: uuid}
+        name: {type: string}
+        program_type:
+          type: string
+          description: VOLUME, GROWTH or PRODUCT_MIX by convention; not validated.
+        start_date: {type: string, format: date-time}
+        end_date: {type: string, format: date-time}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        tiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingRebateTier"
+    PricingRebateProgramCreateRequest:
+      type: object
+      required: [program]
+      properties:
+        program:
+          type: object
+          required: [vendor_id, name]
+          properties:
+            vendor_id: {type: string, format: uuid}
+            name: {type: string, minLength: 1}
+            program_type: {type: string}
+            start_date: {type: string, format: date-time}
+            end_date: {type: string, format: date-time}
+            is_active: {type: boolean}
+        tiers:
+          type: array
+          items:
+            type: object
+            required: [min_volume, rebate_pct]
+            properties:
+              min_volume: {type: integer, format: int64}
+              max_volume: {type: [integer, "null"], format: int64}
+              rebate_pct: {type: number}
+    PricingRebateClaim:
+      type: object
+      required: [id, program_id, period_start, period_end, qualifying_volume, rebate_amount, status, claimed_at, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        program_id: {type: string, format: uuid}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        qualifying_volume: {type: integer, format: int64}
+        rebate_amount: {type: integer, format: int64}
+        status:
+          type: string
+          description: CALCULATED, CLAIMED or RECEIVED.
+        claimed_at: {type: [string, "null"], format: date-time}
+        created_at: {type: string, format: date-time}
+    PricingRebateClaimCalculateRequest:
+      type: object
+      properties:
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        mock_volume: {type: integer, format: int64}
+    MarketIndex:
+      type: object
+      required: [id, name, source, current_value, unit, last_updated_at, created_at, index_code, is_active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        source: {type: string}
+        current_value: {type: number}
+        previous_value: {type: number}
+        unit: {type: string}
+        last_updated_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        index_code: {type: string}
+        commodity_kind: {type: string}
+        description: {type: string}
+        is_active: {type: boolean}
+    MarketIndexMetadataRequest:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        is_active: {type: boolean}
+    MarketIndexHistory:
+      type: object
+      required: [id, market_index_id, value, recorded_at, source]
+      properties:
+        id: {type: string, format: uuid}
+        market_index_id: {type: string, format: uuid}
+        value: {type: number}
+        recorded_at: {type: string, format: date-time}
+        recorded_by: {type: string}
+        source: {type: string}
+    MarketIndexHistoryResponse:
+      type: object
+      required: [market_index_id, from, to, points]
+      properties:
+        market_index_id: {type: string, format: uuid}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketIndexHistory"
+    MarketIndexRefreshRequest:
+      type: object
+      required: [new_value]
+      properties:
+        new_value: {type: number, exclusiveMinimum: 0}
+        source:
+          type: string
+          description: Defaults to MANUAL on refresh; ignored by the preview.
+        notes: {type: string}
+    MarketIndexRefreshResponse:
+      type: object
+      required: [market_index, history_id, scan_kicked]
+      properties:
+        market_index:
+          $ref: "#/components/schemas/MarketIndex"
+        history_id: {type: string, format: uuid}
+        scan_kicked: {type: boolean}
+    MarketIndexRefreshTopCustomer:
+      type: object
+      required: [customer_id, customer_name, quote_count, exposure_dollars]
+      properties:
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        quote_count: {type: integer}
+        exposure_dollars: {type: number}
+    MarketIndexRefreshPreview:
+      type: object
+      required: [delta_pct, affected_quote_count, affected_customer_count, estimated_exposure_dollars, top_customers]
+      properties:
+        delta_pct: {type: number}
+        affected_quote_count: {type: integer}
+        affected_customer_count: {type: integer}
+        estimated_exposure_dollars: {type: number}
+        top_customers:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/MarketIndexRefreshTopCustomer"
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.
@@ -5802,6 +9523,232 @@ components:
         status:
           type: string
           enum: [Active, Completed]
+    PurchaseOrder:
+      type: object
+      required: [id, branch_id, status, source, created_at, updated_at]
+      description: >-
+        A purchase order. Lines appear only on create and get; line_count and total_cost only on the list (omitted when zero). total_cost is float dollars today.
+      properties:
+        id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid}
+        vendor_id: {type: string, format: uuid}
+        vendor_name: {type: string}
+        status:
+          type: string
+          enum: [DRAFT, SENT, PARTIAL, RECEIVED, CANCELLED]
+        source:
+          type: string
+          enum: [MANUAL, REORDER, SPECIAL_ORDER, A2A]
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderLine"
+        line_count: {type: integer}
+        total_cost:
+          type: number
+          description: Float dollars today.
+        freight_charges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderFreightCharge"
+    PurchaseOrderLine:
+      type: object
+      required: [id, po_id, description, quantity, qty_received, cost]
+      properties:
+        id: {type: string, format: uuid}
+        po_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        description: {type: string}
+        quantity: {type: number}
+        qty_received: {type: number}
+        cost:
+          type: number
+          description: Unit cost in float dollars today.
+        linked_so_line_id: {type: string, format: uuid}
+    PurchaseOrderFreightCharge:
+      type: object
+      required: [id, po_id, total_amount_cents, allocation_method, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        po_id: {type: string, format: uuid}
+        file_path: {type: string}
+        original_filename: {type: string}
+        carrier_name: {type: string}
+        invoice_number: {type: string}
+        total_amount_cents: {type: integer, format: int64}
+        allocation_method: {type: string}
+        status:
+          type: string
+          enum: [PENDING, APPLIED]
+        created_at: {type: string, format: date-time}
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderFreightAllocation"
+    PurchaseOrderFreightAllocation:
+      type: object
+      required: [id, freight_charge_id, po_line_id, allocated_cents, per_unit_cents, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        freight_charge_id: {type: string, format: uuid}
+        po_line_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        allocated_cents: {type: integer, format: int64}
+        per_unit_cents: {type: integer, format: int64}
+        description: {type: string}
+        created_at: {type: string, format: date-time}
+    PurchaseOrderFreightUploadResponse:
+      type: object
+      required: [freight_charge, allocations]
+      properties:
+        freight_charge:
+          $ref: "#/components/schemas/PurchaseOrderFreightCharge"
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderFreightAllocation"
+    PurchaseOrderReorderRun:
+      type: object
+      required: [id, job, started_at, dry_run, status, pos_created, products_updated, products_skipped]
+      properties:
+        id: {type: string, format: uuid}
+        job:
+          type: string
+          description: The cron job name, refresh_targets or create_reorders.
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        dry_run: {type: boolean}
+        status:
+          type: string
+          description: RUNNING while in flight, then the outcome the scheduler stamped.
+        pos_created: {type: integer}
+        products_updated: {type: integer}
+        products_skipped: {type: integer}
+        error_message: {type: string}
+    PurchaseOrderRecommendation:
+      type: object
+      required:
+        - product_id
+        - product_sku
+        - product_name
+        - current_stock
+        - avg_daily_sales
+        - std_dev_sales
+        - lead_time_days
+        - reorder_point
+        - safety_stock
+        - suggested_qty
+        - estimated_cost
+        - urgency
+        - days_until_out
+      properties:
+        product_id: {type: string, format: uuid}
+        product_sku: {type: string}
+        product_name: {type: string}
+        vendor_name: {type: string}
+        current_stock: {type: number}
+        avg_daily_sales: {type: number}
+        std_dev_sales: {type: number}
+        lead_time_days: {type: number}
+        reorder_point: {type: number}
+        safety_stock: {type: number}
+        suggested_qty: {type: number}
+        estimated_cost:
+          type: number
+          description: Float dollars today.
+        urgency:
+          type: string
+          enum: [CRITICAL, HIGH, MEDIUM, LOW]
+        days_until_out: {type: number}
+        catalog_price:
+          type: number
+          description: Float dollars today; absent when no catalog price is known.
+    PurchaseOrderRecommendationSummary:
+      type: object
+      required: [total_items, critical_count, high_count, medium_count, low_count, total_estimated_cost, items]
+      properties:
+        total_items: {type: integer}
+        critical_count: {type: integer}
+        high_count: {type: integer}
+        medium_count: {type: integer}
+        low_count: {type: integer}
+        total_estimated_cost:
+          type: number
+          description: Float dollars today.
+        items:
+          type: [array, "null"]
+          description: Null when nothing needs reordering.
+          items:
+            $ref: "#/components/schemas/PurchaseOrderRecommendation"
+    PurchaseOrderReorderTargetProposal:
+      type: object
+      required: [product_id, sku, old_point, new_point, old_qty, new_qty, avg_daily]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string}
+        old_point: {type: number}
+        new_point: {type: number}
+        old_qty: {type: number}
+        new_qty: {type: number}
+        avg_daily: {type: number}
+    PurchaseOrderRefreshResult:
+      type: object
+      required: [dry_run, products_updated, products_skipped, proposals]
+      properties:
+        dry_run: {type: boolean}
+        products_updated: {type: integer}
+        products_skipped: {type: integer}
+        proposals:
+          type: [array, "null"]
+          description: Null when no product changes; capped at 100 entries.
+          items:
+            $ref: "#/components/schemas/PurchaseOrderReorderTargetProposal"
+    PurchaseOrderCreateRequest:
+      type: object
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+          description: Required in effect; a non UUID value is a 400.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderCreateLine"
+    PurchaseOrderCreateLine:
+      type: object
+      properties:
+        product_id:
+          type: string
+          description: A product UUID, or empty for a free text line.
+        description: {type: string}
+        quantity: {type: number}
+        cost:
+          type: number
+          description: Unit cost in float dollars today.
+    PurchaseOrderReceiveRequest:
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderReceiveLine"
+    PurchaseOrderReceiveLine:
+      type: object
+      properties:
+        line_id: {type: string, format: uuid}
+        qty_received: {type: number}
+        location_id: {type: string, format: uuid}
+    PurchaseOrderRefreshRequest:
+      type: object
+      properties:
+        dry_run:
+          type: boolean
+          description: Defaults to true when absent.
+        lookback_days:
+          type: integer
+          description: Zero or negative means the 90 day default.
     QuoteState:
       type: string
       enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]
@@ -6084,4 +10031,132 @@ components:
           type: number
         accepted_value:
           type: number
+    TaxExemption:
+      type: object
+      required: [id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date, is_active, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        exempt_reason:
+          type: string
+          description: For example RESALE, GOVERNMENT or CONTRACTOR (not validated).
+        certificate_number: {type: string}
+        issuing_state:
+          type: string
+          description: A state code (not validated).
+        effective_date:
+          type: string
+          format: date-time
+          description: A full timestamp today, not a date.
+        expiry_date:
+          type: string
+          format: date-time
+          description: Absent when the exemption does not expire.
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+    TaxExemptionCreateRequest:
+      type: object
+      required: [customer_id, exempt_reason]
+      properties:
+        customer_id: {type: string, format: uuid}
+        exempt_reason: {type: string}
+        certificate_number: {type: string}
+        issuing_state: {type: string}
+        expiry_date:
+          type: string
+          format: date
+          description: YYYY-MM-DD.
+    TaxAddress:
+      type: object
+      required: [line1, city, state, postal_code, country]
+      properties:
+        line1: {type: string}
+        line2: {type: string}
+        city: {type: string}
+        state: {type: string}
+        postal_code: {type: string}
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2.
+    TaxLineInput:
+      type: object
+      properties:
+        line_number: {type: integer}
+        item_code: {type: string}
+        description: {type: string}
+        quantity: {type: number}
+        amount:
+          type: integer
+          format: int64
+          description: Pre-tax line total in cents.
+        tax_code:
+          type: string
+          description: Avalara tax code.
+    TaxPreviewRequest:
+      type: object
+      required: [lines]
+      properties:
+        customer_id: {type: string, format: uuid}
+        ship_from:
+          $ref: "#/components/schemas/TaxAddress"
+        ship_to:
+          $ref: "#/components/schemas/TaxAddress"
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/TaxLineInput"
+        document_type:
+          type: string
+          description: SalesInvoice (default) or ReturnInvoice.
+        rate_hint:
+          type: number
+          description: Caller resolved fallback rate for the flat rate path; zero means the configured rate.
+    TaxLine:
+      type: object
+      required: [line_number, item_code, description, quantity, amount, tax_amount, tax_rate, jurisdiction, tax_code, exempt]
+      properties:
+        line_number: {type: integer}
+        item_code: {type: string}
+        description: {type: string}
+        quantity: {type: number}
+        amount:
+          type: integer
+          format: int64
+          description: Pre-tax amount in cents.
+        tax_amount:
+          type: integer
+          format: int64
+          description: Tax in cents.
+        tax_rate:
+          type: number
+          description: Effective rate as a fraction (0.0825 is 8.25 percent).
+        jurisdiction: {type: string}
+        tax_code: {type: string}
+        exempt: {type: boolean}
+    TaxResult:
+      type: object
+      required: [total_amount, total_tax, grand_total, lines, is_estimate]
+      properties:
+        document_code:
+          type: string
+          description: The Avalara document code; absent for estimates.
+        total_amount:
+          type: integer
+          format: int64
+          description: Pre-tax total in cents.
+        total_tax:
+          type: integer
+          format: int64
+          description: Tax in cents.
+        grand_total:
+          type: integer
+          format: int64
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxLine"
+        is_estimate:
+          type: boolean
+          description: True when the flat rate fallback was used.
 

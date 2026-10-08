@@ -1,0 +1,1224 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The pricing and market index routes, transcribed from internal/pricing
+# (handler.go, category_handler.go, rebate_handler.go, escalator_handler.go,
+# index_admin_handler.go) as they behave today. Quirks: every error goes
+# through httputil.RespondError (the standard envelope, generic message) so
+# almost every service failure is a 500; money is float dollars except the
+# rebate module, which is int64; the category rule list answers a bare array
+# unless limit or offset is present, then a {data,total,limit,offset} page;
+# the category routes register only when CATEGORY_PRICING_ENABLED=true; a
+# nil Go slice from the rebate lists, the flat or tree category list and the
+# rule list encodes as null; PUT on a category or category rule does not
+# check existence and echoes the body with 200; GET /pricing/categories is
+# the only pricing route without a role guard. Every other route here is
+# guarded admin or owner (cmd wiring in internal/app/serve/serve.go and
+# wire_exposure.go). Component schemas are prefixed Pricing or MarketIndex.
+paths:
+  /api/v1/pricing/calculate:
+    get:
+      operationId: pricingCalculate
+      tags: [pricing]
+      summary: Calculate a customer price for a product
+      description: >-
+        Guarded admin or owner. customer_id and product_id are required UUIDs.
+        A non positive or unparseable quantity silently falls back to 1 and an
+        unparseable job_id is silently ignored. A customer or product lookup
+        failure of any kind (not only a missing row) answers 404.
+      parameters:
+        - name: customer_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: quantity
+          in: query
+          required: false
+          description: Volume pricing quantity; default 1.
+          schema: {type: number}
+        - name: job_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The calculated price.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingCalculatedPrice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rules:
+    get:
+      operationId: pricingRuleList
+      tags: [pricing]
+      summary: List pricing rules
+      description: Guarded admin or owner. A bare array, unpaged; null when the table is empty.
+      responses:
+        "200":
+          description: Every pricing rule.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingRule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingRuleCreate
+      tags: [pricing]
+      summary: Create a pricing rule
+      description: >-
+        Guarded admin or owner. Only name and rule_type are validated. The
+        server assigns id and both timestamps; is_active is not defaulted, so
+        an omitted is_active is stored and echoed as false. Unknown rule_type
+        values fail at the database and answer 500.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingRuleCreateRequest"
+      responses:
+        "201":
+          description: The created rule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/calculate-escalation:
+    post:
+      operationId: pricingCalculateEscalation
+      tags: [pricing]
+      summary: Calculate an escalated future price
+      description: >-
+        Guarded admin or owner. The body is capped at 1 MiB. base_price must be
+        positive; escalation_type must be PERCENTAGE or INDEX_DELTA; both dates
+        are required. A date that is not YYYY-MM-DD, or an index lookup
+        failure, answers 500. A target on or before the effective date returns
+        the base price with months_out 0. For INDEX_DELTA the
+        escalation_rate field carries the base index value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingEscalationRequest"
+      responses:
+        "200":
+          description: The escalation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingEscalationResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/categories:
+    get:
+      operationId: pricingCategoryList
+      tags: [pricing]
+      summary: List product categories
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. The only pricing
+        route with no role guard (any authenticated caller). view=flat returns
+        the flat list; any other value, or none, returns the nested tree
+        (children populated). Null when there are no categories.
+      parameters:
+        - name: view
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: The categories, flat or as a tree.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingProductCategory"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingCategoryCreate
+      tags: [pricing]
+      summary: Create a product category
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. name, slug and path are required. Duplicate slugs or paths fail
+        at the database and answer 500.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingProductCategory"
+      responses:
+        "201":
+          description: The created category, echoed with server filled fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingProductCategory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/categories/{id}:
+    put:
+      operationId: pricingCategoryUpdate
+      tags: [pricing]
+      summary: Update a product category
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. Updates name, slug, sort_order and is_active only (path and
+        parent are not changed). There is no existence check: an unknown id
+        still answers 200 with the echoed body.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingProductCategory"
+      responses:
+        "200":
+          description: The body echoed with the path id and a fresh updated_at.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingProductCategory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules:
+    get:
+      operationId: pricingCategoryRuleList
+      tags: [pricing]
+      summary: List category pricing rules
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. When either limit or offset is present in the query the answer
+        is the {data,total,limit,offset} page (limit non positive becomes 50,
+        above 200 becomes 200, negative offset becomes 0); otherwise it is a
+        bare array of every matching rule. Filters with an unparseable UUID
+        are silently ignored; is_active is not a filter.
+      parameters:
+        - name: target_type
+          in: query
+          required: false
+          schema: {type: string, enum: [ACCOUNT, TIER]}
+        - name: tier
+          in: query
+          required: false
+          schema: {type: string}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: category_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer}
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer}
+      responses:
+        "200":
+          description: A bare array, or the page when limit or offset was supplied.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/PricingCategoryRule"
+                  - $ref: "#/components/schemas/PricingCategoryRulePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingCategoryRuleCreate
+      tags: [pricing]
+      summary: Create a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. Validation: target_type ACCOUNT or TIER; customer_id required
+        for ACCOUNT; tier required for TIER; category_id required; rule_type
+        one of MARKUP, MARKDOWN, FIXED, MARGIN. A duplicate answers 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingCategoryRule"
+      responses:
+        "201":
+          description: The created rule, echoed with server filled fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingCategoryRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules/bulk:
+    post:
+      operationId: pricingCategoryRuleBulkUpsert
+      tags: [pricing]
+      summary: Bulk upsert category pricing rules
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. The body is a bare JSON array of 1 to 500 rules, each validated
+        as on single create; any failure rejects the whole batch with 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              maxItems: 500
+              items:
+                $ref: "#/components/schemas/PricingCategoryRule"
+      responses:
+        "200":
+          description: The number of rules submitted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingBulkCount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: pricingCategoryRuleBulkDelete
+      tags: [pricing]
+      summary: Bulk delete category pricing rules
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. DELETE with a JSON body of ids; at least one is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingBulkDeleteRequest"
+      responses:
+        "204":
+          description: Deleted; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules/{id}:
+    put:
+      operationId: pricingCategoryRuleUpdate
+      tags: [pricing]
+      summary: Update a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. No validation and no existence check: the decoded body is
+        stored against the path id and echoed with 200.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingCategoryRule"
+      responses:
+        "200":
+          description: The body echoed with the path id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingCategoryRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: pricingCategoryRuleDelete
+      tags: [pricing]
+      summary: Delete a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. No existence check: an unknown id still answers 204.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "204":
+          description: Deleted; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/category-rules/{id}/audit:
+    get:
+      operationId: pricingCategoryRuleAudit
+      tags: [pricing]
+      summary: List audit entries for a category pricing rule
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. A bare array, always an array (empty when none).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PricingCategoryRuleAudit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/matrix:
+    get:
+      operationId: pricingMatrix
+      tags: [pricing]
+      summary: Get the category by tier pricing matrix
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner.
+      responses:
+        "200":
+          description: The matrix.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingMatrix"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/resolve:
+    get:
+      operationId: pricingResolve
+      tags: [pricing]
+      summary: Preview the effective category price for a product
+      description: >-
+        Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or
+        owner. product_id is required. An unparseable customer_id is silently
+        ignored (treated as none). When tier is absent it is taken from the
+        customer, else RETAIL. A product with no category resolves to
+        match_type none with an empty category_path, with 200.
+      parameters:
+        - name: product_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: tier
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: The resolution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingResolvedCategoryPrice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs:
+    get:
+      operationId: pricingRebateProgramList
+      tags: [pricing]
+      summary: List rebate programs
+      description: >-
+        Guarded admin or owner. Optional vendor_id filter (an unparseable value
+        is silently ignored). A bare array with tiers populated; null when no
+        program matches.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The programs.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingRebateProgram"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: pricingRebateProgramCreate
+      tags: [pricing]
+      summary: Create a rebate program with tiers
+      description: >-
+        Guarded admin or owner. The body wraps the program and its tiers.
+        Only program.vendor_id and program.name are validated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingRebateProgramCreateRequest"
+      responses:
+        "201":
+          description: The created program, reloaded with its tiers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRebateProgram"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs/{id}:
+    get:
+      operationId: pricingRebateProgramGet
+      tags: [pricing]
+      summary: Get a rebate program with tiers
+      description: Guarded admin or owner.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRebateProgram"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs/{id}/claims:
+    get:
+      operationId: pricingRebateClaimList
+      tags: [pricing]
+      summary: List claims for a rebate program
+      description: >-
+        Guarded admin or owner. A bare array; null when the program has no
+        claims. An unknown program id is not an error.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The claims.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PricingRebateClaim"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/rebates/programs/{id}/claims/calculate:
+    post:
+      operationId: pricingRebateClaimCalculate
+      tags: [pricing]
+      summary: Calculate a rebate claim for a period
+      description: >-
+        Guarded admin or owner. Answers 200, not 201. The qualifying volume is
+        the caller supplied mock_volume (there is no ledger query yet). An
+        unknown program, like any service failure, answers 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingRebateClaimCalculateRequest"
+      responses:
+        "200":
+          description: The calculated claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRebateClaim"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices:
+    get:
+      operationId: marketIndexList
+      tags: [marketIndex]
+      summary: List market indices
+      description: Guarded admin or owner. A bare unpaged array, always an array.
+      responses:
+        "200":
+          description: Every market index.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MarketIndex"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}:
+    put:
+      operationId: marketIndexUpdateMetadata
+      tags: [marketIndex]
+      summary: Update market index metadata
+      description: >-
+        Guarded admin or owner. An empty or omitted name or description keeps
+        the stored value; an omitted is_active keeps the stored flag. Always
+        refreshes last_updated_at.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketIndexMetadataRequest"
+      responses:
+        "200":
+          description: The index re-read after the update.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndex"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}/history:
+    get:
+      operationId: marketIndexHistory
+      tags: [marketIndex]
+      summary: Get a market index value history
+      description: >-
+        Guarded admin or owner. The window ends now and starts days back.
+        days outside 1 to 730, or unparseable, silently falls back to 90. An
+        unknown index id is not an error (empty points).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: days
+          in: query
+          required: false
+          description: Window length in days; default 90, accepted 1 to 730.
+          schema: {type: integer}
+      responses:
+        "200":
+          description: The time series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndexHistoryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}/refresh:
+    post:
+      operationId: marketIndexRefresh
+      tags: [marketIndex]
+      summary: Apply a new market index value
+      description: >-
+        Guarded admin or owner. new_value must be positive. Source defaults to
+        MANUAL. Updates the index and appends a history point in one
+        transaction, then kicks the exposure scanner; a scanner failure does
+        not fail the call and shows as scan_kicked false.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketIndexRefreshRequest"
+      responses:
+        "200":
+          description: The updated index, the new history id and the scan flag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndexRefreshResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/market-indices/{id}/refresh/preview:
+    post:
+      operationId: marketIndexRefreshPreview
+      tags: [marketIndex]
+      summary: Preview the exposure of a new market index value
+      description: >-
+        Guarded admin or owner. A dry run: nothing is written. new_value must
+        be positive. top_customers lists at most five customers by exposure
+        and is null when no active escalator carries a base index.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketIndexRefreshRequest"
+      responses:
+        "200":
+          description: The exposure preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketIndexRefreshPreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    PricingSource:
+      type: string
+      enum: [CONTRACT, TIER, RETAIL, QUANTITY_BREAK, JOB_OVERRIDE, PROMOTIONAL, CATEGORY_TIER, CATEGORY_ACCOUNT]
+    PricingRuleType:
+      type: string
+      enum: [QUANTITY_BREAK, JOB_OVERRIDE, PROMOTIONAL]
+    PricingCalculatedPrice:
+      type: object
+      required: [product_id, original_price, final_price, discount_pct, source, details]
+      properties:
+        product_id: {type: string, format: uuid}
+        original_price: {type: number, description: Base retail price.}
+        final_price: {type: number}
+        discount_pct: {type: number}
+        source:
+          $ref: "#/components/schemas/PricingSource"
+        details:
+          type: string
+          description: Free text such as "Gold Tier (15%)".
+    PricingRule:
+      type: object
+      required: [id, name, rule_type, min_quantity, is_active, priority, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        rule_type:
+          $ref: "#/components/schemas/PricingRuleType"
+        product_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        category:
+          type: string
+          description: Empty (and omitted) means unscoped.
+        fixed_price: {type: number}
+        discount_pct: {type: number}
+        markup_pct: {type: number}
+        min_quantity: {type: number}
+        max_quantity: {type: number}
+        margin_floor_pct: {type: number}
+        starts_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        is_active: {type: boolean}
+        priority: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PricingRuleCreateRequest:
+      type: object
+      required: [name, rule_type]
+      description: The pricing rule body the create handler decodes. id and both timestamps are overwritten or filled by the server.
+      properties:
+        name: {type: string, minLength: 1}
+        rule_type:
+          $ref: "#/components/schemas/PricingRuleType"
+        product_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        category: {type: string}
+        fixed_price: {type: number}
+        discount_pct: {type: number}
+        markup_pct: {type: number}
+        min_quantity: {type: number}
+        max_quantity: {type: number}
+        margin_floor_pct: {type: number}
+        starts_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        is_active: {type: boolean, description: Not defaulted; omitted stores false.}
+        priority: {type: integer}
+    PricingEscalationRequest:
+      type: object
+      required: [base_price, escalation_type, effective_date, target_date]
+      properties:
+        base_price: {type: number, exclusiveMinimum: 0}
+        escalation_type:
+          type: string
+          enum: [PERCENTAGE, INDEX_DELTA]
+        escalation_rate:
+          type: number
+          description: Percent per month for PERCENTAGE; the base index value for INDEX_DELTA.
+        effective_date: {type: string, format: date}
+        target_date: {type: string, format: date}
+        market_index_id: {type: string, format: uuid}
+    PricingEscalationResult:
+      type: object
+      required: [base_price, future_price, price_delta, delta_percent, months_out, is_stale, escalation_type, is_expired]
+      properties:
+        base_price: {type: number}
+        future_price: {type: number}
+        price_delta: {type: number}
+        delta_percent: {type: number}
+        months_out: {type: integer}
+        is_stale: {type: boolean}
+        stale_delta_pct: {type: number}
+        current_index: {type: number}
+        base_index: {type: number}
+        escalation_type: {type: string}
+        expiration_date: {type: string}
+        is_expired: {type: boolean}
+    PricingProductCategory:
+      type: object
+      required: [id, name, slug, path, sort_order, is_active, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        path:
+          type: string
+          description: ltree path such as lumber.framing.
+        parent_id: {type: string, format: uuid}
+        sort_order: {type: integer}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingProductCategory"
+    PricingCategoryRule:
+      type: object
+      required: [id, target_type, category_id, rule_type, rule_value, is_active, priority, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        target_type:
+          type: string
+          enum: [ACCOUNT, TIER]
+        customer_id: {type: string, format: uuid}
+        tier: {type: string}
+        category_id: {type: string, format: uuid}
+        rule_type:
+          type: string
+          enum: [MARKUP, MARKDOWN, FIXED, MARGIN]
+        rule_value: {type: number}
+        margin_floor_pct: {type: number}
+        starts_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        is_active: {type: boolean}
+        priority: {type: integer}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        category_name: {type: string, description: Joined on reads.}
+        category_path: {type: string, description: Joined on reads.}
+        customer_name: {type: string, description: Joined on reads.}
+    PricingCategoryRulePage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingCategoryRule"
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    PricingCategoryRuleAudit:
+      type: object
+      required: [id, rule_id, action, performed_by, performed_at]
+      properties:
+        id: {type: string, format: uuid}
+        rule_id: {type: string, format: uuid}
+        action: {type: string}
+        old_values: {type: object, additionalProperties: true}
+        new_values: {type: object, additionalProperties: true}
+        performed_by: {type: string}
+        performed_at: {type: string, format: date-time}
+        category_id: {type: string, format: uuid}
+        target_type: {type: string}
+        tier: {type: string}
+        customer_id: {type: string, format: uuid}
+    PricingBulkCount:
+      type: object
+      required: [count]
+      properties:
+        count: {type: integer}
+    PricingBulkDeleteRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          items: {type: string, format: uuid}
+    PricingMatrixCell:
+      type: object
+      required: [category_id, category_name, category_path, tier, inherited]
+      properties:
+        category_id: {type: string, format: uuid}
+        category_name: {type: string}
+        category_path: {type: string}
+        tier: {type: string}
+        rule:
+          $ref: "#/components/schemas/PricingCategoryRule"
+        inherited: {type: boolean}
+        source_path: {type: string}
+    PricingMatrix:
+      type: object
+      required: [categories, tiers, cells]
+      properties:
+        categories:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/PricingProductCategory"
+        tiers:
+          type: [array, "null"]
+          items: {type: string}
+        cells:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/PricingMatrixCell"
+    PricingResolvedCategoryPrice:
+      type: object
+      required: [match_type, category_path, cost_price]
+      properties:
+        rule:
+          $ref: "#/components/schemas/PricingCategoryRule"
+        match_type:
+          type: string
+          enum: [account_exact, account_ancestor, tier_exact, tier_ancestor, none]
+        category_path: {type: string}
+        cost_price:
+          type: number
+          description: The product average unit cost, used by MARKUP and MARGIN rules.
+    PricingRebateTier:
+      type: object
+      required: [id, program_id, min_volume, max_volume, rebate_pct, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        program_id: {type: string, format: uuid}
+        min_volume: {type: integer, format: int64}
+        max_volume: {type: [integer, "null"], format: int64}
+        rebate_pct: {type: number}
+        created_at: {type: string, format: date-time}
+    PricingRebateProgram:
+      type: object
+      required: [id, vendor_id, name, program_type, start_date, end_date, is_active, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        vendor_id: {type: string, format: uuid}
+        name: {type: string}
+        program_type:
+          type: string
+          description: VOLUME, GROWTH or PRODUCT_MIX by convention; not validated.
+        start_date: {type: string, format: date-time}
+        end_date: {type: string, format: date-time}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        tiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PricingRebateTier"
+    PricingRebateProgramCreateRequest:
+      type: object
+      required: [program]
+      properties:
+        program:
+          type: object
+          required: [vendor_id, name]
+          properties:
+            vendor_id: {type: string, format: uuid}
+            name: {type: string, minLength: 1}
+            program_type: {type: string}
+            start_date: {type: string, format: date-time}
+            end_date: {type: string, format: date-time}
+            is_active: {type: boolean}
+        tiers:
+          type: array
+          items:
+            type: object
+            required: [min_volume, rebate_pct]
+            properties:
+              min_volume: {type: integer, format: int64}
+              max_volume: {type: [integer, "null"], format: int64}
+              rebate_pct: {type: number}
+    PricingRebateClaim:
+      type: object
+      required: [id, program_id, period_start, period_end, qualifying_volume, rebate_amount, status, claimed_at, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        program_id: {type: string, format: uuid}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        qualifying_volume: {type: integer, format: int64}
+        rebate_amount: {type: integer, format: int64}
+        status:
+          type: string
+          description: CALCULATED, CLAIMED or RECEIVED.
+        claimed_at: {type: [string, "null"], format: date-time}
+        created_at: {type: string, format: date-time}
+    PricingRebateClaimCalculateRequest:
+      type: object
+      properties:
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        mock_volume: {type: integer, format: int64}
+    MarketIndex:
+      type: object
+      required: [id, name, source, current_value, unit, last_updated_at, created_at, index_code, is_active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        source: {type: string}
+        current_value: {type: number}
+        previous_value: {type: number}
+        unit: {type: string}
+        last_updated_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        index_code: {type: string}
+        commodity_kind: {type: string}
+        description: {type: string}
+        is_active: {type: boolean}
+    MarketIndexMetadataRequest:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        is_active: {type: boolean}
+    MarketIndexHistory:
+      type: object
+      required: [id, market_index_id, value, recorded_at, source]
+      properties:
+        id: {type: string, format: uuid}
+        market_index_id: {type: string, format: uuid}
+        value: {type: number}
+        recorded_at: {type: string, format: date-time}
+        recorded_by: {type: string}
+        source: {type: string}
+    MarketIndexHistoryResponse:
+      type: object
+      required: [market_index_id, from, to, points]
+      properties:
+        market_index_id: {type: string, format: uuid}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketIndexHistory"
+    MarketIndexRefreshRequest:
+      type: object
+      required: [new_value]
+      properties:
+        new_value: {type: number, exclusiveMinimum: 0}
+        source:
+          type: string
+          description: Defaults to MANUAL on refresh; ignored by the preview.
+        notes: {type: string}
+    MarketIndexRefreshResponse:
+      type: object
+      required: [market_index, history_id, scan_kicked]
+      properties:
+        market_index:
+          $ref: "#/components/schemas/MarketIndex"
+        history_id: {type: string, format: uuid}
+        scan_kicked: {type: boolean}
+    MarketIndexRefreshTopCustomer:
+      type: object
+      required: [customer_id, customer_name, quote_count, exposure_dollars]
+      properties:
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        quote_count: {type: integer}
+        exposure_dollars: {type: number}
+    MarketIndexRefreshPreview:
+      type: object
+      required: [delta_pct, affected_quote_count, affected_customer_count, estimated_exposure_dollars, top_customers]
+      properties:
+        delta_pct: {type: number}
+        affected_quote_count: {type: integer}
+        affected_customer_count: {type: integer}
+        estimated_exposure_dollars: {type: number}
+        top_customers:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/MarketIndexRefreshTopCustomer"

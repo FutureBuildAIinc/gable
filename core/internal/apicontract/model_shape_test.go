@@ -10,18 +10,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/integrations"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/portal"
+	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/project"
+	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/routecensus"
+	"github.com/gablelbm/gable/internal/tax"
 	"gopkg.in/yaml.v3"
 )
 
@@ -103,6 +111,59 @@ var modelBoundSchemas = []struct {
 	{"ProjectItem", project.ProjectItem{}},
 	// partner (R1-7c)
 	{"PartnerDashboard", partner.DashboardDTO{}},
+	// finance (R1-7e)
+	{"PricingCalculatedPrice", pricing.CalculatedPrice{}},
+	{"PricingRule", pricing.PricingRule{}},
+	{"PricingEscalationResult", pricing.EscalationResult{}},
+	{"PricingProductCategory", pricing.ProductCategory{}},
+	{"PricingCategoryRule", pricing.CategoryPricingRule{}},
+	{"PricingCategoryRulePage", pricing.PaginatedRulesResponse{}},
+	{"PricingCategoryRuleAudit", pricing.CategoryPricingAudit{}},
+	{"PricingMatrixCell", pricing.MatrixCell{}},
+	{"PricingMatrix", pricing.MatrixResponse{}},
+	{"PricingResolvedCategoryPrice", pricing.ResolvedCategoryPrice{}},
+	{"PricingRebateTier", pricing.RebateTier{}},
+	{"PricingRebateProgram", pricing.RebateProgram{}},
+	{"PricingRebateClaim", pricing.RebateClaim{}},
+	{"MarketIndex", pricing.MarketIndex{}},
+	{"MarketIndexHistory", pricing.MarketIndexHistory{}},
+	{"MarketIndexRefreshPreview", pricing.IndexRefreshPreview{}},
+	{"MarketIndexRefreshTopCustomer", pricing.IndexRefreshTopCustomer{}},
+	{"PurchaseOrder", purchase_order.PurchaseOrder{}},
+	{"PurchaseOrderLine", purchase_order.PurchaseOrderLine{}},
+	{"PurchaseOrderFreightCharge", purchase_order.FreightCharge{}},
+	{"PurchaseOrderFreightAllocation", purchase_order.FreightAllocation{}},
+	{"PurchaseOrderFreightUploadResponse", purchase_order.FreightUploadResponse{}},
+	{"PurchaseOrderReorderRun", purchase_order.ReorderRun{}},
+	{"PurchaseOrderRecommendation", purchase_order.PurchaseRecommendation{}},
+	{"PurchaseOrderRecommendationSummary", purchase_order.RecommendationSummary{}},
+	{"PurchaseOrderReorderTargetProposal", purchase_order.ReorderTargetProposal{}},
+	{"PurchaseOrderRefreshResult", purchase_order.RefreshResult{}},
+	{"EdiTradingPartner", edi.TradingPartner{}},
+	{"EdiCatalogEntry", edi.CatalogEntry{}},
+	{"MatchingResult", matching.MatchResult{}},
+	{"MatchingLineDetail", matching.MatchLineDetail{}},
+	{"MatchingConfig", matching.MatchConfig{}},
+	{"MatchingException", matching.MatchException{}},
+	{"TaxExemption", tax.TaxExemption{}},
+	{"TaxLine", tax.TaxLine{}},
+	{"TaxResult", tax.TaxResult{}},
+	{"GlAccount", gl.GLAccount{}},
+	{"GlJournalEntry", gl.JournalEntry{}},
+	{"GlJournalLine", gl.JournalLine{}},
+	{"GlFiscalPeriod", gl.FiscalPeriod{}},
+	{"GlTrialBalanceRow", gl.TrialBalanceRow{}},
+	{"GlAccountLineItem", gl.AccountLineItem{}},
+	{"GlProfitAndLossReport", gl.ProfitAndLossReport{}},
+	{"GlBalanceSheetReport", gl.BalanceSheetReport{}},
+	{"ApVendorInvoice", ap.VendorInvoice{}},
+	{"ApVendorInvoiceLine", ap.VendorInvoiceLine{}},
+	{"ApPayment", ap.APPayment{}},
+	{"ApAgingSummary", ap.APAgingSummary{}},
+	{"BankreconBankAccount", bankrecon.BankAccount{}},
+	{"BankreconTransaction", bankrecon.BankTransaction{}},
+	{"BankreconSession", bankrecon.ReconciliationSession{}},
+	{"BankreconImportResult", bankrecon.ImportResult{}},
 }
 
 // TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md
