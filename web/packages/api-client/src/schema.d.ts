@@ -4903,7 +4903,7 @@ export interface paths {
         put?: never;
         /**
          * Create a quote
-         * @description Creates a draft quote, priced by the platform rule: each line's extension is rounded once to cents. A line carries its unit of measure, or names a product whose own unit it takes (a line with neither is a 400 naming lines[i].uom); every field problem is collected into one 400. Mints the document number and writes quote.created in the same transaction.
+         * @description Creates a draft quote, priced by the platform rule: each line's extension is rounded once to cents. A line carries its unit of measure, or names a product whose own unit it takes (a line with neither is a 400 naming lines[i].uom); every field problem is collected into one 400. A body branch_id must be a branch the caller may target: when the request's branch context names a branch it must equal it, and with no context branch it must be within the caller's branch grants, else 403 forbidden naming branch_id. Mints the document number and writes quote.created in the same transaction.
          */
         post: operations["quoteCreate"];
         delete?: never;
