@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 // Page limits (ADR 0001 §2): the default page size, and the bound a client
@@ -201,10 +200,10 @@ func ParseListQuery(r *http.Request, scope string) (CursorPage, error) {
 			return CursorPage{}, BadRequest("limit parameter is repeated",
 				FieldError{Field: "limit", Message: "parameter is repeated"})
 		}
-		n, err := strconv.Atoi(strings.TrimSpace(vals[0]))
-		if err != nil {
-			return CursorPage{}, BadRequest("limit is not an integer",
-				FieldError{Field: "limit", Message: "is not an integer"})
+		n, ok := parseLimitParam(vals[0])
+		if !ok {
+			return CursorPage{}, BadRequest("limit is not a plain integer",
+				FieldError{Field: "limit", Message: "must be plain digits with no sign, space, or leading zero"})
 		}
 		if n < 1 || n > MaxPageLimit {
 			return CursorPage{}, &Error{Status: http.StatusBadRequest, Code: CodeValidationFailed,
@@ -216,4 +215,29 @@ func ParseListQuery(r *http.Request, scope string) (CursorPage, error) {
 	}
 
 	return page, nil
+}
+
+// parseLimitParam accepts a plain run of ASCII digits and nothing else: no
+// sign, no whitespace, no exponent, no leading zero ("0" alone parses and is
+// then refused by the range check). Nothing here leans on strconv's
+// leniency, and a digit run too long to hold an int still comes back as a
+// number past the range bound rather than an error class of its own.
+func parseLimitParam(s string) (int, bool) {
+	if s == "" || (len(s) > 1 && s[0] == '0') {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		d := s[i]
+		if d < '0' || d > '9' {
+			return 0, false
+		}
+		if n > 100_000_000 {
+			// Past any valid limit already; stop before the int overflows
+			// and let the range check refuse it.
+			return 1 << 30, true
+		}
+		n = n*10 + int(d-'0')
+	}
+	return n, true
 }
