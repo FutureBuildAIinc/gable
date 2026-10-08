@@ -6,8 +6,9 @@
 # next_cursor, limit} (total only under include=total) with ONE exception, the
 # feed's next_cursor is always a string (ADR 0003 section 5), the snake_case
 # event envelope, and the lowercase error envelope (WireError in _shared). The
-# 401 and 403 are the auth middleware's and the role guard's, which keep the
-# legacy Error envelope until R1-11 converts them.
+# 401 and 403 are the auth middleware's and the role guard's; they answer the
+# same lowercase envelope on every route, so the shared Unauthorized and
+# Forbidden responses are WireError.
 paths:
   /api/v1/events:
     get:

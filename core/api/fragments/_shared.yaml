@@ -86,17 +86,34 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     Unauthorized:
-      description: No or invalid credentials.
+      description: >-
+        No or invalid credentials. The auth layer (pkg/middleware respondAuthError)
+        answers every route with the ADR 0001 error envelope, code unauthorized.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: "#/components/schemas/WireError"
+    HandlerUnauthorized:
+      description: >-
+        No or invalid credentials on a route whose handler also checks the
+        claims itself. The auth layer answers with the ADR 0001 envelope; a
+        handler reached without claims (AUTH_MODE=dev mounts no auth layer)
+        answers with the legacy Error envelope.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/WireError"
+              - $ref: "#/components/schemas/Error"
     Forbidden:
-      description: The caller's roles do not include one the route requires.
+      description: >-
+        The caller's roles, or a machine key's scopes, do not include one the
+        route requires. The role guard and the machine key check answer every
+        route with the ADR 0001 error envelope, code forbidden.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: "#/components/schemas/WireError"
     NotFound:
       description: The addressed resource does not exist.
       content:

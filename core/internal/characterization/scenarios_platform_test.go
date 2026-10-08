@@ -330,6 +330,21 @@ func eventsGroups() []groupDef {
 			{name: "events.list.empty", method: "GET", path: "/api/v1/events?types=nothing.matches.this"},
 			{name: "events.list.bad_param", method: "GET", path: "/api/v1/events?status=sent"},
 			{name: "events.list.bad_cursor", method: "GET", path: "/api/v1/events?cursor=not-a-cursor"},
+			// A machine key holding no events scope: the auth layer refuses it
+			// with the lowercase wire envelope (the 403 every route shares).
+			{
+				name:    "events.key.create",
+				method:  "POST",
+				path:    "/api/v1/admin/keys",
+				body:    map[string]any{"name": "golden-events-denied", "scopes": []any{"quotes:read"}},
+				extract: map[string]string{"eventsKey": "/api_key"},
+			},
+			{
+				name:    "events.list.forbidden",
+				method:  "GET",
+				path:    "/api/v1/events",
+				headers: map[string]string{"Authorization": "Bearer {eventsKey}"},
+			},
 		},
 	}}
 }

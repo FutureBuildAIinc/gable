@@ -8625,22 +8625,31 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description No or invalid credentials. */
+        /** @description No or invalid credentials. The auth layer (pkg/middleware respondAuthError) answers every route with the ADR 0001 error envelope, code unauthorized. */
         Unauthorized: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["WireError"];
             };
         };
-        /** @description The caller's roles do not include one the route requires. */
+        /** @description No or invalid credentials on a route whose handler also checks the claims itself. The auth layer answers with the ADR 0001 envelope; a handler reached without claims (AUTH_MODE=dev mounts no auth layer) answers with the legacy Error envelope. */
+        HandlerUnauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"] | components["schemas"]["Error"];
+            };
+        };
+        /** @description The caller's roles, or a machine key's scopes, do not include one the route requires. The role guard and the machine key check answer every route with the ADR 0001 error envelope, code forbidden. */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["WireError"];
             };
         };
         /** @description The addressed resource does not exist. */
@@ -12934,7 +12943,7 @@ export interface operations {
                     "application/json": components["schemas"]["PartnerDashboard"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["HandlerUnauthorized"];
             /** @description The caller's email resolves to no customer, or to an inactive one; the standard error envelope. */
             403: {
                 headers: {
@@ -12965,7 +12974,7 @@ export interface operations {
                     "application/json": components["schemas"]["Quote"][] | null;
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["HandlerUnauthorized"];
             /** @description The caller's email resolves to no customer, or to an inactive one; the standard error envelope. */
             403: {
                 headers: {
@@ -12999,7 +13008,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["HandlerUnauthorized"];
             /** @description The caller's email resolves to no customer, or to an inactive one; the standard error envelope. */
             403: {
                 headers: {
