@@ -8,7 +8,7 @@ import { appRoutes } from './apps/registry.ts';
  * Route table — order matters: more-specific paths must come before less-specific ones.
  *
  * Converted apps (docs/modularization-blueprint.md) declare their routes in
- * app/src/apps/<key>.ts instead of here — they're spread in via appRoutes().
+ * web/apps/desk/src/apps/<key>.ts instead of here — they're spread in via appRoutes().
  */
 export const routes: RouteConfig[] = [
   // ── POS (no layout) ─────────────────────────────────────────────

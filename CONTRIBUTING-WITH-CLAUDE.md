@@ -85,7 +85,7 @@ You don't know Go. You don't know what a pull request is. That's fine.
 
 - Check first whether this is a **security** problem (it isn't — but if it were, it would stop
   and send you to [`SECURITY.md`](./SECURITY.md) instead of a public issue).
-- Find the actual screen in the code by searching `app/src/routes.ts`.
+- Find the actual screen in the code by searching `web/apps/desk/src/routes.ts`.
 - Notice your numbers are off by exactly 100× and check for the known money-formatting bug —
   ERP money comes from the API in **cents** and has to be rendered with `formatCents()`, so a
   page using `.toFixed(2)` directly renders `$738.87` as `$73,887.00`.
@@ -123,7 +123,7 @@ exactly how it verified the fix.
 (rather than trusting a stale one), recommends by value — invoice tax resolution and
 rounding, `account.PostTransaction` as the single AR writer, the portal/ERP dollars-vs-cents
 boundary — reads the source, copies the idiom from a module that already tests well
-(`backend/internal/tax/service_test.go`), writes a table-driven test that needs no Postgres,
+(`core/internal/tax/service_test.go`), writes a table-driven test that needs no Postgres,
 runs it with `-race` the way CI does, and **proves it can fail** by breaking the code once.
 
 Then it applies the house rules: no tautological tests; a characterization test is labelled as
@@ -152,9 +152,9 @@ lives:
 
 | Directory | Header |
 |---|---|
-| `backend/internal/`, `backend/pkg/`, `backend/cmd/`, `backend/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` |
-| `backend/pkg/apps/` *(the connector seam — most specific path wins)* | `LicenseRef-OpenLBM-Connector-1.0` |
-| `app/` | `LicenseRef-OpenLBM-Surface-1.0` |
+| `core/internal/`, `core/pkg/`, `core/cmd/`, `core/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` |
+| `core/pkg/apps/` *(the connector seam — most specific path wins)* | `LicenseRef-OpenLBM-Connector-1.0` |
+| `web/apps/desk/` | `LicenseRef-OpenLBM-Surface-1.0` |
 | `docs/`, `.claude/` | `LicenseRef-OpenLBM-Docs-1.0` |
 
 Full map: [`LICENSE-MAP.md`](./LICENSE-MAP.md). Ask with `/license-of <path>` if unsure.

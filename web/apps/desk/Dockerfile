@@ -9,11 +9,11 @@ ARG VITE_DEMO_MODE
 ENV VITE_DEMO_MODE=$VITE_DEMO_MODE
 
 # Copy package files
-COPY app/package*.json ./
+COPY web/apps/desk/package*.json ./
 RUN npm ci
 
 # Copy source code
-COPY app/ .
+COPY web/apps/desk/ .
 
 # Build the application
 RUN npm run build
@@ -29,7 +29,7 @@ RUN apk --no-cache add curl
 RUN rm /etc/nginx/conf.d/default.conf
 
 # Copy nginx config template
-COPY app/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY web/apps/desk/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html

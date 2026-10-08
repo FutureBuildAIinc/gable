@@ -3,9 +3,9 @@
 
 -- Rollback for 081_price_protection.sql
 --
--- This directory is OUTSIDE the migrator's glob (backend/cmd/migrate reads
+-- This directory is OUTSIDE the migrator's glob (core/cmd/migrate reads
 -- migrations/*.sql only). Apply by hand:
---   psql "$DATABASE_URL" -f backend/migrations/down/081_price_protection_down.sql
+--   psql "$DATABASE_URL" -f core/migrations/down/081_price_protection_down.sql
 --   DELETE FROM schema_migrations WHERE version = '081_price_protection.sql';
 --
 -- DESTRUCTIVE. Dropping quote_exposure_events discards the append-only

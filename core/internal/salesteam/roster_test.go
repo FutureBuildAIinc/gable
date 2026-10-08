@@ -94,7 +94,7 @@ func TestHandleList_ServesTheRepositoryRoster(t *testing.T) {
 }
 
 // CORRECTNESS: an empty roster is an empty JSON array. A `null` body is not the
-// same value: app/src/services/SalesTeamService.ts declares this endpoint as
+// same value: web/apps/desk/src/services/SalesTeamService.ts declares this endpoint as
 // Promise<SalesPerson[]> and AccountDetailPage.ts:98-99 assigns the result
 // straight into a SalesPerson[] field it later reads .length and .map on, so
 // null is a TypeError in the browser rather than an empty dropdown.

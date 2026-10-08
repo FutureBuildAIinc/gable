@@ -8,7 +8,7 @@ export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
 }
 
-// Money values from the ERP API are int64 cents (see backend/internal/order/model.go
+// Money values from the ERP API are int64 cents (see core/internal/order/model.go
 // and the "Money: stored in cents (integer) in application code" convention in
 // CLAUDE.md). Use this helper everywhere on the ERP side that renders an amount
 // to dollars. Returns a string with a leading "$" and 2 decimals (e.g. 738807 -> "$7,388.07").

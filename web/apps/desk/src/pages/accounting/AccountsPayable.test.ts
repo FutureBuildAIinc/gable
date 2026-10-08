@@ -8,7 +8,7 @@
  * sides of it:
  *
  *   read  — every amount from /api/v1/ap/* is int64 CENTS
- *           (backend/internal/ap/model.go), rendered with the shared
+ *           (core/internal/ap/model.go), rendered with the shared
  *           `formatCents()`.
  *   write — POST /api/v1/ap/invoices and /api/v1/ap/payments take float64
  *           DOLLARS (ap/model.go:100,109,116), which the service multiplies

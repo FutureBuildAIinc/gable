@@ -5,7 +5,7 @@
 --
 -- Note: the migration runner executes each file's contents in a single
 -- transaction without splitting on `-- Up` / `-- Down` markers (see
--- backend/cmd/migrate/main.go). The original version of this file ended
+-- core/cmd/migrate/main.go). The original version of this file ended
 -- with a "-- Down" rollback section that ran immediately after the Up,
 -- silently dropping every table/column it had just created. The Down
 -- statements have been removed; migration 070 re-applies any artifacts

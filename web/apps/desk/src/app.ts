@@ -96,7 +96,7 @@ export class GableApp extends LitElement {
   }
 
   private _pathToTag(path: string): string {
-    // Converted apps declare path→tag in their manifests (app/src/apps/) —
+    // Converted apps declare path→tag in their manifests (web/apps/desk/src/apps/) —
     // one source of truth. The map below shrinks as modules convert.
     const appTag = appTagForPath(path);
     if (appTag) return appTag;

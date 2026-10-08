@@ -52,7 +52,7 @@ func TestCreateProject_RequiresAName(t *testing.T) {
 // so a whitespace-only name passes validation and reaches persistence. In the
 // portal's job picker it renders as a blank, unselectable row.
 //
-// backend/internal/project/service.go:26 —
+// core/internal/project/service.go:26 —
 //
 //	if req.Name == "" {
 func TestCreateProject_WhitespaceNameIsNotRejected(t *testing.T) {

@@ -3,7 +3,7 @@
 
 /**
  * Lumber Index-Aware Quote Price Protection — frontend types.
- * Mirrors backend/internal/pricing/exposure_model.go and the JSON shapes
+ * Mirrors core/internal/pricing/exposure_model.go and the JSON shapes
  * returned by the exposure + index-admin handlers.
  */
 

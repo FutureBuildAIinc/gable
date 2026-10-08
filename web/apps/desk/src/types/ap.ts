@@ -3,7 +3,7 @@
 
 // Accounts Payable types.
 //
-// Read paths return int64 cents (see backend/internal/ap/model.go); write
+// Read paths return int64 cents (see core/internal/ap/model.go); write
 // paths take float64 DOLLARS, which the service converts on the way in
 // (ap/service.go:53,56,81,167). The asymmetry is deliberate and load-bearing
 // — the comments below mark which side each field is on.

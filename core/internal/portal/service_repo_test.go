@@ -670,7 +670,7 @@ func TestGetCart_ReturnsTheExistingCart(t *testing.T) {
 // as "your cart is empty", and Checkout then refuses with "cart is empty"
 // rather than surfacing the fault.
 //
-// backend/internal/portal/cart.go:17-31 —
+// core/internal/portal/cart.go:17-31 —
 //
 //	cart, err := s.repo.GetCartByCustomer(ctx, customerID)
 //	if err != nil { /* create a new one */ }

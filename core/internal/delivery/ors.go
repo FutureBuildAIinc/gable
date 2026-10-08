@@ -54,7 +54,7 @@ type RouteLeg struct {
 }
 
 // RouteOptimizationResult holds the optimized stop ordering and per-leg ETAs.
-// The JSON shape is mirrored by app/src/types/notification.ts and must stay
+// The JSON shape is mirrored by web/apps/desk/src/types/notification.ts and must stay
 // stable across the Google→OpenRouteService migration.
 type RouteOptimizationResult struct {
 	OptimizedOrder    []int      `json:"optimized_order"` // Reordered waypoint indices (into the input stops slice)

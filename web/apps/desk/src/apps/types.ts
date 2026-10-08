@@ -6,7 +6,7 @@
  * See docs/modularization-blueprint.md §4.
  *
  * A converted app declares its routes and nav entries in ONE place
- * (app/src/apps/<key>.ts). The registry feeds them into the route table,
+ * (web/apps/desk/src/apps/<key>.ts). The registry feeds them into the route table,
  * the path→tag resolution in app.ts, and the generated sidebar items —
  * retiring the old triple bookkeeping (routes.ts + _pathToTag + hardcoded
  * nav arrays) app by app.

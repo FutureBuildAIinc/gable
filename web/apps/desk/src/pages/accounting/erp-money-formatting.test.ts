@@ -5,7 +5,7 @@
  * ERP money rendering outside `formatCents()`.
  *
  * CLAUDE.md is unambiguous: "When rendering money on **ERP pages**, use
- * `formatCents()` from `app/src/lib/utils.ts`". Five pages used not to — each
+ * `formatCents()` from `web/apps/desk/src/lib/utils.ts`". Five pages used not to — each
  * carried its own private `_formatCents`, and no two of the five agreed:
  *
  *   accounting/TrialBalance.ts          `--` at zero, then toLocaleString('en-US', {min:2})
@@ -116,7 +116,7 @@ describe('trial balance', () => {
     expect(text(el)).not.toContain('Diff:')
   })
 
-  // Regression (app/src/pages/accounting/TrialBalance.ts): the private formatter
+  // Regression (web/apps/desk/src/pages/accounting/TrialBalance.ts): the private formatter
   // short-circuited `cents === 0` to "--" *inside* the helper, not at the call
   // site. The table cells already guard with `row.debit > 0 ? … : '--'`, so the
   // only place that branch actually fired was the three summary cards at the top
@@ -274,7 +274,7 @@ describe('bank reconciliation', () => {
     expect(diff.every((a) => !a.endsWith('DR'))).toBe(true)
   })
 
-  // Regression (app/src/pages/accounting/BankReconciliation.ts): the private
+  // Regression (web/apps/desk/src/pages/accounting/BankReconciliation.ts): the private
   // helper used `.toFixed(2)` with no locale formatting, so a bank balance
   // rendered "$12345.67" with no thousands separator — on the one screen whose
   // entire job is comparing two large numbers digit by digit. CLAUDE.md says ERP
@@ -331,7 +331,7 @@ describe('PO matching', () => {
     return calls
   }
 
-  // Regression (app/src/pages/accounting/POMatching.ts): the change handler used
+  // Regression (web/apps/desk/src/pages/accounting/POMatching.ts): the change handler used
   // to send `Math.round(dollars * 100)` — cents — but the endpoint takes DOLLARS.
   // `matching/model.go` declares `DollarTolerance *float64 // dollars, converted
   // to cents` on `UpdateMatchConfigRequest`, and `matching/service.go` applies it

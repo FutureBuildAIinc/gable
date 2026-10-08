@@ -20,7 +20,7 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS salesperson_id UUID REFERENCES sales
 -- Seed demo salespeople (BC/Okanagan personas matching the Gable Lumber & Supply demo brand).
 -- Existing demo DBs that already applied this migration with the prior Portland-era
 -- names are corrected at runtime by the seed's ON CONFLICT (id) DO UPDATE clause
--- in backend/cmd/seed/main.go; fresh installs get the corrected values directly here.
+-- in core/cmd/seed/main.go; fresh installs get the corrected values directly here.
 INSERT INTO sales_team (id, name, email, phone, role) VALUES
     ('a1b2c3d4-0001-4000-8000-000000000001', 'Heather Macdonald', 'heather.m@gablelumber.ca', '250-555-5001', 'Sales Manager'),
     ('a1b2c3d4-0002-4000-8000-000000000002', 'Ethan Gagnon', 'ethan.g@gablelumber.ca', '250-555-5002', 'Sales Rep'),

@@ -85,7 +85,7 @@ func resetTransactionalData(db *sql.DB) {
 		"rebate_programs", "rebate_tiers", "rebate_claims",
 		"saved_reports", "edi_trading_partners",
 	}
-	// Every name above is created by a migration in backend/migrations/. The
+	// Every name above is created by a migration in core/migrations/. The
 	// existence filter is defensive, not a workaround for a missing table: a
 	// single TRUNCATE fails atomically on the first name Postgres cannot
 	// resolve, so this keeps the reset working against a partially-migrated
@@ -1196,7 +1196,7 @@ func main() {
 	// 21. PORTAL USERS
 	//    The demo portal account is `demo@kelbrook.ca` (Sam Kelbrook), linked
 	//    to Kelbrook Construction — the persona referenced by the portal
-	//    dev-mode injection in backend/cmd/server/main.go.
+	//    dev-mode injection in core/cmd/server/main.go.
 	// =========================================================================
 	pwHash, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
 	portalUsers := []struct {

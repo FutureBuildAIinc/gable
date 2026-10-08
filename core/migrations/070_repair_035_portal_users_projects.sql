@@ -3,7 +3,7 @@
 
 -- Migration 035 originally contained a `-- Down` rollback section that the
 -- file-based migration runner executed alongside the Up section in the same
--- transaction (see backend/cmd/migrate/main.go), silently dropping every
+-- transaction (see core/cmd/migrate/main.go), silently dropping every
 -- artifact 035 had just created. Deployments that already ran the buggy 035
 -- have it marked as applied in `schema_migrations` and won't re-execute the
 -- fixed file. This migration idempotently re-applies the intended Up

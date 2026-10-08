@@ -66,24 +66,24 @@ a separate section clearly marked as a guess.
 ## 2 · Find the screen in the code (so the maintainer doesn't have to)
 
 Map the human description to a real path. The route table is
-[`app/src/routes.ts`](../../../app/src/routes.ts) — grep it for the URL they were on:
+[`web/apps/desk/src/routes.ts`](../../../web/apps/desk/src/routes.ts) — grep it for the URL they were on:
 
 ```bash
-grep -n "delivery" app/src/routes.ts
+grep -n "delivery" web/apps/desk/src/routes.ts
 ```
 
 The surface trees are:
 
 | They said | URL prefix | Lives under |
 |---|---|---|
-| "the ERP", "the main app", the desktop screens | `/erp/*` | `app/src/pages/` |
-| "the customer portal", "the contractor site" | `/portal/*` | `app/src/pages/portal/` |
-| "the driver app", "on my phone in the truck" | `/driver/*` | `app/src/pages/driver/` |
-| "the yard", "the warehouse scanner" | `/yard/*` | `app/src/pages/yard/` |
-| "the till", "the front counter", "POS" | `/pos` | `app/src/pages/pos/` |
+| "the ERP", "the main app", the desktop screens | `/erp/*` | `web/apps/desk/src/pages/` |
+| "the customer portal", "the contractor site" | `/portal/*` | `web/apps/desk/src/pages/portal/` |
+| "the driver app", "on my phone in the truck" | `/driver/*` | `web/apps/desk/src/pages/driver/` |
+| "the yard", "the warehouse scanner" | `/yard/*` | `web/apps/desk/src/pages/yard/` |
+| "the till", "the front counter", "POS" | `/pos` | `web/apps/desk/src/pages/pos/` |
 
 If the problem is in data rather than display, the backend module is under
-`backend/internal/<module>/` — there are 41 of them. `ls backend/internal/` and pick the
+`core/internal/<module>/` — there are 41 of them. `ls core/internal/` and pick the
 obvious one (`order`, `invoice`, `delivery`, `inventory`, `pricing`, `payment`, `pos`…).
 
 Record the **directory**, not just a guess: the issue template asks for it, and Gable is
@@ -106,15 +106,15 @@ page runs a cents helper over dollars.
 Check the page:
 
 ```bash
-grep -n "toFixed\|formatCents" app/src/pages/<the-page>.ts
+grep -n "toFixed\|formatCents" web/apps/desk/src/pages/<the-page>.ts
 ```
 
 - ERP pages (`/erp/*`, `/pos`, `/yard/*`, `/driver/*`) **must** use `formatCents()` from
-  [`app/src/lib/utils.ts`](../../../app/src/lib/utils.ts).
+  [`web/apps/desk/src/lib/utils.ts`](../../../web/apps/desk/src/lib/utils.ts).
 - Portal pages (`/portal/*`) already receive dollars and must **not** use `formatCents()`.
 
 If the wrong total is off by exactly 100×, you have found the bug and can say so precisely:
-*"`app/src/pages/X.ts:NN` renders an ERP cents field with `.toFixed(2)` instead of
+*"`web/apps/desk/src/pages/X.ts:NN` renders an ERP cents field with `.toFixed(2)` instead of
 `formatCents()`."* That is a one-line fix and a maintainer will love you.
 
 Also possible without being a display bug: money conventions genuinely differ per module
@@ -123,7 +123,7 @@ float dollars). `CLAUDE.md` § "Money convention is not uniform across modules" 
 
 ### b. Demo data vanished / numbers reset
 
-`backend/cmd/seed/main.go` **truncates all transactional data** (orders, invoices, quotes,
+`core/cmd/seed/main.go` **truncates all transactional data** (orders, invoices, quotes,
 deliveries, payments, GL entries, POs, POS/CRM rows) at the start of every run, and the seed
 runs on every demo/staging deploy. Orders you created on demo yesterday are *supposed* to be
 gone today. Reference data (customers, products, vendors, locations) is upserted and survives.
@@ -177,8 +177,8 @@ If they are on a laptop with the repo, reproduce it locally so the report is gro
 make up                                    # Postgres on :5434
 make migrate
 DEMO_SEED=1 make seed                      # demo dataset (gate is required)
-cd backend && go run ./cmd/server          # API on :8080
-cd app && npm install && npm run dev       # SPA on :5173
+cd core && go run ./cmd/server          # API on :8080
+cd web/apps/desk && npm install && npm run dev       # SPA on :5173
 ```
 
 Then open <http://localhost:5173> and walk their steps.
@@ -227,7 +227,7 @@ Rules for the body:
 
 - **Title**: what is wrong and where, in one line. `[Bug] ` prefix (the template sets it).
   Not "delivery broken" — "[Bug] Delivery detail renders order total 100× too high".
-- **Affected area**: the real directory (`app/src/pages/...`, `backend/internal/delivery`).
+- **Affected area**: the real directory (`web/apps/desk/src/pages/...`, `core/internal/delivery`).
 - **Steps to reproduce**: numbered, starting from a fresh `DEMO_SEED=1 make seed`, with the specific
   record they used ("open order `SO-1042` from the seeded Gable Lumber & Supply data").
 - **Expected vs actual**: exact numbers and exact error text.

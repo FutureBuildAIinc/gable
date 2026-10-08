@@ -510,7 +510,7 @@ func TestOptimizeRoute_GeocodeDedupWithinRun(t *testing.T) {
 }
 
 // TestRouteOptimizationResultJSONContract pins the wire shape the TS mirror
-// (app/src/types/notification.ts) depends on. Renaming a json tag breaks the
+// (web/apps/desk/src/types/notification.ts) depends on. Renaming a json tag breaks the
 // frontend silently; this fails loudly instead.
 func TestRouteOptimizationResultJSONContract(t *testing.T) {
 	r := RouteOptimizationResult{

@@ -95,7 +95,7 @@ type Scheduler struct {
 // every stored row, the frontend presets, the API validator and the published
 // cronDialectDescription already use. It is documented at every place a user
 // types one: ValidateCronExpression's error, ScheduleExecution.CronDialect on
-// the read path, and the hint under the cron input in app/src/pages/reports.
+// the read path, and the hint under the cron input in web/apps/desk/src/pages/reports.
 var cronDialect = cron.NewParser(
 	cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )

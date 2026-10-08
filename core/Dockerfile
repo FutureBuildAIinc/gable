@@ -4,11 +4,11 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /app
 
 # Copy go mod and sum files
-COPY backend/go.mod backend/go.sum ./
+COPY core/go.mod core/go.sum ./
 RUN go mod download
 
 # Copy the source code
-COPY backend/ .
+COPY core/ .
 
 # Build the application binaries. `main` is the API server (CMD), and
 # `migrate` / `seed` are bundled so DO App Platform post-deploy jobs can

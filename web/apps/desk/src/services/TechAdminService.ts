@@ -219,7 +219,7 @@ export const techAdminService = {
      * Readiness probe. Deliberately NOT under /api: the backend serves
      * /healthz/ready at the root and the deploy spec (.do/app-*.yaml) routes
      * /healthz to the backend with preserve_path_prefix, so it is same-origin
-     * in a real deployment; app/vite.config.ts forwards it in dev.
+     * in a real deployment; web/apps/desk/vite.config.ts forwards it in dev.
      *
      * A 503 is a health *report* ("degraded"), not a transport failure, so the
      * body is parsed on any status that carries JSON. Plain `fetch` rather than

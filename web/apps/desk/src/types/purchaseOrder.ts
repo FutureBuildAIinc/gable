@@ -4,7 +4,7 @@
 export type POStatus = 'DRAFT' | 'SENT' | 'PARTIAL' | 'RECEIVED' | 'CANCELLED';
 
 // POSource — must stay in sync with the CHECK constraint in
-// backend/migrations/055_po_source.sql.
+// core/migrations/055_po_source.sql.
 export type POSource = 'MANUAL' | 'REORDER' | 'SPECIAL_ORDER' | 'A2A';
 
 export interface PurchaseOrder {

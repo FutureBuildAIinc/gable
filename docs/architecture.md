@@ -5,7 +5,7 @@
 > [`modularization-blueprint.md`](./modularization-blueprint.md).
 
 ## 1. System Principles
-- **Modular Monolith:** Single deployment binary; ~40 modules under `backend/internal/`, wired in `backend/cmd/server/main.go`.
+- **Modular Monolith:** Single deployment binary; ~40 modules under `core/internal/`, wired in `core/cmd/server/main.go`.
 - **Zero-Trust Modules:** Modules never access another module's database tables directly — cross-module needs go through the other module's service or repository types.
 - **Synchronous Interop:** Every inter-module *write* is a synchronous Go call. The one asynchronous path is notification side-effects for price exposure, fanned out over the in-process `pkg/eventbus` (§4.2). There is no message broker and no NATS client in the codebase.
 - **Interface Seams Where They Earn Their Keep:** Most coupling is concrete `*Service` injection; consumer-defined interfaces + adapters in `main.go` exist where cycles had to be broken (`quote.AutoPOService`, `delivery.InvoiceServiceInterface`, `pos.PriceCalculator`, `gl` → `integrations.GLAdapter`).
@@ -16,7 +16,7 @@
 - **Database:** PostgreSQL 16+ via pgx v5.
     - Extensions in use: `uuid-ossp` (migration 001), `ltree` (migration 049). (`pgvector`/`postgis` are not installed; adopt only when a feature needs them.)
 - **Frontend:**
-    - **Core:** Lit 3 Web Components + TypeScript 5.9 + Vite 7 — **not** React. Custom SPA router (`app/src/lib/router.ts`).
+    - **Core:** Lit 3 Web Components + TypeScript 5.9 + Vite 7 — **not** React. Custom SPA router (`web/apps/desk/src/lib/router.ts`).
     - **Styling:** Tailwind CSS 3.4 + custom design tokens (no Shadcn).
     - **Charts:** Chart.js 4. **Maps:** Leaflet.
     - **Components:** Light DOM (`createRenderRoot() { return this; }`) so Tailwind classes apply directly.
@@ -42,7 +42,7 @@ job.
 
 ## 3. Module Boundaries (as built)
 
-Actual packages under `backend/internal/` (the older draft of this document
+Actual packages under `core/internal/` (the older draft of this document
 described an idealized `sales`/`finance`/`logistics` grouping that never
 existed as packages). Grouped by domain:
 
@@ -58,7 +58,7 @@ existed as packages). Grouped by domain:
 | External surfaces | `portal`, `partner`, `project`, `integrations` | B2B portal, co-op partner API, portal projects, service-to-service integration |
 | Platform (not apps) | `config`, `ai`, `domain`, `notification`, `techadmin`, `governance` | Env config, OpenRouter AI client + KeyStore, shared types, email/SMS stubs, admin settings, RFC governance |
 
-Platform primitives live in `backend/pkg/`: `apps` (app registry/gating),
+Platform primitives live in `core/pkg/`: `apps` (app registry/gating),
 `middleware` (auth/branch/cors/rate-limit/idempotency/…), `database`,
 `audit`, `metrics`, `httputil`, `pagination`, `branchctx`.
 
@@ -77,7 +77,7 @@ debit in one transaction (`order.FulfillOrder` → `invoice.PostInvoiceToLedger`
 → `gl.SyncInvoice` + `account.PostTransaction`).
 
 ### 4.2. Asynchronous events — one in-process bus, no broker
-`backend/pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam.
+`core/pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam.
 It is used by exactly one feature: the lumber price-exposure scanner publishes
 `quote.exposure.*` events, and `notification.ExposureNotifier` subscribes on
 `quote.exposure.>` to send salesperson and customer email. Subjects follow NATS
@@ -118,24 +118,24 @@ change behind `eventbus.Bus`: producers and consumers only see `Publisher`,
 - **Config:** Environment variables with `godotenv` fallback.
 
 ## 6. Frontend Architecture
-- **Routing:** custom singleton router (`app/src/lib/router.ts`) + flat route
-  table (`app/src/routes.ts`) with lazy `import()` per route. Surfaces:
+- **Routing:** custom singleton router (`web/apps/desk/src/lib/router.ts`) + flat route
+  table (`web/apps/desk/src/routes.ts`) with lazy `import()` per route. Surfaces:
     - `/erp/*` — ERP desktop (`<gable-app-shell>`) *(ERP pages actually mount at root paths like `/orders`, with `layout: 'erp'`)*
     - `/portal/*` — B2B dealer portal (`<gable-portal-layout>`)
     - `/driver/*` — Mobile driver app (`<gable-driver-layout>`)
     - `/yard/*` — Warehouse/yard app (`<gable-yard-layout>`)
     - `/pos` — Point of sale terminal (no layout)
-- **Apps:** converted apps declare routes + nav in `app/src/apps/<key>.ts`;
+- **Apps:** converted apps declare routes + nav in `web/apps/desk/src/apps/<key>.ts`;
   the app registry feeds the route table, tag resolution, and generated
   sidebar entries, filtered by enablement from `GET /api/v1/apps`.
-- **State:** component-local state + framework-agnostic singleton services (`app/src/services/`); HTTP via `services/fetchClient.ts` only.
+- **State:** component-local state + framework-agnostic singleton services (`web/apps/desk/src/services/`); HTTP via `services/fetchClient.ts` only.
 - **AI Keys:** Managed via Tech Admin UI → stored in `system_settings` → resolved dynamically by backend `ai.KeyStore`.
 
 ## 7. Partner & Governance (present state vs. vision)
 - **Built:** `internal/partner` exposes a read-only co-op partner API
   (`/api/partner/v1/dashboard|quotes`); `internal/governance` manages RFCs
   (`/api/v1/governance/rfcs`) with AI assistance (`governance/ai.go`);
-  governance UI pages exist under `app/src/pages/governance/`.
+  governance UI pages exist under `web/apps/desk/src/pages/governance/`.
 - **Planned (not built):** AI-mediated impact analysis of proposed changes,
   backlog orchestration, and a federated catalog sync layer for co-ops to
   push master SKU data to member dealer instances.
