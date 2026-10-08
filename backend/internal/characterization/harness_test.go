@@ -56,9 +56,11 @@ type harness struct {
 
 // goldensDBURL is the throwaway database this binary's harness runs against,
 // set up once by TestMain (empty when DATABASE_URL is unset and the suite
-// skips). A package-level handle is the one shape that survives a test
-// timeout: t.Cleanup never runs on the timeout panic path, TestMain's
-// teardown does.
+// skips). The handle is package-level because the drop must live in TestMain
+// regardless of which test owns the run: neither t.Cleanup nor TestMain's own
+// defer runs on the `go test -timeout` panic path (the panic fires on the
+// timer goroutine and takes the process down), so a timed-out run's database
+// is reclaimed by the next run's sweep, not by teardown.
 var (
 	goldensDBURL  string
 	goldensDBName string
@@ -76,7 +78,7 @@ func TestMain(m *testing.M) {
 	flag.Parse()
 
 	teardown := setupGoldensDatabase()
-	defer teardown() // runs when a timeout panic unwinds out of m.Run
+	defer teardown() // ordinary paths; a timeout panic skips it (see setupGoldensDatabase)
 
 	code := m.Run()
 	teardown() // os.Exit below skips defers, so call it on the normal path too
@@ -85,11 +87,21 @@ func TestMain(m *testing.M) {
 
 // setupGoldensDatabase creates this run's throwaway database and returns a
 // teardown that drops it. It first sweeps stale gv1_goldens_* databases left
-// behind by earlier runs whose cleanup never ran (a `go test -timeout` panic
-// skips t.Cleanup, which is where the drop used to live). A database is
-// treated as stale only when no backend is connected to it: a live harness
-// always holds its admin connection plus the server's pool, so a concurrent
-// run's database is never touched.
+// behind by earlier runs whose cleanup never ran: a `go test -timeout` panic
+// happens on the timer goroutine, so neither t.Cleanup nor this function's
+// own defer unwinds - the dropped-by-teardown path covers ordinary failures
+// only, and the timeout-panic path leaks its database until a later run's
+// sweep (or the operator) removes it.
+//
+// The sweep treats a database as stale only when no backend is connected to
+// it. The admin connection this function holds is to the caller's DATABASE_URL
+// database, not to any golden one, so that test protects exactly the live
+// harnesses whose migrate/seed/server pool is already attached; a fresh
+// database has no backend from its CREATE until the built binaries connect,
+// so a concurrent run whose sweep passes inside that window could in
+// principle drop it. That window is the go build that precedes the first
+// connection; overlapping runs have not hit it, and a dropped database fails
+// the affected run loudly rather than corrupting a golden.
 func setupGoldensDatabase() func() {
 	baseDBURL := os.Getenv("DATABASE_URL")
 	if baseDBURL == "" {
@@ -333,7 +345,14 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = serverProcAttr()
-	if err := cmd.Start(); err != nil {
+	// Pdeathsig is paired with the OS thread that calls Start: if the Go
+	// runtime retires that thread, the kernel delivers the signal to a living
+	// parent. Locking the thread around Start pins the pairing to a thread
+	// that stays alive for the rest of the process.
+	runtime.LockOSThread()
+	err = cmd.Start()
+	runtime.UnlockOSThread()
+	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
 	pgid := cmd.Process.Pid // Setpgid makes the pid the group leader's id

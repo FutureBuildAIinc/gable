@@ -17,14 +17,18 @@ run:
 1. **Own database, owned by TestMain.** It reads the Postgres server from
    `DATABASE_URL` and creates a fresh database on it with a random name
    (`gv1_goldens_<hex>`), dropped when the run ends. The create and drop live
-   in `TestMain`, not in `t.Cleanup`, because a `go test -timeout` panic skips
-   cleanups: TestMain's teardown runs on the normal path and when a timeout
-   panic unwinds the stack. At startup it first sweeps stale `gv1_goldens_*`
-   databases from earlier interrupted runs - but only those with no connected
-   backend, since a live harness always holds its admin connection plus the
-   server's pool, so a concurrent run's database is never touched. Other
-   packages' tests share the `DATABASE_URL` database; the harness never
-   touches it beyond `CREATE`/`DROP` of its own.
+   in `TestMain`, not in `t.Cleanup`: a `go test -timeout` panic fires on the
+   timer goroutine and skips both, so a timed-out run's database is reclaimed
+   by the next run's startup sweep (or by the operator) - teardown covers the
+   ordinary failure paths. The sweep drops stale `gv1_goldens_*` databases
+   only when no backend is connected to them, which protects a concurrent run
+   whose migrate/seed/server pool is already attached; the harness's admin
+   connection goes to the `DATABASE_URL` database, not to the golden one, so a
+   fresh database is unprotected from its `CREATE` until the built binaries
+   connect - a window bounded by the `go build` that precedes the first
+   connection, not observed to collide. Other packages' tests share the
+   `DATABASE_URL` database; the harness never touches it beyond
+   `CREATE`/`DROP` of its own.
 2. **Migrate and seed.** It builds `cmd/migrate`, `cmd/seed` and `cmd/server`
    from the working tree, migrates the fresh database, and seeds it with
    `DEMO_SEED=1`. The seed draws its demo data through Go's global `math/rand`
@@ -90,6 +94,12 @@ byte.
 Placeholders are numbered by walking the transcript (paths, request bodies,
 headers, response bodies) with map keys in sorted order, so the numbering is
 independent of Go's random map iteration.
+
+What `<ts+Nd>` does not detect: a change that keeps the same day offset - a
+wrong hour of day, or a UTC-offset shift that stays inside the same calendar
+day - is invisible, because the within-day time is deliberately free. Day
+arithmetic (net terms, window edges) is what the offset pins; time-of-day is
+not.
 
 Not normalised, because they are real behaviour: money, status strings, field
 names, null versus empty array, error codes and messages, content types
