@@ -65,7 +65,8 @@ services:
     restart: unless-stopped
 
   # `core worker`: the outbox drain and the retention purges. It serves no
-  # HTTP, so the image's curl healthcheck is switched off.
+  # HTTP, so the image's curl healthcheck is replaced by a process check (the
+  # entrypoint is the only `core` process in the container).
   worker:
     image: gable-core:local
     pull_policy: never
@@ -74,7 +75,10 @@ services:
       AUTH_MODE: dev
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "pidof core >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     depends_on:
       migrate:
         condition: service_completed_successfully
