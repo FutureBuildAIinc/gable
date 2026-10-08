@@ -128,7 +128,7 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 		LEFT JOIN locations l ON l.id = i.location_id
 		WHERE COALESCE(i.quantity, 0) <= COALESCE(p.reorder_point, 10)
 		  AND ($2::uuid IS NULL OR l.branch_id = $2)
-		ORDER BY COALESCE(i.quantity, 0) ASC, p.id ASC, i.location_id ASC
+		ORDER BY COALESCE(i.quantity, 0) ASC, p.sku ASC, i.location_id ASC
 		LIMIT $1
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, branchID)
@@ -167,7 +167,7 @@ func (r *PostgresRepository) GetTopCustomers(ctx context.Context, branchID *uuid
 		LEFT JOIN invoices inv ON o.id = inv.order_id
 		GROUP BY c.id, c.name
 		HAVING COALESCE(SUM(inv.total_amount), 0) > 0
-		ORDER BY total_revenue DESC, c.id ASC
+		ORDER BY total_revenue DESC, c.name ASC, c.id ASC
 		LIMIT $2
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, cutoff, limit, branchID)
