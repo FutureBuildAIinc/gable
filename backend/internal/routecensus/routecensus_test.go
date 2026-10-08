@@ -192,6 +192,20 @@ func TestDiffRoutesReportsHandlerOnlyChange(t *testing.T) {
 	}
 }
 
+// TestBuildExcludedFilesAreNotWalked pins the fix for the review's F7:
+// directories the go tool ignores (leading underscore) and files its build
+// constraints exclude (//go:build ignore) are not walked, so only the
+// route of the buildable file remains.
+func TestBuildExcludedFilesAreNotWalked(t *testing.T) {
+	result := collectFixture(t, "buildexcluded")
+	if err := result.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if len(result.Routes) != 1 || result.Routes[0].Pattern != "/zz/kept" || result.Routes[0].Module != "." {
+		t.Fatalf("want only GET /zz/kept in the module root package, got %+v", result.Routes)
+	}
+}
+
 // diffRoutes compares two rendered censuses by full row and returns the
 // rows present in newRender only and in oldRender only, so a change in any
 // column, handler included, is reported.

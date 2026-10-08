@@ -22,6 +22,7 @@ package routecensus
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -189,7 +190,10 @@ func Collect(moduleRoot string) (Result, error) {
 			switch {
 			case name == ".":
 				return nil
-			case strings.HasPrefix(name, "."), name == "testdata", name == "node_modules":
+			// The go tool never builds a directory whose name begins with
+			// a dot or an underscore, nor testdata or node_modules.
+			case strings.HasPrefix(name, "."), strings.HasPrefix(name, "_"),
+				name == "testdata", name == "node_modules":
 				return filepath.SkipDir
 			// A vendor directory is only a dependency checkout at the
 			// module root; deeper "vendor" directories are workspace
@@ -207,6 +211,16 @@ func Collect(moduleRoot string) (Result, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		// Files the go tool would not build register nothing: a name
+		// beginning with a dot or an underscore, or build constraints that
+		// exclude the file under the default build tags.
+		matched, err := build.Default.MatchFile(filepath.Dir(path), name)
+		if err != nil {
+			return fmt.Errorf("match build constraints of %s: %w", rel, err)
+		}
+		if !matched {
+			return nil
+		}
 		src, err := os.ReadFile(path)
 		if err != nil {
 			return err
