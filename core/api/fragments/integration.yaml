@@ -290,6 +290,8 @@ paths:
         unknown staff so attacker input is not echoed.
       security:
         - IntegrationKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -311,6 +313,10 @@ paths:
           $ref: "#/components/responses/IntegrationServerError"
         "503":
           $ref: "#/components/responses/IntegrationUnavailable"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
 components:
   responses:
     IntegrationBadRequest:

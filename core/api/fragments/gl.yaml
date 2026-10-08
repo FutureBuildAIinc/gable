@@ -1,0 +1,817 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The general ledger module, transcribed from internal/gl/handler.go,
+# model.go, service.go and repository.go as they behave today. Quirks the
+# transcription preserves: money on the response side is int64 cents but the
+# journal entry request takes float dollars (debit and credit) and converts
+# with rounding; the list routes answer bare JSON arrays with no page
+# envelope and no filters, and an empty append-built slice is null, not [];
+# the status routes answer a one key {status} object; nearly every service
+# failure (unbalanced entry, wrong status, closed period, missing row) is a
+# 400 rather than a 404 or 409; PUT /accounts/{id} never checks the row
+# exists and echoes the request with a zero created_at and balance; GET a
+# single journal entry never carries reverses_entry_id (the header query does
+# not select it) while the create echo can; every error body is the standard
+# envelope from httputil.RespondError. Every route sits behind
+# RequireRole("admin","owner"), registered in internal/app/serve/serve.go.
+paths:
+  /api/v1/gl/accounts:
+    get:
+      operationId: glAccountList
+      tags: [gl]
+      summary: List the chart of accounts
+      description: >-
+        Every account ordered by code, with the posted balance (debit minus
+        credit, cents) computed per account. Role guard admin or owner. The
+        body is null when the chart is empty.
+      responses:
+        "200":
+          description: The chart of accounts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccountList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: glAccountCreate
+      tags: [gl]
+      summary: Create a GL account
+      description: >-
+        Role guard admin or owner. A missing code, a missing name, an invalid
+        type, or a database refusal such as a duplicate code is a 400. A
+        missing normal_balance defaults from the type (DEBIT for ASSET and
+        EXPENSE, CREDIT otherwise). The account is always created active.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlAccountRequest"
+      responses:
+        "201":
+          description: The created account (balance is 0).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/accounts/{id}:
+    put:
+      operationId: glAccountUpdate
+      tags: [gl]
+      summary: Replace a GL account
+      description: >-
+        Role guard admin or owner. Full replace of the editable columns; the
+        account is always written active (is_active cannot be set false
+        here). The row is not checked for existence: an unknown id still
+        answers 200, echoing the request with a zero created_at
+        (0001-01-01T00:00:00Z) and a zero balance. A non UUID id or an
+        undecodable body is a 400; a database refusal is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlAccountRequest"
+      responses:
+        "200":
+          description: The account as written, not re-read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/journal-entries:
+    get:
+      operationId: glJournalEntryList
+      tags: [gl]
+      summary: List journal entries
+      description: >-
+        Every entry, newest entry_date first then highest entry_number. No
+        filters or paging. Headers only: lines are omitted. Role guard admin
+        or owner. The body is null when there are no entries.
+      responses:
+        "200":
+          description: The journal entry headers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlJournalEntryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: glJournalEntryCreate
+      tags: [gl]
+      summary: Create a draft manual journal entry
+      description: >-
+        Role guard admin or owner. The request carries float dollars; each
+        amount is multiplied by 100 and rounded to int64 cents. Source is
+        always MANUAL and status DRAFT. entry_date is optional (today when
+        absent) and must be YYYY-MM-DD. Refused with 400: undecodable body,
+        malformed entry_date, a negative debit or credit, a non UUID
+        account_id, fewer than 2 lines, debits not equal to credits, all
+        zero amounts, or a database refusal such as an unknown account.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlJournalEntryRequest"
+      responses:
+        "201":
+          description: The created entry with its lines (account_code and account_name are omitted on the echo).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlJournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/journal-entries/{id}:
+    get:
+      operationId: glJournalEntryGet
+      tags: [gl]
+      summary: Get one journal entry with lines
+      description: >-
+        Role guard admin or owner. Lines carry account_code and account_name.
+        Any repository failure, not only a missing row, answers 404.
+        reverses_entry_id is never present on this read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The entry with lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlJournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/gl/journal-entries/{id}/post:
+    post:
+      operationId: glJournalEntryPost
+      tags: [gl]
+      summary: Post a draft journal entry
+      description: >-
+        Role guard admin or owner. No body. Only a DRAFT entry whose date does
+        not fall in a CLOSED fiscal period can post. Every refusal, including
+        an unknown id, is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Posted. The body is a one key object with status "posted".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/journal-entries/{id}/reverse:
+    post:
+      operationId: glJournalEntryReverse
+      tags: [gl]
+      summary: Reverse a posted journal entry
+      description: >-
+        Role guard admin or owner. Books a posted, net-zero reversing entry
+        dated today and linked by reverses_entry_id. The optional body reason
+        is appended to the memo; an undecodable or absent body is ignored.
+        Only a POSTED entry that has not already been reversed and has at
+        least 2 lines can be reversed. Every refusal, including an unknown
+        id, is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlReverseRequest"
+      responses:
+        "200":
+          description: The id of the new reversal entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlReverseResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/journal-entries/{id}/void:
+    post:
+      operationId: glJournalEntryVoid
+      tags: [gl]
+      summary: Void a posted journal entry
+      description: >-
+        Role guard admin or owner. No body. Only a POSTED entry can be
+        voided; every refusal, including an unknown id, is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Voided. The body is a one key object with status "voided".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/trial-balance:
+    get:
+      operationId: glTrialBalance
+      tags: [gl]
+      summary: Trial balance
+      description: >-
+        Role guard admin or owner. Posted activity up to and including as_of
+        (default today), for active accounts with any activity, ordered by
+        code. A malformed as_of is a 400. The body is null when no account
+        has activity.
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          description: Cut-off date, YYYY-MM-DD. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The trial balance rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlTrialBalance"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/profit-and-loss:
+    get:
+      operationId: glProfitAndLoss
+      tags: [gl]
+      summary: Profit and loss statement
+      description: >-
+        Role guard admin or owner. start defaults to the first of the current
+        month and end to today; both are YYYY-MM-DD and inclusive. A
+        malformed date or an end before the start is a 400. The three
+        sections are never null.
+      parameters:
+        - name: start
+          in: query
+          required: false
+          description: First day, YYYY-MM-DD. Defaults to the first of the current month.
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: false
+          description: Last day, YYYY-MM-DD. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The income statement in cents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlProfitAndLossReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/balance-sheet:
+    get:
+      operationId: glBalanceSheet
+      tags: [gl]
+      summary: Balance sheet
+      description: >-
+        Role guard admin or owner. as_of defaults to today; a malformed value
+        is a 400. retained_earnings is already included in total_equity. The
+        three sections are never null.
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          description: Statement date, YYYY-MM-DD. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The statement of financial position in cents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlBalanceSheetReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/fiscal-periods:
+    get:
+      operationId: glFiscalPeriodList
+      tags: [gl]
+      summary: List fiscal periods
+      description: >-
+        Role guard admin or owner. All periods ordered by start date; the
+        body is null when there are none.
+      responses:
+        "200":
+          description: The fiscal periods.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlFiscalPeriodList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/fiscal-periods/{id}/close:
+    post:
+      operationId: glFiscalPeriodClose
+      tags: [gl]
+      summary: Close an open fiscal period
+      description: >-
+        Role guard admin or owner. No body. A period that does not exist or
+        is not OPEN is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Closed. The body is a one key object with status "closed".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/gl/fiscal-periods/{id}/reopen:
+    post:
+      operationId: glFiscalPeriodReopen
+      tags: [gl]
+      summary: Reopen a closed fiscal period
+      description: >-
+        Role guard admin or owner. No body. A period that does not exist or
+        is not CLOSED is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Reopened. The body is a one key object with status "reopened".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlStatusResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+components:
+  schemas:
+    GlAccount:
+      type: object
+      required: [id, code, name, type, subtype, normal_balance, is_active, description, balance, created_at, updated_at]
+      description: One chart of accounts row (gl.GLAccount). balance is int64 cents (debit minus credit of posted lines).
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE]
+        subtype:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+        normal_balance:
+          type: string
+          enum: [DEBIT, CREDIT]
+        is_active:
+          type: boolean
+        description:
+          type: string
+        balance:
+          type: integer
+          format: int64
+          description: Cents.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GlAccountList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlAccount"
+    GlAccountRequest:
+      type: object
+      required: [code, name, type]
+      description: The create and update body for an account. Unknown keys are ignored.
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE]
+        subtype:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+        normal_balance:
+          type: string
+          enum: [DEBIT, CREDIT]
+        description:
+          type: string
+    GlJournalEntry:
+      type: object
+      required: [id, entry_number, entry_date, memo, source, status, posted_by, total_debit, total_credit, created_at, updated_at]
+      description: A journal entry header (gl.JournalEntry), with lines on the single read and the create echo. total_debit and total_credit are int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        entry_number:
+          type: integer
+        entry_date:
+          type: string
+          format: date-time
+        memo:
+          type: string
+        source:
+          type: string
+          description: MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN or DEPOSIT.
+        source_ref_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [DRAFT, POSTED, VOID]
+        posted_by:
+          type: string
+        reverses_entry_id:
+          type: string
+          format: uuid
+        total_debit:
+          type: integer
+          format: int64
+          description: Cents.
+        total_credit:
+          type: integer
+          format: int64
+          description: Cents.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlJournalLine"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GlJournalEntryList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlJournalEntry"
+    GlJournalLine:
+      type: object
+      required: [id, journal_entry_id, account_id, description, debit, credit]
+      description: One debit or credit line (gl.JournalLine). debit and credit are int64 cents.
+      properties:
+        id:
+          type: string
+          format: uuid
+        journal_entry_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        account_code:
+          type: string
+        account_name:
+          type: string
+        description:
+          type: string
+        debit:
+          type: integer
+          format: int64
+          description: Cents.
+        credit:
+          type: integer
+          format: int64
+          description: Cents.
+    GlJournalEntryRequest:
+      type: object
+      description: >-
+        The create body. entry_date is YYYY-MM-DD and defaults to today.
+        debit and credit are float dollars today, rounded to cents on the
+        way in.
+      properties:
+        entry_date:
+          type: string
+          format: date
+        memo:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlJournalLineRequest"
+    GlJournalLineRequest:
+      type: object
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        debit:
+          type: number
+          description: Float dollars today; must be >= 0.
+        credit:
+          type: number
+          description: Float dollars today; must be >= 0.
+    GlReverseRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+    GlReverseResult:
+      type: object
+      required: [reversal_entry_id]
+      properties:
+        reversal_entry_id:
+          type: string
+          format: uuid
+    GlStatusResult:
+      type: object
+      required: [status]
+      description: The one key acknowledgement the status routes write.
+      properties:
+        status:
+          type: string
+          enum: [posted, voided, closed, reopened]
+    GlFiscalPeriod:
+      type: object
+      required: [id, name, start_date, end_date, status, created_at]
+      description: An accounting period (gl.FiscalPeriod). closed_at and closed_by are omitted while the period is open.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+        closed_at:
+          type: string
+          format: date-time
+        closed_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    GlFiscalPeriodList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlFiscalPeriod"
+    GlTrialBalanceRow:
+      type: object
+      required: [account_id, account_code, account_name, account_type, debit, credit]
+      description: One trial balance row (gl.TrialBalanceRow). debit and credit are int64 cents.
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        account_code:
+          type: string
+        account_name:
+          type: string
+        account_type:
+          type: string
+        debit:
+          type: integer
+          format: int64
+          description: Cents.
+        credit:
+          type: integer
+          format: int64
+          description: Cents.
+    GlTrialBalance:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/GlTrialBalanceRow"
+    GlAccountLineItem:
+      type: object
+      required: [account_id, account_code, account_name, amount]
+      description: One account's signed balance on a statement (gl.AccountLineItem). amount is int64 cents.
+      properties:
+        account_id:
+          type: string
+        account_code:
+          type: string
+        account_name:
+          type: string
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+    GlProfitAndLossReport:
+      type: object
+      required: [start_date, end_date, revenue, cogs, expenses, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
+      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents.
+      properties:
+        start_date:
+          type: string
+          description: YYYY-MM-DD.
+        end_date:
+          type: string
+          description: YYYY-MM-DD.
+        revenue:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        cogs:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        total_revenue:
+          type: integer
+          format: int64
+        total_cogs:
+          type: integer
+          format: int64
+        gross_profit:
+          type: integer
+          format: int64
+        total_expenses:
+          type: integer
+          format: int64
+          description: Cents, excludes COGS.
+        net_income:
+          type: integer
+          format: int64
+    GlBalanceSheetReport:
+      type: object
+      required: [as_of_date, assets, liabilities, equity, total_assets, total_liabilities, total_equity, retained_earnings]
+      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents.
+      properties:
+        as_of_date:
+          type: string
+          description: YYYY-MM-DD.
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        liabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        equity:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccountLineItem"
+        total_assets:
+          type: integer
+          format: int64
+        total_liabilities:
+          type: integer
+          format: int64
+        total_equity:
+          type: integer
+          format: int64
+          description: Cents, includes retained_earnings.
+        retained_earnings:
+          type: integer
+          format: int64

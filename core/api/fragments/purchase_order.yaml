@@ -1,0 +1,624 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The purchase order module, transcribed from internal/purchase_order
+# (handler.go, model.go, freight.go, repository.go, recommendations.go) as
+# it behaves today. Quirks kept: the list is a bare array that is JSON null
+# when empty; PO line cost and quantity are float dollars and units while
+# freight money is int64 cents; a get of any failure is a 404; submit, receive
+# and reorder failures are all 500; freight upload and apply failures are all
+# 400 (including "AI not configured"); the bodies of submit, receive,
+# reorder-check, apply and source-summary are inline maps with no Go struct.
+# Every route sits behind the admin, owner and purchasing role guard plus the
+# branch middleware (scoped in internal/app/serve/serve.go).
+paths:
+  /api/v1/purchase-orders:
+    get:
+      operationId: purchaseOrderList
+      tags: [purchaseOrder]
+      summary: List purchase orders
+      description: >-
+        Roles admin, owner, purchasing. Unpaged, newest first, scoped to the
+        caller's branch. Headers only (no lines); line_count and total_cost
+        are filled. A bare array that is JSON null when there are no orders.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The purchase orders, or null when there are none.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/PurchaseOrder"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      operationId: purchaseOrderCreate
+      tags: [purchaseOrder]
+      summary: Create a manual purchase order
+      description: >-
+        Roles admin, owner, purchasing. Creates a DRAFT order with source
+        MANUAL. A vendor_id that is not a UUID is a 400. Any service failure
+        (unknown vendor, bad line product id) is a 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseOrderCreateRequest"
+      responses:
+        "201":
+          description: The created purchase order with its lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrder"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/purchase-orders/recommendations:
+    get:
+      operationId: purchaseOrderRecommendations
+      tags: [purchaseOrder]
+      summary: Purchasing recommendations
+      description: >-
+        Roles admin, owner, purchasing. Velocity based reorder suggestions.
+        503 when the recommendation service is not wired.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The recommendation summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrderRecommendationSummary"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /api/v1/purchase-orders/refresh-reorder-targets:
+    post:
+      operationId: purchaseOrderRefreshReorderTargets
+      tags: [purchaseOrder]
+      summary: Recompute product reorder targets
+      description: >-
+        Roles admin, owner, purchasing. The body is optional and a body that
+        fails to decode is ignored. dry_run defaults to true when absent, so a
+        bare call previews only. Failures (including an unwired velocity
+        repository) are 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseOrderRefreshRequest"
+      responses:
+        "200":
+          description: The refresh result with up to 100 proposals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrderRefreshResult"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/purchase-orders/reorder-check:
+    post:
+      operationId: purchaseOrderReorderCheck
+      tags: [purchaseOrder]
+      summary: Create reorder purchase orders
+      description: >-
+        Roles admin, owner, purchasing. Raises DRAFT orders for products
+        below their reorder point, grouped by vendor.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The count of orders created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, count]
+                properties:
+                  status:
+                    type: string
+                    enum: [success]
+                  count:
+                    type: integer
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/purchase-orders/reorder-runs:
+    get:
+      operationId: purchaseOrderReorderRuns
+      tags: [purchaseOrder]
+      summary: Recent reorder cron runs
+      description: Roles admin, owner, purchasing. The last 50 runs, never null.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The runs, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PurchaseOrderReorderRun"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/purchase-orders/source-summary:
+    get:
+      operationId: purchaseOrderSourceSummary
+      tags: [purchaseOrder]
+      summary: Purchase order counts by source
+      description: >-
+        Roles admin, owner, purchasing. A map from source (MANUAL, REORDER,
+        SPECIAL_ORDER, A2A) to count; sources with no orders are absent.
+        Counts are not branch scoped.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Counts keyed by source.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: integer
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/purchase-orders/{id}:
+    get:
+      operationId: purchaseOrderGet
+      tags: [purchaseOrder]
+      summary: Get one purchase order with lines
+      description: >-
+        Roles admin, owner, purchasing. Every lookup failure, not only a
+        missing row, is a 404 today.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The purchase order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrder"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/purchase-orders/{id}/freight:
+    get:
+      operationId: purchaseOrderFreightList
+      tags: [purchaseOrder]
+      summary: List freight charges of an order
+      description: Roles admin, owner, purchasing. A bare array, never null.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The freight charges, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PurchaseOrderFreightCharge"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      operationId: purchaseOrderFreightUpload
+      tags: [purchaseOrder]
+      summary: Upload a freight invoice
+      description: >-
+        Roles admin, owner, purchasing. Multipart form with a file field,
+        10 MiB limit. The order must be RECEIVED or PARTIAL and AI extraction
+        must be configured. Every service failure (wrong status, no AI, bad
+        extraction, nothing received) is a 400, not a 500. Returns 200, not
+        201.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: The pending freight charge and its cost weighted allocations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOrderFreightUploadResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/purchase-orders/{id}/freight/{freightId}/apply:
+    post:
+      operationId: purchaseOrderFreightApply
+      tags: [purchaseOrder]
+      summary: Apply a freight charge to product costs
+      description: >-
+        Roles admin, owner, purchasing. Every service failure is a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: freightId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The charge was applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [applied]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/purchase-orders/{id}/receive:
+    post:
+      operationId: purchaseOrderReceive
+      tags: [purchaseOrder]
+      summary: Receive goods against an order
+      description: >-
+        Roles admin, owner, purchasing. Bad line or location ids, an unknown
+        order and every other service failure are 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseOrderReceiveRequest"
+      responses:
+        "200":
+          description: The goods were received.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [received]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/purchase-orders/{id}/submit:
+    post:
+      operationId: purchaseOrderSubmit
+      tags: [purchaseOrder]
+      summary: Submit a purchase order to the vendor
+      description: >-
+        Roles admin, owner, purchasing. Every service failure (unknown order,
+        wrong status, vendor send failure) is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order was submitted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [submitted]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  schemas:
+    PurchaseOrder:
+      type: object
+      required: [id, branch_id, status, source, created_at, updated_at]
+      description: >-
+        A purchase order. Lines appear only on create and get; line_count and
+        total_cost only on the list (omitted when zero). total_cost is float
+        dollars today.
+      properties:
+        id: { type: string, format: uuid }
+        branch_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        vendor_name: { type: string }
+        status:
+          type: string
+          enum: [DRAFT, SENT, PARTIAL, RECEIVED, CANCELLED]
+        source:
+          type: string
+          enum: [MANUAL, REORDER, SPECIAL_ORDER, A2A]
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderLine"
+        line_count: { type: integer }
+        total_cost:
+          type: number
+          description: Float dollars today.
+        freight_charges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderFreightCharge"
+    PurchaseOrderLine:
+      type: object
+      required: [id, po_id, description, quantity, qty_received, cost]
+      properties:
+        id: { type: string, format: uuid }
+        po_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        description: { type: string }
+        quantity: { type: number }
+        qty_received: { type: number }
+        cost:
+          type: number
+          description: Unit cost in float dollars today.
+        linked_so_line_id: { type: string, format: uuid }
+    PurchaseOrderFreightCharge:
+      type: object
+      required: [id, po_id, total_amount_cents, allocation_method, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        po_id: { type: string, format: uuid }
+        file_path: { type: string }
+        original_filename: { type: string }
+        carrier_name: { type: string }
+        invoice_number: { type: string }
+        total_amount_cents: { type: integer, format: int64 }
+        allocation_method: { type: string }
+        status:
+          type: string
+          enum: [PENDING, APPLIED]
+        created_at: { type: string, format: date-time }
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderFreightAllocation"
+    PurchaseOrderFreightAllocation:
+      type: object
+      required: [id, freight_charge_id, po_line_id, allocated_cents, per_unit_cents, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        freight_charge_id: { type: string, format: uuid }
+        po_line_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        allocated_cents: { type: integer, format: int64 }
+        per_unit_cents: { type: integer, format: int64 }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+    PurchaseOrderFreightUploadResponse:
+      type: object
+      required: [freight_charge, allocations]
+      properties:
+        freight_charge:
+          $ref: "#/components/schemas/PurchaseOrderFreightCharge"
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderFreightAllocation"
+    PurchaseOrderReorderRun:
+      type: object
+      required: [id, job, started_at, dry_run, status, pos_created, products_updated, products_skipped]
+      properties:
+        id: { type: string, format: uuid }
+        job:
+          type: string
+          description: The cron job name, refresh_targets or create_reorders.
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        dry_run: { type: boolean }
+        status:
+          type: string
+          description: RUNNING while in flight, then the outcome the scheduler stamped.
+        pos_created: { type: integer }
+        products_updated: { type: integer }
+        products_skipped: { type: integer }
+        error_message: { type: string }
+    PurchaseOrderRecommendation:
+      type: object
+      required:
+        - product_id
+        - product_sku
+        - product_name
+        - current_stock
+        - avg_daily_sales
+        - std_dev_sales
+        - lead_time_days
+        - reorder_point
+        - safety_stock
+        - suggested_qty
+        - estimated_cost
+        - urgency
+        - days_until_out
+      properties:
+        product_id: { type: string, format: uuid }
+        product_sku: { type: string }
+        product_name: { type: string }
+        vendor_name: { type: string }
+        current_stock: { type: number }
+        avg_daily_sales: { type: number }
+        std_dev_sales: { type: number }
+        lead_time_days: { type: number }
+        reorder_point: { type: number }
+        safety_stock: { type: number }
+        suggested_qty: { type: number }
+        estimated_cost:
+          type: number
+          description: Float dollars today.
+        urgency:
+          type: string
+          enum: [CRITICAL, HIGH, MEDIUM, LOW]
+        days_until_out: { type: number }
+        catalog_price:
+          type: number
+          description: Float dollars today; absent when no catalog price is known.
+    PurchaseOrderRecommendationSummary:
+      type: object
+      required: [total_items, critical_count, high_count, medium_count, low_count, total_estimated_cost, items]
+      properties:
+        total_items: { type: integer }
+        critical_count: { type: integer }
+        high_count: { type: integer }
+        medium_count: { type: integer }
+        low_count: { type: integer }
+        total_estimated_cost:
+          type: number
+          description: Float dollars today.
+        items:
+          type: [array, "null"]
+          description: Null when nothing needs reordering.
+          items:
+            $ref: "#/components/schemas/PurchaseOrderRecommendation"
+    PurchaseOrderReorderTargetProposal:
+      type: object
+      required: [product_id, sku, old_point, new_point, old_qty, new_qty, avg_daily]
+      properties:
+        product_id: { type: string, format: uuid }
+        sku: { type: string }
+        old_point: { type: number }
+        new_point: { type: number }
+        old_qty: { type: number }
+        new_qty: { type: number }
+        avg_daily: { type: number }
+    PurchaseOrderRefreshResult:
+      type: object
+      required: [dry_run, products_updated, products_skipped, proposals]
+      properties:
+        dry_run: { type: boolean }
+        products_updated: { type: integer }
+        products_skipped: { type: integer }
+        proposals:
+          type: [array, "null"]
+          description: Null when no product changes; capped at 100 entries.
+          items:
+            $ref: "#/components/schemas/PurchaseOrderReorderTargetProposal"
+    PurchaseOrderCreateRequest:
+      type: object
+      properties:
+        vendor_id:
+          type: string
+          format: uuid
+          description: Required in effect; a non UUID value is a 400.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderCreateLine"
+    PurchaseOrderCreateLine:
+      type: object
+      properties:
+        product_id:
+          type: string
+          description: A product UUID, or empty for a free text line.
+        description: { type: string }
+        quantity: { type: number }
+        cost:
+          type: number
+          description: Unit cost in float dollars today.
+    PurchaseOrderReceiveRequest:
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOrderReceiveLine"
+    PurchaseOrderReceiveLine:
+      type: object
+      properties:
+        line_id: { type: string, format: uuid }
+        qty_received: { type: number }
+        location_id: { type: string, format: uuid }
+    PurchaseOrderRefreshRequest:
+      type: object
+      properties:
+        dry_run:
+          type: boolean
+          description: Defaults to true when absent.
+        lookback_days:
+          type: integer
+          description: Zero or negative means the 90 day default.

@@ -1,0 +1,305 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The EDI trading partner admin module, transcribed from internal/edi
+# (edi_handler.go, edi_repository.go) as it behaves today. Quirks kept: the
+# trading partner is the request body and the response body (create decodes
+# the full model, update echoes it without re-reading); transport_config is
+# a JSON document carried as a string; delete answers 204 whether or not the
+# partner existed; the catalog list is capped at 200 with no paging; the
+# catalog import takes a raw body (not multipart) and a format query. Roles
+# admin and owner guard every route; there is no branch middleware.
+paths:
+  /api/v1/edi/partners:
+    get:
+      operationId: ediPartnerList
+      tags: [edi]
+      summary: List trading partners
+      description: Roles admin, owner. Ordered by name, unpaged, never null.
+      responses:
+        "200":
+          description: The trading partners.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EdiTradingPartner"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      operationId: ediPartnerCreate
+      tags: [edi]
+      summary: Create a trading partner
+      description: >-
+        Roles admin, owner. name is required (400 when empty). Defaults
+        filled when empty: transport_config "{}", edi_version "004010",
+        transport_type "SFTP", supported_documents ["832","846","850"]. A
+        transport_config that is not valid JSON fails at the database cast
+        and is a 500. is_active defaults to false.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EdiTradingPartner"
+      responses:
+        "201":
+          description: The created partner with server filled id and timestamps.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdiTradingPartner"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/edi/partners/{id}:
+    delete:
+      operationId: ediPartnerDelete
+      tags: [edi]
+      summary: Delete a trading partner
+      description: >-
+        Roles admin, owner. A hard delete. An unknown id still answers 204.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The partner is gone (or never existed).
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      operationId: ediPartnerGet
+      tags: [edi]
+      summary: Get one trading partner
+      description: Roles admin, owner. Adds the count of catalog entries.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The partner with its catalog count.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdiTradingPartnerDetail"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: ediPartnerUpdate
+      tags: [edi]
+      summary: Replace a trading partner
+      description: >-
+        Roles admin, owner. A full replace of every field; an omitted field
+        is written as its zero value, and an empty transport_config fails the
+        JSON cast and is a 500. The response echoes the submitted body with
+        the path id and a fresh updated_at; created_at is whatever the body
+        carried (the zero time when omitted) and an omitted
+        supported_documents echoes as null. An unknown id is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EdiTradingPartner"
+      responses:
+        "200":
+          description: The echoed partner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdiTradingPartner"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/edi/partners/{id}/catalog:
+    get:
+      operationId: ediPartnerCatalogList
+      tags: [edi]
+      summary: List a partner's catalog entries
+      description: >-
+        Roles admin, owner. Ordered by vendor_sku, capped at 200, never null.
+        An unknown partner answers an empty array.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The catalog entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EdiCatalogEntry"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/edi/partners/{id}/import-catalog:
+    post:
+      operationId: ediPartnerCatalogImport
+      tags: [edi]
+      summary: Import a catalog file for a partner
+      description: >-
+        Roles admin, owner. The request body is the raw file (50 MiB limit),
+        not multipart. format=x12 (default, an 832 document) or format=csv; any
+        other value is treated as x12 but echoed back as given. An unreadable
+        file is a 422. Entries upsert on (partner, vendor_sku). The partner id
+        is not looked up first, but catalog entries carry a foreign key to the
+        partner: an unknown partner id answers 500 when at least one entry
+        parses, and 200 with saved_count 0 when none does.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            default: x12
+            description: x12 or csv.
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Counts of parsed and saved entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [partner_id, format, parsed_count, saved_count]
+                properties:
+                  partner_id:
+                    type: string
+                    format: uuid
+                  format:
+                    type: string
+                  parsed_count:
+                    type: integer
+                  saved_count:
+                    type: integer
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  schemas:
+    EdiTradingPartner:
+      type: object
+      required:
+        - id
+        - name
+        - isa_sender_id
+        - isa_sender_qualifier
+        - isa_receiver_id
+        - isa_receiver_qualifier
+        - gs_sender_id
+        - gs_receiver_id
+        - edi_version
+        - transport_type
+        - transport_config
+        - supported_documents
+        - is_active
+        - notes
+        - created_at
+        - updated_at
+      description: >-
+        A trading partner. Used as the create and update request body and as
+        the response body; on a request the id and timestamps are ignored or
+        overwritten by the server.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        isa_sender_id: { type: string }
+        isa_sender_qualifier: { type: string }
+        isa_receiver_id: { type: string }
+        isa_receiver_qualifier: { type: string }
+        gs_sender_id: { type: string }
+        gs_receiver_id: { type: string }
+        edi_version: { type: string }
+        transport_type:
+          type: string
+          description: SFTP, AS2 or FILE (not validated).
+        transport_config:
+          type: string
+          description: A JSON document carried as a string, "{}" by default.
+        supported_documents:
+          type: [array, "null"]
+          description: Null only on an update echo that omitted the field.
+          items:
+            type: string
+        is_active: { type: boolean }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    EdiTradingPartnerDetail:
+      description: A trading partner plus the number of catalog entries it holds.
+      allOf:
+        - $ref: "#/components/schemas/EdiTradingPartner"
+        - type: object
+          required: [catalog_count]
+          properties:
+            catalog_count: { type: integer }
+    EdiCatalogEntry:
+      type: object
+      required: [id, partner_id, vendor_sku, description, unit_cost, uom, min_order_qty, pack_qty, synced_at]
+      properties:
+        id: { type: string, format: uuid }
+        partner_id: { type: string, format: uuid }
+        vendor_sku: { type: string }
+        internal_product_id: { type: string, format: uuid }
+        description: { type: string }
+        unit_cost:
+          type: number
+          description: Float dollars today.
+        uom: { type: string }
+        effective_date: { type: string, format: date-time }
+        expiry_date: { type: string, format: date-time }
+        min_order_qty: { type: number }
+        pack_qty: { type: number }
+        synced_at: { type: string, format: date-time }

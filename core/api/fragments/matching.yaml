@@ -1,0 +1,222 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The three way match module, transcribed from internal/matching as it
+# behaves today. Quirks kept: tolerance money is int64 cents on the response
+# but the update request takes dollar_tolerance as float dollars (10 in,
+# 1000 out); the get of a result is a 404 for any failure; running a match is
+# a 500 for any failure (no lines, unknown order); the exception list is a
+# bare array never null. Roles admin, owner, finance guard every route; the
+# matching routes are not behind the branch middleware.
+paths:
+  /api/v1/matching/config:
+    get:
+      operationId: matchingConfigGet
+      tags: [matching]
+      summary: Get the match tolerances
+      description: Roles admin, owner, finance.
+      responses:
+        "200":
+          description: The tolerance configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingConfig"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      operationId: matchingConfigUpdate
+      tags: [matching]
+      summary: Update the match tolerances
+      description: >-
+        Roles admin, owner, finance. Partial: only the fields sent change.
+        dollar_tolerance is read as float dollars and stored and returned as
+        int64 cents.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchingConfigUpdateRequest"
+      responses:
+        "200":
+          description: The updated configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingConfig"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/matching/exceptions:
+    get:
+      operationId: matchingExceptionList
+      tags: [matching]
+      summary: List match exceptions
+      description: >-
+        Roles admin, owner, finance. Results in EXCEPTION or PARTIAL status,
+        newest first, unpaged, never null.
+      responses:
+        "200":
+          description: The exceptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MatchingException"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/matching/results/{po_id}:
+    get:
+      operationId: matchingResultGet
+      tags: [matching]
+      summary: Get the match result of an order
+      description: >-
+        Roles admin, owner, finance. Every lookup failure, not only a missing
+        result, is a 404.
+      parameters:
+        - name: po_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The match result with per line details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/matching/run/{po_id}:
+    post:
+      operationId: matchingRun
+      tags: [matching]
+      summary: Run the three way match for an order
+      description: >-
+        Roles admin, owner, finance. Compares ordered, received and invoiced
+        quantities and prices. An unknown order, an order with no lines and
+        every other failure are 500.
+      parameters:
+        - name: po_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The match outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchingResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  schemas:
+    MatchingStatus:
+      type: string
+      enum: [PENDING, MATCHED, PARTIAL, EXCEPTION]
+    MatchingResult:
+      type: object
+      required: [id, po_id, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        po_id: { type: string, format: uuid }
+        vendor_invoice_id: { type: string, format: uuid }
+        status:
+          $ref: "#/components/schemas/MatchingStatus"
+        matched_at: { type: string, format: date-time }
+        matched_by: { type: string, format: uuid }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchingLineDetail"
+    MatchingLineDetail:
+      type: object
+      required:
+        - id
+        - match_result_id
+        - po_line_id
+        - description
+        - po_qty
+        - received_qty
+        - invoiced_qty
+        - po_unit_cost
+        - invoice_unit_price
+        - qty_variance_pct
+        - price_variance_pct
+        - line_status
+        - created_at
+      properties:
+        id: { type: string, format: uuid }
+        match_result_id: { type: string, format: uuid }
+        po_line_id: { type: string, format: uuid }
+        description: { type: string }
+        po_qty: { type: number }
+        received_qty: { type: number }
+        invoiced_qty: { type: number }
+        po_unit_cost:
+          type: integer
+          format: int64
+          description: Cents.
+        invoice_unit_price:
+          type: integer
+          format: int64
+          description: Cents.
+        qty_variance_pct: { type: number }
+        price_variance_pct: { type: number }
+        line_status:
+          $ref: "#/components/schemas/MatchingStatus"
+        created_at: { type: string, format: date-time }
+    MatchingConfig:
+      type: object
+      required: [id, qty_tolerance_pct, price_tolerance_pct, dollar_tolerance, auto_approve_on_match, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        qty_tolerance_pct: { type: number }
+        price_tolerance_pct: { type: number }
+        dollar_tolerance:
+          type: integer
+          format: int64
+          description: Cents. The update request sends float dollars under the same name.
+        auto_approve_on_match: { type: boolean }
+        updated_at: { type: string, format: date-time }
+    MatchingConfigUpdateRequest:
+      type: object
+      properties:
+        qty_tolerance_pct: { type: number }
+        price_tolerance_pct: { type: number }
+        dollar_tolerance:
+          type: number
+          description: Float dollars; converted to cents on write.
+        auto_approve_on_match: { type: boolean }
+    MatchingException:
+      type: object
+      required: [match_result_id, po_id, status, created_at, line_count, exception_count]
+      properties:
+        match_result_id: { type: string, format: uuid }
+        po_id: { type: string, format: uuid }
+        vendor_invoice_id: { type: string, format: uuid }
+        status:
+          $ref: "#/components/schemas/MatchingStatus"
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        line_count: { type: integer }
+        exception_count: { type: integer }
