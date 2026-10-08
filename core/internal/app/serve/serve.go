@@ -305,10 +305,13 @@ func Run() {
 	salesTeamHandler := salesteam.NewHandler(salesTeamRepo)
 	salesTeamHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
-	// CRM Module
-	crmRepo := crm.NewRepository(db)
-	crmHandler := crm.NewHandler(crmRepo)
-	crmHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	// CRM Module: on the wire contract, its writes in one transaction with
+	// their audit row and activity.* event, every route behind the branch
+	// wall through the activity's customer.
+	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog))
 
 	// Account Module
 	accountRepo := account.NewRepository(db)

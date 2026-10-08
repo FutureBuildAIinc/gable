@@ -8,6 +8,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
@@ -58,6 +59,14 @@ func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {
 func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 	customer.NewHandler(svc.WithBranchGuard(customerguard.New(w.guard))).
 		RegisterRoutes(mux, w.scoped("admin", "owner", "sales"), w.scoped("admin", "owner", "finance"))
+}
+
+// crm mounts the activity routes behind the branch middleware: every route
+// addresses a customer (by path) or an activity of one, and the repositories
+// hold each read and write to the customer's branches, so a caller held to
+// branch A finds branch B's activity a 404.
+func (w *branchWall) crm(mux *http.ServeMux, svc *crm.Service) {
+	crm.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
 }
 
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {

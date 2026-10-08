@@ -210,84 +210,111 @@ paths:
           $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
-  /api/v1/activities/{id}:
+  /api/v1/customers/{customerId}/activities:
     get:
-      operationId: activityGet
-      tags:
-        - activities
-      summary: Get one activity
+      operationId: activityList
+      tags: [activities]
+      summary: List a customer's activities
+      description: >-
+        The cursor list envelope, newest first on (created_at, id). activity_type and contact_id filter; total appears only under include=total. A parameter the route does not declare, an activity type outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400. A customer the caller cannot see behind the branch wall serves an empty page.
       parameters:
-        - name: id
+        - name: customerId
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/XBranchId'
+        - name: activity_type
+          in: query
+          required: false
+          description: One lowercase activity type.
+          schema:
+            type: string
+            enum: [call, meeting, email, note]
+        - name: contact_id
+          in: query
+          required: false
+          description: Only the activities of this contact.
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The activity.
+        "200":
+          description: The page of activities.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Activity'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    put:
-      operationId: activityUpdate
-      tags:
-        - activities
-      summary: Update an activity
-      description: The write replaces contact_id, activity_type, description, logged_by and activity_date; an omitted field is cleared.
+                $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: activityCreate
+      tags: [activities]
+      summary: Log an activity
+      description: >-
+        activity_type and description are required; contact_id and logged_by are optional; activity_date defaults to now. The customer is named by the path: a body customer_id is a 400, and a customer the caller cannot see behind the branch wall is a 404. Writes the audit row activity.created and the event activity.created in the same transaction, the event last.
       parameters:
-        - name: id
+        - name: customerId
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/XBranchId'
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ActivityUpdate'
+              $ref: "#/components/schemas/ActivityRequest"
       responses:
-        '200':
-          description: The activity as the request wrote it. customer_id, created_at and any field the body omitted come back as zero values, because the handler echoes the decoded body rather than re-reading the row.
+        "201":
+          description: The logged activity, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Activity'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
-    delete:
-      operationId: activityDelete
-      tags:
-        - activities
-      summary: Delete an activity
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/activities/{id}:
+    get:
+      operationId: activityGet
+      tags: [activities]
+      summary: Get one activity
+      description: The activity with its ETag. An activity behind the caller's branch wall is a 404.
       parameters:
         - name: id
           in: path
@@ -295,20 +322,114 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/XBranchId'
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '204':
+        "200":
+          description: The activity.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: activityUpdate
+      tags: [activities]
+      summary: Update an activity
+      description: >-
+        Replaces contact_id, activity_type, description, logged_by and activity_date (an omitted activity_date keeps its stored value) on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. A body customer_id is a 400: the customer is fixed at create. The response is the stored row, not the echo of the body. Writes the audit row activity.updated and the event activity.updated in the same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityRequest"
+      responses:
+        "200":
+          description: The activity at its new revision, with its ETag.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    delete:
+      operationId: activityDelete
+      tags: [activities]
+      summary: Delete an activity
+      description: >-
+        Deletes on the client's revision, carried by If-Match alone (a DELETE has no body). Writes the audit row activity.deleted and the event activity.deleted in the same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "204":
           description: Activity deleted.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/admin/keys:
     get:
       operationId: adminListKeys
@@ -2321,78 +2442,6 @@ paths:
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
-  /api/v1/customers/{customerId}/activities:
-    get:
-      operationId: customerListActivities
-      tags: [customer]
-      summary: List customer activities
-      description: >-
-        Returns activities for a customer, ordered by activity_date descending. The handler guarantees a bare array: an empty array, never null, when the customer has no activities.
-      parameters:
-        - name: customerId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-      responses:
-        "200":
-          description: Activities, a bare array that is empty when none exist.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "500":
-          $ref: "#/components/responses/InternalError"
-    post:
-      operationId: customerCreateActivity
-      tags: [customer]
-      summary: Create a customer activity
-      parameters:
-        - name: customerId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CustomerActivityCreate"
-      responses:
-        "201":
-          description: The created activity.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
   /api/v1/customers/{customerId}/contacts:
     get:
       operationId: customerListContacts
@@ -12552,20 +12601,21 @@ components:
           format: date-time
     ActivityType:
       type: string
-      enum:
-        - CALL
-        - MEETING
-        - EMAIL
-        - NOTE
+      description: Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
+      enum: [call, meeting, email, note]
     Activity:
       type: object
-      description: crm.Activity. contact_id and logged_by are omitted when unset. The customer routes of the customer fragment return the same schema.
+      description: >-
+        One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value.
       required:
         - id
         - customer_id
+        - contact_id
         - activity_type
         - description
+        - logged_by
         - activity_date
+        - revision
         - created_at
         - updated_at
       properties:
@@ -12576,43 +12626,69 @@ components:
           type: string
           format: uuid
         contact_id:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_type:
-          $ref: '#/components/schemas/ActivityType'
+          $ref: "#/components/schemas/ActivityType"
         description:
           type: string
+          description: 1 to 4000 characters.
         logged_by:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_date:
           type: string
           format: date-time
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-    ActivityUpdate:
+    ActivityRequest:
       type: object
-      description: The Activity decoded from the body; a missing or unknown activity_type answers 400.
-      required:
-        - activity_type
+      description: >-
+        The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused.
+      required: [activity_type, description]
       properties:
         contact_id:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_type:
-          $ref: '#/components/schemas/ActivityType'
+          $ref: "#/components/schemas/ActivityType"
         description:
           type: string
         logged_by:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_date:
           type: string
           format: date-time
+          description: Optional; defaults to now on create, keeps its stored value on update when absent.
+        revision:
+          type: integer
+          format: int64
+          description: The body revision, on update only. A create carrying one is a 400.
+    ActivityPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Activity"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
     TechAdminKey:
       type: object
       required: [id, name, prefix, scopes, created_at, last_used_at, revoked_at]
@@ -14072,25 +14148,6 @@ components:
           type: integer
           format: int64
           description: PUT only, beside If-Match.
-    CustomerActivityCreate:
-      type: object
-      required: [activity_type]
-      description: >-
-        The Activity decoded from the body; customer_id comes from the path and created_at and updated_at are set by the server. A supplied id is kept. A missing or unknown activity_type answers 400.
-      properties:
-        contact_id:
-          type: string
-          format: uuid
-        activity_type:
-          $ref: "#/components/schemas/ActivityType"
-        description:
-          type: string
-        logged_by:
-          type: string
-          format: uuid
-        activity_date:
-          type: string
-          format: date-time
     DashboardSummary:
       type: object
       description: dashboard.DashboardSummary. Money is int64 cents.
