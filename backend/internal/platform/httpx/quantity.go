@@ -6,6 +6,7 @@ package httpx
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -81,4 +82,37 @@ func (q *Quantity) UnmarshalJSON(data []byte) error {
 	}
 	*q = v
 	return nil
+}
+
+// extendScaleDivisor is the power of ten between the product of two scale
+// 4 values and cents: quantity ten-thousandths times factor ten-thousandths
+// times price ten-thousandths lands at scale 12 of the major unit, and a
+// cent is scale 2, so the divisor is 10^10.
+const extendScaleDivisor = 10_000_000_000
+
+// Extend prices one line (ADR 0001 §7a): the quantity, converted from its
+// sale unit into the price unit by factor (factor 1 when the units agree),
+// multiplied by the unit price, rounded once, to cents, half away from
+// zero. The product is exact in big arithmetic until that one rounding;
+// every module prices lines through here and nowhere else.
+func Extend(qty, factor Quantity, price Price) (Cents, error) {
+	n := new(big.Int).Mul(big.NewInt(int64(qty)), big.NewInt(int64(factor)))
+	n.Mul(n, big.NewInt(int64(price)))
+	neg := n.Sign() < 0
+
+	var mag big.Int
+	mag.Abs(n)
+	// Half away from zero: add half the divisor to the magnitude before
+	// the one division, which lands .5 (and only .5 or more) on the
+	// farther side of zero.
+	mag.Add(&mag, big.NewInt(extendScaleDivisor/2))
+	mag.Div(&mag, big.NewInt(extendScaleDivisor))
+	if !mag.IsInt64() {
+		return 0, errOverflow
+	}
+	cents := mag.Int64()
+	if neg {
+		cents = -cents
+	}
+	return Cents(cents), nil
 }

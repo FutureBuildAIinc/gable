@@ -141,3 +141,55 @@ func TestQuantityOnTheWireIsAString(t *testing.T) {
 		t.Error("a quantity serialized as a JSON number")
 	}
 }
+
+// RULE (ADR 0001 §7a): the extension of a line is the quantity converted
+// to the price unit, times the unit price, rounded once, to cents, half
+// away from zero. The product is exact until that one rounding; it is
+// computed here, once, for every module.
+func TestExtend(t *testing.T) {
+	mustQ := func(s string) Quantity {
+		q, err := ParseQuantity(s)
+		if err != nil {
+			t.Fatalf("ParseQuantity(%q): %v", s, err)
+		}
+		return q
+	}
+	cases := []struct {
+		name   string
+		qty    string
+		factor string
+		price  Price
+		want   Cents
+	}{
+		{"ten at 1.50 each", "10", "1", 15000, 1500},
+		{"1000 each at 3.75 per M", "1000", "0.001", 37500, 375},
+		{"1600 BF at 450.00 per MBF", "1600", "0.001", 4500000, 72000},
+		{"a credit line", "-100", "1", 15000, -15000},
+		{"a negative price", "100", "1", -15000, -15000},
+		{"half a cent rounds away from zero", "1", "1", 50, 1},
+		{"minus half a cent rounds away from zero", "1", "1", -50, -1},
+		{"exact when the product is whole cents", "4", "1", 125, 5},
+		{"a hundredth of a cent rounds to zero", "1", "1", 1, 0},
+		{"zero quantity", "0", "1", 13725, 0},
+		{"sub cent price on a big quantity", "20000", "1", 1, 200},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Extend(mustQ(tc.qty), mustQ(tc.factor), tc.price)
+			if err != nil {
+				t.Fatalf("Extend: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("Extend(%s, %s, %d) = %d cents, want %d", tc.qty, tc.factor, tc.price, got, tc.want)
+			}
+		})
+	}
+}
+
+// RULE: a product past the int64 cent range is refused, not wrapped.
+func TestExtendOverflow(t *testing.T) {
+	big := Quantity(9_000_000_000_000_000)
+	if _, err := Extend(big, big, Price(9_000_000_000_000_000)); err == nil {
+		t.Error("overflowing product extended, want a refusal")
+	}
+}
