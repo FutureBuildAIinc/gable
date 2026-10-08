@@ -317,6 +317,12 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 		slog.Error("failed to convert quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
 		var herr *httpx.Error
 		if errors.As(err, &herr) {
+			// An unknown quote id was a 500 "failed to get quote" in the base;
+			// it is a 404 now (CONTRACT-CHANGES).
+			if herr.Status == http.StatusNotFound {
+				writeError(w, http.StatusNotFound, "quote not found")
+				return
+			}
 			writeError(w, http.StatusConflict, "quote cannot be converted: "+herr.Message)
 			return
 		}
@@ -342,7 +348,7 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 		case order.StatusOnHold:
 			// The hold is a committed state change with its event; the seam
 			// keeps the 409 its callers know.
-			writeError(w, http.StatusConflict, "order "+o.ID.String()+" created from quote but could not be confirmed: credit limit exceeded")
+			writeError(w, http.StatusConflict, "order "+o.ID.String()+" created from quote but could not be confirmed: credit limit exceeded: order placed ON HOLD")
 			return
 		case order.StatusBackordered:
 			status = "CONFIRMED" // the vocabulary this seam's callers know

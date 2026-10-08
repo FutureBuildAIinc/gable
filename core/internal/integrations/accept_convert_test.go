@@ -280,3 +280,49 @@ func TestAcceptAndConvert_OrderTakesTheQuotesBranch(t *testing.T) {
 		t.Errorf("order tax = %v at %v, want 275 cents at 5 percent", o.TaxCents, o.TaxRatePercent)
 	}
 }
+
+// RULE (ADR 0005 5.8): a confirm that lands on_hold answers the seam's
+// frozen 409, with today's body byte for byte, while the order stays held
+// with its order.hold event. The seam keeps its 409; the product keeps the
+// hold.
+func TestAcceptAndConvert_OverLimitKeepsTheSeam409AndTheHold(t *testing.T) {
+	w := newSeamWorld(t)
+	ctx := context.Background()
+	// 10 PCS at 5.50 is over a 10.00 limit.
+	if _, err := w.db.Pool.Exec(ctx, `UPDATE customers SET credit_limit = 10.00 WHERE id = $1`, w.customerID); err != nil {
+		t.Fatal(err)
+	}
+	q := w.quoteAt(t, nil, 10*10000)
+	rec := w.acceptAndConvert(q)
+	var orderID uuid.UUID
+	if err := w.db.Pool.QueryRow(ctx, `SELECT id FROM orders WHERE quote_id = $1`, q.ID).Scan(&orderID); err != nil {
+		t.Fatalf("the held order was not kept: %v", err)
+	}
+	want := `{"error":"order ` + orderID.String() + ` created from quote but could not be confirmed: credit limit exceeded: order placed ON HOLD"}` + "\n"
+	if rec.Code != http.StatusConflict || rec.Body.String() != want {
+		t.Fatalf("over limit = %d %q, want 409 %q", rec.Code, rec.Body.String(), want)
+	}
+	var status string
+	if err := w.db.Pool.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1`, orderID).Scan(&status); err != nil || status != "ON_HOLD" {
+		t.Errorf("order status = %q (%v), want ON_HOLD", status, err)
+	}
+	var holds int
+	if err := w.db.Pool.QueryRow(ctx, `SELECT count(*) FROM events_outbox WHERE entity_type = 'order' AND entity_id = $1 AND type = 'order.hold'`, orderID).Scan(&holds); err != nil || holds != 1 {
+		t.Errorf("order.hold events = %d (%v), want 1", holds, err)
+	}
+}
+
+// RULE: an unknown quote id answers 404 (the base answered 500 "failed to
+// get quote"; CONTRACT-CHANGES).
+func TestAcceptAndConvert_UnknownQuoteIs404(t *testing.T) {
+	w := newSeamWorld(t)
+	h := NewHandler(w.db, nil, w.quoteSvc, w.orderSvc, nil, nil, "k")
+	id := uuid.New()
+	req := httptest.NewRequest("POST", "/api/integration/quotes/"+id.String()+"/accept-and-convert", nil)
+	req.SetPathValue("id", id.String())
+	rec := httptest.NewRecorder()
+	h.AcceptAndConvertQuote(rec, req)
+	if rec.Code != http.StatusNotFound || rec.Body.String() != `{"error":"quote not found"}`+"\n" {
+		t.Fatalf("unknown quote = %d %q, want 404 quote not found", rec.Code, rec.Body.String())
+	}
+}
