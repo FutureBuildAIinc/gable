@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-.PHONY: help up down logs ps pg-shell migrate seed reset-db \
+.PHONY: help up down smoke logs ps pg-shell migrate seed reset-db \
         build vet test test-short cover \
         contract contract-go contract-ts \
         fe-install fe-typecheck fe-lint fe-test fe-cover fe-build \
@@ -17,7 +17,8 @@ help:
 	@echo "Gable make targets"
 	@echo ""
 	@echo "  Infra"
-	@echo "    up down logs ps pg-shell     docker compose lifecycle"
+	@echo "    up down logs ps pg-shell     the local stack (docker compose)"
+	@echo "    smoke                        the exit test's step 3 against the running stack"
 	@echo "    migrate seed reset-db        database lifecycle"
 	@echo "                                 (seed needs DEMO_SEED=1 — see the Makefile)"
 	@echo ""
@@ -38,11 +39,20 @@ help:
 # ---------------------------------------------------------------------------
 # Infra (Docker)
 # ---------------------------------------------------------------------------
+# The whole local stack: Postgres, a migrate and seed step, core serve, core
+# worker and the web image (front door and desk on one origin). AUTH_MODE=dev,
+# local only. Builds one image at a time, then waits until every service is
+# healthy. http://127.0.0.1:$${GABLE_WEB_PORT:-8080}
 up:
-	docker compose up -d
+	COMPOSE_PARALLEL_LIMIT=1 docker compose up -d --build --wait --wait-timeout 600
 
+# Stop and remove the containers AND their volumes (the Postgres data).
 down:
-	docker compose down
+	docker compose down -v
+
+# The exit test's step 3 against the running stack (scripts/smoke.sh).
+smoke:
+	bash scripts/smoke.sh
 
 logs:
 	docker compose logs -f
