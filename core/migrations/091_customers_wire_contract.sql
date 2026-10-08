@@ -102,17 +102,61 @@ FROM (VALUES
 ) AS v(n, code, name, kind, net_days)
 ON CONFLICT (code) DO NOTHING;
 
--- Any other text found on a customer or an invoice becomes a NET_DAYS 30 term named by
--- its text, so no row loses its terms.
+-- Legacy free text becomes terms without changing what it meant (a customer's terms
+-- must not change meaning). The text is keyed case blind with spaces, dots, hyphens
+-- and underscores removed: NET<n> (also N<n> and NET<n>DAYS) is a NET n term, made
+-- when absent; COD and CASHONDELIVERY are COD; the due on receipt spellings are
+-- DUE_ON_RECEIPT. Text that matches nothing gets a term of its own, its code the text
+-- normalised to the API's pattern (a numeric suffix when two texts normalise alike)
+-- and its name the original text, never the NET30 default; the texts are reported.
+DROP TABLE IF EXISTS legacy_terms_map;
+CREATE TEMP TABLE legacy_terms_map AS
+WITH legacy AS (
+    SELECT DISTINCT btrim(t) AS original
+    FROM (SELECT payment_terms::text AS t FROM customers
+          UNION ALL SELECT payment_terms::text FROM invoices) s
+    WHERE btrim(t) <> ''
+), keyed AS (
+    SELECT original, upper(regexp_replace(original, '[\s_.\-]+', '', 'g')) AS key FROM legacy
+), classified AS (
+    SELECT original, key,
+        CASE
+            WHEN key ~ '^NET[0-9]{1,4}(DAYS?)?$' AND substring(key from '^NET([0-9]+)')::int <= 3650
+                THEN 'NET' || (substring(key from '^NET([0-9]+)')::int)::text
+            WHEN key ~ '^N[0-9]{1,4}$' AND substring(key from 2)::int <= 3650
+                THEN 'NET' || (substring(key from 2)::int)::text
+            WHEN key IN ('COD', 'CASHONDELIVERY') THEN 'COD'
+            WHEN key IN ('DUEONRECEIPT', 'DUEUPONRECEIPT', 'UPONRECEIPT', 'ONRECEIPT') THEN 'DUE_ON_RECEIPT'
+        END AS matched,
+        COALESCE(NULLIF(left(trim(both '-' from regexp_replace(upper(original), '[^A-Z0-9_-]+', '-', 'g')), 36), ''), 'LEGACY') AS norm
+    FROM keyed
+), ranked AS (
+    SELECT *, row_number() OVER (PARTITION BY norm ORDER BY original COLLATE "C") AS rn
+    FROM classified WHERE matched IS NULL
+)
+SELECT c.original, COALESCE(c.matched, CASE WHEN r.rn = 1 THEN r.norm ELSE r.norm || '-' || r.rn END) AS code,
+       (c.matched IS NULL) AS own
+FROM classified c LEFT JOIN ranked r ON r.original = c.original;
+
 INSERT INTO payment_terms (code, name, kind, net_days)
-SELECT DISTINCT t, t, 'NET_DAYS', 30
-FROM (
-    SELECT btrim(payment_terms::text) AS t FROM customers
-    UNION
-    SELECT btrim(payment_terms::text) FROM invoices
-) legacy
-WHERE t IS NOT NULL AND t <> ''
+SELECT DISTINCT code, 'Net ' || substring(code from 4), 'NET_DAYS', substring(code from 4)::int
+FROM legacy_terms_map WHERE NOT own AND code ~ '^NET[0-9]+$'
 ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO payment_terms (code, name, kind, net_days)
+SELECT code, original, 'NET_DAYS', 30 FROM legacy_terms_map WHERE own
+ON CONFLICT (code) DO NOTHING;
+
+DO $$
+DECLARE
+    n INTEGER;
+    texts TEXT;
+BEGIN
+    SELECT count(*), string_agg(original, ', ' ORDER BY original) INTO n, texts FROM legacy_terms_map WHERE own;
+    IF n > 0 THEN
+        RAISE NOTICE '% legacy payment terms text(s) matched no known form and got their own payment terms (NET_DAYS 30, named by the text): %', n, texts;
+    END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION payment_terms_default_id() RETURNS UUID
 LANGUAGE sql STABLE AS $$ SELECT id FROM payment_terms WHERE code = 'NET30' $$;
@@ -120,9 +164,11 @@ LANGUAGE sql STABLE AS $$ SELECT id FROM payment_terms WHERE code = 'NET30' $$;
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS payment_terms_id UUID NULL REFERENCES payment_terms (id);
 UPDATE customers c
 SET payment_terms_id = COALESCE(
-    (SELECT pt.id FROM payment_terms pt WHERE pt.code = btrim(c.payment_terms::text)),
+    (SELECT pt.id FROM legacy_terms_map m JOIN payment_terms pt ON pt.code = m.code
+     WHERE m.original = btrim(c.payment_terms::text)),
     payment_terms_default_id())
 WHERE c.payment_terms_id IS NULL;
+DROP TABLE legacy_terms_map;
 ALTER TABLE customers ALTER COLUMN payment_terms_id SET DEFAULT payment_terms_default_id();
 ALTER TABLE customers ALTER COLUMN payment_terms_id SET NOT NULL;
 
@@ -182,7 +228,27 @@ UPDATE customers SET balance_due = 0 WHERE balance_due IS NULL;
 ALTER TABLE customers ALTER COLUMN balance_due SET DEFAULT 0;
 ALTER TABLE customers ALTER COLUMN balance_due SET NOT NULL;
 
--- 6. One job table: projects. customer_jobs rows move over with their ids.
+-- 6. One job table: projects. customer_jobs rows move over with their ids, and nothing
+-- is dropped: what cannot become a project is kept whole in tables of its own, so the
+-- down file can restore every job, quote link and pricing rule.
+--   customer_jobs_copied      the ids that became projects (the down file's list)
+--   customer_jobs_unmigrated  jobs with no single customer (projects.customer_id is NOT NULL)
+--   quote_jobs_unmigrated     a quote's job link that quotes.project_id cannot carry: the job
+--                             was not copied, or the quote already names another project
+--   pricing_rules_unmigrated  rules scoped to a job that was not copied, moved out whole
+--                             (nulling their job_id would collide on the scope key, and
+--                             widening them to every job would change what they price)
+CREATE TABLE IF NOT EXISTS customer_jobs_copied (id UUID PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS customer_jobs_unmigrated (
+    id UUID PRIMARY KEY, customer_id UUID NULL, name TEXT NOT NULL, is_active BOOLEAN,
+    created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS quote_jobs_unmigrated (
+    quote_id UUID PRIMARY KEY, job_id UUID NOT NULL,
+    reason TEXT NOT NULL CHECK (reason IN ('job_not_copied', 'quote_has_other_project'))
+);
+CREATE TABLE IF NOT EXISTS pricing_rules_unmigrated (LIKE pricing_rules);
+
 DO $$
 DECLARE
     not_copied INTEGER := 0;
@@ -212,24 +278,41 @@ BEGIN
     WHERE cj.customer_id IS NOT NULL
     ON CONFLICT (id) DO NOTHING;
 
-    SELECT COUNT(*) INTO not_copied FROM customer_jobs WHERE customer_id IS NULL;
+    INSERT INTO customer_jobs_copied (id)
+    SELECT cj.id FROM customer_jobs cj WHERE cj.customer_id IS NOT NULL
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO customer_jobs_unmigrated (id, customer_id, name, is_active, created_at, updated_at)
+    SELECT cj.id, cj.customer_id, cj.name, cj.is_active, cj.created_at, cj.updated_at
+    FROM customer_jobs cj WHERE cj.customer_id IS NULL
+    ON CONFLICT DO NOTHING;
+    SELECT COUNT(*) INTO not_copied FROM customer_jobs_unmigrated;
     IF not_copied > 0 THEN
-        RAISE NOTICE 'customer_jobs: % row(s) with no customer were not copied into projects', not_copied;
+        RAISE NOTICE 'customer_jobs: % row(s) with no customer were not copied into projects; kept in customer_jobs_unmigrated', not_copied;
     END IF;
 
-    -- Quotes keep the project they already name; otherwise they take the copied job.
+    -- A quote's job link that project_id cannot carry is kept.
+    INSERT INTO quote_jobs_unmigrated (quote_id, job_id, reason)
+    SELECT q.id, q.job_id,
+           CASE WHEN EXISTS (SELECT 1 FROM customer_jobs_copied c WHERE c.id = q.job_id)
+                THEN 'quote_has_other_project' ELSE 'job_not_copied' END
+    FROM quotes q
+    WHERE q.job_id IS NOT NULL
+      AND (NOT EXISTS (SELECT 1 FROM customer_jobs_copied c WHERE c.id = q.job_id)
+           OR (q.project_id IS NOT NULL AND q.project_id <> q.job_id))
+    ON CONFLICT DO NOTHING;
+
+    -- Every other quote carries its job onto project_id.
     UPDATE quotes q
     SET project_id = q.job_id
     WHERE q.project_id IS NULL AND q.job_id IS NOT NULL
-      AND EXISTS (SELECT 1 FROM projects p WHERE p.id = q.job_id);
+      AND EXISTS (SELECT 1 FROM customer_jobs_copied c WHERE c.id = q.job_id);
 
-    -- Pricing rules scoped to a job that was not copied are switched off, never
-    -- widened to every job.
-    UPDATE pricing_rules pr
-    SET is_active = FALSE
+    -- Rules scoped to a job that was not copied move out whole.
+    INSERT INTO pricing_rules_unmigrated
+    SELECT pr.* FROM pricing_rules pr
     WHERE pr.job_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = pr.job_id);
-    UPDATE pricing_rules pr
-    SET job_id = NULL
+    DELETE FROM pricing_rules pr
     WHERE pr.job_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = pr.job_id);
 END $$;
 

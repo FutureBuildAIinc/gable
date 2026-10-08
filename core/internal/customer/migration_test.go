@@ -189,13 +189,13 @@ func TestMigration091_BackfillsRowsThatExist(t *testing.T) {
 	code := func(acct string) string {
 		return scalar[string](t, conn, `SELECT pt.code FROM customers c JOIN payment_terms pt ON pt.id = c.payment_terms_id WHERE c.account_number = $1`, acct)
 	}
-	if code("A1") != "NET30" || code("A2") != "Net 45" || code("A3") != "NET30" {
-		t.Errorf("customer terms = %s, %s, %s; want NET30, 'Net 45' (a legacy text value), NET30 (none)", code("A1"), code("A2"), code("A3"))
+	if code("A1") != "NET30" || code("A2") != "NET45" || code("A3") != "NET30" {
+		t.Errorf("customer terms = %s, %s, %s; want NET30, NET45 ('Net 45' keeps its 45 days), NET30 (none)", code("A1"), code("A2"), code("A3"))
 	}
-	if k := scalar[string](t, conn, `SELECT kind || ':' || net_days FROM payment_terms WHERE code = 'Net 45'`); k != "NET_DAYS:30" {
-		t.Errorf("a legacy text value became %s, want NET_DAYS:30 with its text as code", k)
+	if k := scalar[string](t, conn, `SELECT kind || ':' || net_days FROM payment_terms WHERE code = 'NET45'`); k != "NET_DAYS:45" {
+		t.Errorf("a legacy text value became %s, want NET_DAYS:45", k)
 	}
-	if n := scalar[int](t, conn, `SELECT count(*) FROM payment_terms WHERE code = 'Net 15'`); n != 1 {
+	if n := scalar[int](t, conn, `SELECT count(*) FROM payment_terms WHERE code = 'NET15'`); n != 1 {
 		t.Errorf("the terms text of an invoice: %d rows, want 1", n)
 	}
 	// A raw writer that names no terms still gets the default.
@@ -267,8 +267,11 @@ func TestMigration091_BackfillsRowsThatExist(t *testing.T) {
 	if !reported {
 		t.Errorf("notices = %q, want the count of uncopied jobs reported", *notices)
 	}
-	if v := scalar[bool](t, conn, `SELECT is_active FROM pricing_rules WHERE name = 'rule on the orphan'`); v {
-		t.Error("a pricing rule scoped to an uncopied job must be switched off, not widened to every job")
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pricing_rules WHERE name = 'rule on the orphan'`); n != 0 {
+		t.Error("a pricing rule scoped to an uncopied job must leave pricing_rules, not be widened to every job")
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pricing_rules_unmigrated WHERE name = 'rule on the orphan' AND job_id = $1`, b4); n != 1 {
+		t.Error("that rule must be kept whole in pricing_rules_unmigrated")
 	}
 	if j := scalar[*string](t, conn, `SELECT job_id::text FROM pricing_rules WHERE name = 'rule on a copied job'`); j == nil || *j != b1 {
 		t.Errorf("a pricing rule on a copied job = %v, want %s", j, b1)
@@ -282,5 +285,205 @@ func TestMigration091_BackfillsRowsThatExist(t *testing.T) {
 	apply(t, conn, target)
 	if n := scalar[int](t, conn, `SELECT count(*) FROM customer_ship_tos`); n != 1 {
 		t.Errorf("a second run left %d ship-tos, want 1", n)
+	}
+}
+
+// legacyScratch is a scratch database at schema 090 with one branch in it.
+func legacyScratch(t *testing.T) (*pgx.Conn, *[]string, string) {
+	t.Helper()
+	conn, notices := scratchDB(t)
+	before, target := migrationFiles(t)
+	for _, f := range before {
+		apply(t, conn, f)
+	}
+	return conn, notices, target
+}
+
+func exec(t *testing.T, conn *pgx.Conn, sql string, args ...any) {
+	t.Helper()
+	if _, err := conn.Exec(context.Background(), sql, args...); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+}
+
+// RULE (review P2-2): no customer's terms may change meaning. Spellings are
+// matched case blind with spacing, dots, hyphens and underscores ignored;
+// `NET <n>` is a NET n term (made when absent); COD variants are COD; text
+// that matches nothing gets a term of its own (a code in the API's pattern, the
+// original text as the name), never the NET30 default.
+func TestMigration091_LegacyTermsKeepTheirMeaning(t *testing.T) {
+	conn, notices, target := legacyScratch(t)
+	cases := []struct {
+		text     any    // customers.payment_terms
+		wantCode string // the terms code the customer ends on
+		wantKind string
+		wantDays string // net_days as text, "" for none
+		wantName string // "" to skip
+	}{
+		{"NET30", "NET30", "NET_DAYS", "30", ""},
+		{"net 30", "NET30", "NET_DAYS", "30", ""},
+		{"  Net-60 ", "NET60", "NET_DAYS", "60", ""},
+		{"NET 15", "NET15", "NET_DAYS", "15", "Net 15"},
+		{"Net 45 days", "NET45", "NET_DAYS", "45", "Net 45"},
+		{"n10", "NET10", "NET_DAYS", "10", ""},
+		{"NET_90", "NET90", "NET_DAYS", "90", ""},
+		{"COD", "COD", "DUE_ON_RECEIPT", "", ""},
+		{"cod", "COD", "DUE_ON_RECEIPT", "", ""},
+		{"C.O.D.", "COD", "DUE_ON_RECEIPT", "", ""},
+		{"Cash on delivery", "COD", "DUE_ON_RECEIPT", "", ""},
+		{"Due on receipt", "DUE_ON_RECEIPT", "DUE_ON_RECEIPT", "", ""},
+		{"DUE_ON_RECEIPT", "DUE_ON_RECEIPT", "DUE_ON_RECEIPT", "", ""},
+		{"2/10 Net 30", "2-10-NET-30", "NET_DAYS", "30", "2/10 Net 30"},
+		{"EOM", "EOM", "NET_DAYS", "30", "EOM"},
+		{"Net 30 EOM", "NET-30-EOM", "NET_DAYS", "30", "Net 30 EOM"},
+		{"2/10 net.30", "2-10-NET-30-2", "NET_DAYS", "30", "2/10 net.30"}, // collides with the code above: a suffix, never a merge
+		{nil, "NET30", "NET_DAYS", "30", ""},
+		{"", "NET30", "NET_DAYS", "30", ""},
+	}
+	for i, c := range cases {
+		exec(t, conn, `INSERT INTO customers (name, account_number, payment_terms, primary_branch_id) VALUES ($1, $2, $3, (SELECT id FROM locations LIMIT 1))`,
+			fmt.Sprintf("T%d", i), fmt.Sprintf("T-%02d", i), c.text)
+	}
+	apply(t, conn, target)
+
+	for i, c := range cases {
+		var code, kind, days, name string
+		if err := conn.QueryRow(context.Background(), `SELECT pt.code, pt.kind, COALESCE(pt.net_days::text, ''), pt.name
+			FROM customers cu JOIN payment_terms pt ON pt.id = cu.payment_terms_id WHERE cu.account_number = $1`, fmt.Sprintf("T-%02d", i)).
+			Scan(&code, &kind, &days, &name); err != nil {
+			t.Fatal(err)
+		}
+		if code != c.wantCode || kind != c.wantKind || days != c.wantDays || (c.wantName != "" && name != c.wantName) {
+			t.Errorf("%q became %s %s %s %q, want %s %s %s %q", c.text, code, kind, days, name, c.wantCode, c.wantKind, c.wantDays, c.wantName)
+		}
+	}
+	// Every code made is in the pattern the API enforces on a terms code.
+	if n := scalar[int](t, conn, `SELECT count(*) FROM payment_terms WHERE code !~ '^[A-Z0-9][A-Z0-9_-]{0,39}$'`); n != 0 {
+		t.Errorf("%d terms codes are outside the API's pattern", n)
+	}
+	// The unmatched texts are reported.
+	reported := false
+	for _, n := range *notices {
+		if strings.Contains(n, "own payment terms") && strings.Contains(n, "EOM") {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Errorf("notices = %q, want the texts that got terms of their own reported", *notices)
+	}
+	// Re-applying changes nothing.
+	before := scalar[int](t, conn, `SELECT count(*) FROM payment_terms`)
+	apply(t, conn, target)
+	if after := scalar[int](t, conn, `SELECT count(*) FROM payment_terms`); after != before {
+		t.Errorf("a second run made %d terms", after-before)
+	}
+}
+
+// RULE (review P2-1 and the lossless jobs merge): 091 completes whatever the
+// pricing rules scoped to uncopied jobs look like, including two rules the
+// scope key would collide once the job is taken away, and nothing is dropped:
+// the uncopied jobs, the quote links and the rules are kept in tables of their
+// own.
+func TestMigration091_UncopiedJobsLoseNothingAndNeverAbort(t *testing.T) {
+	conn, _, target := legacyScratch(t)
+	exec(t, conn, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES
+		 ('00000000-0000-0000-0000-0000000000a1','A','A1',(SELECT id FROM locations LIMIT 1)),
+		 ('00000000-0000-0000-0000-0000000000a2','B','A2',(SELECT id FROM locations LIMIT 1));
+		INSERT INTO customer_jobs (id, customer_id, name, is_active) VALUES
+		 ('00000000-0000-0000-0000-0000000000b1','00000000-0000-0000-0000-0000000000a1','copied',true),
+		 ('00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000a1','copied, quote has another project',true),
+		 ('00000000-0000-0000-0000-0000000000b3',NULL,'customerless one',true),
+		 ('00000000-0000-0000-0000-0000000000b4',NULL,'customerless two',true),
+		 ('00000000-0000-0000-0000-0000000000b5',NULL,'customerless, two customers quote it',true);
+		INSERT INTO projects (id, customer_id, name) VALUES ('00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000a1','an existing project');
+		INSERT INTO quotes (id, customer_id, job_id, project_id, state, total_amount, branch_id, created_at) VALUES
+		 ('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000d1','DRAFT',1,(SELECT id FROM locations LIMIT 1),now()),
+		 ('00000000-0000-0000-0000-0000000000c2','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000b5',NULL,'DRAFT',1,(SELECT id FROM locations LIMIT 1),now()),
+		 ('00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000a2','00000000-0000-0000-0000-0000000000b5',NULL,'DRAFT',1,(SELECT id FROM locations LIMIT 1),now()),
+		 ('00000000-0000-0000-0000-0000000000c4','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000b1',NULL,'DRAFT',1,(SELECT id FROM locations LIMIT 1),now());
+		-- Two rules the scope key would make identical once their jobs are gone, and one
+		-- identical to an unscoped rule that already exists.
+		INSERT INTO pricing_rules (name, rule_type, job_id, fixed_price) VALUES
+		 ('r1','JOB_OVERRIDE','00000000-0000-0000-0000-0000000000b3', 1.5),
+		 ('r1','JOB_OVERRIDE','00000000-0000-0000-0000-0000000000b4', 2.5),
+		 ('r2','JOB_OVERRIDE','00000000-0000-0000-0000-0000000000b3', 3.5),
+		 ('r2','JOB_OVERRIDE',NULL, 4.5),
+		 ('kept','JOB_OVERRIDE','00000000-0000-0000-0000-0000000000b1', 5.5);`)
+
+	apply(t, conn, target) // the base of the review: this aborted on the scope key
+
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pricing_rules`); n != 2 {
+		t.Errorf("%d pricing rules left, want the unscoped r2 and the one on a copied job", n)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pricing_rules_unmigrated`); n != 3 {
+		t.Errorf("%d rules kept in pricing_rules_unmigrated, want the 3 scoped to uncopied jobs", n)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pricing_rules_unmigrated WHERE name = 'r1' AND job_id IS NOT NULL`); n != 2 {
+		t.Errorf("the two r1 rules keep their own job ids: got %d", n)
+	}
+	if got := scalar[string](t, conn, `SELECT job_id::text FROM pricing_rules WHERE name = 'kept'`); got != "00000000-0000-0000-0000-0000000000b1" {
+		t.Errorf("the rule on a copied job points at %s", got)
+	}
+
+	// No job row is dropped: copied ones are projects, the rest are kept whole.
+	if n := scalar[int](t, conn, `SELECT count(*) FROM customer_jobs_unmigrated WHERE id IN
+		('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000b4','00000000-0000-0000-0000-0000000000b5')`); n != 3 {
+		t.Errorf("%d customerless jobs kept in customer_jobs_unmigrated, want 3 (one named by two customers' quotes)", n)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM projects WHERE id IN
+		('00000000-0000-0000-0000-0000000000b1','00000000-0000-0000-0000-0000000000b2')`); n != 2 {
+		t.Errorf("%d copied jobs in projects, want 2", n)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM customer_jobs_unmigrated WHERE id IN
+		('00000000-0000-0000-0000-0000000000b1','00000000-0000-0000-0000-0000000000b2')`); n != 0 {
+		t.Errorf("a job that was copied is also in the unmigrated table")
+	}
+
+	// A quote's job link survives somewhere recoverable when project_id cannot carry it.
+	link := func(quote string) string {
+		return scalar[string](t, conn, `SELECT COALESCE((SELECT job_id::text || ':' || reason FROM quote_jobs_unmigrated WHERE quote_id = $1), '')`, quote)
+	}
+	if got := link("00000000-0000-0000-0000-0000000000c1"); got != "00000000-0000-0000-0000-0000000000b2:quote_has_other_project" {
+		t.Errorf("quote c1 link = %q", got)
+	}
+	if got := link("00000000-0000-0000-0000-0000000000c2"); got != "00000000-0000-0000-0000-0000000000b5:job_not_copied" {
+		t.Errorf("quote c2 link = %q", got)
+	}
+	if got := link("00000000-0000-0000-0000-0000000000c3"); got != "00000000-0000-0000-0000-0000000000b5:job_not_copied" {
+		t.Errorf("quote c3 link = %q", got)
+	}
+	if got := link("00000000-0000-0000-0000-0000000000c4"); got != "" {
+		t.Errorf("quote c4 (cleanly carried onto project_id) has a link row: %q", got)
+	}
+	if p := scalar[*string](t, conn, `SELECT project_id::text FROM quotes WHERE id = '00000000-0000-0000-0000-0000000000c1'`); p == nil || *p != "00000000-0000-0000-0000-0000000000d1" {
+		t.Errorf("quote c1 keeps its own project, got %v", p)
+	}
+	if p := scalar[*string](t, conn, `SELECT project_id::text FROM quotes WHERE id = '00000000-0000-0000-0000-0000000000c4'`); p == nil || *p != "00000000-0000-0000-0000-0000000000b1" {
+		t.Errorf("quote c4 project = %v, want its job", p)
+	}
+
+	// Applying it again and rolling it back both work and lose nothing.
+	apply(t, conn, target)
+	down, err := os.ReadFile("../../migrations/down/091_customers_wire_contract_down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(context.Background(), string(down)); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM customer_jobs`); n != 5 {
+		t.Errorf("%d jobs after the rollback, want all 5 back", n)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pricing_rules`); n != 5 {
+		t.Errorf("%d pricing rules after the rollback, want all 5 back", n)
+	}
+	for q, want := range map[string]string{
+		"c1": "00000000-0000-0000-0000-0000000000b2", "c2": "00000000-0000-0000-0000-0000000000b5",
+		"c3": "00000000-0000-0000-0000-0000000000b5", "c4": "00000000-0000-0000-0000-0000000000b1",
+	} {
+		if got := scalar[*string](t, conn, `SELECT job_id::text FROM quotes WHERE id = $1`, "00000000-0000-0000-0000-0000000000"+q); got == nil || *got != want {
+			t.Errorf("quote %s job after the rollback = %v, want %s", q, got, want)
+		}
 	}
 }

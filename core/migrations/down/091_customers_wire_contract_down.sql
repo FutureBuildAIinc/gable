@@ -6,12 +6,15 @@
 -- Lives in migrations/down/ so cmd/migrate's `migrations/*.sql` glob cannot
 -- pick it up and apply it as a forward migration. Apply by hand.
 --
--- What does not come back: customer_jobs rows are recreated from the projects
--- that carry their ids only for projects some quote names (the table held
--- nothing else that anything read); a null credit limit becomes 0 again (the
--- old "no limit"); payment terms master rows beyond the legacy text are lost
--- with the table; ship-to addresses, contact order authority, the PO required
--- flag and every revision are dropped; created_at stays NOT NULL.
+-- What does not come back: a null credit limit becomes 0 again (the old "no limit");
+-- payment terms master rows beyond the legacy text are lost with the table and each
+-- customer's `payment_terms` text is not rewritten (it kept its old value, which the
+-- up migration never changed); ship-to addresses, contact order authority, the PO
+-- required flag and every revision are dropped; created_at stays NOT NULL. Jobs are
+-- restored whole: every job the up migration copied (it kept the list), every job it
+-- could not copy, each quote's job link (the link table, else its project when that
+-- project was a copied job) and each pricing rule it moved out. A quote's own
+-- project_id stays as it is.
 
 CREATE TABLE IF NOT EXISTS customer_jobs (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -26,18 +29,28 @@ CREATE INDEX IF NOT EXISTS idx_customer_jobs_customer_id ON customer_jobs (custo
 INSERT INTO customer_jobs (id, customer_id, name, is_active, created_at, updated_at)
 SELECT p.id, p.customer_id, p.name, p.status <> 'Inactive', p.created_at, p.updated_at
 FROM projects p
-WHERE p.id IN (SELECT project_id FROM quotes WHERE project_id IS NOT NULL)
-   OR p.id IN (SELECT job_id FROM pricing_rules WHERE job_id IS NOT NULL)
+WHERE p.id IN (SELECT id FROM customer_jobs_copied)
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO customer_jobs (id, customer_id, name, is_active, created_at, updated_at)
+SELECT id, customer_id, name, is_active, created_at, updated_at FROM customer_jobs_unmigrated
 ON CONFLICT (id) DO NOTHING;
 
 ALTER TABLE pricing_rules DROP CONSTRAINT IF EXISTS pricing_rules_job_id_fkey;
+INSERT INTO pricing_rules SELECT * FROM pricing_rules_unmigrated;
 ALTER TABLE pricing_rules
     ADD CONSTRAINT pricing_rules_job_id_fkey FOREIGN KEY (job_id) REFERENCES customer_jobs (id);
 
 ALTER TABLE quotes ADD COLUMN IF NOT EXISTS job_id UUID NULL;
-UPDATE quotes SET job_id = project_id WHERE project_id IN (SELECT id FROM customer_jobs);
+UPDATE quotes q SET job_id = l.job_id FROM quote_jobs_unmigrated l WHERE l.quote_id = q.id;
+UPDATE quotes q SET job_id = q.project_id
+WHERE q.job_id IS NULL AND q.project_id IN (SELECT id FROM customer_jobs_copied);
 ALTER TABLE quotes
     ADD CONSTRAINT quotes_job_id_fkey FOREIGN KEY (job_id) REFERENCES customer_jobs (id) ON DELETE SET NULL;
+
+DROP TABLE IF EXISTS pricing_rules_unmigrated;
+DROP TABLE IF EXISTS quote_jobs_unmigrated;
+DROP TABLE IF EXISTS customer_jobs_unmigrated;
+DROP TABLE IF EXISTS customer_jobs_copied;
 
 DROP INDEX IF EXISTS idx_customers_payment_terms;
 DROP INDEX IF EXISTS idx_payment_terms_created_id;
