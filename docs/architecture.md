@@ -5,7 +5,7 @@
 > [`modularization-blueprint.md`](./modularization-blueprint.md).
 
 ## 1. System Principles
-- **Modular Monolith:** Single deployment binary; ~40 modules under `core/internal/`, wired in `core/cmd/server/main.go`.
+- **Modular Monolith:** Single deployment binary; ~40 modules under `core/internal/`, wired in `core/internal/app/serve/serve.go`.
 - **Zero-Trust Modules:** Modules never access another module's database tables directly — cross-module needs go through the other module's service or repository types.
 - **Synchronous Interop:** Every inter-module *write* is a synchronous Go call. The one asynchronous path is notification side-effects for price exposure, fanned out over the in-process `pkg/eventbus` (§4.2). There is no message broker and no NATS client in the codebase.
 - **Interface Seams Where They Earn Their Keep:** Most coupling is concrete `*Service` injection; consumer-defined interfaces + adapters in `main.go` exist where cycles had to be broken (`quote.AutoPOService`, `delivery.InvoiceServiceInterface`, `pos.PriceCalculator`, `gl` → `integrations.GLAdapter`).
@@ -161,7 +161,7 @@ change behind `eventbus.Bus`: producers and consumers only see `Publisher`,
       catalog and trading-partner logic lives in `internal/edi`).
 - **Agent-to-agent (separate surface):** `POST /api/v1/a2a/purchase-order`
   accepts JWS-signed inbound POs (`purchase_order.NewA2AReceiver`, wired in
-  `cmd/server/main.go`). It is not part of `internal/integrations`.
+  `core/internal/app/serve/serve.go`). It is not part of `internal/integrations`.
 - **Planned (not built):** per-module `adaptors/` mappers and a dedicated sync
   engine for bi-directional phase-in from legacy systems. Design these as
   *apps* once the platform work (blueprint Phases 1–2) is in place.

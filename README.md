@@ -72,8 +72,8 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 > **Why `AUTH_MODE=dev` is on that command:** it is **not** a default. The
 > backend is fail-closed — with `AUTH_MODE` unset it refuses to start, logging
 > `CORS_ORIGINS not set and AUTH_MODE != dev` (checked first,
-> `cmd/server/main.go:96-99`) and, once that is satisfied,
-> `JWKS_URL not set and AUTH_MODE != dev` (`cmd/server/main.go:146-149`). It
+> `core/internal/app/serve/serve.go`) and, once that is satisfied,
+> `JWKS_URL not set and AUTH_MODE != dev` (`core/internal/app/serve/serve.go`). It
 > exits rather than starting without authentication. You must opt in
 > explicitly, which is the point.
 >
