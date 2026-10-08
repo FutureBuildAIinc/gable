@@ -939,8 +939,8 @@ func TestOrderTransitionsTable(t *testing.T) {
 	}
 	// The reopen is refused once the order is billed: confirm it, bill it,
 	// then try to walk it back to draft.
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_amount, due_date, payment_terms)
-		VALUES (gen_random_uuid(), $1, $2, (SELECT branch_id FROM orders WHERE id = $1), 'UNPAID', 100, 100, 0, CURRENT_DATE + 30, 'NET30')`,
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_amount, due_date)
+		VALUES (gen_random_uuid(), $1, $2, (SELECT branch_id FROM orders WHERE id = $1), 'UNPAID', 100, 100, 0, CURRENT_DATE + 30)`,
 		str(t, other.body, "id"), f.customerID); err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ package payment
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gablelbm/gable/pkg/httputil"
@@ -49,6 +50,10 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 
 	payment, err := h.service.ProcessPayment(r.Context(), req.InvoiceID, req.Amount, req.Method, req.Reference, req.Notes)
 	if err != nil {
+		if errors.Is(err, ErrInvoiceVoid) {
+			httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+			return
+		}
 		httputil.RespondError(w, r, "payment processing failed", http.StatusInternalServerError, err)
 		return
 	}
@@ -96,6 +101,10 @@ func (h *Handler) ProcessCardPayment(w http.ResponseWriter, r *http.Request) {
 
 	payment, err := h.service.ProcessCardPayment(r.Context(), req.InvoiceID, req.TokenID, req.Amount, req.Notes)
 	if err != nil {
+		if errors.Is(err, ErrInvoiceVoid) {
+			httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+			return
+		}
 		httputil.RespondError(w, r, "card payment failed", http.StatusPaymentRequired, err)
 		return
 	}

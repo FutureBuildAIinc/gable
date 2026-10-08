@@ -5,12 +5,14 @@ package payment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -78,6 +80,32 @@ func (s *Service) GetPublicKey() string {
 	return s.publicKey
 }
 
+// ErrInvoiceVoid is the refusal to record a payment against a void invoice.
+var ErrInvoiceVoid = errors.New("the invoice is void: it takes no payment")
+
+// lockInvoice reads the invoice under its row lock (ADR 0005 section 11,
+// step 4) so a payment and an invoice void serialize: the void checks for
+// payments under the same lock, and a payment never lands on a void invoice.
+// C2-4 moves this into the AR core with the rest of the payment acts.
+func (s *Service) lockInvoice(ctx context.Context, id uuid.UUID) (*invoice.Invoice, error) {
+	var inv *invoice.Invoice
+	var err error
+	if l, ok := s.invoiceRepo.(interface {
+		LockInvoice(ctx context.Context, id uuid.UUID) (*invoice.Invoice, error)
+	}); ok {
+		inv, err = l.LockInvoice(ctx, id)
+	} else {
+		inv, err = s.invoiceRepo.GetInvoice(ctx, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if inv.Status == invoice.InvoiceStatusVoid {
+		return nil, ErrInvoiceVoid
+	}
+	return inv, nil
+}
+
 // ProcessPayment handles cash, check, and account payments (non-gateway).
 func (s *Service) ProcessPayment(ctx context.Context, invoiceID uuid.UUID, amountCents int64, method PaymentMethod, ref, notes string) (*Payment, error) {
 	if amountCents <= 0 {
@@ -87,7 +115,10 @@ func (s *Service) ProcessPayment(ctx context.Context, invoiceID uuid.UUID, amoun
 	var p *Payment
 
 	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
-		inv, err := s.invoiceRepo.GetInvoice(ctx, invoiceID)
+		inv, err := s.lockInvoice(ctx, invoiceID)
+		if errors.Is(err, ErrInvoiceVoid) {
+			return err
+		}
 		if err != nil {
 			return fmt.Errorf("invoice not found: %w", err)
 		}
@@ -149,6 +180,12 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 		return nil, fmt.Errorf("payment gateway not configured — set RUN_PAYMENTS_API_KEY")
 	}
 
+	// A void invoice takes no payment: refuse before the card is charged (the
+	// locked read inside the transaction below repeats the check).
+	if pre, err := s.invoiceRepo.GetInvoice(ctx, invoiceID); err == nil && pre.Status == invoice.InvoiceStatusVoid {
+		return nil, ErrInvoiceVoid
+	}
+
 	// 1. Charge through Run Payments
 	result, err := s.gateway.Charge(ctx, ChargeRequest{
 		TokenID:     tokenID,
@@ -171,7 +208,10 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 	// 2. Record payment in our DB within a transaction
 	var p *Payment
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
-		inv, err := s.invoiceRepo.GetInvoice(ctx, invoiceID)
+		inv, err := s.lockInvoice(ctx, invoiceID)
+		if errors.Is(err, ErrInvoiceVoid) {
+			return err
+		}
 		if err != nil {
 			return fmt.Errorf("invoice not found: %w", err)
 		}
@@ -347,10 +387,10 @@ func (s *Service) updateInvoiceStatus(ctx context.Context, invoiceID uuid.UUID, 
 		totalPaid += pay.Amount
 	}
 
-	if totalPaid >= inv.TotalAmount {
+	if totalPaid >= int64(inv.TotalCents) {
 		inv.Status = invoice.InvoiceStatusPaid
 		if inv.PaidAt == nil {
-			now := time.Now()
+			now := httpx.TimestampOf(time.Now())
 			inv.PaidAt = &now
 		}
 	} else if totalPaid > 0 {
@@ -367,7 +407,7 @@ func (s *Service) updateInvoiceStatus(ctx context.Context, invoiceID uuid.UUID, 
 
 	// Notify FB Brain's financial engine when an invoice is fully paid.
 	if inv.Status == invoice.InvoiceStatusPaid && s.brainNotifier != nil {
-		s.brainNotifier.notifyInvoicePaid(s.brainOrgID, inv.ID, inv.TotalAmount)
+		s.brainNotifier.notifyInvoicePaid(s.brainOrgID, inv.ID, int64(inv.TotalCents))
 	}
 
 	return nil

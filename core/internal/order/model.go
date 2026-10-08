@@ -79,21 +79,9 @@ const (
 // MarshalText writes the lowercase wire name.
 func (h HoldReason) MarshalText() ([]byte, error) { return []byte(strings.ToLower(string(h))), nil }
 
-// ShipToSnapshot is the address captured at confirm (ADR 0005 section 5.1),
-// stored as JSONB on the order and read back as the wire's ship_to object.
-type ShipToSnapshot struct {
-	ID                   uuid.UUID `json:"id"`
-	Code                 string    `json:"code"`
-	Name                 string    `json:"name"`
-	Line1                string    `json:"line1"`
-	Line2                *string   `json:"line2"`
-	City                 string    `json:"city"`
-	Region               string    `json:"region"`
-	PostalCode           string    `json:"postal_code"`
-	Country              *string   `json:"country"`
-	Phone                *string   `json:"phone"`
-	DeliveryInstructions *string   `json:"delivery_instructions"`
-}
+// ShipToSnapshot is the address captured at confirm (ADR 0005 section 5.1);
+// the invoice copies it, so the type is the shared one.
+type ShipToSnapshot = salesdoc.ShipToSnapshot
 
 // OrderSummary is the head of an order: a list item, and the summary of the
 // full document. Money is integer cents; optional fields are present as

@@ -143,7 +143,7 @@ func (r *PostgresRepository) GetPortalConfig(ctx context.Context) (*PortalConfig
 
 // GetCustomerARSummary fetches balance, credit limit, and past-due amount.
 //
-// Balance is computed live from the invoices table (sum of all UNPAID/OVERDUE
+// Balance is computed live from the invoices table (sum of all UNPAID/PARTIAL
 // invoice totals) rather than read from the denormalized customers.balance_due
 // column. The stored column is not maintained by the seed pipeline or the
 // invoice write paths, so reading it produced stale zeros while past_due
@@ -166,7 +166,7 @@ func (r *PostgresRepository) GetCustomerARSummary(ctx context.Context, customerI
 		SELECT COALESCE(SUM(total_amount), 0)::float8
 		FROM invoices
 		WHERE customer_id = $1
-		  AND status IN ('UNPAID', 'PARTIAL', 'OVERDUE')
+		  AND status IN ('UNPAID', 'PARTIAL')
 	`
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, balanceQuery, customerID).Scan(&balance)
 	if err != nil {
@@ -178,8 +178,8 @@ func (r *PostgresRepository) GetCustomerARSummary(ctx context.Context, customerI
 		SELECT COALESCE(SUM(total_amount), 0)::float8
 		FROM invoices
 		WHERE customer_id = $1
-		  AND status IN ('UNPAID', 'OVERDUE')
-		  AND due_date < NOW()
+		  AND status IN ('UNPAID', 'PARTIAL')
+		  AND due_date < CURRENT_DATE
 	`
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, pastDueQuery, customerID).Scan(&pastDue)
 	if err != nil {
@@ -259,10 +259,12 @@ func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderI
 // ListInvoicesByCustomer fetches invoices for a customer.
 func (r *PostgresRepository) ListInvoicesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalInvoiceDTO, error) {
 	query := `
-		SELECT id, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at
-		FROM invoices
-		WHERE customer_id = $1
-		ORDER BY created_at DESC
+		SELECT i.id, i.order_id, i.status, i.total_amount, i.subtotal, i.tax_amount,
+		       (SELECT pt.code FROM payment_terms pt WHERE pt.id = i.payment_terms_id), i.due_date, i.paid_at, i.created_at,
+		       i.number, (i.status IN ('UNPAID', 'PARTIAL') AND i.due_date < CURRENT_DATE)
+		FROM invoices i
+		WHERE i.customer_id = $1
+		ORDER BY i.created_at DESC
 		LIMIT 50
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
@@ -277,7 +279,7 @@ func (r *PostgresRepository) ListInvoicesByCustomer(ctx context.Context, custome
 		if err := rows.Scan(
 			&inv.ID, &inv.OrderID, &inv.Status, &inv.TotalAmount,
 			&inv.Subtotal, &inv.TaxAmount, &inv.PaymentTerms,
-			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt,
+			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.Number, &inv.IsOverdue,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan invoice: %w", err)
 		}
@@ -294,15 +296,17 @@ func (r *PostgresRepository) ListInvoicesByCustomer(ctx context.Context, custome
 // GetInvoiceByIDAndCustomer fetches a single invoice scoped to a customer.
 func (r *PostgresRepository) GetInvoiceByIDAndCustomer(ctx context.Context, invoiceID, customerID uuid.UUID) (*PortalInvoiceDTO, error) {
 	query := `
-		SELECT id, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at
-		FROM invoices
-		WHERE id = $1 AND customer_id = $2
+		SELECT i.id, i.order_id, i.status, i.total_amount, i.subtotal, i.tax_amount,
+		       (SELECT pt.code FROM payment_terms pt WHERE pt.id = i.payment_terms_id), i.due_date, i.paid_at, i.created_at,
+		       i.number, (i.status IN ('UNPAID', 'PARTIAL') AND i.due_date < CURRENT_DATE)
+		FROM invoices i
+		WHERE i.id = $1 AND i.customer_id = $2
 	`
 	var inv PortalInvoiceDTO
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, invoiceID, customerID).Scan(
 		&inv.ID, &inv.OrderID, &inv.Status, &inv.TotalAmount,
 		&inv.Subtotal, &inv.TaxAmount, &inv.PaymentTerms,
-		&inv.DueDate, &inv.PaidAt, &inv.CreatedAt,
+		&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.Number, &inv.IsOverdue,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

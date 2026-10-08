@@ -520,6 +520,10 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 				ID: uuid.New(), Position: n, LineType: string(b.LineType), ProductID: b.ProductID, ChargeCodeID: b.ChargeCodeID,
 				SKU: b.SKU, Description: b.Description, UOM: b.UOM, PriceUOM: b.PriceUOM,
 				PriceSource: string(b.PriceSource), Taxable: b.Taxable, RevenueAccountCode: b.RevenueAccountCode,
+				OverrideReason: b.OverrideReason, PriceAdjustedBy: b.PriceAdjustedBy,
+			}
+			if b.PricedUnitPrice != nil {
+				fl.PricedUnitPrice = i64(int64(*b.PricedUnitPrice))
 			}
 			olID := ol.ID
 			fl.OrderLineID = &olID
@@ -538,8 +542,12 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 					fl.DiscountPercent = i64(int64(*b.DiscountPercent))
 				}
 				if b.DiscountAmount != nil {
-					// the invoice line's share of the prorated amount discount
-					share := salesdocDiscountShare(&ol.Line, ol.QuantityFulfilled, ol.QuantityFulfilled+*b.Quantity)
+					// the invoice line's share of the amount discount: its gross piece
+					// less its net, so the shares sum to the order line's discount
+					share, err := salesdoc.BilledDiscount(&ol.Line, ol.QuantityFulfilled, ol.QuantityFulfilled+*b.Quantity)
+					if err != nil {
+						return err
+					}
 					fl.DiscountCents = i64(int64(share))
 				}
 				fl.DiscountReason = b.DiscountReason
@@ -612,24 +620,6 @@ func derefPrice(p *httpx.Price) httpx.Price {
 		return 0
 	}
 	return *p
-}
-
-// salesdocDiscountShare is an invoice line's share of its order line's amount
-// discount: the difference of the prorated cumulative discounts.
-func salesdocDiscountShare(l *salesdoc.Line, before, after httpx.Quantity) httpx.Cents {
-	if l.DiscountAmount == nil || l.Quantity == nil || *l.Quantity <= 0 {
-		return 0
-	}
-	cum := func(q httpx.Quantity) int64 {
-		if q >= *l.Quantity {
-			return int64(*l.DiscountAmount)
-		}
-		n := new(big.Int).Mul(big.NewInt(int64(*l.DiscountAmount)), big.NewInt(int64(q)))
-		d := big.NewInt(int64(*l.Quantity))
-		n.Add(n, new(big.Int).Rsh(d, 1))
-		return new(big.Int).Div(n, d).Int64()
-	}
-	return httpx.Cents(cum(after) - cum(before))
 }
 
 // checkFulfilFields holds the request fields to the order: a will-call
@@ -801,13 +791,19 @@ func nonStockRelief(rc NonStockReceipts, billedBefore, qty httpx.Quantity) httpx
 	return httpx.Cents(n.Int64())
 }
 
-// recordInvoice writes invoice.created through the transaction's executor.
+// recordInvoice writes invoice.created through the transaction's executor, and
+// invoice.paid after it for a zero total (ADR 0005 6.2: an invoice with
+// nothing owed is created paid).
 func (s *Service) recordInvoice(ctx context.Context, o *Order, inv *invoice.FulfilmentInvoice) error {
 	if s.events == nil {
 		return nil
 	}
+	status := "unpaid"
+	if inv.TotalCents == 0 {
+		status = "paid"
+	}
 	raw, err := jsonMarshal(map[string]any{
-		"customer_id": inv.CustomerID, "order_id": inv.OrderID, "status": "unpaid",
+		"number": inv.Number, "customer_id": inv.CustomerID, "order_id": inv.OrderID, "status": status,
 		"currency": inv.Currency, "total_cents": inv.TotalCents, "subtotal_cents": inv.SubtotalCents,
 		"tax_cents": inv.TaxCents, "delivery_id": inv.DeliveryID,
 	})
@@ -815,8 +811,23 @@ func (s *Service) recordInvoice(ctx context.Context, o *Order, inv *invoice.Fulf
 		return err
 	}
 	branch := o.BranchID
-	return s.events.Write(ctx, outbox.Event{
+	if err := s.events.Write(ctx, outbox.Event{
 		Type: EventInvoiceCreated, EntityType: "invoice", EntityID: inv.ID, BranchID: &branch, Data: raw,
+	}); err != nil {
+		return err
+	}
+	if inv.TotalCents != 0 {
+		return nil
+	}
+	paid, err := jsonMarshal(map[string]any{
+		"number": inv.Number, "customer_id": inv.CustomerID, "order_id": inv.OrderID, "status": "paid",
+		"from_status": "unpaid", "currency": inv.Currency, "total_cents": inv.TotalCents,
+	})
+	if err != nil {
+		return err
+	}
+	return s.events.Write(ctx, outbox.Event{
+		Type: "invoice.paid", EntityType: "invoice", EntityID: inv.ID, BranchID: &branch, Data: paid,
 	})
 }
 

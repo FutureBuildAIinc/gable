@@ -25,7 +25,7 @@ import (
 // --- fakes -------------------------------------------------------------------
 
 type fakeRepo struct {
-	created []Invoice
+	created []LegacyInvoice
 
 	createErr  error
 	branchRate float64
@@ -34,13 +34,9 @@ type fakeRepo struct {
 
 	openBalance int64
 	existsOrder bool
-
-	memos    []CreditMemo
-	memoErr  error
-	updateCM error
 }
 
-func (f *fakeRepo) CreateInvoice(_ context.Context, inv *Invoice) error {
+func (f *fakeRepo) CreateInvoice(_ context.Context, inv *LegacyInvoice) error {
 	if f.createErr != nil {
 		return f.createErr
 	}
@@ -51,11 +47,7 @@ func (f *fakeRepo) CreateInvoice(_ context.Context, inv *Invoice) error {
 	return nil
 }
 func (f *fakeRepo) GetInvoice(context.Context, uuid.UUID) (*Invoice, error) { return nil, nil }
-func (f *fakeRepo) ListInvoices(context.Context) ([]Invoice, error)         { return nil, nil }
-func (f *fakeRepo) ListInvoicesPaginated(context.Context, int, int) ([]Invoice, int, error) {
-	return nil, 0, nil
-}
-func (f *fakeRepo) UpdateInvoice(context.Context, *Invoice) error { return nil }
+func (f *fakeRepo) UpdateInvoice(context.Context, *Invoice) error           { return nil }
 func (f *fakeRepo) ExistsInvoiceForOrder(context.Context, uuid.UUID) (bool, error) {
 	return f.existsOrder, nil
 }
@@ -66,20 +58,6 @@ func (f *fakeRepo) GetBranchTaxRate(_ context.Context, branchID *uuid.UUID) (flo
 	f.branchSeen = append(f.branchSeen, branchID)
 	return f.branchRate, f.branchOK
 }
-func (f *fakeRepo) CreateCreditMemo(_ context.Context, cm *CreditMemo) error {
-	if f.memoErr != nil {
-		return f.memoErr
-	}
-	if cm.ID == uuid.Nil {
-		cm.ID = uuid.New()
-	}
-	f.memos = append(f.memos, *cm)
-	return nil
-}
-func (f *fakeRepo) ListCreditMemos(context.Context, uuid.UUID) ([]CreditMemo, error) {
-	return f.memos, nil
-}
-func (f *fakeRepo) UpdateCreditMemo(context.Context, *CreditMemo) error { return f.updateCM }
 
 // fakeAccount records AR subledger postings.
 type fakeAccount struct {
@@ -111,8 +89,8 @@ func (f *fakeAccount) GetTransactions(context.Context, uuid.UUID) ([]account.Cus
 
 func txCtx() context.Context { return testutil.TxContext(context.Background()) }
 
-func line(priceEach int64, qty float64) InvoiceLine {
-	return InvoiceLine{ProductID: uuid.New(), PriceEach: priceEach, Quantity: qty}
+func line(priceEach int64, qty float64) LegacyLine {
+	return LegacyLine{ProductID: uuid.New(), PriceEach: priceEach, Quantity: qty}
 }
 
 // --- subtotal accumulation ---------------------------------------------------
@@ -122,26 +100,26 @@ func line(priceEach int64, qty float64) InvoiceLine {
 func TestCreateInvoice_SubtotalAccumulation(t *testing.T) {
 	tests := []struct {
 		name  string
-		lines []InvoiceLine
+		lines []LegacyLine
 		want  int64
 	}{
-		{"single whole-unit line", []InvoiceLine{line(1299, 1)}, 1299},
-		{"quantity multiplies the unit price", []InvoiceLine{line(1299, 4)}, 5196},
-		{"three lines accumulate", []InvoiceLine{line(1000, 2), line(250, 4), line(99, 1)}, 3099},
-		{"fractional board feet", []InvoiceLine{line(100, 12.5)}, 1250},
-		{"many small lines do not drift", []InvoiceLine{
+		{"single whole-unit line", []LegacyLine{line(1299, 1)}, 1299},
+		{"quantity multiplies the unit price", []LegacyLine{line(1299, 4)}, 5196},
+		{"three lines accumulate", []LegacyLine{line(1000, 2), line(250, 4), line(99, 1)}, 3099},
+		{"fractional board feet", []LegacyLine{line(100, 12.5)}, 1250},
+		{"many small lines do not drift", []LegacyLine{
 			line(1, 1), line(1, 1), line(1, 1), line(1, 1), line(1, 1),
 			line(1, 1), line(1, 1), line(1, 1), line(1, 1), line(1, 1),
 		}, 10},
 		// CHARACTERIZATION: a zero-quantity line contributes nothing and is
 		// neither rejected nor dropped. CreateInvoice performs no line-level
 		// validation at all.
-		{"zero quantity contributes zero", []InvoiceLine{line(5000, 0), line(2500, 2)}, 5000},
-		{"zero price contributes zero", []InvoiceLine{line(0, 99), line(2500, 2)}, 5000},
+		{"zero quantity contributes zero", []LegacyLine{line(5000, 0), line(2500, 2)}, 5000},
+		{"zero price contributes zero", []LegacyLine{line(0, 99), line(2500, 2)}, 5000},
 		// CHARACTERIZATION: negative quantities are accepted and reduce the
 		// subtotal. There is no guard against a credit-shaped line arriving on
 		// a regular invoice.
-		{"negative quantity subtracts", []InvoiceLine{line(1000, 5), line(1000, -2)}, 3000},
+		{"negative quantity subtracts", []LegacyLine{line(1000, 5), line(1000, -2)}, 3000},
 	}
 
 	for _, tc := range tests {
@@ -149,7 +127,7 @@ func TestCreateInvoice_SubtotalAccumulation(t *testing.T) {
 			repo := &fakeRepo{branchRate: 0, branchOK: false}
 			svc := NewService(repo, nil, nil, nil)
 
-			inv := &Invoice{CustomerID: uuid.New(), Lines: tc.lines}
+			inv := &LegacyInvoice{CustomerID: uuid.New(), Lines: tc.lines}
 			if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 				t.Fatalf("CreateInvoice: %v", err)
 			}
@@ -166,10 +144,10 @@ func TestCreateInvoice_PrecomputedSubtotalIsPreserved(t *testing.T) {
 	repo := &fakeRepo{branchRate: 0.10, branchOK: true}
 	svc := NewService(repo, nil, nil, nil)
 
-	inv := &Invoice{
+	inv := &LegacyInvoice{
 		CustomerID: uuid.New(),
 		Subtotal:   9999, // deliberately disagrees with the lines
-		Lines:      []InvoiceLine{line(100, 1)},
+		Lines:      []LegacyLine{line(100, 1)},
 	}
 	if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 		t.Fatalf("CreateInvoice: %v", err)
@@ -211,7 +189,7 @@ func TestCreateInvoice_LineExtensionRounding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeRepo{}
 			svc := NewService(repo, nil, nil, nil)
-			inv := &Invoice{CustomerID: uuid.New(), Lines: []InvoiceLine{line(tc.priceEach, tc.qty)}}
+			inv := &LegacyInvoice{CustomerID: uuid.New(), Lines: []LegacyLine{line(tc.priceEach, tc.qty)}}
 			if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 				t.Fatalf("CreateInvoice: %v", err)
 			}
@@ -234,7 +212,7 @@ func TestCreateInvoice_TaxRateResolution(t *testing.T) {
 		repo := &fakeRepo{branchRate: 0.12, branchOK: true}
 		svc := NewService(repo, nil, nil, nil)
 
-		inv := &Invoice{CustomerID: uuid.New(), BranchID: branchID, Lines: []InvoiceLine{line(10000, 1)}}
+		inv := &LegacyInvoice{CustomerID: uuid.New(), BranchID: branchID, Lines: []LegacyLine{line(10000, 1)}}
 		if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 			t.Fatalf("CreateInvoice: %v", err)
 		}
@@ -256,7 +234,7 @@ func TestCreateInvoice_TaxRateResolution(t *testing.T) {
 		repo := &fakeRepo{branchOK: false}
 		svc := NewService(repo, nil, nil, nil)
 
-		inv := &Invoice{CustomerID: uuid.New(), Lines: []InvoiceLine{line(100000, 1)}}
+		inv := &LegacyInvoice{CustomerID: uuid.New(), Lines: []LegacyLine{line(100000, 1)}}
 		if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 			t.Fatalf("CreateInvoice: %v", err)
 		}
@@ -275,7 +253,7 @@ func TestCreateInvoice_TaxRateResolution(t *testing.T) {
 		repo := &fakeRepo{branchRate: 0.12, branchOK: true}
 		svc := NewService(repo, nil, nil, nil)
 
-		inv := &Invoice{CustomerID: uuid.New(), TaxRate: 0.05, Lines: []InvoiceLine{line(10000, 1)}}
+		inv := &LegacyInvoice{CustomerID: uuid.New(), TaxRate: 0.05, Lines: []LegacyLine{line(10000, 1)}}
 		if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 			t.Fatalf("CreateInvoice: %v", err)
 		}
@@ -302,11 +280,11 @@ func TestCreateInvoice_TotalEqualsSubtotalPlusTax(t *testing.T) {
 		for _, sub := range subtotals {
 			repo := &fakeRepo{}
 			svc := NewService(repo, nil, nil, nil)
-			inv := &Invoice{
+			inv := &LegacyInvoice{
 				CustomerID: uuid.New(),
 				Subtotal:   sub,
 				TaxRate:    rate,
-				Lines:      []InvoiceLine{line(1, 1)},
+				Lines:      []LegacyLine{line(1, 1)},
 			}
 			if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 				t.Fatalf("CreateInvoice: %v", err)
@@ -347,11 +325,11 @@ func TestCreateInvoice_TaxHalfCentRounding(t *testing.T) {
 	for _, tc := range tests {
 		repo := &fakeRepo{}
 		svc := NewService(repo, nil, nil, nil)
-		inv := &Invoice{
+		inv := &LegacyInvoice{
 			CustomerID: uuid.New(),
 			Subtotal:   tc.subtotal,
 			TaxRate:    tc.rate,
-			Lines:      []InvoiceLine{line(1, 1)},
+			Lines:      []LegacyLine{line(1, 1)},
 		}
 		if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 			t.Fatalf("CreateInvoice: %v", err)
@@ -377,13 +355,13 @@ func TestCreateInvoice_PresetTotalSuppressesTax(t *testing.T) {
 	repo := &fakeRepo{branchRate: 0.12, branchOK: true}
 	svc := NewService(repo, nil, nil, nil)
 
-	inv := &Invoice{
+	inv := &LegacyInvoice{
 		CustomerID:  uuid.New(),
 		Subtotal:    10000,
 		TaxAmount:   1200,
 		TaxRate:     0.12,
 		TotalAmount: 11200,
-		Lines:       []InvoiceLine{line(10000, 1)},
+		Lines:       []LegacyLine{line(10000, 1)},
 	}
 	if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 		t.Fatalf("CreateInvoice: %v", err)
@@ -423,13 +401,13 @@ func TestCreateInvoice_OrderFulfilmentPathIsTaxed(t *testing.T) {
 	const orderTotalCents = 10000 // what order.CreateOrder computed, pre-tax
 
 	// Exactly how order.FulfillOrder builds the invoice.
-	inv := &Invoice{
+	inv := &LegacyInvoice{
 		OrderID:     uuid.New(),
 		CustomerID:  uuid.New(),
 		BranchID:    uuid.New(),
 		TotalAmount: orderTotalCents,
 		Status:      InvoiceStatusUnpaid,
-		Lines:       []InvoiceLine{line(10000, 1)},
+		Lines:       []LegacyLine{line(10000, 1)},
 	}
 	if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 		t.Fatalf("CreateInvoice: %v", err)
@@ -455,7 +433,7 @@ func TestCreateInvoice_RejectsEmptyLines(t *testing.T) {
 	repo := &fakeRepo{}
 	svc := NewService(repo, nil, nil, nil)
 
-	err := svc.CreateInvoice(txCtx(), &Invoice{CustomerID: uuid.New()})
+	err := svc.CreateInvoice(txCtx(), &LegacyInvoice{CustomerID: uuid.New()})
 	if err == nil {
 		t.Fatal("want an error for an invoice with no lines")
 	}
@@ -464,30 +442,18 @@ func TestCreateInvoice_RejectsEmptyLines(t *testing.T) {
 	}
 }
 
-// CORRECTNESS: unset status and terms get safe defaults, and a due date is
-// always stamped.
+// CORRECTNESS: an unset status defaults to unpaid (the repository stamps the
+// terms and the due date from the customer's payment terms by id).
 func TestCreateInvoice_Defaults(t *testing.T) {
 	repo := &fakeRepo{}
 	svc := NewService(repo, nil, nil, nil)
 
-	before := time.Now()
-	inv := &Invoice{CustomerID: uuid.New(), Lines: []InvoiceLine{line(1000, 1)}}
+	inv := &LegacyInvoice{CustomerID: uuid.New(), Lines: []LegacyLine{line(1000, 1)}}
 	if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 		t.Fatalf("CreateInvoice: %v", err)
 	}
-
 	if inv.Status != InvoiceStatusUnpaid {
 		t.Errorf("Status = %q, want %q", inv.Status, InvoiceStatusUnpaid)
-	}
-	if inv.PaymentTerms != TermsNet30 {
-		t.Errorf("PaymentTerms = %q, want %q", inv.PaymentTerms, TermsNet30)
-	}
-	if inv.DueDate == nil {
-		t.Fatal("DueDate must be set")
-	}
-	wantEarliest := before.AddDate(0, 0, 30)
-	if inv.DueDate.Before(wantEarliest.Add(-time.Minute)) {
-		t.Errorf("DueDate = %v, want roughly 30 days out (%v)", inv.DueDate, wantEarliest)
 	}
 }
 
@@ -497,12 +463,11 @@ func TestCreateInvoice_PreservesCallerStatusAndDueDate(t *testing.T) {
 	svc := NewService(repo, nil, nil, nil)
 
 	due := time.Date(2027, 1, 15, 0, 0, 0, 0, time.UTC)
-	inv := &Invoice{
-		CustomerID:   uuid.New(),
-		Status:       InvoiceStatusPartial,
-		PaymentTerms: TermsCOD,
-		DueDate:      &due,
-		Lines:        []InvoiceLine{line(1000, 1)},
+	inv := &LegacyInvoice{
+		CustomerID: uuid.New(),
+		Status:     InvoiceStatusPartial,
+		DueDate:    &due,
+		Lines:      []LegacyLine{line(1000, 1)},
 	}
 	if err := svc.CreateInvoice(txCtx(), inv); err != nil {
 		t.Fatalf("CreateInvoice: %v", err)
@@ -520,82 +485,9 @@ func TestCreateInvoice_RepositoryErrorPropagates(t *testing.T) {
 	repo := &fakeRepo{createErr: errors.New("insert failed")}
 	svc := NewService(repo, nil, nil, nil)
 
-	err := svc.CreateInvoice(txCtx(), &Invoice{CustomerID: uuid.New(), Lines: []InvoiceLine{line(1000, 1)}})
+	err := svc.CreateInvoice(txCtx(), &LegacyInvoice{CustomerID: uuid.New(), Lines: []LegacyLine{line(1000, 1)}})
 	if err == nil {
 		t.Fatal("want the repository error to propagate")
-	}
-}
-
-// CORRECTNESS: payment terms map to the documented net periods; anything
-// unrecognised defaults to 30 days rather than to "due immediately".
-func TestCalcDueDate(t *testing.T) {
-	from := time.Date(2026, 1, 31, 12, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		terms string
-		want  time.Time
-	}{
-		{TermsCOD, from},
-		{TermsDueOnReceipt, from},
-		{TermsNet30, from.AddDate(0, 0, 30)},
-		{TermsNet60, from.AddDate(0, 0, 60)},
-		{TermsNet90, from.AddDate(0, 0, 90)},
-		{"NET45", from.AddDate(0, 0, 30)},
-		{"", from.AddDate(0, 0, 30)},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.terms, func(t *testing.T) {
-			if got := calcDueDate(from, tc.terms); !got.Equal(tc.want) {
-				t.Errorf("calcDueDate(%v, %q) = %v, want %v", from, tc.terms, got, tc.want)
-			}
-		})
-	}
-}
-
-// --- credit memos ------------------------------------------------------------
-
-// CORRECTNESS: a credit memo must carry a positive amount. A zero or negative
-// memo would become a debit when applied (ApplyCreditMemoFull posts -Amount).
-func TestCreateCreditMemo_RejectsNonPositiveAmounts(t *testing.T) {
-	tests := []struct {
-		name    string
-		amount  int64
-		wantErr bool
-	}{
-		{"positive is accepted", 1, false},
-		{"zero is rejected", 0, true},
-		{"negative is rejected", -500, true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := &fakeRepo{}
-			svc := NewService(repo, nil, nil, nil)
-
-			cm, err := svc.CreateCreditMemo(context.Background(), uuid.New(), nil, tc.amount, "damaged goods")
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("want an error for amount %d", tc.amount)
-				}
-				if len(repo.memos) != 0 {
-					t.Error("a rejected memo must not be persisted")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("CreateCreditMemo: %v", err)
-			}
-			if cm.Status != "PENDING" {
-				t.Errorf("Status = %q, want PENDING — a new memo is not yet applied", cm.Status)
-			}
-			if cm.Amount != tc.amount {
-				t.Errorf("Amount = %d, want %d", cm.Amount, tc.amount)
-			}
-			if cm.AppliedAt != nil {
-				t.Error("AppliedAt must be nil on a pending memo")
-			}
-		})
 	}
 }
 
@@ -609,7 +501,7 @@ func TestPostInvoiceToLedger_BalancedAndAgreeing(t *testing.T) {
 	acct := &fakeAccount{}
 	svc := NewService(&fakeRepo{}, newGLService(glRepo), acct, nil)
 
-	inv := &Invoice{ID: uuid.New(), CustomerID: uuid.New(), TotalAmount: 11200}
+	inv := &LegacyInvoice{ID: uuid.New(), CustomerID: uuid.New(), TotalAmount: 11200}
 	if err := svc.PostInvoiceToLedger(context.Background(), inv); err != nil {
 		t.Fatalf("PostInvoiceToLedger: %v", err)
 	}
@@ -660,7 +552,7 @@ func TestPostInvoiceToLedger_GLFailureBlocksSubledger(t *testing.T) {
 	acct := &fakeAccount{}
 	svc := NewService(&fakeRepo{}, newGLService(glRepo), acct, nil)
 
-	err := svc.PostInvoiceToLedger(context.Background(), &Invoice{ID: uuid.New(), CustomerID: uuid.New(), TotalAmount: 5000})
+	err := svc.PostInvoiceToLedger(context.Background(), &LegacyInvoice{ID: uuid.New(), CustomerID: uuid.New(), TotalAmount: 5000})
 	if err == nil {
 		t.Fatal("want an error when the GL posting fails")
 	}

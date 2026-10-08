@@ -5,39 +5,438 @@ package invoice
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"sort"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/money"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
+// EventRecorder writes a domain event into the transactional outbox, as the
+// LAST statement of the mutation's transaction (ADR 0003 section 2).
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
+
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3).
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+}
+
+// Stock is the inventory seam an invoice void and a restocking credit memo
+// use: the scale 4 functions of the inventory service, each taking an explicit
+// branch and running inside the caller's transaction.
+type Stock interface {
+	RestockQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
+	UnrestockQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
+}
+
+// OrderReopener is the order module's half of an invoice void (ADR 0005
+// 6.2), implemented by order.Service: the invoice module cannot import the
+// order module, which imports it.
+type OrderReopener interface {
+	// LockForInvoiceVoid takes the invoice's order row and the customer's
+	// credit serialization (section 11, steps 1 and 1a), in that order.
+	LockForInvoiceVoid(ctx context.Context, orderID uuid.UUID) error
+	// ReturnBilled returns the voided invoice's billed quantities to its
+	// order: the stock back on hand, quantity_fulfilled reduced, allocation
+	// re-run for those quantities, the status re-derived. It answers the
+	// order's own events for the caller to write last, and the order's new
+	// status for the invoice's event.
+	ReturnBilled(ctx context.Context, orderID uuid.UUID, billed []BilledLine, actor string) (ReopenResult, error)
+}
+
+// ReopenResult is what ReturnBilled did to the order.
+type ReopenResult struct {
+	Status string // the order's status after the void, lowercase
+	Events []outbox.Event
+}
+
+// TxRunner runs fn inside one transaction, joining the caller's when ctx
+// already carries one. *database.DB satisfies it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
 type Service struct {
-	repo     Repository
-	gl       *gl.Service
-	account  account.Service
-	auditLog *audit.Logger
-	db       *database.DB
+	repo      Repository
+	gl        *gl.Service
+	account   account.Service
+	auditLog  *audit.Logger
+	db        *database.DB
+	events    EventRecorder
+	branches  BranchGuard
+	inventory Stock
+	orders    OrderReopener
+	now       func() time.Time
 }
 
 func NewService(repo Repository, glService *gl.Service, accountService account.Service, db *database.DB) *Service {
-	return &Service{repo: repo, gl: glService, account: accountService, db: db}
+	return &Service{repo: repo, gl: glService, account: accountService, db: db, now: time.Now}
 }
 
 // WithAuditLog sets the audit logger for financial operation tracking.
-func (s *Service) WithAuditLog(l *audit.Logger) *Service {
-	s.auditLog = l
-	return s
+func (s *Service) WithAuditLog(l *audit.Logger) *Service { s.auditLog = l; return s }
+
+// WithOutbox sets the event writer.
+func (s *Service) WithOutbox(e EventRecorder) *Service { s.events = e; return s }
+
+// WithBranchGuard sets the payload branch rule for the write routes.
+func (s *Service) WithBranchGuard(g BranchGuard) *Service { s.branches = g; return s }
+
+// WithStock sets the inventory seam a void and a restock use.
+func (s *Service) WithStock(st Stock) *Service { s.inventory = st; return s }
+
+// WithOrders sets the order module's half of an invoice void.
+func (s *Service) WithOrders(o OrderReopener) *Service { s.orders = o; return s }
+
+// Store is the repository half the C2-3 acts use; the Postgres repository
+// implements it. Unit tests that fake only Repository never reach them.
+type Store interface {
+	Repository
+	FulfilmentStore
+
+	ListInvoices(ctx context.Context, f ListFilter) ([]InvoiceSummary, error)
+	CountInvoices(ctx context.Context, f ListFilter) (int64, error)
+	LockInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error)
+	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
+	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
+	VoidFactsFor(ctx context.Context, invoiceID uuid.UUID) (VoidFacts, error)
+	MarkVoid(ctx context.Context, id uuid.UUID, actor, reason string, voidedOn time.Time) error
+	BilledLines(ctx context.Context, invoiceID uuid.UUID) ([]BilledLine, error)
+
+	ListCreditMemos(ctx context.Context, f CreditFilter) ([]CreditMemoSummary, error)
+	CountCreditMemos(ctx context.Context, f CreditFilter) (int64, error)
+	GetCreditMemo(ctx context.Context, id uuid.UUID) (*CreditMemo, error)
+	LockCreditMemo(ctx context.Context, id uuid.UUID) (*CreditMemo, error)
+	CreditMemoInvoiceID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
+	InsertCreditMemo(ctx context.Context, h *CreditHeader) error
+	UpdateCreditDraft(ctx context.Context, h *CreditHeader) error
+	ReplaceCreditLines(ctx context.Context, memoID uuid.UUID, lines []CreditLine) error
+	PostCredit(ctx context.Context, h *CreditHeader, number string, glEntryID *uuid.UUID) error
+	MarkCreditVoid(ctx context.Context, id uuid.UUID, actor, reason string, voidedOn time.Time) error
+	NextCreditMemoNumber(ctx context.Context) (string, error)
+	CreditedAgainstInvoice(ctx context.Context, invoiceID, exclude uuid.UUID, includeDrafts bool) (CreditedAgainst, error)
+	CustomerCreditFacts(ctx context.Context, customerID uuid.UUID) (CreditFacts, error)
+	OwnedBy(ctx context.Context, customerID uuid.UUID, shipToID, jobID *uuid.UUID) (bool, bool, error)
+	TaxInputs(ctx context.Context, branchID uuid.UUID, shipToID *uuid.UUID) (shipRate, branchRate *string, err error)
+	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductRef, error)
+	ChargeCodeByCode(ctx context.Context, code string) (salesdoc.ChargeCode, bool, error)
 }
 
-// DefaultTaxRate is the default sales tax rate (configurable per jurisdiction)
+func (s *Service) store() (Store, error) {
+	st, ok := s.repo.(Store)
+	if !ok {
+		return nil, errors.New("invoice: the repository cannot run the invoice acts")
+	}
+	return st, nil
+}
+
+func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.db == nil {
+		return fn(ctx)
+	}
+	return s.db.RunInTx(ctx, fn)
+}
+
+// Precondition is the client's revision for a transition or an edit (ADR 0001
+// section 11).
+type Precondition struct {
+	IfMatch  string
+	Revision *int64
+}
+
+func (p Precondition) missing() bool { return p.IfMatch == "" && p.Revision == nil }
+
+func (p Precondition) check(current int64) error {
+	return httpx.CheckRevision(current, p.IfMatch, p.Revision)
+}
+
+func conflictBlocker(code, message string) *httpx.Error {
+	return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict, Message: message,
+		Details: []httpx.FieldError{httpx.Blocker(code, message)}}
+}
+
+func notFound(err error) error {
+	var he *httpx.Error
+	if errors.As(err, &he) {
+		return err
+	}
+	return httpx.NotFound("not found")
+}
+
+// checkBranch is the record branch rule (ADR 0007 section 2.3) for a document
+// a path id addresses on the write routes: the document's branch must be one
+// the caller may target, else 403 forbidden naming id. It fails closed.
+func (s *Service) checkBranch(ctx context.Context, branch uuid.UUID, what string) error {
+	if s.branches == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, branch)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: what + " is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
+}
+
+// financeRoles may void and post (ADR 0005 6.2 and 6.3).
+var financeRoles = map[string]bool{"admin": true, "owner": true, "finance": true}
+
+// requireFinance holds an act to the finance roles; an empty role (an in
+// process caller, a machine key) passes, as the order's release does.
+func requireFinance(role, what string) error {
+	if role != "" && !financeRoles[role] {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: what + " needs the admin, owner or finance role"}
+	}
+	return nil
+}
+
+// record writes one event through the transaction's executor, last.
+func (s *Service) record(ctx context.Context, ev outbox.Event) error {
+	if s.events == nil {
+		return nil
+	}
+	return s.events.Write(ctx, ev)
+}
+
+func marshal(v any) json.RawMessage {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return raw
+}
+
+// ---------------------------------------------------------------------------
+// Reads.
+// ---------------------------------------------------------------------------
+
+func (s *Service) GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error) {
+	return s.repo.GetInvoice(ctx, id)
+}
+
+// ListInvoices answers one page and whether another follows (the repository
+// reads limit+1), with the filtered total on request.
+func (s *Service) ListInvoices(ctx context.Context, f ListFilter, wantTotal bool) (items []InvoiceSummary, hasMore bool, total *int64, err error) {
+	st, err := s.store()
+	if err != nil {
+		return nil, false, nil, err
+	}
+	probe := f
+	probe.Limit = f.Limit + 1
+	items, err = st.ListInvoices(ctx, probe)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	if len(items) > f.Limit {
+		items, hasMore = items[:f.Limit], true
+	}
+	if wantTotal {
+		n, err := st.CountInvoices(ctx, f)
+		if err != nil {
+			return nil, false, nil, err
+		}
+		total = &n
+	}
+	return items, hasMore, total, nil
+}
+
+// GetCustomerOpenBalanceCents returns the customer's live outstanding AR balance
+// (sum of open invoices), in cents.
+func (s *Service) GetCustomerOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
+	return s.repo.SumOpenBalanceCents(ctx, customerID)
+}
+
+// ExistsInvoiceForOrder reports whether the order has an invoice not void.
+func (s *Service) ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error) {
+	return s.repo.ExistsInvoiceForOrder(ctx, orderID)
+}
+
+// ---------------------------------------------------------------------------
+// The void (ADR 0005 6.2).
+// ---------------------------------------------------------------------------
+
+// Transition is the body of an invoice transition.
+type Transition struct {
+	Reason string
+	Actor  string
+	Role   string
+}
+
+// VoidInvoice voids an unpaid invoice in one transaction, in section 11's
+// order: the invoice's order row and the customer's credit serialization, the
+// invoice, the stock back on hand and the order's lines and status, the
+// customer row for the subledger, the reversal entry, then the events last.
+// It reverses the invoice's whole entry (dated the void date), returns its
+// billed stock to on hand, reduces the order lines' fulfilled quantities,
+// re-runs allocation for those quantities and derives the order status.
+func (s *Service) VoidInvoice(ctx context.Context, id uuid.UUID, pre Precondition, body Transition) (*Invoice, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	if err := requireFinance(body.Role, "voiding an invoice"); err != nil {
+		return nil, err
+	}
+	st, err := s.store()
+	if err != nil {
+		return nil, err
+	}
+	var out *Invoice
+	err = s.inTx(ctx, func(ctx context.Context) error {
+		// Read the invoice unlocked to learn its order, the first lock.
+		head, err := st.GetInvoice(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := s.checkBranch(ctx, head.BranchID, "invoice"); err != nil {
+			return err
+		}
+		if head.OrderID != nil && s.orders != nil {
+			if err := s.orders.LockForInvoiceVoid(ctx, *head.OrderID); err != nil {
+				return err
+			}
+		} else if err := st.LockCustomerCredit(ctx, head.CustomerID); err != nil {
+			return err
+		}
+		inv, err := st.LockInvoice(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := pre.check(inv.Revision); err != nil {
+			return err
+		}
+		if inv.Status == InvoiceStatusVoid {
+			return httpx.InvalidStateTransition("the invoice is already void")
+		}
+		facts, err := st.VoidFactsFor(ctx, id)
+		if err != nil {
+			return err
+		}
+		switch {
+		case inv.Status != InvoiceStatusUnpaid || facts.Payments > 0 || facts.AppliedMemos > 0:
+			// paid, partial, written off, a payment recorded or an applied
+			// credit memo naming it: reverse them first (C2-4's live
+			// applications take over this check)
+			return conflictBlocker("has_applications", "the invoice has payments or applied credit memos: reverse them before voiding it")
+		case facts.LiveMemos > 0:
+			return conflictBlocker("has_credit_memos", "a credit memo names the invoice: void the credit memos first")
+		}
+
+		// Section 11 step 6: the order's stock and lines.
+		var reopen ReopenResult
+		if inv.OrderID != nil && s.orders != nil {
+			billed, err := st.BilledLines(ctx, id)
+			if err != nil {
+				return err
+			}
+			if reopen, err = s.orders.ReturnBilled(ctx, *inv.OrderID, billed, body.Actor); err != nil {
+				return err
+			}
+		}
+
+		// Step 7 and 9: the customer row (the subledger's lock), then the
+		// reversal of the invoice's whole entry, dated the void date.
+		date, err := st.BranchLocalDate(ctx, inv.BranchID, s.now())
+		if err != nil {
+			return err
+		}
+		if err := st.LockCustomer(ctx, inv.CustomerID); err != nil {
+			return err
+		}
+		if inv.GLEntryID != nil && s.gl != nil {
+			if _, err := s.gl.PostReversal(ctx, gl.ReversalInput{EntryID: *inv.GLEntryID, EntryDate: date,
+				Currency: inv.Currency, Reason: "invoice " + inv.Number + " voided", PostedBy: body.Actor}); err != nil {
+				return mapPostingError(err)
+			}
+		}
+		if s.account != nil {
+			invID := inv.ID
+			if _, err := s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypeReversal, -int64(inv.TotalCents), &invID, "Void of invoice "+inv.Number); err != nil {
+				return fmt.Errorf("failed to reverse the invoice in the account ledger: %w", err)
+			}
+		}
+		if err := st.MarkVoid(ctx, id, body.Actor, body.Reason, date); err != nil {
+			return err
+		}
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action: "invoice.voided", EntityType: "invoice", EntityID: id, UserID: body.Actor,
+				Changes: map[string]interface{}{"number": inv.Number, "reason": body.Reason, "total_cents": int64(inv.TotalCents)},
+			}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
+		}
+		if out, err = st.GetInvoice(ctx, id); err != nil {
+			return err
+		}
+
+		// Step 10: the events, last.
+		data := map[string]any{
+			"number": out.Number, "customer_id": out.CustomerID, "status": out.Status.Status(),
+			"from_status": inv.Status.Status(), "revision": out.Revision, "currency": out.Currency,
+			"total_cents": int64(out.TotalCents),
+		}
+		if out.OrderID != nil {
+			data["order_id"] = out.OrderID
+			if reopen.Status != "" {
+				data["order_status"] = reopen.Status
+			}
+		}
+		branch := out.BranchID
+		if err := s.record(ctx, outbox.Event{Type: EventInvoiceVoided, EntityType: "invoice", EntityID: out.ID,
+			BranchID: &branch, Data: marshal(data)}); err != nil {
+			return err
+		}
+		for _, ev := range reopen.Events {
+			if err := s.record(ctx, ev); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// mapPostingError maps the ledger's refusals to the wire: a closed period is
+// a 409 with the blocker period_closed (ADR 0005 8.1).
+func mapPostingError(err error) error {
+	if errors.Is(err, gl.ErrPeriodClosed) {
+		return conflictBlocker("period_closed", "the entry would be dated into a closed fiscal period")
+	}
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// The legacy writers (the counter's account charge; C2-5 retires them).
+// ---------------------------------------------------------------------------
+
+// DefaultTaxRate is the fallback sales tax rate of the counter's legacy account
+// charge when its branch has none configured (C2-5 retires it with the path;
+// the orders and the credit memos refuse instead, ADR 0005 section 3).
 const DefaultTaxRate = 0.0825 // 8.25%
 
-func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
+// CreateInvoice is the counter's account charge (the legacy path): the
+// repository locks the customer, numbers the invoice through the counter and
+// derives the due date from the customer's terms.
+func (s *Service) CreateInvoice(ctx context.Context, inv *LegacyInvoice) error {
 	if len(inv.Lines) == 0 {
 		return fmt.Errorf("invoice must have lines")
 	}
@@ -45,35 +444,23 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 		inv.Status = InvoiceStatusUnpaid
 	}
 
-	// C3: Calculate tax if not already set
 	callerSuppliedSubtotal := inv.Subtotal != 0
 	if inv.Subtotal == 0 {
 		var subtotal int64
 		for _, line := range inv.Lines {
 			// Round, never truncate: 100 cents x 8.29 is exactly 829 in
-			// decimal but 828.99999999999989 in float64, and a truncating
-			// cast would drop a whole cent. order/service.go rounds the same
-			// extension, so truncating here made an order and the invoice
-			// generated from it disagree on the same line.
+			// decimal but 828.99999999999989 in float64.
 			subtotal += money.RoundToCents(float64(line.PriceEach) * line.Quantity)
 		}
 		inv.Subtotal = subtotal
 	}
-	// Callers that pre-computed the invoice (e.g. POS account-charge sales,
-	// where the register already ran the exemption-aware calculation) supply
-	// BOTH the subtotal and the tax-inclusive total, and are honored as-is.
-	//
-	// A total on its own is not evidence that anyone calculated tax: order
-	// fulfilment passed the order's PRE-TAX total that way, which silently
-	// produced an invoice with TaxRate 0, TaxAmount 0 and a pre-tax total —
-	// and that untaxed figure was what PostInvoiceToLedger booked to the GL
-	// and the AR subledger. So a total without a subtotal is recomputed.
+	// Callers that pre-computed the invoice (POS account-charge sales, where
+	// the register already ran the exemption-aware calculation) supply BOTH
+	// the subtotal and the tax-inclusive total, and are honored as-is. A total
+	// on its own is not evidence that anyone calculated tax, so a total without
+	// a subtotal is recomputed.
 	if inv.TotalAmount == 0 || !callerSuppliedSubtotal {
 		if inv.TaxRate == 0 {
-			// Source the rate from the invoice's branch (locations.default_tax_rate),
-			// so app-created invoices match the jurisdiction (e.g. 0.12 in BC) instead
-			// of the hardcoded DefaultTaxRate fallback. branchID may be nil → the repo
-			// falls back to the active/default branch.
 			var branchID *uuid.UUID
 			if inv.BranchID != uuid.Nil {
 				branchID = &inv.BranchID
@@ -84,30 +471,16 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 				inv.TaxRate = DefaultTaxRate
 			}
 		}
-		// Round half up: $10.00 at 8.25% is exactly 82.5 cents, and truncating
-		// it to 82 under-collects on every invoice whose tax lands on a
-		// fractional cent — a systematic downward bias, not a wash.
+		// Round half up: $10.00 at 8.25% is exactly 82.5 cents.
 		inv.TaxAmount = money.RoundToCents(float64(inv.Subtotal) * inv.TaxRate)
 		inv.TotalAmount = inv.Subtotal + inv.TaxAmount
 	}
 
-	// C5: Calculate due date from payment terms
-	if inv.PaymentTerms == "" {
-		inv.PaymentTerms = TermsNet30
-	}
-	if inv.DueDate == nil {
-		dueDate := calcDueDate(time.Now(), inv.PaymentTerms)
-		inv.DueDate = &dueDate
-	}
-
-	if err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+	return s.inTx(ctx, func(txCtx context.Context) error {
 		if err := s.repo.CreateInvoice(txCtx, inv); err != nil {
 			return err
 		}
-		// Audit log: inside the transaction, so it shares the invoice's fate
-		// — a rolled back invoice leaves no audit row. When CreateInvoice is
-		// itself called inside a caller's transaction (order fulfilment, POS
-		// account charges), RunInTx joins it and this row rides along.
+		// Audit log: inside the transaction, so it shares the invoice's fate.
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(txCtx, audit.Entry{
 				Action:     "invoice.created",
@@ -124,83 +497,14 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 			}
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func calcDueDate(from time.Time, terms string) time.Time {
-	switch terms {
-	case TermsCOD, TermsDueOnReceipt:
-		return from
-	case TermsNet30:
-		return from.AddDate(0, 0, 30)
-	case TermsNet60:
-		return from.AddDate(0, 0, 60)
-	case TermsNet90:
-		return from.AddDate(0, 0, 90)
-	default:
-		return from.AddDate(0, 0, 30)
-	}
-}
-
-func (s *Service) GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error) {
-	return s.repo.GetInvoice(ctx, id)
-}
-
-func (s *Service) ListInvoices(ctx context.Context) ([]Invoice, error) {
-	return s.repo.ListInvoices(ctx)
-}
-
-func (s *Service) ListInvoicesPaginated(ctx context.Context, limit, offset int) ([]Invoice, int, error) {
-	return s.repo.ListInvoicesPaginated(ctx, limit, offset)
-}
-
-func (s *Service) FinalizeInvoice(ctx context.Context, id uuid.UUID) error {
-	inv, err := s.repo.GetInvoice(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	return s.db.RunInTx(ctx, func(txCtx context.Context) error {
-		// Post to GL
-		if err := s.gl.SyncInvoice(txCtx, inv.ID.String(), inv.TotalAmount); err != nil {
-			return fmt.Errorf("failed to sync to GL: %w", err)
-		}
-
-		// Post to Account Ledger (Debit)
-		_, err := s.account.PostTransaction(txCtx, inv.CustomerID, account.TransactionTypeInvoice, inv.TotalAmount, &inv.ID, "Invoice #"+inv.ID.String())
-		if err != nil {
-			return fmt.Errorf("failed to post to account ledger: %w", err)
-		}
-
-		return nil
 	})
 }
 
-// ExistsInvoiceForOrder reports whether the order already has an invoice.
-func (s *Service) ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error) {
-	return s.repo.ExistsInvoiceForOrder(ctx, orderID)
-}
-
-// GetCustomerOpenBalanceCents returns the customer's live outstanding AR balance
-// (sum of open invoices), in cents. Use this for credit-limit checks instead of
-// the unmaintained customers.balance_due column.
-func (s *Service) GetCustomerOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
-	return s.repo.SumOpenBalanceCents(ctx, customerID)
-}
-
-// PostInvoiceToLedger posts an already-created invoice to the GL (DR Accounts
-// Receivable / CR Sales Revenue) and the customer AR subledger (a debit + a
-// customer_transactions row). It is intended to run inside the caller's
-// transaction so the invoice, GL entry, and subledger commit atomically — both
-// postings are required (the chart of accounts is seeded by migration 025).
-// This is the single AR writer for the order-fulfilment path, replacing the old
-// raw, pre-tax customers.balance_due bump that left the recorded balance
-// disagreeing with the tax-inclusive invoice total.
-func (s *Service) PostInvoiceToLedger(ctx context.Context, inv *Invoice) error {
+// PostInvoiceToLedger posts an already-created legacy invoice to the GL (DR
+// Accounts Receivable / CR Sales Revenue) and the customer AR subledger. It
+// runs inside the caller's transaction so the invoice, entry and subledger
+// commit atomically.
+func (s *Service) PostInvoiceToLedger(ctx context.Context, inv *LegacyInvoice) error {
 	if s.gl != nil {
 		if err := s.gl.SyncInvoice(ctx, inv.ID.String(), inv.TotalAmount); err != nil {
 			return fmt.Errorf("failed to post invoice to GL: %w", err)
@@ -214,10 +518,8 @@ func (s *Service) PostInvoiceToLedger(ctx context.Context, inv *Invoice) error {
 	return nil
 }
 
-// PostCashSaleToGL posts a POS cash sale to the GL (DR Cash / CR Sales Revenue).
-// POS already depends on invoice.Service, so this lets the till book revenue
-// without taking a direct GL dependency. Intended to be called best-effort
-// AFTER the sale commits (a GL failure must never block a till transaction).
+// PostCashSaleToGL posts a POS cash sale to the GL (DR Cash / CR Sales
+// Revenue), best effort AFTER the sale commits (C2-5 moves it inside).
 func (s *Service) PostCashSaleToGL(ctx context.Context, posTxID string, amountCents int64) error {
 	if s.gl == nil {
 		return nil
@@ -225,12 +527,9 @@ func (s *Service) PostCashSaleToGL(ctx context.Context, posTxID string, amountCe
 	return s.gl.SyncCashSale(ctx, posTxID, amountCents)
 }
 
-// PostCashReturnToGL posts a POS cash refund to the GL (DR Sales Revenue /
-// CR Cash), the exact mirror of PostCashSaleToGL. Lets the till book a refund
-// without taking a direct GL dependency; best-effort, called AFTER the return
-// commits (a GL hiccup must never block a completed refund). Returns the GL
-// entry ID so the return row can link back to its ledger entry (uuid.Nil when
-// no GL is wired).
+// PostCashReturnToGL posts a POS cash refund to the GL (DR Sales Revenue / CR
+// Cash), the mirror of PostCashSaleToGL; best effort, after the return
+// commits. It returns the entry ID (uuid.Nil when no GL is wired).
 func (s *Service) PostCashReturnToGL(ctx context.Context, returnID string, amountCents int64) (uuid.UUID, error) {
 	if s.gl == nil {
 		return uuid.Nil, nil
@@ -240,10 +539,8 @@ func (s *Service) PostCashReturnToGL(ctx context.Context, returnID string, amoun
 
 // PostAccountReturnToLedger books a POS return refunded as store credit: the
 // GL leg (DR Sales Revenue / CR Accounts Receivable) plus a balance-reducing
-// subledger entry, the mirror of PostInvoiceToLedger. Store credit lowers what
-// the customer owes, so the subledger amount is negative (payment-shaped).
-// Best-effort at the POS layer, same policy as PostCashReturnToGL. Returns the
-// GL entry ID (uuid.Nil when no GL is wired).
+// subledger entry. Best-effort at the POS layer (C2-5 turns it into a credit
+// memo). Returns the GL entry ID (uuid.Nil when no GL is wired).
 func (s *Service) PostAccountReturnToLedger(ctx context.Context, customerID, returnID uuid.UUID, amountCents int64) (uuid.UUID, error) {
 	var glEntryID uuid.UUID
 	if s.gl != nil {
@@ -261,99 +558,17 @@ func (s *Service) PostAccountReturnToLedger(ctx context.Context, customerID, ret
 	return glEntryID, nil
 }
 
-// C2: Credit memo workflow
-func (s *Service) CreateCreditMemo(ctx context.Context, customerID uuid.UUID, invoiceID *uuid.UUID, amountCents int64, reason string) (*CreditMemo, error) {
-	if amountCents <= 0 {
-		return nil, fmt.Errorf("amount_cents must be positive")
-	}
-
-	cm := &CreditMemo{
-		CustomerID: customerID,
-		InvoiceID:  invoiceID,
-		Amount:     amountCents,
-		Reason:     reason,
-		Status:     "PENDING",
-	}
-
-	if err := s.repo.CreateCreditMemo(ctx, cm); err != nil {
-		return nil, err
-	}
-
-	return cm, nil
-}
-
-func (s *Service) ApplyCreditMemo(ctx context.Context, memoID uuid.UUID) error {
-	// We need to get the memo from the DB. For now, use a simple approach.
-	// The caller passes the memo ID; we'll fetch memos by looking up via service.
-	// Since we don't have a GetCreditMemo, we'll add a lightweight approach.
-	// Actually, let's just post the refund to the account ledger.
-
-	// For the MVP, the handler will pass the credit memo details directly
-	return nil
-}
-
-func (s *Service) ApplyCreditMemoFull(ctx context.Context, cm *CreditMemo) error {
-	now := time.Now()
-	cm.Status = "APPLIED"
-	cm.AppliedAt = &now
-
-	return s.db.RunInTx(ctx, func(txCtx context.Context) error {
-		if err := s.repo.UpdateCreditMemo(txCtx, cm); err != nil {
-			return fmt.Errorf("failed to update credit memo: %w", err)
+// sortedProductIDs returns the distinct product ids of the lines in id order
+// (section 11, step 6: inventory rows are taken in product id order).
+func sortedProductIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := map[uuid.UUID]bool{}
+	var out []uuid.UUID
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
 		}
-
-		// Post negative amount (credit) to customer account
-		_, err := s.account.PostTransaction(txCtx, cm.CustomerID, account.TransactionTypeRefund, -cm.Amount, &cm.ID, "Credit Memo: "+cm.Reason)
-		if err != nil {
-			return fmt.Errorf("failed to post credit to account: %w", err)
-		}
-
-		return nil
-	})
-}
-
-// CreateAndApplyCreditMemo atomically creates a credit memo and applies it in a single transaction.
-func (s *Service) CreateAndApplyCreditMemo(ctx context.Context, customerID uuid.UUID, invoiceID *uuid.UUID, amountCents int64, reason string) (*CreditMemo, error) {
-	if amountCents <= 0 {
-		return nil, fmt.Errorf("amount_cents must be positive")
 	}
-
-	cm := &CreditMemo{
-		CustomerID: customerID,
-		InvoiceID:  invoiceID,
-		Amount:     amountCents,
-		Reason:     reason,
-		Status:     "PENDING",
-	}
-
-	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
-		if err := s.repo.CreateCreditMemo(txCtx, cm); err != nil {
-			return fmt.Errorf("failed to create credit memo: %w", err)
-		}
-
-		now := time.Now()
-		cm.Status = "APPLIED"
-		cm.AppliedAt = &now
-
-		if err := s.repo.UpdateCreditMemo(txCtx, cm); err != nil {
-			return fmt.Errorf("failed to update credit memo: %w", err)
-		}
-
-		// Post negative amount (credit) to customer account
-		_, err := s.account.PostTransaction(txCtx, cm.CustomerID, account.TransactionTypeRefund, -cm.Amount, &cm.ID, "Credit Memo: "+cm.Reason)
-		if err != nil {
-			return fmt.Errorf("failed to post credit to account: %w", err)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return cm, nil
-}
-
-func (s *Service) ListCreditMemos(ctx context.Context, customerID uuid.UUID) ([]CreditMemo, error) {
-	return s.repo.ListCreditMemos(ctx, customerID)
+	sort.Slice(out, func(a, b int) bool { return out[a].String() < out[b].String() })
+	return out
 }

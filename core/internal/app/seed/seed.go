@@ -121,6 +121,11 @@ func resetTransactionalData(db *sql.DB) {
 	if _, err := db.Exec(`ALTER SEQUENCE IF EXISTS quote_number_seq RESTART`); err != nil {
 		log.Printf("resetTransactionalData: restart quote_number_seq: %v", err)
 	}
+	// The invoices and credit memos are gone too, and their gapless counters
+	// start again at 1 so the demo's series stays unbroken from the first.
+	if _, err := db.Exec(`UPDATE document_counters SET next_value = 1 WHERE series IN ('invoice', 'credit_memo')`); err != nil {
+		log.Printf("resetTransactionalData: reset the invoice counters: %v", err)
+	}
 }
 
 // demoSeedEnv gates the entire command. Keep this name in sync with the
@@ -572,9 +577,9 @@ func Run() {
 	for _, c := range customers {
 		plID := priceLevelIDs[c.PriceLevel]
 		var cid string
-		err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms, payment_terms_id, price_level_id, primary_branch_id)
-			VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8::text,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
-			ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7, payment_terms=$8::text,
+		err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms_id, price_level_id, primary_branch_id)
+			VALUES ($1,$2,$3,$4,$5,$6,0,$7,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
+			ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7,
 				payment_terms_id=COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),
 				price_level_id=$9, primary_branch_id=$10
 			RETURNING id`, c.Name, c.Acct, c.Email, c.Phone, c.Addr, c.CreditLimit, c.Tier, c.Terms, plID, c.PrimaryBranch).Scan(&cid)
@@ -772,11 +777,16 @@ func Run() {
 				orderIDs = append(orderIDs, orderID)
 				orderCustMap[orderID] = custID
 				invID := uuid.New()
+				// A share of the invoices are paid in full, a share partly paid and a
+				// share left unpaid; some of the unpaid ones are past their due date
+				// (overdue is computed from the due date, never stored).
 				invStatus := "UNPAID"
-				if rand.Float32() < 0.65 {
+				partPaid := false
+				switch r := rand.Float32(); {
+				case r < 0.65:
 					invStatus = "PAID"
-				} else if rand.Float32() < 0.3 {
-					invStatus = "OVERDUE"
+				case r < 0.75:
+					invStatus, partPaid = "PARTIAL", true
 				}
 				dueDate := orderDate.AddDate(0, 1, 0)
 				taxRate := 0.12 // BC: GST 5% + PST 7% on building materials.
@@ -784,14 +794,27 @@ func Run() {
 				taxAmt := subtotal * taxRate
 				total := subtotal + taxAmt
 
-				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount, due_date, payment_terms, created_at)
-					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'NET30',$11)`,
+				// number is left to the column DEFAULT: the seed numbers its invoices
+				// through the same gapless counter as every other writer.
+				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
+						due_date, payment_terms_id, invoice_date, created_at)
+					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,(SELECT payment_terms_id FROM customers WHERE id = $3),$11::date,$11)`,
 					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, orderDate.AddDate(0, 0, 1))
 				if err == nil {
 					invoiceIDs = append(invoiceIDs, invID)
-					if invStatus == "PAID" {
+					// the billed lines: the order's, in the shared line shape
+					db.Exec(`INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
+							quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable)
+						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
+							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
+						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
+					switch {
+					case invStatus == "PAID":
 						db.Exec(`INSERT INTO payments (invoice_id, amount, method, reference, notes)
 							VALUES ($1,$2,'CHECK','CHK-'||floor(random()*10000+1000)::text,'Payment in full')`, invID, total)
+					case partPaid:
+						db.Exec(`INSERT INTO payments (invoice_id, amount, method, reference, notes)
+							VALUES ($1,ROUND($2::numeric * 0.4, 2),'CHECK','CHK-'||floor(random()*10000+1000)::text,'Partial payment')`, invID, total)
 					}
 				}
 			}
@@ -1197,23 +1220,35 @@ func Run() {
 	// =========================================================================
 	if len(invoiceIDs) > 3 {
 		memos := []struct {
-			Reason string
-			Amt    float64
-			Status string
+			ReasonCode string
+			Reason     string
+			Amt        float64
+			Status     string
 		}{
-			{"Damaged material on delivery - 2x4x8 split ends", 125.00, "APPLIED"},
-			{"Wrong product shipped - returned OSB", 285.00, "APPLIED"},
-			{"Price adjustment per contract terms", 450.00, "PENDING"},
-			{"Customer loyalty credit Q1", 200.00, "PENDING"},
+			{"DAMAGE", "Damaged material on delivery - 2x4x8 split ends", 125.00, "OPEN"},
+			{"RETURN", "Wrong product shipped - returned OSB", 285.00, "OPEN"},
+			{"PRICE_ADJUSTMENT", "Price adjustment per contract terms", 450.00, "DRAFT"},
+			{"OTHER", "Customer loyalty credit Q1", 200.00, "DRAFT"},
 		}
 		for i, m := range memos {
 			invID := invoiceIDs[i%len(invoiceIDs)]
-			var custIDStr string
-			db.QueryRow("SELECT customer_id FROM invoices WHERE id=$1", invID).Scan(&custIDStr)
-			if custIDStr != "" {
-				db.Exec(`INSERT INTO credit_memos (invoice_id, customer_id, amount, reason, status)
-					VALUES ($1,$2,$3,$4,$5)`, invID, custIDStr, m.Amt, m.Reason, m.Status)
+			// A posted memo numbers itself through the gapless counter (the column has
+			// no DEFAULT: a draft carries none); each memo has one ADJUST charge line.
+			var memoID string
+			err := db.QueryRow(`INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status,
+					number, memo_date, subtotal, tax_amount, total_amount, tax_rate)
+				SELECT i.id, i.customer_id, i.branch_id, i.currency, $2, $3, $4::numeric, $5,
+					CASE WHEN $5 = 'DRAFT' THEN NULL ELSE credit_memo_next_number() END,
+					i.invoice_date, -$4::numeric, 0, -$4::numeric, 0
+				FROM invoices i WHERE i.id = $1 RETURNING id`, invID, m.ReasonCode, m.Reason, m.Amt, m.Status).Scan(&memoID)
+			if err != nil {
+				log.Printf("Credit memo %q: %v", m.Reason, err)
+				continue
 			}
+			db.Exec(`INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, charge_code_id, description, quantity, uom, price_uom,
+					uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, revenue_account_code)
+				SELECT $1, 0, 'CHARGE', cc.id, $2, -1, 'EA', 'EA', 1, 1, $3::numeric, 'MANUAL', -$3::numeric, FALSE, cc.revenue_account_code
+				FROM charge_codes cc WHERE cc.code = 'ADJUST'`, memoID, m.Reason, m.Amt)
 		}
 		fmt.Printf("Seed: %d Credit Memos\n", len(memos))
 	}
