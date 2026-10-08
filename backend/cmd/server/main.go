@@ -795,13 +795,6 @@ func main() {
 		})
 	})
 
-	// R1-2 proof route: deliberately registered without regenerating
-	// api/ROUTES.txt, so the census test fails naming this route. Reverted
-	// in the next commit; see docs/refactor/ROUTE-CENSUS.md.
-	mux.HandleFunc("GET /api/v1/census-proof-dummy", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
 	// Legacy /health endpoint (backward compat)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		status := "ok"
