@@ -600,8 +600,9 @@ func TestBranchWall_DocumentRoutes(t *testing.T) {
 }
 
 // The match exceptions list is filtered by the caller's branches: a finance
-// user held to branch A reads only branch A's exceptions, an administrator
-// without a header every branch's.
+// user held to branch A reads only branch A's exceptions, through its context
+// branch or, with none, through its grants; a bound user with no grants reads
+// none; an administrator without a header reads every branch's.
 func TestBranchWall_MatchingExceptions(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
@@ -625,6 +626,8 @@ func TestBranchWall_MatchingExceptions(t *testing.T) {
 		wantA, wantB            bool
 	}{
 		{"finance, header A", "finance", "u-a", A, true, false},
+		{"finance, no header", "finance", "u-a", "", true, false},
+		{"finance u-none, no header", "finance", "u-none", "", false, false},
 		{"admin, no header", "admin", "boss", "", true, true},
 	} {
 		status, body := f.callBody(t, "GET", "/api/v1/matching/exceptions", "", c.role, c.sub, c.header)

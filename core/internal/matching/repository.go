@@ -97,10 +97,11 @@ func (r *PostgresRepository) UpdateMatchResult(ctx context.Context, m *MatchResu
 }
 
 // ListExceptions lists the match results awaiting attention. Behind the
-// branch middleware the list is scoped to the request's branch context
-// through the purchase order's branch; no context branch (an administrator
-// without a header, an unbound key, the single-branch switch) lists every
-// branch's exceptions, as on the module's other reads.
+// branch middleware the list is scoped to the caller's branches: a context
+// branch lists its own exceptions; with no context branch a bound non-admin
+// user lists the branches granted to the user, none granted listing none;
+// an administrator without a header, an unbound key and the single-branch
+// switch list every branch's, as on the module's other reads.
 func (r *PostgresRepository) ListExceptions(ctx context.Context) ([]MatchException, error) {
 	query := `
 		SELECT mr.id, mr.po_id, mr.vendor_invoice_id, mr.status, COALESCE(mr.notes, '') as notes, mr.created_at,
@@ -110,11 +111,17 @@ func (r *PostgresRepository) ListExceptions(ctx context.Context) ([]MatchExcepti
 		JOIN purchase_orders po ON po.id = mr.po_id
 		LEFT JOIN po_match_line_details mld ON mld.match_result_id = mr.id
 		WHERE mr.status IN ('EXCEPTION', 'PARTIAL')
-		  AND ($1::uuid IS NULL OR po.branch_id = $1)
+		  AND (
+		    ($1::uuid IS NOT NULL AND po.branch_id = $1)
+		    OR ($1::uuid IS NULL AND $2::text IS NOT NULL AND po.branch_id IN
+		        (SELECT branch_id FROM user_locations WHERE user_sub = $2))
+		    OR ($1::uuid IS NULL AND $2::text IS NULL)
+		  )
 		GROUP BY mr.id, mr.po_id, mr.vendor_invoice_id, mr.status, mr.notes, mr.created_at
 		ORDER BY mr.created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, middleware.BranchIDForQuery(ctx))
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list exceptions: %w", err)
 	}
