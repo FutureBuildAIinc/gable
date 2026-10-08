@@ -159,12 +159,92 @@ func MachineKeyModules() []string {
 }
 
 // RequiredScope returns the scope a machine key must hold for a method on a
-// module: reads are GET and HEAD, writes are everything else.
+// module: reads are GET and HEAD, writes are everything else. This is the
+// plain module level rule; RequiredScopeForPath refines it for the modules
+// that declare finer scopes (ADR 0009) and is what the auth core serves.
 func RequiredScope(module string, method string) string {
 	if method == http.MethodGet || method == http.MethodHead {
 		return module + scopeReadSuffix
 	}
 	return module + scopeWriteSuffix
+}
+
+// adminAreaScopes refines the admin module's scope by the second path segment
+// under /api/v1/admin (ADR 0002's known limits, narrowed on ADR 0009): a key
+// granted settings authority must not reach the staff roster or the module
+// kill switches, and the scope stays derivable from the URL alone because the
+// area is the second segment. One scope admits every method on its area's
+// routes: an operator who may save the AI key may see its hint, and the
+// read/write split is the module level rule, not the area's.
+var adminAreaScopes = map[string]string{
+	"settings": "admin:settings",
+	"staff":    "admin:staff",
+	"modules":  "admin:modules",
+}
+
+// writeScopeOverrides replaces a module's write scope name with a finer one
+// (ADR 0009): the users module's only writes are the branch grant, revoke and
+// home branch routes, so its write scope is named for what it grants. The
+// module's read scope keeps the plain name.
+var writeScopeOverrides = map[string]string{
+	"users": "users:grants",
+}
+
+// RequiredScopeForPath returns the scope a machine key must hold for a method
+// and path, refining the plain module rule where a module declares finer
+// scopes: an admin area (the second segment under /api/v1/admin) needs its
+// area scope for every method, and a module with a write override needs the
+// override's name for every non read. ok is false wherever ModuleForPath
+// refuses; the caller checks the module policy separately.
+func RequiredScopeForPath(method string, path string) (string, bool) {
+	module, ok := ModuleForPath(path)
+	if !ok {
+		return "", false
+	}
+	if module == "admin" {
+		rest, _ := strings.CutPrefix(path, "/api/v1/admin")
+		segment, _, _ := strings.Cut(strings.TrimPrefix(rest, "/"), "/")
+		if area, ok := adminAreaScopes[segment]; ok {
+			return area, true
+		}
+	}
+	if method != http.MethodGet && method != http.MethodHead {
+		if finer, ok := writeScopeOverrides[module]; ok {
+			return finer, true
+		}
+	}
+	return RequiredScope(module, method), true
+}
+
+// FinerAdminScopes returns the admin module's area scopes, sorted, so tests
+// and tooling can hold them against the route census.
+func FinerAdminScopes() []string {
+	out := make([]string, 0, len(adminAreaScopes))
+	for _, scope := range adminAreaScopes {
+		out = append(out, scope)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ValidScopeGrammar returns every scope a registered /api/v1 route can
+// require: the module read and write scopes, with the finer names (admin
+// areas, users:grants) in place of the coarse ones they replace. C5-2a's mint
+// validation (ADR 0007 section 5.3) checks granted scopes against this set;
+// it is the one source, so the mint and the auth core cannot disagree.
+func ValidScopeGrammar() []string {
+	var out []string
+	for module := range machineKeyModules {
+		out = append(out, module+scopeReadSuffix)
+		if finer, ok := writeScopeOverrides[module]; ok {
+			out = append(out, finer)
+		} else {
+			out = append(out, module+scopeWriteSuffix)
+		}
+	}
+	out = append(out, FinerAdminScopes()...)
+	sort.Strings(out)
+	return out
 }
 
 // userOnlyRoute is a route prefix a machine key may never reach, with the
@@ -396,8 +476,8 @@ func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey s
 		}
 	}
 
-	scope := RequiredScope(module, r.Method)
-	if !scopeHeld(principal.Scopes, scope) {
+	scope, ok := RequiredScopeForPath(r.Method, r.URL.Path)
+	if !ok || !scopeHeld(principal.Scopes, scope) {
 		a.auditRefusal(ctx, principal.ID, AuditActionKeyScopeRefused, scope, r)
 		respondAuthError(w, r, http.StatusForbidden, "forbidden", "machine key lacks required scope "+scope)
 		return

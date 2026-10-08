@@ -115,3 +115,92 @@ func TestRequiredScopeSplit(t *testing.T) {
 		}
 	}
 }
+
+// TestFinerAdminScopesCoverCensusRoutes is the finer scopes' drift gate
+// (ADR 0009): every admin area the middleware declares must sit under real
+// census routes, every census route under a declared area resolves to that
+// area's scope for every method, and every route under /api/v1/admin outside
+// the declared areas keeps the coarse module scope (the exposure scan, and
+// the key routes a key may not reach anyway).
+func TestFinerAdminScopesCoverCensusRoutes(t *testing.T) {
+	areas := map[string]bool{}
+	for _, scope := range middleware.FinerAdminScopes() {
+		areas[strings.TrimPrefix(scope, "admin:")] = true
+	}
+	if len(areas) == 0 {
+		t.Fatal("no admin areas declared; the test is not exercising anything")
+	}
+
+	served := map[string]bool{}
+	for _, line := range readCensus(t) {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "/api/v1/admin/") {
+			continue
+		}
+		served[fields[1]] = true
+		rest := strings.TrimPrefix(fields[1], "/api/v1/admin/")
+		segment, _, _ := strings.Cut(rest, "/")
+		if areas[segment] {
+			for _, method := range []string{"GET", "PUT", "POST", "DELETE"} {
+				scope, ok := middleware.RequiredScopeForPath(method, fields[1])
+				if !ok || scope != "admin:"+segment {
+					t.Errorf("%s %s resolves to scope %q (ok=%v), want the area scope admin:%s for every method", method, fields[1], scope, ok, segment)
+				}
+			}
+		} else {
+			scope, _ := middleware.RequiredScopeForPath("POST", fields[1])
+			if scope != "admin:write" {
+				t.Errorf("POST %s outside the declared areas resolves to %q, want the coarse admin:write", fields[1], scope)
+			}
+		}
+	}
+	for area := range areas {
+		found := false
+		for path := range served {
+			if strings.HasPrefix(path, "/api/v1/admin/"+area+"/") || path == "/api/v1/admin/"+area {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("admin area %q matches no route in the census; dead or misspelled entry", area)
+		}
+	}
+}
+
+// TestValidScopeGrammarHoldsTheCensus pins the grammar a minted scope may
+// carry (ADR 0009; the mint route's validation is C5-2a's): every scope a
+// census route can require is in the grammar, and the finer names replaced
+// the coarse ones they narrow, so no route requires a scope the grammar
+// cannot grant.
+func TestValidScopeGrammarHoldsTheCensus(t *testing.T) {
+	grammar := map[string]bool{}
+	for _, scope := range middleware.ValidScopeGrammar() {
+		grammar[scope] = true
+	}
+	if grammar["users:write"] {
+		t.Error("users:write is in the grammar; users:grants replaced it (ADR 0009)")
+	}
+	if !grammar["users:grants"] || !grammar["admin:settings"] || !grammar["admin:staff"] || !grammar["admin:modules"] {
+		t.Errorf("grammar lacks a finer name: %v", middleware.ValidScopeGrammar())
+	}
+	for _, line := range readCensus(t) {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "/api/v1/") {
+			continue
+		}
+		module, _ := middleware.ModuleForPath(fields[1])
+		if middleware.ModuleScopePolicyFor(module) != middleware.ModuleScopeAllowed {
+			continue // excluded segments keep their own seam and no key scope
+		}
+		for _, method := range []string{"GET", "POST"} {
+			scope, ok := middleware.RequiredScopeForPath(method, fields[1])
+			if !ok {
+				t.Fatalf("route %s is under /api/v1 but resolves to no scope", fields[1])
+			}
+			if !grammar[scope] {
+				t.Errorf("%s %s requires %q, which the grammar cannot grant", method, fields[1], scope)
+			}
+		}
+	}
+}
