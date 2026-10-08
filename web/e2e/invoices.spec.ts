@@ -328,7 +328,12 @@ test.describe('Invoices and credit memos', () => {
     await page.goto('/portal/invoices');
     await expect(page.getByRole('heading', { name: 'Invoices', level: 1 })).toBeVisible();
     await expect(page.getByText(/IN-\d{6}/).first()).toBeVisible();
-    await expect(page.getByTestId('portal-overdue').first()).toBeVisible();
+    // the badge comes from is_overdue and nothing else: as many badges as flagged invoices
+    const mine = (await (await page.request.get('/api/portal/v1/invoices')).json()) as { number: string; status: string; is_overdue: boolean }[];
+    expect(mine.length).toBeGreaterThan(0);
+    for (const inv of mine) expect(inv.number).toMatch(/^IN-\d{6,}$/);
+    expect(mine.map((i) => i.status).filter((st) => st === 'OVERDUE')).toHaveLength(0);
+    await expect(page.getByTestId('portal-overdue')).toHaveCount(mine.filter((i) => i.is_overdue).length);
     await expect(page.getByText('OVERDUE', { exact: true })).toHaveCount(0);
     await page.screenshot({ path: path.join(SHOTS_DIR, 'portal-invoices.png'), fullPage: true });
   });
