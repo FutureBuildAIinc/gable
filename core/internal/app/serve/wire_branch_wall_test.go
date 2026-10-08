@@ -379,14 +379,16 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 
 	// The location list is filtered to the caller's branches: a user granted
 	// only A sees branch A's rows only, through its context branch or, with
-	// none, through its grants; an administrator is held to a header it
-	// sends and sees every branch without one.
+	// none, through its grants; a bound user with no grants sees no rows at
+	// all; an administrator is held to a header it sends and sees every
+	// branch without one.
 	for _, c := range []struct {
 		name, role, sub, header string
 		wantA, wantB            bool
 	}{
 		{"warehouse, header A", "warehouse", "u-a", A, true, false},
 		{"warehouse, no header", "warehouse", "u-a", "", true, false},
+		{"warehouse u-none, no header", "warehouse", "u-none", "", false, false},
 		{"admin, header A", "admin", "boss", A, true, false},
 		{"admin, no header", "admin", "boss", "", true, true},
 	} {

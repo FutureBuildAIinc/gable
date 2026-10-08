@@ -171,9 +171,10 @@ func (h *Handler) CreateLocation(w http.ResponseWriter, r *http.Request) {
 // ListLocations serves GET /api/v1/locations. Behind the branch wall the
 // list covers only the caller's branches: with a context branch that
 // branch's rows, with no context branch the rows of the branches granted to
-// the user, and an administrator without a header, an unbound key and the
-// single-branch switch see every location, as before. The branch switcher
-// reads /me/branches, so it does not ride on this list.
+// the user (none granted, none listed), and an administrator without a
+// header, an unbound key and the single-branch switch see every location,
+// as before. The branch switcher reads /me/branches, so it does not ride on
+// this list.
 func (h *Handler) ListLocations(w http.ResponseWriter, r *http.Request) {
 	branches, err := h.listScope(r.Context())
 	if err != nil {
@@ -189,11 +190,11 @@ func (h *Handler) ListLocations(w http.ResponseWriter, r *http.Request) {
 }
 
 // listScope resolves the branch ids a caller's location list covers; nil is
-// every branch. A request that did not run the branch middleware, an
-// administrator (the single-branch switch makes every caller one) and an
-// unbound key cover every branch; a bound caller is held to its context
-// branch, or to its granted branches when the middleware left no context
-// branch.
+// every branch and an empty slice is no branches. A request that did not run
+// the branch middleware, an administrator (the single-branch switch makes
+// every caller one) and an unbound key cover every branch; a bound caller is
+// held to its context branch, or to its granted branches when the middleware
+// left no context branch, so a user with no grants lists nothing.
 func (h *Handler) listScope(ctx context.Context) ([]uuid.UUID, error) {
 	bc := middleware.BranchFromContext(ctx)
 	if bc == nil {

@@ -78,11 +78,15 @@ func (s *Service) ListLocations(ctx context.Context) ([]Location, error) {
 	return s.repo.ListLocations(ctx)
 }
 
-// ListLocationsIn lists the locations of the given branches, or every
-// location when the slice is empty.
+// ListLocationsIn lists the locations of the given branches. A nil slice
+// means every branch; an empty slice is no branches and answers no rows, so
+// a bound caller with no grants lists nothing rather than everything.
 func (s *Service) ListLocationsIn(ctx context.Context, branches []uuid.UUID) ([]Location, error) {
-	if len(branches) == 0 {
+	if branches == nil {
 		return s.repo.ListLocations(ctx)
+	}
+	if len(branches) == 0 {
+		return []Location{}, nil
 	}
 	return s.repo.ListLocationsInBranches(ctx, branches)
 }
