@@ -123,9 +123,9 @@ describe('InvoiceService', () => {
   it('says the blocker in plain words and keeps the server message', async () => {
     const applications = new ApiError(409, 'conflict', 'server words', [{ code: 'has_applications', message: 'x' }])
     expect(voidBlockerHint(applications)).toContain('server words')
-    expect(voidBlockerHint(applications)).toContain('Reverse those first')
+    expect(voidBlockerHint(applications)).toContain('then void the invoice')
     const memos = new ApiError(409, 'conflict', 'server words', [{ code: 'has_credit_memos', message: 'x' }])
-    expect(voidBlockerHint(memos)).toContain('Void its credit memos first')
+    expect(voidBlockerHint(memos)).toContain('then void the invoice')
     expect(voidBlockerHint(new ApiError(409, 'invalid_state_transition', 'cannot', []))).toBe('cannot')
   })
 

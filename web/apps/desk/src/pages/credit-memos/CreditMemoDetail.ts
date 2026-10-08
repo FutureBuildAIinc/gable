@@ -10,7 +10,6 @@ import { InvoiceService } from '../../services/InvoiceService.ts';
 import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
 import {
     type CreditMemo,
-    creditMemoLabel,
     formatCreditMemoStatus,
     formatReasonCode,
     getCreditMemoStatusColor,
@@ -117,7 +116,7 @@ export class GableCreditMemoDetail extends LitElement {
                 <div class="flex items-start justify-between gap-4 flex-wrap pb-6 border-b border-white/10">
                     <div class="min-w-0">
                         <div class="flex items-center gap-3 mb-2 flex-wrap">
-                            <h1 class="text-3xl font-bold font-mono ${cm.number ? 'text-white' : 'text-zinc-400'}">${creditMemoLabel(cm)}</h1>
+                            <h1 class="text-3xl font-bold font-mono ${cm.number ? 'text-white' : 'text-zinc-400'}">${cm.number ?? 'Draft credit memo'}</h1>
                             <span class=${chipClass(getCreditMemoStatusColor(cm.status))}>${formatCreditMemoStatus(cm.status)}</span>
                         </div>
                         <p class="text-muted-foreground text-sm">

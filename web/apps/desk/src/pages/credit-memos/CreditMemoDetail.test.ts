@@ -36,7 +36,7 @@ describe('gable-credit-memo-detail', () => {
   it('shows a draft as Draft with its explanation and Post, Edit and Void', async () => {
     stub(creditMemo())
     el = await mountAsync<GableCreditMemoDetail>('gable-credit-memo-detail', { routeId: MEMO_ID })
-    expect(text(el.querySelector('h1'))).toBe('Draft')
+    expect(text(el.querySelector('h1'))).toBe('Draft credit memo')
     expect(text(el.querySelector('[data-testid="draft-banner"]'))).toContain('no number')
     expect(buttonByText(el, 'Post')).toBeTruthy()
     expect(el.querySelector(`a[href="/credit-memos/${MEMO_ID}/edit"]`)).not.toBeNull()

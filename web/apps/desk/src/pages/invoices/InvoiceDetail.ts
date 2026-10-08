@@ -35,10 +35,10 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 export function voidBlockerHint(err: unknown): string {
     if (!(err instanceof ApiError)) return apiErrorMessage(err, 'Failed to void invoice');
     if (err.hasBlocker('has_applications')) {
-        return `${err.message}\nA payment is recorded against this invoice, or an applied credit memo names it. Reverse those first.`;
+        return `${err.message}\nReverse the payment, or the applied credit memo, then void the invoice.`;
     }
     if (err.hasBlocker('has_credit_memos')) {
-        return `${err.message}\nA credit memo is written against this invoice. Void its credit memos first.`;
+        return `${err.message}\nThe credit memos are listed on this page: void them, then void the invoice.`;
     }
     return err.displayMessage;
 }
@@ -102,7 +102,8 @@ export class GableInvoiceDetail extends LitElement {
 
     private async loadPayments(id: string) {
         try {
-            this.payments = await paymentService.getHistory(id);
+            // the payments route answers null for an invoice with none
+            this.payments = (await paymentService.getHistory(id)) ?? [];
         } catch (error) {
             console.error('Failed to load payments', error);
         }
@@ -144,6 +145,8 @@ export class GableInvoiceDetail extends LitElement {
             this.invoice = await InvoiceService.voidInvoice(this.invoice.id, this.invoice.revision, reason);
             this.voidOpen = false;
             ToastService.show('Invoice voided', 'success');
+            // the credit memos listed beside it may have changed since the page loaded
+            this.loadCreditMemos(this.invoice.id);
         } catch (err) {
             if (err instanceof ApiError && err.isStaleRevision) {
                 // someone changed the invoice since it was loaded: show the current one

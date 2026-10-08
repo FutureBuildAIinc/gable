@@ -17,7 +17,7 @@ import type { Invoice } from '../../types/invoice'
 function stub(inv: Invoice, extra: Record<string, (url: URL, init?: RequestInit) => unknown> = {}) {
   const state = routedFetch({
     [`/api/v1/invoices/${INVOICE_ID}`]: () => inv,
-    [`/api/v1/invoices/${INVOICE_ID}/payments`]: () => [],
+    [`/api/v1/invoices/${INVOICE_ID}/payments`]: () => null, // the payments route answers null when there are none
     '/api/v1/credit-memos': () => ({ items: [], next_cursor: null, limit: 100 }),
     [`/api/v1/orders/${ORDER_ID}`]: () => ({ id: ORDER_ID, number: 'SO-000007' }),
     ...extra,
@@ -196,7 +196,7 @@ describe('gable-invoice-detail', () => {
       await (dialog as unknown as { updateComplete: Promise<boolean> }).updateComplete
       const err = text(el.querySelector('[data-testid="dialog-error"]'))
       expect(err).toContain('void the credit memos first')
-      expect(err).toContain('Void its credit memos first')
+      expect(err).toContain('void them, then void the invoice')
       expect(el.querySelector('[role="dialog"]')).not.toBeNull()
     })
   })

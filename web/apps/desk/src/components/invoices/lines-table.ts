@@ -61,13 +61,13 @@ export function renderSalesLines(lines: SalesLineView[], opts: LinesTableOptions
                         <th class="p-3 text-muted-foreground font-medium">Item</th>
                         <th class="p-3 text-muted-foreground font-medium text-right">Qty</th>
                         <th class="p-3 text-muted-foreground font-medium text-right">Unit price</th>
-                        <th class="p-3 text-muted-foreground font-medium text-right">Discount</th>
+                        <th class="p-3 text-muted-foreground font-medium text-right hidden sm:table-cell">Discount</th>
                         <th class="p-3 text-muted-foreground font-medium text-right">Total</th>
-                        <th class="p-3 text-muted-foreground font-medium text-center">Tax</th>
-                        ${opts.showRestock ? html`<th class="p-3 text-muted-foreground font-medium text-center">Restock</th>` : nothing}
+                        <th class="p-3 text-muted-foreground font-medium text-center hidden sm:table-cell">Tax</th>
+                        ${opts.showRestock ? html`<th class="p-3 text-muted-foreground font-medium text-center hidden sm:table-cell">Restock</th>` : nothing}
                         ${showCost ? html`
-                            <th class="p-3 text-muted-foreground font-medium text-right">Cost</th>
-                            <th class="p-3 text-muted-foreground font-medium text-right">Margin</th>
+                            <th class="p-3 text-muted-foreground font-medium text-right hidden md:table-cell">Cost</th>
+                            <th class="p-3 text-muted-foreground font-medium text-right hidden md:table-cell">Margin</th>
                         ` : nothing}
                     </tr>
                 </thead>
@@ -99,15 +99,15 @@ export function renderSalesLines(lines: SalesLineView[], opts: LinesTableOptions
                                     ${line.unit_price_ten_thousandths !== null ? formatPrice4(line.unit_price_ten_thousandths) : '—'}
                                     ${line.price_uom ? html`<span class="text-[10px] text-zinc-500 ml-1">/ ${line.price_uom}</span>` : nothing}
                                 </td>
-                                <td class="p-3 font-mono text-right text-blue-400 text-xs" title=${line.discount_reason ?? ''}>${discountText(line)}</td>
+                                <td class="p-3 font-mono text-right text-blue-400 text-xs hidden sm:table-cell" title=${line.discount_reason ?? ''}>${discountText(line)}</td>
                                 <td class="p-3 font-mono text-right font-medium ${credit ? creditTextClass(line.line_total_cents) : 'text-gable-green'}">
                                     ${line.line_total_cents !== null ? formatCents(line.line_total_cents) : '—'}
                                 </td>
-                                <td class="p-3 text-center text-xs ${line.taxable ? 'text-zinc-300' : 'text-zinc-600'}">${line.taxable ? 'T' : '-'}</td>
-                                ${opts.showRestock ? html`<td class="p-3 text-center text-xs ${line.restock ? 'text-gable-green' : 'text-zinc-600'}">${line.restock ? 'Yes' : '-'}</td>` : nothing}
+                                <td class="p-3 text-center text-xs hidden sm:table-cell ${line.taxable ? 'text-zinc-300' : 'text-zinc-600'}">${line.taxable ? 'T' : '-'}</td>
+                                ${opts.showRestock ? html`<td class="p-3 text-center text-xs hidden sm:table-cell ${line.restock ? 'text-gable-green' : 'text-zinc-600'}">${line.restock ? 'Yes' : '-'}</td>` : nothing}
                                 ${showCost ? html`
-                                    <td class="p-3 font-mono text-right text-zinc-300">${line.unit_cost_ten_thousandths !== null ? formatCents(line.cost_cents) : '—'}</td>
-                                    <td class="p-3 font-mono text-right ${margin !== null && margin < 0 && !credit ? 'text-red-400' : 'text-zinc-300'}">${margin !== null ? formatCents(margin) : '—'}</td>
+                                    <td class="p-3 font-mono text-right text-zinc-300 hidden md:table-cell">${line.unit_cost_ten_thousandths !== null ? formatCents(line.cost_cents) : '—'}</td>
+                                    <td class="p-3 font-mono text-right hidden md:table-cell ${margin !== null && margin < 0 && !credit ? 'text-red-400' : 'text-zinc-300'}">${margin !== null ? formatCents(margin) : '—'}</td>
                                 ` : nothing}
                             </tr>
                         `;
