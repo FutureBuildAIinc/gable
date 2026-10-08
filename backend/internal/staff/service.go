@@ -28,7 +28,7 @@ type store interface {
 // can assert that a privileged grant/revoke was recorded without standing up
 // the audit_log table. *audit.Logger satisfies it.
 type auditSink interface {
-	Log(ctx context.Context, entry audit.Entry)
+	Log(ctx context.Context, entry audit.Entry) error
 }
 
 // Service holds staff-management business logic. Module grant/revoke operations

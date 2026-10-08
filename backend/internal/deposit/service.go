@@ -72,25 +72,32 @@ func (s *Service) RecordDeposit(ctx context.Context, req RecordDepositRequest) (
 		if glID != uuid.Nil {
 			d.GLEntryID = &glID
 		}
-		return s.repo.Create(ctx, d)
+		if err := s.repo.Create(ctx, d); err != nil {
+			return err
+		}
+		// Audit log: inside the transaction, so it shares the deposit's fate
+		// — a rolled back deposit leaves no audit row.
+		if s.audit != nil {
+			if err := s.audit.Log(ctx, audit.Entry{
+				Action:     "deposit.recorded",
+				EntityType: "customer_deposit",
+				EntityID:   d.ID,
+				Changes: map[string]interface{}{
+					"customer_id":  d.CustomerID,
+					"amount_cents": d.Amount,
+					"method":       d.Method,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	d.Remaining = d.Amount - d.AppliedAmount
-	if s.audit != nil {
-		s.audit.Log(ctx, audit.Entry{
-			Action:     "deposit.recorded",
-			EntityType: "customer_deposit",
-			EntityID:   d.ID,
-			Changes: map[string]interface{}{
-				"customer_id":  d.CustomerID,
-				"amount_cents": d.Amount,
-				"method":       d.Method,
-			},
-		})
-	}
 	s.logger.Info("customer deposit recorded", "id", d.ID, "customer", d.CustomerID, "amount_cents", d.Amount)
 	return d, nil
 }
@@ -146,24 +153,31 @@ func (s *Service) ApplyDeposit(ctx context.Context, depositID uuid.UUID, req App
 		if glID != uuid.Nil {
 			app.GLEntryID = &glID
 		}
-		return s.repo.RecordApplication(ctx, app, newApplied, newStatus)
+		if err := s.repo.RecordApplication(ctx, app, newApplied, newStatus); err != nil {
+			return err
+		}
+		// Audit log: inside the transaction, so it shares the application's
+		// fate — a rolled back application leaves no audit row.
+		if s.audit != nil {
+			if err := s.audit.Log(ctx, audit.Entry{
+				Action:     "deposit.applied",
+				EntityType: "customer_deposit",
+				EntityID:   app.DepositID,
+				Changes: map[string]interface{}{
+					"customer_id":  app.CustomerID,
+					"amount_cents": app.Amount,
+					"invoice_id":   app.InvoiceID,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if s.audit != nil {
-		s.audit.Log(ctx, audit.Entry{
-			Action:     "deposit.applied",
-			EntityType: "customer_deposit",
-			EntityID:   app.DepositID,
-			Changes: map[string]interface{}{
-				"customer_id":  app.CustomerID,
-				"amount_cents": app.Amount,
-				"invoice_id":   app.InvoiceID,
-			},
-		})
-	}
 	s.logger.Info("customer deposit applied", "deposit", app.DepositID, "customer", app.CustomerID, "amount_cents", app.Amount)
 	return app, nil
 }

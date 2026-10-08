@@ -104,24 +104,28 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 		if err := s.repo.CreateInvoice(txCtx, inv); err != nil {
 			return err
 		}
+		// Audit log: inside the transaction, so it shares the invoice's fate
+		// — a rolled back invoice leaves no audit row. When CreateInvoice is
+		// itself called inside a caller's transaction (order fulfilment, POS
+		// account charges), RunInTx joins it and this row rides along.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(txCtx, audit.Entry{
+				Action:     "invoice.created",
+				EntityType: "invoice",
+				EntityID:   inv.ID,
+				Changes: map[string]interface{}{
+					"customer_id":  inv.CustomerID,
+					"order_id":     inv.OrderID,
+					"total_amount": inv.TotalAmount,
+					"status":       inv.Status,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
-	}
-
-	// Audit log: invoice created
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "invoice.created",
-			EntityType: "invoice",
-			EntityID:   inv.ID,
-			Changes: map[string]interface{}{
-				"customer_id":  inv.CustomerID,
-				"order_id":     inv.OrderID,
-				"total_amount": inv.TotalAmount,
-				"status":       inv.Status,
-			},
-		})
 	}
 
 	return nil

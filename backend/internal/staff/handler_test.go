@@ -227,10 +227,11 @@ type recordingAudit struct {
 	entries []audit.Entry
 }
 
-func (a *recordingAudit) Log(_ context.Context, e audit.Entry) {
+func (a *recordingAudit) Log(_ context.Context, e audit.Entry) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.entries = append(a.entries, e)
+	return nil
 }
 
 func (a *recordingAudit) all() []audit.Entry {

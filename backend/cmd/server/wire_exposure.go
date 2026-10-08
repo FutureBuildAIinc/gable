@@ -185,7 +185,7 @@ func registerExposureRoutes(mux *http.ServeMux, r exposureRoutes) {
 		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 }
 
-// exposureAuditAdapter bridges the async pkg/audit.Logger to the narrow
+// exposureAuditAdapter bridges the synchronous pkg/audit.Logger to the narrow
 // pricing.AuditWriter interface (which re-declares the audit entry to avoid a
 // pricing→pkg/audit import). EntityID arrives as a string; non-UUID values map
 // to uuid.Nil rather than dropping the audit entry.
