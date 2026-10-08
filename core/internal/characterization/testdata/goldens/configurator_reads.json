@@ -1,0 +1,335 @@
+[
+  {
+    "name": "configurator.presets",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/presets"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "config": "eyJncmFkZSI6ICJTVEsiLCAic3BlY2llcyI6ICJDZWRhciIsICJ0cmVhdG1lbnQiOiAiTm9uZSIsICJkaW1lbnNpb25zIjogIjF4Ni02In0=",
+          "created_at": "<ts+0d>",
+          "description": "Western Red Cedar fence boards",
+          "id": "<id-1>",
+          "is_active": true,
+          "name": "Cedar Fence Picket",
+          "product_type": "Lumber",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "config": "eyJncmFkZSI6ICIjMiIsICJ3aWR0aCI6IDM2LCAiaGVpZ2h0IjogODAsICJzcGVjaWVzIjogIlNZUCIsICJ0cmVhdG1lbnQiOiAiTm9uZSJ9",
+          "created_at": "<ts+0d>",
+          "description": "Basic interior passage door",
+          "id": "<id-2>",
+          "is_active": true,
+          "name": "Standard Interior Door",
+          "product_type": "Door",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "config": "eyJncmFkZSI6ICIjMiIsICJzcGVjaWVzIjogIlNZUCIsICJ0cmVhdG1lbnQiOiAiVHJlYXRhYmxlIiwgImRpbWVuc2lvbnMiOiAiMng2LTEwIn0=",
+          "created_at": "<ts+0d>",
+          "description": "Pressure-treated SYP for deck framing",
+          "id": "<id-3>",
+          "is_active": true,
+          "name": "Treated Deck Frame",
+          "product_type": "Lumber",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "configurator.rules",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/rules"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "id": "<id-4>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Clear",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "id": "<id-5>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "STK",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "id": "<id-6>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "error_message": "Cedar is not rated for structural applications — use SYP or Douglas Fir",
+          "id": "<id-7>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "error_message": "Cedar is naturally rot-resistant and should not be pressure treated",
+          "id": "<id-8>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#1",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "id": "<id-9>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "id": "<id-10>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "id": "<id-11>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Select Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "id": "<id-12>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "id": "<id-13>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "error_message": "Douglas Fir cannot be pressure treated — use SYP, Hem-Fir, or SPF for treatable applications",
+          "id": "<id-14>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "id": "<id-15>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "error_message": "Hem-Fir is not available in Appearance grade — use Cedar or Douglas Fir",
+          "id": "<id-16>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "id": "<id-17>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Stud",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "id": "<id-18>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "id": "<id-19>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "id": "<id-20>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "error_message": "SPF is not available in Appearance grade — use Cedar or Douglas Fir",
+          "id": "<id-21>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "error_message": "SPF is not rated for structural applications — use SYP, Douglas Fir, or Hem-Fir",
+          "id": "<id-22>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Stud",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "id": "<id-23>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "id": "<id-24>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#1",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "id": "<id-25>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "id": "<id-26>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#3",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "id": "<id-27>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "error_message": "SYP is not available in Appearance grade — use Cedar or Douglas Fir for appearance applications",
+          "id": "<id-28>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "id": "<id-29>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "id": "<id-30>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  }
+]

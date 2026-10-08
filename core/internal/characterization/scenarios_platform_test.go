@@ -161,6 +161,13 @@ func portalGroups() []groupDef {
 				body:   map[string]any{"product_id": "{product}", "quantity": 2},
 			},
 			{name: "portal.cart.get", method: "GET", path: "/api/portal/v1/cart"},
+			// The demo customer's seeded book (amounts, which orders, invoices
+			// and deliveries exist) is drawn from the seed inside map
+			// iteration and differs per run, so these three pin the route,
+			// status and content type with the body masked as a whole.
+			{name: "portal.dashboard", method: "GET", path: "/api/portal/v1/dashboard", maskBody: true},
+			{name: "portal.invoices", method: "GET", path: "/api/portal/v1/invoices", maskBody: true},
+			{name: "portal.deliveries", method: "GET", path: "/api/portal/v1/deliveries", maskBody: true},
 		},
 	}, {
 		name: "project",

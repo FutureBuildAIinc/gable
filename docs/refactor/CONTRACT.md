@@ -27,7 +27,7 @@ and from the code the goldens pin.
 | Path | What it is |
 |---|---|
 | `core/api/fragments/*.yaml` | One fragment per module. Top-level keys are exactly `paths` and `components`. Underscore prefixed files carry shared components only. |
-| `core/api/fragments/_shared.yaml` | The shared fragment: security schemes, the limit and offset parameters, the branch and idempotency headers, the standard error envelope, the integration error body, the exposure 409 payload. |
+| `core/api/fragments/_shared.yaml` | The shared fragment: security schemes, the limit and offset parameters, the branch and idempotency headers, the standard error envelope and the ADR 0001 lowercase error envelope (`WireError`), the integration error body, the exposure 409 payload. |
 | `core/api/openapi.yaml` | The assembled document. Generated; never edited by hand. |
 | `core/api/ROUTES.txt` | The route census (R1-2): every route the sources register. The truth the coverage gate counts against. |
 | `core/api/contract-pending.txt` | Routes still without an operation. Generated; shrinks as fragments land, and only shrinks. |
@@ -102,6 +102,33 @@ Transcription conventions (following the models' JSON tags):
   `null` (append-built repository slices) are typed nullable; the
   integration seam's lists, which the handler guarantees non null, are
   not.
+
+The error envelope rule. An error answer is declared in the envelope of
+whatever writes it, not of the module it belongs to:
+
+- Middleware that writes the ADR 0001 envelope (`WireError`, lowercase
+  codes) is declared as `WireError`: 401 and 403 from the auth layer, the
+  role guard and the machine key check; and the idempotency layer's 409
+  `idempotency_in_progress`, 422 `idempotency_key_reused`, 400
+  `validation_failed` and `bad_request`, and 413 `payload_too_large`.
+- Handlers, and the middleware that answers through `httputil.RespondError`
+  (the branch check, portal auth, partner auth, the rate limiter), write the
+  legacy `Error` envelope (uppercase codes, generic message), and are
+  declared as `Error`. The `Error` code enum lists only the uppercase codes
+  `RespondError` writes.
+- Where one status can come from either writer on an operation, the response
+  is `oneOf [Error, WireError]` (or the seam's own body in place of `Error`).
+  Every POST, PUT and PATCH that takes an `Idempotency-Key` declares 400,
+  409, 413 and 422 for that reason.
+- Operations reference the shared responses in `_shared.yaml` (`Unauthorized`,
+  `Forbidden`, `ForbiddenEither`, `BadRequest`, `BadRequestEither`,
+  `IdempotencyBadRequest`, `Conflict`, `ConflictEither`, `IdempotencyConflict`,
+  `UnprocessableEntity`, `UnprocessableEntityEither`, `PayloadTooLarge`,
+  `LegacyUnauthorized`, `LegacyForbidden`); a fragment does not repeat an
+  inline copy. A body unique to an operation (a refusal envelope, the exposure
+  block) stays inline as a further `oneOf` leg.
+- Not declared per operation: the auth layer's rare 500 `internal_error` and
+  the machine key lookup's 503 `unavailable` (both `WireError`).
 
 ## Regenerating
 
@@ -230,13 +257,21 @@ Fragments done (the pattern the rest copy):
 | partner | `partner.yaml` | 3 |
 | health and metrics | `health.yaml` | 4 |
 | uploads | `uploads.yaml` | 1 |
+| admin (tech admin, staff, exposure scan) | `admin.yaml` | 17 |
+| apps registry | `apps.yaml` | 3 |
+| governance | `governance.yaml` | 4 |
+| millwork | `millwork.yaml` | 2 |
+| configurator | `configurator.yaml` | 5 |
+| reporting and reports | `reporting.yaml` | 17 |
+| dashboard | `dashboard.yaml` | 5 |
+| documents | `documents.yaml` | 2 |
+| vision | `vision.yaml` | 1 |
+| parsing | `parsing.yaml` | 1 |
+| a2a purchase order | `a2a.yaml` | 1 |
+| events (R1-12b) | `events.yaml` | 1 |
 | shared components | `_shared.yaml` | 0 |
 
-200 of 345 census routes covered. Pending (in `contract-pending.txt`):
-pricing, reporting, gl, purchase_order, techadmin, bankrecon, staff, edi,
-ap, configurator, dashboard, matching, tax, governance, the apps registry
-under `pkg/apps`, document (two routes), millwork, parsing, vision and the
-metrics endpoint of `cmd/server`.
+346 of 346 census routes covered. `contract-pending.txt` is empty.
 
 Nullability is spelled the 3.1 way, `type: [T, "null"]`; the 3.0
 `nullable` keyword does not exist in 3.1 and the generated types would

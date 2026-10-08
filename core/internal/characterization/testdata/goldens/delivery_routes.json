@@ -1,0 +1,266 @@
+[
+  {
+    "name": "delivery.route.create.c",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes",
+      "body": {
+        "driver_id": "<id-1>",
+        "notes": "r1b c main route",
+        "scheduled_date": "<day+2>",
+        "vehicle_id": "<id-2>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-1>",
+        "id": "<id-3>",
+        "notes": "r1b c main route",
+        "scheduled_date": "<ts+2d>",
+        "status": "DRAFT",
+        "stop_count": 0,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-2>"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.create.c_empty",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes",
+      "body": {
+        "driver_id": "<id-1>",
+        "scheduled_date": "<day+3>",
+        "vehicle_id": "<id-2>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-1>",
+        "id": "<id-4>",
+        "notes": null,
+        "scheduled_date": "<ts+3d>",
+        "status": "DRAFT",
+        "stop_count": 0,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-2>"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.create.bad_date",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes",
+      "body": {
+        "driver_id": "<id-1>",
+        "scheduled_date": "next tuesday",
+        "vehicle_id": "<id-2>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.create.unknown_vehicle",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes",
+      "body": {
+        "driver_id": "<id-1>",
+        "scheduled_date": "<day+2>",
+        "vehicle_id": "<id-7>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.list_by_date",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?date=<day+2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "driver_id": "<id-1>",
+          "driver_name": "R1C Driver Renamed",
+          "id": "<id-3>",
+          "notes": "r1b c main route",
+          "scheduled_date": "<ts+2d>",
+          "status": "DRAFT",
+          "stop_count": 0,
+          "updated_at": "<ts+0d>",
+          "vehicle_id": "<id-2>",
+          "vehicle_name": "R1C Truck Renamed"
+        }
+      ]
+    }
+  },
+  {
+    "name": "delivery.route.list_by_driver",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?driver_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "driver_id": "<id-1>",
+          "driver_name": "R1C Driver Renamed",
+          "id": "<id-3>",
+          "notes": "r1b c main route",
+          "scheduled_date": "<ts+2d>",
+          "status": "DRAFT",
+          "stop_count": 0,
+          "updated_at": "<ts+0d>",
+          "vehicle_id": "<id-2>",
+          "vehicle_name": "R1C Truck Renamed"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "driver_id": "<id-1>",
+          "driver_name": "R1C Driver Renamed",
+          "id": "<id-4>",
+          "notes": null,
+          "scheduled_date": "<ts+3d>",
+          "status": "DRAFT",
+          "stop_count": 0,
+          "updated_at": "<ts+0d>",
+          "vehicle_id": "<id-2>",
+          "vehicle_name": "R1C Truck Renamed"
+        }
+      ]
+    }
+  },
+  {
+    "name": "delivery.route.list_bad_driver",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?driver_id=not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.list_bad_date",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?date=next-tuesday"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.deliveries.empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/<id-3>/deliveries"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": null
+    }
+  },
+  {
+    "name": "delivery.route.deliveries.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/not-a-uuid/deliveries"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  }
+]

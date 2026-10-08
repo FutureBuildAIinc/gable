@@ -1,0 +1,382 @@
+[
+  {
+    "name": "market_index.history.before",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/market-indices/<id-1>/history"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "from": "<ts-90d>",
+        "market_index_id": "<id-1>",
+        "points": [],
+        "to": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "market_index.history.days",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/market-indices/<id-1>/history?days=30"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "from": "<ts-30d>",
+        "market_index_id": "<id-1>",
+        "points": [],
+        "to": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "market_index.history.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/market-indices/not-a-uuid/history"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh_preview",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/<id-1>/refresh/preview",
+      "body": {
+        "new_value": 123.45
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "affected_customer_count": 0,
+        "affected_quote_count": 0,
+        "delta_pct": -70.0364077669903,
+        "estimated_exposure_dollars": 0,
+        "top_customers": null
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh_preview.bad_value",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/<id-1>/refresh/preview",
+      "body": {
+        "new_value": 0
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh_preview.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/<id-4>/refresh/preview",
+      "body": {
+        "new_value": 100
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh_preview.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/not-a-uuid/refresh/preview",
+      "body": {
+        "new_value": 100
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/<id-1>/refresh",
+      "body": {
+        "new_value": 123.45,
+        "source": "GOLDEN"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "history_id": "<id-7>",
+        "market_index": {
+          "commodity_kind": "DIMENSIONAL_LUMBER",
+          "created_at": "<ts+0d>",
+          "current_value": 123.45,
+          "description": "golden characterisation description",
+          "id": "<id-1>",
+          "index_code": "RL_SPF_2X4",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths SPF #2&Btr 2x4",
+          "previous_value": 412,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        "scan_kicked": true
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh.bad_value",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/<id-1>/refresh",
+      "body": {
+        "new_value": -1
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/<id-4>/refresh",
+      "body": {
+        "new_value": 100
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "market_index.refresh.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/market-indices/not-a-uuid/refresh",
+      "body": {
+        "new_value": 100
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "market_index.history.after",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/market-indices/<id-1>/history"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "from": "<ts-90d>",
+        "market_index_id": "<id-1>",
+        "points": [
+          {
+            "id": "<id-7>",
+            "market_index_id": "<id-1>",
+            "recorded_at": "<ts+0d>",
+            "recorded_by": "dev",
+            "source": "GOLDEN",
+            "value": 123.45
+          }
+        ],
+        "to": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "market_index.list_after",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/market-indices"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "commodity_kind": "FUTURES",
+          "created_at": "<ts+0d>",
+          "current_value": 498.5,
+          "id": "<id-11>",
+          "index_code": "CME_LBR",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "CME Lumber Futures",
+          "previous_value": 490,
+          "source": "CME",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "COMPOSITE",
+          "created_at": "<ts+0d>",
+          "current_value": 522,
+          "description": "Madison's 497-product composite, public weekly",
+          "id": "<id-12>",
+          "index_code": "MADISONS_COMP",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Madison's Lumber Prices Composite",
+          "previous_value": 515,
+          "source": "MADISONS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "COMPOSITE",
+          "created_at": "<ts+0d>",
+          "current_value": 485,
+          "id": "<id-13>",
+          "index_code": "RL_FRAMING_COMP",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths Framing Lumber Composite",
+          "previous_value": 472,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "PANEL",
+          "created_at": "<ts+0d>",
+          "current_value": 530,
+          "description": "OSB 7/16\" 4x8 spot price",
+          "id": "<id-14>",
+          "index_code": "RL_OSB_716",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths OSB 7/16\"",
+          "previous_value": 522,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MSF"
+        },
+        {
+          "commodity_kind": "DIMENSIONAL_LUMBER",
+          "created_at": "<ts+0d>",
+          "current_value": 123.45,
+          "description": "golden characterisation description",
+          "id": "<id-1>",
+          "index_code": "RL_SPF_2X4",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths SPF #2&Btr 2x4",
+          "previous_value": 412,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "DIMENSIONAL_LUMBER",
+          "created_at": "<ts+0d>",
+          "current_value": 478,
+          "description": "Southern Yellow Pine 2x4 spot price",
+          "id": "<id-15>",
+          "index_code": "RL_SYP_2X4",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths SYP 2x4",
+          "previous_value": 470,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "COMPOSITE",
+          "created_at": "<ts+0d>",
+          "current_value": 520,
+          "id": "<id-16>",
+          "index_code": "RL_PANEL_COMP",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths Structural Panel Composite",
+          "previous_value": 505,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        }
+      ]
+    }
+  }
+]

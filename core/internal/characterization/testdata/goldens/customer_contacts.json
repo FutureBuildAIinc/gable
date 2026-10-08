@@ -1,0 +1,851 @@
+[
+  {
+    "name": "customer.a.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers",
+      "body": {
+        "account_number": "GOLD-A-001",
+        "address": "7 Golden Way, Kelowna BC",
+        "credit_limit": 50000,
+        "email": "contacts@example.com",
+        "name": "Golden Contacts Co",
+        "payment_terms": "NET30",
+        "phone": "250-555-0177",
+        "primary_branch_id": "<id-1>",
+        "tier": "GOLD"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "GOLD-A-001",
+        "address": "7 Golden Way, Kelowna BC",
+        "balance_due": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit": 50000,
+        "email": "contacts@example.com",
+        "id": "<id-2>",
+        "is_active": false,
+        "name": "Golden Contacts Co",
+        "phone": "250-555-0177",
+        "primary_branch_id": "<id-1>",
+        "tier": "GOLD",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "contact.list_empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-2>/contacts"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": null
+    }
+  },
+  {
+    "name": "contact.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-2>/contacts",
+      "body": {
+        "email": "golden.contact@example.com",
+        "first_name": "Golden",
+        "is_active": true,
+        "is_primary": true,
+        "last_name": "Contact",
+        "phone": "250-555-0155",
+        "role": "Buyer",
+        "title": "Purchasing"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "email": "golden.contact@example.com",
+        "first_name": "Golden",
+        "id": "<id-3>",
+        "is_active": true,
+        "is_primary": true,
+        "last_name": "Contact",
+        "phone": "250-555-0155",
+        "role": "Buyer",
+        "title": "Purchasing",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "contact.create.second",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-2>/contacts",
+      "body": {
+        "first_name": "Golden",
+        "is_active": true,
+        "last_name": "Ledger",
+        "role": "AP"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "first_name": "Golden",
+        "id": "<id-4>",
+        "is_active": true,
+        "is_primary": false,
+        "last_name": "Ledger",
+        "role": "AP",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "contact.create.bad_customer_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/not-a-uuid/contacts",
+      "body": {
+        "first_name": "X",
+        "last_name": "Y",
+        "role": "Buyer"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-2>/contacts",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.list",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-2>/contacts"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "golden.contact@example.com",
+          "first_name": "Golden",
+          "id": "<id-3>",
+          "is_active": true,
+          "is_primary": true,
+          "last_name": "Contact",
+          "phone": "250-555-0155",
+          "role": "Buyer",
+          "title": "Purchasing",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "first_name": "Golden",
+          "id": "<id-4>",
+          "is_active": true,
+          "is_primary": false,
+          "last_name": "Ledger",
+          "role": "AP",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "contact.list.bad_customer_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/not-a-uuid/contacts"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/contacts/<id-3>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "email": "golden.contact@example.com",
+        "first_name": "Golden",
+        "id": "<id-3>",
+        "is_active": true,
+        "is_primary": true,
+        "last_name": "Contact",
+        "phone": "250-555-0155",
+        "role": "Buyer",
+        "title": "Purchasing",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "contact.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/contacts/<id-8>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/contacts/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/contacts/<id-3>",
+      "body": {
+        "customer_id": "<id-2>",
+        "email": "golden.contact.updated@example.com",
+        "first_name": "Golden",
+        "is_active": true,
+        "is_primary": true,
+        "last_name": "Contact-Updated",
+        "role": "Owner",
+        "title": "Senior Purchasing"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts-106751d>",
+        "customer_id": "<id-2>",
+        "email": "golden.contact.updated@example.com",
+        "first_name": "Golden",
+        "id": "<id-3>",
+        "is_active": true,
+        "is_primary": true,
+        "last_name": "Contact-Updated",
+        "role": "Owner",
+        "title": "Senior Purchasing",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "contact.get.after_update",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/contacts/<id-3>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "email": "golden.contact.updated@example.com",
+        "first_name": "Golden",
+        "id": "<id-3>",
+        "is_active": true,
+        "is_primary": true,
+        "last_name": "Contact-Updated",
+        "role": "Owner",
+        "title": "Senior Purchasing",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "contact.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/contacts/<id-3>",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/contacts/not-a-uuid",
+      "body": {
+        "first_name": "X"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.update.not_found",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/contacts/<id-8>",
+      "body": {
+        "customer_id": "<id-2>",
+        "first_name": "Nobody",
+        "is_active": true,
+        "last_name": "Here",
+        "role": "Buyer"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.get_default",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-2>/escalation-policy"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "customer_id": "<id-2>",
+        "policy": "FLAG_FOR_REQUOTE",
+        "threshold_pct": 5
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-8>/escalation-policy"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/not-a-uuid/escalation-policy"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.set",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>/escalation-policy",
+      "body": {
+        "policy": "FLAG_FOR_REQUOTE",
+        "threshold_pct": 7.5
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "customer_id": "<id-2>",
+        "policy": "FLAG_FOR_REQUOTE",
+        "threshold_pct": 7.5
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.set.auto_escalate_signed",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>/escalation-policy",
+      "body": {
+        "agreement_ref": "GOLD-AGREEMENT-1",
+        "agreement_signed_at": "<ts+0d>",
+        "policy": "AUTO_ESCALATE",
+        "threshold_pct": 5
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "agreement_ref": "GOLD-AGREEMENT-1",
+        "agreement_signed_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "policy": "AUTO_ESCALATE",
+        "threshold_pct": 5
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-2>/escalation-policy"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "agreement_ref": "GOLD-AGREEMENT-1",
+        "agreement_signed_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "policy": "AUTO_ESCALATE",
+        "threshold_pct": 5
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.set.agreement_required",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>/escalation-policy",
+      "body": {
+        "policy": "AUTO_ESCALATE",
+        "threshold_pct": 5
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.set.invalid_mode",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>/escalation-policy",
+      "body": {
+        "policy": "SHRUG",
+        "threshold_pct": 5
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.set.threshold_out_of_range",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>/escalation-policy",
+      "body": {
+        "policy": "REQUIRE_ACK",
+        "threshold_pct": 80
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "escalation_policy.set.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>/escalation-policy",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.salesperson.assign",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/customers/<id-2>/salesperson",
+      "body": {
+        "salesperson_id": "<id-20>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "GOLD-A-001",
+        "address": "7 Golden Way, Kelowna BC",
+        "balance_due": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit": 50000,
+        "email": "contacts@example.com",
+        "id": "<id-2>",
+        "is_active": false,
+        "name": "Golden Contacts Co",
+        "phone": "250-555-0177",
+        "primary_branch_id": "<id-1>",
+        "salesperson_id": "<id-20>",
+        "salesperson_name": "Heather Macdonald",
+        "tier": "GOLD",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "customer.salesperson.clear",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/customers/<id-2>/salesperson",
+      "body": {
+        "salesperson_id": null
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "GOLD-A-001",
+        "address": "7 Golden Way, Kelowna BC",
+        "balance_due": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit": 50000,
+        "email": "contacts@example.com",
+        "id": "<id-2>",
+        "is_active": false,
+        "name": "Golden Contacts Co",
+        "phone": "250-555-0177",
+        "primary_branch_id": "<id-1>",
+        "tier": "GOLD",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "customer.salesperson.bad_body",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/customers/<id-2>/salesperson",
+      "body": {
+        "salesperson_id": "not-a-uuid"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.salesperson.bad_id",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/customers/not-a-uuid/salesperson",
+      "body": {
+        "salesperson_id": "<id-20>"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.salesperson.unknown_rep",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/customers/<id-2>/salesperson",
+      "body": {
+        "salesperson_id": "<id-8>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-23>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/contacts/<id-3>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "contact.delete.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/contacts/<id-3>"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-24>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.delete.bad_id",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/contacts/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.get.after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/contacts/<id-3>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.list.after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-2>/contacts"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "first_name": "Golden",
+          "id": "<id-4>",
+          "is_active": true,
+          "is_primary": false,
+          "last_name": "Ledger",
+          "role": "AP",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  }
+]

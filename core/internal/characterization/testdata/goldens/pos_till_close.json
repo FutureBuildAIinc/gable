@@ -1,0 +1,484 @@
+[
+  {
+    "name": "pos.till.report",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-1>/report"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "change_given": 48596,
+        "expected_by_method": {
+          "CASH": 11404
+        },
+        "sale_count": 1,
+        "sales_total": 1872,
+        "session": {
+          "cashier_id": "<id-2>",
+          "id": "<id-1>",
+          "notes": "",
+          "opened_at": "<ts+0d>",
+          "opening_float": 10000,
+          "register_id": "REG-01",
+          "status": "OPEN"
+        },
+        "tax_total": 0,
+        "tendered_by_method": {
+          "CASH": 50000
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.report.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/not-a-uuid/report"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.report.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-4>/report"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.zreport.before_close",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-1>/zreport"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.zreport.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/not-a-uuid/zreport"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.close.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/not-a-uuid/close",
+      "body": {
+        "counted_by_method": {
+          "CASH": 1
+        }
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.close.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-1>/close",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.close.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-4>/close",
+      "body": {
+        "counted_by_method": {
+          "CASH": 1
+        }
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "CONFLICT",
+          "message": "Conflict"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.close",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-1>/close",
+      "body": {
+        "counted_by_method": {
+          "CASH": 200
+        },
+        "notes": "r1b c close count"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "change_given": 48596,
+        "expected_by_method": {
+          "CASH": 11404
+        },
+        "sale_count": 1,
+        "sales_total": 1872,
+        "session": {
+          "cashier_id": "<id-2>",
+          "closed_at": "<ts+0d>",
+          "counted_by_method": {
+            "CASH": 20000
+          },
+          "expected_by_method": {
+            "CASH": 11404
+          },
+          "gl_entry_id": "<id-11>",
+          "id": "<id-1>",
+          "notes": "r1b c close count",
+          "opened_at": "<ts+0d>",
+          "opening_float": 10000,
+          "over_short": 8596,
+          "register_id": "REG-01",
+          "status": "CLOSED"
+        },
+        "tax_total": 0,
+        "tendered_by_method": {
+          "CASH": 50000
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.close.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-1>/close",
+      "body": {
+        "counted_by_method": {
+          "CASH": 200
+        }
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "CONFLICT",
+          "message": "Conflict"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.current.after_close",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/current?register_id=REG-01"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "session": null
+      }
+    }
+  },
+  {
+    "name": "pos.till.reopen",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/open",
+      "body": {
+        "opening_float": 100,
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "cashier_id": "<id-13>",
+        "id": "<id-14>",
+        "notes": "",
+        "opened_at": "<ts+0d>",
+        "opening_float": 10000,
+        "register_id": "REG-01",
+        "status": "OPEN"
+      }
+    }
+  },
+  {
+    "name": "pos.till.report.after_close",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-1>/report"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "change_given": 48596,
+        "expected_by_method": {
+          "CASH": 11404
+        },
+        "sale_count": 1,
+        "sales_total": 1872,
+        "session": {
+          "cashier_id": "<id-2>",
+          "closed_at": "<ts+0d>",
+          "counted_by_method": {
+            "CASH": 20000
+          },
+          "expected_by_method": {
+            "CASH": 11404
+          },
+          "gl_entry_id": "<id-11>",
+          "id": "<id-1>",
+          "notes": "r1b c close count",
+          "opened_at": "<ts+0d>",
+          "opening_float": 10000,
+          "over_short": 8596,
+          "register_id": "REG-01",
+          "status": "CLOSED"
+        },
+        "tax_total": 0,
+        "tendered_by_method": {
+          "CASH": 50000
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.zreport",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-1>/zreport"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "generated_at": "<ts+0d>",
+        "id": "<id-15>",
+        "over_short": 8596,
+        "payload": {
+          "change_given": 48596,
+          "expected_by_method": {
+            "CASH": 11404
+          },
+          "sale_count": 1,
+          "sales_total": 1872,
+          "session": {
+            "cashier_id": "<id-2>",
+            "closed_at": "<ts+0d>",
+            "counted_by_method": {
+              "CASH": 20000
+            },
+            "expected_by_method": {
+              "CASH": 11404
+            },
+            "gl_entry_id": "<id-11>",
+            "id": "<id-1>",
+            "notes": "r1b c close count",
+            "opened_at": "<ts+0d>",
+            "opening_float": 10000,
+            "over_short": 8596,
+            "register_id": "REG-01",
+            "status": "CLOSED"
+          },
+          "tax_total": 0,
+          "tendered_by_method": {
+            "CASH": 50000
+          }
+        },
+        "register_id": "REG-01",
+        "till_session_id": "<id-1>"
+      }
+    }
+  },
+  {
+    "name": "pos.till.zreport.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-4>/zreport"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.zreports.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/zreports?register_id=REG-01"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "z_reports": [
+          {
+            "generated_at": "<ts+0d>",
+            "id": "<id-15>",
+            "over_short": 8596,
+            "payload": {
+              "change_given": 48596,
+              "expected_by_method": {
+                "CASH": 11404
+              },
+              "sale_count": 1,
+              "sales_total": 1872,
+              "session": {
+                "cashier_id": "<id-2>",
+                "closed_at": "<ts+0d>",
+                "counted_by_method": {
+                  "CASH": 20000
+                },
+                "expected_by_method": {
+                  "CASH": 11404
+                },
+                "gl_entry_id": "<id-11>",
+                "id": "<id-1>",
+                "notes": "r1b c close count",
+                "opened_at": "<ts+0d>",
+                "opening_float": 10000,
+                "over_short": 8596,
+                "register_id": "REG-01",
+                "status": "CLOSED"
+              },
+              "tax_total": 0,
+              "tendered_by_method": {
+                "CASH": 50000
+              }
+            },
+            "register_id": "REG-01",
+            "till_session_id": "<id-1>"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "pos.zreports.list.other_day",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/zreports?register_id=REG-01&date=<day-30>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "z_reports": null
+      }
+    }
+  },
+  {
+    "name": "pos.zreports.list.unknown_register",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/zreports?register_id=REG-NONE"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "z_reports": null
+      }
+    }
+  }
+]

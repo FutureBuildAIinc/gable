@@ -99,6 +99,9 @@ var volatileStringFields = map[string]string{
 	"uptime":          "<uptime>",
 	"idempotency_key": "<idem-key>",
 	"next_cursor":     "<cursor>",
+	// quote_short_id is the first eight characters of the quote's uuid, so
+	// the events feed's exposure payloads carry a per-run fragment of an id.
+	"quote_short_id": "<short-id>",
 }
 
 // seedFixedDateFields carry fixed calendar dates in the demo seed's vehicle

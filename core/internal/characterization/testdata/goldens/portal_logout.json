@@ -1,0 +1,110 @@
+[
+  {
+    "name": "portal_logout.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_logout.logout",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/logout"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_logout.after",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/quotes/<id-4>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": "<ts+0d>",
+        "created_at": "<ts+0d>",
+        "delivery_type": "DELIVERY",
+        "erp_state": "ACCEPTED",
+        "expires_at": null,
+        "freight_amount": 0,
+        "id": "<id-4>",
+        "lines": [
+          {
+            "customer_note": "catalog line",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-5>",
+            "is_special_order": false,
+            "line_total": 0,
+            "price_uom": "PCS",
+            "product_id": "<id-6>",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 12,
+            "unit_price": 0,
+            "uom": "PCS"
+          },
+          {
+            "customer_note": "",
+            "description": "Custom cedar bracket",
+            "id": "<id-7>",
+            "is_special_order": true,
+            "line_total": 0,
+            "price_uom": "EA",
+            "product_id": null,
+            "product_sku": "SPECIAL-ORDER",
+            "quantity": 4,
+            "unit_price": 0,
+            "uom": "EA"
+          }
+        ],
+        "notes": "golden scope",
+        "priced": true,
+        "project_id": null,
+        "project_name": null,
+        "rejected_at": null,
+        "sent_at": "<ts+0d>",
+        "status": "ACCEPTED",
+        "total_amount": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  }
+]

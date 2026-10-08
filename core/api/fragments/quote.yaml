@@ -45,13 +45,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/QuotePage"
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: quoteCreate
       tags: [quote]
@@ -88,17 +88,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Quote"
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
           $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          $ref: "#/components/responses/WireUnprocessable"
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/analytics:
     get:
       operationId: quoteAnalytics
@@ -114,13 +116,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/QuoteAnalytics"
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/{id}:
     get:
       operationId: quoteGet
@@ -147,15 +149,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Quote"
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: quoteUpdate
       tags: [quote]
@@ -199,21 +201,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/Quote"
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          $ref: "#/components/responses/WireUnprocessable"
+          $ref: "#/components/responses/UnprocessableEntity"
         "428":
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/{id}/transitions:
     post:
       operationId: quoteTransition
@@ -255,21 +259,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/Quote"
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          $ref: "#/components/responses/WireUnprocessable"
+          $ref: "#/components/responses/UnprocessableEntity"
         "428":
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/{id}/convert:
     post:
       operationId: quoteConvertToOrderPayload
@@ -308,21 +314,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/QuoteOrderPayload"
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          $ref: "#/components/responses/WireUnprocessable"
+          $ref: "#/components/responses/UnprocessableEntity"
         "428":
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/exposure:
     get:
       operationId: exposureList
@@ -387,7 +395,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure:
@@ -417,7 +425,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/request-ack:
@@ -443,13 +451,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureRequestAckResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/acknowledge:
@@ -483,13 +495,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureAcknowledgeResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/override:
@@ -523,13 +539,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExposureOverrideResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/exposure/escalate-now:
@@ -555,11 +575,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/EscalateNowResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/file:
@@ -588,15 +614,15 @@ paths:
                 type: string
                 format: binary
         "400":
-          $ref: "#/components/responses/WireBadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/WireUnauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/WireForbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
         "500":
-          $ref: "#/components/responses/WireInternalError"
+          $ref: "#/components/responses/InternalErrorEither"
 components:
   schemas:
     QuoteStatus:
@@ -658,6 +684,7 @@ components:
           type: [string, "null"]
         source:
           type: string
+          description: How the quote came to be; portal is a quote the dealer portal customer requested.
           enum: [manual, ai, portal]
         expires_at:
           type: [string, "null"]
@@ -724,6 +751,7 @@ components:
           type: [string, "null"]
         source:
           type: string
+          description: How the quote came to be; portal is a quote the dealer portal customer requested.
           enum: [manual, ai, portal]
         expires_at:
           type: [string, "null"]

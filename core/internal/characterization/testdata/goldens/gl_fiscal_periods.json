@@ -1,0 +1,264 @@
+[
+  {
+    "name": "gl.fiscal_periods.list",
+    "mask_fields": {
+      "end_date": "<period-end>",
+      "name": "<period>",
+      "start_date": "<period-start>"
+    },
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/fiscal-periods"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-1>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-2>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-3>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-4>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-5>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-6>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-7>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-8>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-9>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-10>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-11>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "end_date": "<period-end>",
+          "id": "<id-12>",
+          "name": "<period>",
+          "start_date": "<period-start>",
+          "status": "OPEN"
+        }
+      ]
+    }
+  },
+  {
+    "name": "gl.fiscal_period.close",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/<id-10>/close"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "closed"
+      }
+    }
+  },
+  {
+    "name": "gl.fiscal_period.close.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/<id-10>/close"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.fiscal_period.close.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/<id-14>/close"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.fiscal_period.close.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/not-a-uuid/close"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.fiscal_period.reopen",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/<id-10>/reopen"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "reopened"
+      }
+    }
+  },
+  {
+    "name": "gl.fiscal_period.reopen.not_closed",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/<id-10>/reopen"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.fiscal_period.reopen.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/<id-14>/reopen"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.fiscal_period.reopen.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/fiscal-periods/not-a-uuid/reopen"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  }
+]

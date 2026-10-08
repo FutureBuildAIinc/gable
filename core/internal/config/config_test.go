@@ -79,3 +79,40 @@ func TestLoad_RateLimitPerMinute(t *testing.T) {
 		t.Fatalf("with the variable set = %d (%v), want 2000", cfg.RateLimitPerMinute, err)
 	}
 }
+
+func TestLoad_OutboxRetentionDays(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutboxRetentionDays != 14 {
+		t.Errorf("default retention = %d days, want 14", cfg.OutboxRetentionDays)
+	}
+
+	t.Setenv("OUTBOX_RETENTION_DAYS", "30")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutboxRetentionDays != 30 {
+		t.Errorf("retention = %d days, want 30", cfg.OutboxRetentionDays)
+	}
+
+	// A value past the cap is clamped, so days*24h cannot overflow a Duration.
+	for _, v := range []string{"3651", "999999999", "9223372036854775807"} {
+		t.Setenv("OUTBOX_RETENTION_DAYS", v)
+		cfg, err = Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.OutboxRetentionDays != MaxOutboxRetentionDays {
+			t.Errorf("OUTBOX_RETENTION_DAYS=%s gave %d days, want the cap %d", v, cfg.OutboxRetentionDays, MaxOutboxRetentionDays)
+		}
+	}
+	t.Setenv("OUTBOX_RETENTION_DAYS", "3650")
+	if cfg, err = Load(); err != nil || cfg.OutboxRetentionDays != 3650 {
+		t.Errorf("the cap itself must pass unchanged: %d, %v", cfg.OutboxRetentionDays, err)
+	}
+}

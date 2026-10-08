@@ -107,15 +107,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingRule"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/pricing/calculate-escalation:
@@ -146,15 +148,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingEscalationResult"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/pricing/categories:
@@ -209,15 +213,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingProductCategory"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/pricing/categories/{id}:
@@ -250,15 +256,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingProductCategory"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/pricing/category-rules:
@@ -340,13 +348,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingCategoryRule"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "422":
@@ -380,15 +390,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingBulkCount"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
     delete:
@@ -444,15 +456,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingCategoryRule"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
     delete:
@@ -620,15 +634,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingRebateProgram"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/pricing/rebates/programs/{id}:
@@ -718,15 +734,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PricingRebateClaim"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/market-indices:
@@ -779,17 +797,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketIndex"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/market-indices/{id}/history:
@@ -856,17 +876,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketIndexRefreshResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/market-indices/{id}/refresh/preview:
@@ -898,17 +920,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketIndexRefreshPreview"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 components:

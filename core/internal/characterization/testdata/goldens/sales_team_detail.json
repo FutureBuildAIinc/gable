@@ -1,0 +1,63 @@
+[
+  {
+    "name": "sales_team.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/sales-team/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "email": "heather.m@gablelumber.ca",
+        "id": "<id-1>",
+        "is_active": true,
+        "name": "Heather Macdonald",
+        "phone": "250-555-5001",
+        "role": "Sales Manager",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "sales_team.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/sales-team/<id-2>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "sales_team.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/sales-team/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  }
+]

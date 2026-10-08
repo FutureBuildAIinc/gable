@@ -68,11 +68,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationPricedItemList"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
         "404":
           $ref: "#/components/responses/IntegrationNotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -103,9 +109,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationQuoteResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -138,11 +150,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationOrderResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
         "409":
-          $ref: "#/components/responses/IntegrationConflict"
+          $ref: "#/components/responses/IntegrationConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -272,9 +288,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationDeliveryRouteResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
@@ -306,15 +328,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationValidateStaffResponse"
         "400":
-          $ref: "#/components/responses/IntegrationBadRequest"
+          $ref: "#/components/responses/IntegrationBadRequestEither"
         "401":
           $ref: "#/components/responses/IntegrationUnauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/IntegrationServerError"
         "503":
           $ref: "#/components/responses/IntegrationUnavailable"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/ConflictEither"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 components:
@@ -325,6 +349,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/IntegrationError"
+    IntegrationBadRequestEither:
+      description: >-
+        The body or a parameter is malformed (the seam's own error body), or
+        the idempotency layer rejects the Idempotency-Key header or the body
+        read (the ADR 0001 envelope).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/IntegrationError"
+              - $ref: "#/components/schemas/WireError"
     IntegrationNotFound:
       description: The addressed resource does not exist.
       content:
@@ -337,6 +372,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/IntegrationError"
+    IntegrationConflictEither:
+      description: >-
+        The order was created but could not be confirmed (the seam's own error
+        body), or the idempotency layer reports the Idempotency-Key in progress
+        (the ADR 0001 envelope).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/IntegrationError"
+              - $ref: "#/components/schemas/WireError"
     IntegrationServerError:
       description: The handler failed.
       content:

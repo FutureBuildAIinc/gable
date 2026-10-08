@@ -13,18 +13,24 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/configurator"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/governance"
 	"github.com/gablelbm/gable/internal/integrations"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
+	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pim"
@@ -35,10 +41,15 @@ import (
 	"github.com/gablelbm/gable/internal/project"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/routecensus"
 	"github.com/gablelbm/gable/internal/salesteam"
+	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
+	"github.com/gablelbm/gable/internal/vision"
+	"github.com/gablelbm/gable/pkg/apps"
 	"gopkg.in/yaml.v3"
 )
 
@@ -169,6 +180,50 @@ var modelBoundSchemas = []struct {
 	{"ProjectItem", project.ProjectItem{}},
 	// partner (R1-7c)
 	{"PartnerDashboard", partner.DashboardDTO{}},
+	// admin, apps, governance, millwork, configurator (R1-7f)
+	{"TechAdminKey", techadmin.APIKey{}},
+	{"TechAdminCreateKeyResponse", techadmin.CreateKeyResponse{}},
+	{"TechAdminSettingsStatus", techadmin.AISettingsResponse{}},
+	{"StaffMember", staff.Staff{}},
+	{"StaffModule", staff.Module{}},
+	// AppsManifestStatus is apps.Status, which embeds Manifest and adds enabled
+	// and orphaned; the embedded struct is bound, the two extras checked by hand.
+	{"AppsManifestStatus", apps.Manifest{}},
+	{"GovernanceRFC", governance.RFC{}},
+	{"MillworkOption", millwork.MillworkOption{}},
+	{"ConfiguratorRule", configurator.ConfiguratorRule{}},
+	{"ConfiguratorPreset", configurator.ConfiguratorPreset{}},
+	{"ConfiguratorAvailableOption", configurator.AvailableOption{}},
+	{"ConfiguratorValidationConflict", configurator.ValidationConflict{}},
+	{"ConfiguratorValidateResponse", configurator.ValidateConfigResponse{}},
+	{"ConfiguratorBuildSKUResponse", configurator.BuildSKUResponse{}},
+	// reporting, reports, dashboard (R1-7f)
+	{"ReportingSavedReport", reporting.SavedReport{}},
+	{"ReportingSchedule", reporting.ReportSchedule{}},
+	{"ReportingScheduleExecution", reporting.ScheduleExecution{}},
+	{"ReportingScheduleResponse", reporting.ReportScheduleResponse{}},
+	{"ReportingScheduleList", reporting.ReportScheduleListResponse{}},
+	{"ReportingDailyTill", reporting.DailyTillReport{}},
+	{"ReportingSalesSummary", reporting.SalesSummaryReport{}},
+	{"ReportingArAgingBucket", reporting.ARAgingBucket{}},
+	{"ReportingArAging", reporting.ARAgingReport{}},
+	{"ReportingStatementLine", reporting.StatementLine{}},
+	{"ReportingCustomerStatement", reporting.CustomerStatement{}},
+	{"ReportsExposurePortfolio", pricing.PortfolioSummary{}},
+	{"ReportsExposureCustomerRow", pricing.PortfolioCustomerRow{}},
+	{"ReportsExposureSalespersonRow", pricing.PortfolioSalespersonRow{}},
+	{"DashboardSummary", dashboard.DashboardSummary{}},
+	{"DashboardInventoryAlert", dashboard.InventoryAlert{}},
+	{"DashboardTopCustomer", dashboard.TopCustomer{}},
+	{"DashboardOrderActivity", dashboard.OrderActivity{}},
+	{"DashboardRecentOrder", dashboard.RecentOrder{}},
+	{"DashboardRevenueTrendPoint", dashboard.RevenueTrendPoint{}},
+	// vision, parsing (R1-7f)
+	{"VisionBlueprintScanResponse", vision.BlueprintScanResponse{}},
+	{"VisionMismatch", vision.Mismatch{}},
+	{"ParsingParseResponse", parsing.ParseResponse{}},
+	{"ParsingParsedItem", parsing.ParsedItem{}},
+	{"ParsingMatchedProduct", parsing.MatchedProduct{}},
 	// finance (R1-7e)
 	{"PricingCalculatedPrice", pricing.CalculatedPrice{}},
 	{"PricingRule", pricing.PricingRule{}},
@@ -222,6 +277,9 @@ var modelBoundSchemas = []struct {
 	{"BankreconTransaction", bankrecon.BankTransaction{}},
 	{"BankreconSession", bankrecon.ReconciliationSession{}},
 	{"BankreconImportResult", bankrecon.ImportResult{}},
+	// events (R1-12b)
+	{"Event", events.Item{}},
+	{"EventEntity", events.EntityRef{}},
 }
 
 // TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md

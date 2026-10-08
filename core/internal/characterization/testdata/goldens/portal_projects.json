@@ -1,0 +1,204 @@
+[
+  {
+    "name": "portal_projects.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_projects.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/projects",
+      "body": {
+        "name": "Golden Project Two"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "id": "<id-4>",
+        "name": "Golden Project Two",
+        "status": "Active",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_projects.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/projects"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-4>",
+          "name": "Golden Project Two",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-5>",
+          "name": "Golden Orders Project",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-6>",
+          "name": "Golden Project",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-7>",
+          "name": "West Kelowna Medical Plaza",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-8>",
+          "name": "Big White Lodge Reno Phase 1",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal_projects.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/projects/<id-4>",
+      "body": {
+        "name": "Golden Project Two Renamed",
+        "status": "Completed"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "id": "<id-4>",
+        "name": "Golden Project Two Renamed",
+        "status": "Completed",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_projects.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/projects/not-a-uuid",
+      "body": {
+        "name": "x"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_projects.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/projects/<id-4>",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_projects.update.unknown",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/projects/<id-11>",
+      "body": {
+        "name": "x"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  }
+]

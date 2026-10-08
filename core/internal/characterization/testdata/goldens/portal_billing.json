@@ -1,0 +1,610 @@
+[
+  {
+    "name": "portal_billing.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.cart.add_invoice",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/cart/items",
+      "body": {
+        "product_id": "<id-4>",
+        "quantity": 2
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "id": "<id-5>",
+        "item_count": 1,
+        "items": [
+          {
+            "available": 0,
+            "id": "<id-6>",
+            "image_url": "",
+            "line_total": 9.5,
+            "product_id": "<id-4>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2,
+            "unit_price": 4.75
+          }
+        ],
+        "subtotal": 9.5
+      }
+    }
+  },
+  {
+    "name": "portal_billing.checkout_invoice",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/checkout",
+      "body": {
+        "delivery_method": "PICKUP",
+        "payment_method": "ACCOUNT"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "message": "Order placed successfully",
+        "order_id": "<id-7>"
+      }
+    }
+  },
+  {
+    "name": "portal_billing.cart.add_delivery",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/cart/items",
+      "body": {
+        "product_id": "<id-4>",
+        "quantity": 1
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "id": "<id-5>",
+        "item_count": 1,
+        "items": [
+          {
+            "available": 0,
+            "id": "<id-8>",
+            "image_url": "",
+            "line_total": 4.75,
+            "product_id": "<id-4>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 1,
+            "unit_price": 4.75
+          }
+        ],
+        "subtotal": 4.75
+      }
+    }
+  },
+  {
+    "name": "portal_billing.checkout_delivery",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/checkout",
+      "body": {
+        "delivery_address": "1 Golden Way",
+        "delivery_method": "DELIVERY",
+        "payment_method": "ACCOUNT"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "message": "Order placed successfully",
+        "order_id": "<id-9>"
+      }
+    }
+  },
+  {
+    "name": "portal_billing.erp_confirm",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders/<id-7>/confirm"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_billing.erp_fulfill",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders/<id-7>/fulfill"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_billing.erp_invoices",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices?limit=1"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "data": [
+          {
+            "branch_id": "<id-10>",
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "customer_name": "Kelbrook Construction",
+            "due_date": "<ts+30d>",
+            "id": "<id-11>",
+            "order_id": "<id-7>",
+            "paid_at": null,
+            "payment_terms": "NET30",
+            "status": "UNPAID",
+            "subtotal": 950,
+            "tax_amount": 114,
+            "tax_rate": 0.12,
+            "total_amount": 1064,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 1,
+        "offset": 0,
+        "total": 52
+      }
+    }
+  },
+  {
+    "name": "portal_billing.invoice.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/invoices/<id-11>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "due_date": "<ts+30d>",
+        "id": "<id-11>",
+        "lines": [
+          {
+            "price_each": 4.75,
+            "product_id": "<id-4>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2
+          }
+        ],
+        "order_id": "<id-7>",
+        "paid_at": null,
+        "payment_terms": "NET30",
+        "status": "UNPAID",
+        "subtotal": 9.5,
+        "tax_amount": 1.14,
+        "total_amount": 10.64
+      }
+    }
+  },
+  {
+    "name": "portal_billing.invoice.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/invoices/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.invoice.unknown",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/invoices/<id-13>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.erp_route",
+    "request": {
+      "method": "POST",
+      "path": "/api/integration/delivery-routes",
+      "headers": {
+        "X-Integration-Key": "fb-brain-demo-key-2026"
+      },
+      "body": {
+        "driver_id": "<id-15>",
+        "scheduled_date": "<day+11>",
+        "stops": [
+          {
+            "order_id": "<id-9>",
+            "sequence": 1
+          }
+        ],
+        "vehicle_id": "<id-16>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created": true,
+        "replaced": false,
+        "route_id": "<id-17>",
+        "stop_count": 1
+      }
+    }
+  },
+  {
+    "name": "portal_billing.erp_route_deliveries",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/<id-17>/deliveries"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "address": "1885 Formwork Rd, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Kelbrook Construction",
+          "delivery_instructions": null,
+          "id": "<id-18>",
+          "latitude": null,
+          "longitude": null,
+          "order_id": "<id-9>",
+          "order_number": "<id-9>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-17>",
+          "status": "PENDING",
+          "stop_sequence": 1,
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal_billing.delivery.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries/<id-18>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "delivery_address": "1885 Formwork Rd, Kelowna BC",
+        "delivery_instructions": null,
+        "driver_name": "Brendan Lee",
+        "driver_phone": "250-555-4005",
+        "driver_photo_url": null,
+        "estimated_arrival": null,
+        "id": "<id-18>",
+        "order_id": "<id-9>",
+        "order_number": "<id-9>",
+        "pod_proof_url": null,
+        "pod_signed_by": null,
+        "pod_timestamp": null,
+        "scheduled_date": "<ts+11d>",
+        "status": "PENDING",
+        "stop_sequence": 1,
+        "total_stops": 1,
+        "vehicle_name": "Truck 1 - Flatbed",
+        "vehicle_photo_url": null
+      }
+    }
+  },
+  {
+    "name": "portal_billing.delivery.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.delivery.unknown",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries/<id-13>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.none",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries/<id-18>/reschedule"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries/not-a-uuid/reschedule"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.unknown",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries/<id-13>/reschedule"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.request",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/deliveries/<id-18>/reschedule",
+      "body": {
+        "reason": "golden reschedule",
+        "requested_date": "<day+12>"
+      }
+    },
+    "response": {
+      "status": 202,
+      "content_type": "application/json",
+      "body": {
+        "applied": false,
+        "created_at": "<ts+0d>",
+        "current_scheduled_date": "<day+11>",
+        "delivery_id": "<id-18>",
+        "id": "<id-23>",
+        "order_id": "<id-9>",
+        "reason": "golden reschedule",
+        "requested_date": "<day+12>",
+        "resolution_note": null,
+        "status": "PENDING",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.past",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/deliveries/<id-18>/reschedule",
+      "body": {
+        "reason": "too late",
+        "requested_date": "<day-3>"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-24>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.bad_date",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/deliveries/<id-18>/reschedule",
+      "body": {
+        "requested_date": "soon"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/deliveries/<id-18>/reschedule",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.unknown_post",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/deliveries/<id-13>/reschedule",
+      "body": {
+        "requested_date": "<day+3>"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-27>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_billing.reschedule.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/deliveries/<id-18>/reschedule"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "applied": false,
+        "created_at": "<ts+0d>",
+        "current_scheduled_date": "<day+11>",
+        "delivery_id": "<id-18>",
+        "id": "<id-23>",
+        "order_id": "<id-9>",
+        "reason": "golden reschedule",
+        "requested_date": "<day+12>",
+        "resolution_note": null,
+        "status": "PENDING",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  }
+]

@@ -1,0 +1,68 @@
+[
+  {
+    "name": "exposure.admin_scan",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/exposure-scan"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "name": "exposure.report",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/exposure"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "by_customer": [
+          {
+            "customer_id": "<id-1>",
+            "customer_name": "Kelbrook Construction",
+            "exposure_dollars": 0,
+            "last_activity_at": "<ts+0d>",
+            "policy": "FLAG_FOR_REQUOTE",
+            "quote_count": 1
+          }
+        ],
+        "by_salesperson": [
+          {
+            "ack_required_count": 0,
+            "exposure_dollars": 0,
+            "flagged_count": 0,
+            "quote_count": 1,
+            "salesperson_id": "<id-2>",
+            "salesperson_name": "Priya Brar"
+          }
+        ],
+        "total_customers": 1,
+        "total_exposure_dollars": 0,
+        "total_quotes": 1
+      }
+    }
+  },
+  {
+    "name": "exposure.report.summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/exposure?summary=true"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "total_customers": 1,
+        "total_exposure_dollars": 0,
+        "total_quotes": 1
+      }
+    }
+  }
+]

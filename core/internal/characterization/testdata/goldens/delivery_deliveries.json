@@ -1,0 +1,477 @@
+[
+  {
+    "name": "delivery.delivery.assign.first",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries",
+      "body": {
+        "delivery_instructions": "r1b c first stop",
+        "order_id": "<id-1>",
+        "route_id": "<id-2>",
+        "stop_sequence": 1
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "delivery": {
+          "created_at": "<ts+0d>",
+          "delivery_instructions": "r1b c first stop",
+          "id": "<id-3>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-1>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-2>",
+          "status": "PENDING",
+          "stop_sequence": 1,
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.assign.second",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries",
+      "body": {
+        "order_id": "<id-4>",
+        "route_id": "<id-2>",
+        "stop_sequence": 2
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "delivery": {
+          "created_at": "<ts+0d>",
+          "delivery_instructions": null,
+          "id": "<id-5>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-4>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-2>",
+          "status": "PENDING",
+          "stop_sequence": 2,
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.assign.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.assign.unknown_route",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries",
+      "body": {
+        "order_id": "<id-1>",
+        "route_id": "<id-7>",
+        "stop_sequence": 1
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.get",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/<id-3>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_name": "Golden Harness Co",
+        "delivery_instructions": "r1b c first stop",
+        "id": "<id-3>",
+        "latitude": 49.888,
+        "longitude": -119.496,
+        "order_id": "<id-1>",
+        "order_number": "<id-1>",
+        "pod_proof_url": null,
+        "pod_signed_by": null,
+        "pod_timestamp": null,
+        "route_id": "<id-2>",
+        "status": "PENDING",
+        "stop_sequence": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/<id-7>"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.deliveries.two",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/<id-2>/deliveries"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "address": "1 Golden Way, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
+          "delivery_instructions": "r1b c first stop",
+          "id": "<id-3>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-1>",
+          "order_number": "<id-1>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-2>",
+          "status": "PENDING",
+          "stop_sequence": 1,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "address": "1 Golden Way, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
+          "delivery_instructions": null,
+          "id": "<id-5>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-4>",
+          "order_number": "<id-4>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-2>",
+          "status": "PENDING",
+          "stop_sequence": 2,
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "delivery.delivery.adjust_qty",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-3>/adjust-qty",
+      "body": {
+        "adjusted_by": "<id-11>",
+        "adjustments": [
+          {
+            "adjusted_qty": 8,
+            "notes": "two short",
+            "original_qty": 10,
+            "product_id": "<id-12>",
+            "reason_code": "SHORT_SHIP"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "adjusted"
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.adjust_qty.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/not-a-uuid/adjust-qty",
+      "body": {
+        "adjustments": []
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.adjust_qty.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-3>/adjust-qty",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.adjust_qty.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-7>/adjust-qty",
+      "body": {
+        "adjustments": []
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photos.empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/<id-3>/pod-photos"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photo.bad_type",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-3>/pod-photo",
+      "body": {
+        "field": "photo",
+        "filename": "pod.pdf",
+        "content_type": "",
+        "content": "golden photo bytes"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photo.wrong_field",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-3>/pod-photo",
+      "body": {
+        "field": "file",
+        "filename": "pod.png",
+        "content_type": "",
+        "content": "golden photo bytes"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photo.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/not-a-uuid/pod-photo",
+      "body": {
+        "field": "photo",
+        "filename": "pod.png",
+        "content_type": "",
+        "content": "golden photo bytes"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photo.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-7>/pod-photo",
+      "body": {
+        "field": "photo",
+        "filename": "pod.png",
+        "content_type": "",
+        "content": "golden photo bytes"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photos.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/not-a-uuid/pod-photos"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photos.none",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/<id-7>/pod-photos"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  }
+]

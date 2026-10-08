@@ -1,0 +1,53 @@
+[
+  {
+    "name": "delivery.delivery.pod_photo",
+    "mask_fields": {
+      "photo_url": "<pod-photo-url>"
+    },
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-1>/pod-photo",
+      "body": {
+        "field": "photo",
+        "filename": "pod.png",
+        "content_type": "",
+        "content": "golden photo bytes"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "delivery_id": "<id-1>",
+        "id": "<id-2>",
+        "photo_type": "site",
+        "photo_url": "<pod-photo-url>",
+        "uploaded_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.pod_photos",
+    "sort_primary_array": true,
+    "mask_fields": {
+      "photo_url": "<pod-photo-url>"
+    },
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/<id-1>/pod-photos"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "delivery_id": "<id-1>",
+          "id": "<id-2>",
+          "photo_type": "site",
+          "photo_url": "<pod-photo-url>",
+          "uploaded_at": "<ts+0d>"
+        }
+      ]
+    }
+  }
+]

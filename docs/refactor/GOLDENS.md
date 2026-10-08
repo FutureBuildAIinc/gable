@@ -50,8 +50,9 @@ run:
    runs in its own process group, stopped by that group number even when the
    test fails, and carries `Pdeathsig=SIGKILL` on Linux so a killed test
    process takes the server with it.
-4. **Script.** It replays a fixed, ordered script of 202 requests across 44
-   groups (one golden file per group). Writes run in a deterministic order, so
+4. **Script.** It replays a fixed, ordered script of 991 steps across 100
+   groups (one golden file per group; 202 steps in the first 44 groups, the
+   rest added by R1-1b). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
    same way every run. Later steps reference values extracted from earlier
    responses (the order whose invoice is read, the invoice whose payment is
@@ -197,9 +198,104 @@ the first of the current month, a calendar boundary that makes the window's
 contents differ between a run on the 5th and one on the 25th. The explicit
 window exercises the same code path with a stable one.
 
-**Depth deferred to R1-1b.** Every module with routes now has a golden (the
-R1-1 exit bar); the remaining 194 of the 345 census routes without one are
-listed at the end of this document.
+**Routes with no recorded step.** Four census routes have none; see "Routes
+without a recorded step" at the end of this document, each with its reason.
+
+## R1-1b: depth additions
+
+R1-1b added a recorded step for every route in `core/api/ROUTES.txt` but one
+(56 new groups, 789 new steps). The new groups all run after the clock group,
+so none of their writes can move an earlier golden: the first 44 golden files
+are byte-identical to their R1-1 recording. The harness gained the following,
+each used only where a route needed it.
+
+- **Order and ownership.** The new groups run in this order after
+  `clockwindow`: `machine_key`, `events`, `idempotency`, then the R1-1b module
+  groups, then `delivery_delivered` last of all: completing a delivery as
+  DELIVERED invoices its order, and an invoice moves the statement, aging and
+  ledger reads of any group after it. They create their own fixtures (customers, vehicles, tills, quotes,
+  ...) for anything destructive; the few that share a seed or earlier fixture
+  only read it. The POS groups share register `REG-01` with the `pos` group
+  (the API cannot create a register): `pos_till_close` closes its till and
+  reopens another, so the register ends the run with an open till.
+- **A step can set up fixture rows** (`setup` on a step): SQL through the
+  harness, for state the API cannot create. The `events` group uses it to
+  insert a SENT quote whose exposure rollup is ACK_REQUIRED (mirroring the
+  pricing package's own acknowledgement fixture), so a real acknowledgement
+  can be recorded.
+- **A step can be a database probe** (`sql` on a step): a query run in a read
+  only transaction that is always rolled back (a write through it fails, and a
+  test pins that), whose rows are the recorded response (request method `SQL`,
+  content type `application/x-sql-rows`). Two uses. The `machine_key` audit
+  row: no route reads `audit_log` (the users listing unions only user
+  attributed rows and a key is never a user), so the probe pins the row itself
+  (action, `actor_kind` key, the key as `actor_id`, a null `user_id`, the
+  refused method, path and scope). The invoices of the `delivery_delivered`
+  order: no route lists invoices by order, so the probe pins the count before
+  and after a refused completion and the invoice a DELIVERED completion makes.
+  The conformance test skips probe steps.
+- **A step can mask mock coordinates** (`maskMockGeo`, recorded as
+  `mask_mock_geo`): `latitude` and `longitude` on delivery rows. With no routing
+  key configured the mock geocoder derives them from two bytes of the order's
+  random uuid, so they differ per run, but always inside 0.128 degrees of the
+  demo anchor. Only a number inside that band is replaced (by the anchor, so the
+  schema still validates); a null coordinate or one outside the band stays in the
+  golden, so a delivery that loses its coordinates or gets a wrong one changes
+  it. A test pins that reach.
+- **A step can mask its whole body** (`maskBody`, recorded as `mask_body`, the
+  body stored as `<body>`): only the status and content type stay pinned. Used
+  by the three portal reads named under "Routes without a recorded step"; the
+  conformance test checks those two against the contract and skips the body.
+- **A step can pin response headers** (`captureHeaders`, recorded under the
+  response's `headers`): used for `Idempotency-Replayed` in the `idempotency`
+  group. No other header is recorded.
+- **A step can mask named response fields** (`maskFields`, recorded in the
+  golden as `mask_fields`, like the older mask flags): used where one field is
+  derived from a per-run id or the calendar and everything else on the step
+  stays pinned. Today: `quote_short_id` and `salesperson_name` on the events feed pages (a random uuid's first characters, a name drawn at seed time), `photo_url` on proof of delivery photos (the stored file name
+  carries eight random hex characters), `vendor_id` on the purchase order list
+  (the seed assigns vendors from rand draws consumed inside map iteration, so
+  the rows tie on the sort key and the placeholder numbering would shift), and
+  `name`, `start_date` and `end_date` on the fiscal period list (twelve
+  monthly periods of the current calendar year: the year and the dates move
+  with the calendar, ids, status and order stay pinned), and `length` on the
+  xlsx export (a zip whose byte length differs between hosts; the step pins
+  status and content type).
+- **A group can run against its own server** (`serverEnv` on a group): the
+  group gets a second `core serve` process on the same database with extra
+  variables, stopped when the group ends. The two category pricing groups
+  (`pricing_categories`, `pricing_category_rules`) use it with
+  `CATEGORY_PRICING_ENABLED=true`: with the flag off (the main server, and so
+  every other golden) the whole route family is unregistered and the mux
+  answers 404, which is why no earlier golden could see these routes.
+- **One normaliser extension**: `quote_short_id` (the first eight characters of
+  a quote uuid, carried in the exposure notification payload the events feed
+  serves) normalises to `<short-id>`.
+
+### Cross-cutting groups
+
+| Group | What it pins |
+|---|---|
+| `machine_key` | The server's machine key wiring under `AUTH_MODE=dev`. A key minted with scope `quotes:read` reads a quote (200); `POST /quotes/{id}/transitions` is refused 403 (`machine key lacks required scope quotes:write`, the ADR error envelope); the refusal's audit row is read through the probe step; `GET /admin/keys` is refused 403 (user only); an unknown `sk_live_` key is 401. The raw key never appears: the normaliser replaces it with `<api-key>` in the request header. |
+| `events` | `GET /api/v1/events`: the feed before the fixture (a first page of two and the same page filtered by type, with two per run values masked by `mask_fields`; an empty page 200; an unknown parameter and a broken cursor 400), a key without the events scope refused 403 (the shared WireError), then after a real quote exposure acknowledgement: the fixture quote's exposure, the acknowledge (200), the feed filtered to `quote.exposure.acknowledged` (one item, the cursor, the envelope), an unknown type (400) and an unknown parameter (400). |
+| `idempotency` | `POST /api/v1/vendors` with `Idempotency-Key`: the first answer (201), the replay (same body and vendor id, `Idempotency-Replayed: true`, no second vendor), and the same key with a different body (422 `idempotency_key_reused`); then `POST /api/v1/vision/scan` with a key: the first request (200), the same key with a different body (422 `idempotency_key_reused`) and a malformed key (400 `validation_failed`). The middleware answers pin the ADR 0001 envelope. |
+
+## Recorded oddities (not defects of the goldens)
+
+The goldens record the base as it is, including answers a later cycle may
+change on purpose. Worth knowing before reading them: many service level
+validation failures answer 500 (unknown ids on PUT/DELETE of vehicles,
+drivers, contacts, a portal project, bank reconciliation dates, inventory
+transfer validation, purchase order receive and submit, the three BI exports
+that name columns the schema does not have, governance RFC listing which
+scans a NULL column); several missing-id deletes answer 204 or 200; the
+portal cart item update, `POST /orders/reorder` and an empty-cart checkout
+answer 500 (the cart update writes a column the table does not have); and the
+AI backed routes (`pim/generate/*`, freight upload) answer their no-key refusal.
+Each is a step you can find by name in its group file; none is a golden bug.
+Two quirks sit in `core/api/conformance-known.txt`: a PATCH on a missing
+product's dimensions answers 200 with an empty body, and the file route on a
+manual quote answers 200 with an empty body where the fragment says 404.
 
 ## Running and re-recording
 
@@ -234,8 +330,9 @@ naming what changed and why.
   it with `TRUSTED_PROXIES` set to loopback, the address the harness client
   connects from; without that the rotation would be ignored. The
   portal login's own strict limit is not reached (two logins).
-- The harness sends no `Idempotency-Key` headers, so the idempotency cache
-  never interferes.
+- The harness sends no `Idempotency-Key` header except in the `idempotency`
+  group, which pins the replay itself, so the idempotency cache never
+  interferes anywhere else.
 - The partner surface answers 401 under `AUTH_MODE=dev` (it needs ERP JWT
   claims, and dev mode mounts no auth middleware); that refusal is its golden.
 - The A2A purchase-order receiver mounts only when FB Brain is enabled with a
@@ -301,71 +398,73 @@ last).
 | configurator app | `configurator` | GET /api/v1/configurator/options?attribute_type=; POST /api/v1/configurator/validate; POST /api/v1/configurator/build-sku; empty selections (400) |
 | governance app | `governance` | POST /api/v1/governance/rfcs; GET /api/v1/governance/rfcs/{id} |
 | partner surface | `partner` | GET /api/partner/v1/dashboard (the dev-mode 401) |
-| portal | `portal` | GET /api/portal/v1/config; POST /api/portal/v1/login; GET /api/portal/v1/catalog; POST /api/portal/v1/cart/items; GET /api/portal/v1/cart |
+| portal | `portal` | GET /api/portal/v1/config; POST /api/portal/v1/login; GET /api/portal/v1/catalog; POST /api/portal/v1/cart/items; GET /api/portal/v1/cart; GET /api/portal/v1/dashboard, /invoices, /deliveries (status and content type only, body masked) |
 | project | `project` | POST /api/portal/v1/projects; GET /api/portal/v1/projects/{id} |
 | techadmin | `techadmin` | GET /api/v1/admin/keys; POST /api/v1/admin/keys (generated key normalised) |
 | staff roster | `staff` | GET /api/v1/admin/staff; POST /api/v1/admin/staff; GET /api/v1/admin/modules; missing fields (400) |
 | apps registry | `apps` | GET /api/v1/apps; POST /api/v1/apps/product/disable (409 core); POST /api/v1/apps/governance/disable; POST /api/v1/apps/governance/enable; unknown key (404) |
 | integrations (AI_LM) | `integrations` | no key and wrong key (401 `invalid integration key`); GET /api/integration/locations, /vehicles, /drivers, /products?category=, /orders?date=; POST /api/integration/quotes; POST /api/integration/quotes/bulk-price; POST /api/integration/quotes/{id}/accept-and-convert; POST /api/integration/validate-staff (known and unknown); POST /api/integration/delivery-routes |
+| customer contacts and policy | `customer_contacts` | GET/POST /api/v1/customers/{customerId}/contacts; GET/PUT/DELETE /api/v1/contacts/{id}; GET/PUT /api/v1/customers/{id}/escalation-policy; PATCH /api/v1/customers/{id}/salesperson, each with error paths |
+| salesteam detail | `sales_team_detail` | GET /api/v1/sales-team/{id} |
+| crm activity item | `crm_activity_item` | GET/PUT/DELETE /api/v1/activities/{id} |
+| location item | `location_item` | GET /api/v1/branches/{id}/tree; PUT/DELETE /api/v1/locations/{id} |
+| product item | `product_item` | GET /api/v1/products/reorder-alerts; PATCH /api/v1/products/{id}/dimensions, /lead-time, /margins |
+| tax exemption item | `tax_exemption_item` | DELETE /api/v1/tax/exemptions/{id} |
+| deposits | `deposit_apply` | GET /api/v1/deposits; POST /api/v1/deposits/{id}/apply |
+| payment gateway | `payment_gateway` | POST /api/v1/payments/card (402, no gateway); POST /api/v1/payments/refund (500, no gateway) |
+| documents | `document_invoice` | GET /api/v1/documents/print/invoice/{id} (PDF text hash); POST /api/v1/invoices/{id}/email (202, async) |
+| quote file | `quote_file` | GET /api/v1/quotes/{id}/file |
+| inventory transfer | `inventory_transfer` | POST /api/v1/inventory/transfer |
+| ap payments | `ap_payments` | POST /api/v1/ap/invoices/{id}/approve (401/400 only: dev mode has no claims, so no approver); GET/POST /api/v1/ap/payments |
+| gl | `gl_accounts_entries`, `gl_fiscal_periods` | POST /api/v1/gl/accounts; PUT /api/v1/gl/accounts/{id}; GET /api/v1/gl/journal-entries and /{id}; POST .../{id}/reverse and /void; GET /api/v1/gl/fiscal-periods; POST .../{id}/close and /reopen |
+| matching | `matching_runs` | GET /api/v1/matching/exceptions; GET /api/v1/matching/results/{po_id}; POST /api/v1/matching/run/{po_id} |
+| bankrecon | `bankrecon_sessions` | POST /api/v1/bankrecon/import, /match, /unmatch; GET/POST /api/v1/bankrecon/sessions; GET /api/v1/bankrecon/sessions/{id}; POST .../{id}/complete |
+| edi | `edi_partner_catalog` | GET /api/v1/edi/partners; PUT/DELETE /api/v1/edi/partners/{id}; GET /api/v1/edi/partners/{id}/catalog; POST .../import-catalog (an X12 832 segment stream carried in a JSON string; raw and CSV uploads are not buildable by the harness) |
+| delivery | `delivery_fleet`, `delivery_routes`, `delivery_deliveries`, `delivery_pod_photo`, `delivery_route_lifecycle`, `delivery_delivered` | vehicles and drivers get/put/delete/photo; routes list/create/optimize/reorder/dispatch/complete/deliveries; deliveries create/get/adjust-qty/pod-photo(s)/status (PARTIAL and FAILED are recorded on the shared order; DELIVERED has its own group, `delivery_delivered`, on an order of its own: a missing proof of delivery is refused with no invoice, then a DELIVERED completion with proof reads back the delivery and the invoice it made) |
+| pos | `pos_transactions`, `pos_sync`, `pos_returns`, `pos_till_close` | products/search; transactions list/get/items POST and DELETE/complete/void; returns list/create/get; sync; till close/report/zreport; zreports |
+| purchase_order | `purchase_order_flow`, `purchase_order_list` | list; recommendations; refresh-reorder-targets; reorder-check; reorder-runs; source-summary; freight GET/POST (the upload refuses with no AI key, so apply is recorded only for an unknown charge); receive; submit |
+| pricing (flag off main) | `pricing_escalation`, `market_index_refresh`, `exposure_admin`, `rebate_programs` | POST /api/v1/pricing/calculate-escalation; GET /api/v1/market-indices/{id}/history; POST .../refresh and /refresh/preview; POST /api/v1/admin/exposure-scan; GET /api/v1/reports/exposure; GET /api/v1/pricing/rebates/programs/{id}, /claims; POST .../claims/calculate |
+| pricing categories (flag on) | `pricing_categories`, `pricing_category_rules` | categories GET/POST/PUT; category-rules GET/POST/PUT/DELETE, bulk POST/DELETE, audit; matrix; resolve (own server, see above) |
+| reporting | `reporting_builder`, `reporting_saved`, `reporting_reports` | builder preview/export; export/{entity} (all 500 at this base); saved get/put/delete/run; schedules DELETE; customer-statement; daily-till |
+| pim | `pim_media` | products/{id}/detail; collateral GET/DELETE; media GET/DELETE/primary PATCH; generate/* (500, no AI key) |
+| techadmin | `techadmin_keys`, `techadmin_settings` | DELETE /api/v1/admin/keys/{id}; settings/ai and settings/routing GET/PUT/DELETE (invented placeholder values only) |
+| staff detail | `staff_detail` | GET/PUT /api/v1/admin/staff/{id}; PUT /api/v1/admin/modules/{id}; POST/DELETE /api/v1/admin/staff/{id}/modules |
+| governance | `governance_rfcs` | GET /api/v1/governance/rfcs (500); PUT /api/v1/governance/rfcs/{id} |
+| configurator | `configurator_reads` | GET /api/v1/configurator/presets and /rules |
+| server | `server_routes` | `/uploads/` (the file server's plain 404) |
+| partner | `partner_quotes` | GET /api/partner/v1/quotes and /quotes/{id} (the dev-mode 401) |
+| portal | `portal_catalog`, `portal_orders`, `portal_billing`, `portal_quotes`, `portal_team`, `portal_logout` | catalog/{id}, /volume-breaks, /categories; cart item PUT (500) and DELETE; checkout; orders list (project filtered, since, 304), get, cancel, reorder (500), project; invoices/{id}; deliveries/{id}, reschedule GET/POST; quotes list/create/get/accept/decline; users list/role/status; invites GET/POST; logout |
+| project | `portal_projects` | GET /api/portal/v1/projects; PUT /api/portal/v1/projects/{id} |
+| machine keys | `machine_key` | see Cross-cutting groups |
+| events | `events` | GET /api/v1/events |
+| idempotency | `idempotency` | POST /api/v1/vendors replayed; POST /api/v1/vision/scan key reuse and a malformed key |
 
 Modules without routes of their own (notification, ai, domain, config,
 testutil, the x12 and gl integration libraries) are exercised through the
 modules that wire them.
 
-## Deferred to R1-1b: census routes without a golden
+## Routes without a recorded step
 
-151 of the 345 census routes carry a golden. The remaining 194, by module
-(paths abbreviated; every one needs a scenario step plus a recorded golden
-before its module's conversion in R1-7):
+Every route in `core/api/ROUTES.txt` has a recorded step except one, for a
+stated reason:
 
-- portal (29): cart item PUT/DELETE; catalog/{id} and /volume-breaks;
-  catalog/categories; checkout; dashboard; deliveries (list, get,
-  reschedule GET/POST); invites GET/POST; invoices (list, get); logout;
-  orders (list, get, cancel, reorder, set-project); quotes (list, create,
-  get, accept, decline); users (list, role, status).
-- delivery (21): deliveries (create, get, adjust-qty, pod-photo, pod-photos,
-  status); drivers (list, PUT, DELETE, photo); routes (list, create,
-  complete, deliveries, dispatch, optimize, reorder); vehicles (get, PUT,
-  DELETE, photo).
-- pricing (21): admin/exposure-scan; market-indices/{id}/history,
-  /refresh, /refresh/preview; pricing/calculate-escalation; categories
-  (list, create, PUT); category-rules (list, create, bulk POST/DELETE, PUT,
-  DELETE, audit); matrix; rebates program get, claims get/calculate;
-  pricing/resolve; reports/exposure.
-- pos (15): products/search; returns (list, create, get); sync;
-  till close/report/zreport; transactions (list, get, complete, items
-  POST/DELETE, void); zreports.
-- purchase_order (11): list; recommendations; refresh-reorder-targets;
-  reorder-check; reorder-runs; source-summary; freight GET/POST/apply;
-  receive; submit.
-- reporting (10): builder export/preview; export/{entity}; saved get/PUT/
-  DELETE/run; schedules DELETE; customer-statement; daily-till.
-- pim (10): products/{id}/detail; collateral GET/DELETE/generate;
-  generate descriptions/image/seo; media GET/DELETE/PATCH.
-- gl (9): accounts POST/PUT; fiscal-periods (list, close, reopen);
-  journal-entries (list, get, reverse, void).
-- customer (8): contacts (get, POST, PUT, DELETE); escalation-policy
-  GET/PUT; salesperson PATCH.
-- bankrecon (7): import; match; unmatch; sessions (list, create, get,
-  complete).
-- techadmin (7): keys DELETE; settings/ai GET/PUT/DELETE;
-  settings/routing GET/PUT/DELETE.
-- staff (5): staff get/PUT; modules PUT; staff modules POST/DELETE.
-- product (4): reorder-alerts; dimensions/lead-time/margins PATCHes.
-- ap (3): approve; payments GET/POST.
-- crm (3): activities get/PUT/DELETE.
-- location (3): branches/{id}/tree; locations PUT/DELETE.
-- matching (3): exceptions; results/{po_id}; run/{po_id}.
-- partner (2): quotes list/get (all partner routes answer the dev-mode 401;
-  one 401 is pinned, the rest are the same refusal).
-- configurator (2): presets; rules.
-- deposit (2): list; apply.
-- document (2): print/invoice/{id}; invoices/{id}/email.
-- governance (2): rfcs list; PUT.
-- payment (2): card; refund.
-- project (2): list; PUT.
-- server (2): /metrics; /uploads/.
-- inventory (1): transfer.
-- quote (1): /quotes/{id}/file.
-- salesteam (1): /sales-team/{id}.
-- tax (1): exemptions DELETE.
+- `GET /metrics`: the body is the Prometheus exposition of Go runtime and
+  process series (`go_build_info`, memory statistics, goroutines, start time)
+  that differ on every run; the normaliser has no rule for them and R1-1b adds
+  none.
+
+Three portal reads have a step that pins less than the rest:
+`GET /api/portal/v1/dashboard`, `GET /api/portal/v1/invoices` and
+`GET /api/portal/v1/deliveries` return the demo customer's seeded book, whose
+composition (amounts, which orders, invoices and deliveries exist) is drawn
+from the seed inside map-iteration loops and so differs per run. Their steps
+(`portal.dashboard`, `portal.invoices`, `portal.deliveries`, in the `portal`
+group) pin the status and content type and record the body as the placeholder
+`<body>` (`mask_body`). The conformance test checks the status and content type
+against the contract and skips the body of such a step. The shape of those
+bodies is covered through their sibling reads: `GET /orders` (project
+filtered), `GET /invoices/{id}` and `GET /deliveries/{id}` on fixtures the
+script creates.
+
+A route a later cycle changes needs its golden re-recorded together with an
+entry in `docs/refactor/CONTRACT-CHANGES.md`, as before.

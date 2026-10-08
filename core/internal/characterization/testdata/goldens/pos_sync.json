@@ -1,0 +1,268 @@
+[
+  {
+    "name": "pos.sync",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/sync",
+      "body": {
+        "batch_id": "r1c-batch-1",
+        "items": [
+          {
+            "cashier_id": "<id-1>",
+            "client_created_at": "<ts+0d>",
+            "client_id": "<id-2>",
+            "items": [
+              {
+                "product_id": "<id-3>",
+                "quantity": 1
+              }
+            ],
+            "register_id": "REG-01",
+            "tenders": [
+              {
+                "amount": 200,
+                "method": "CASH"
+              }
+            ]
+          }
+        ],
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "batch_id": "r1c-batch-1",
+        "duplicate_count": 0,
+        "error_count": 0,
+        "synced_count": 1
+      }
+    }
+  },
+  {
+    "name": "pos.sync.replay_duplicate",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/sync",
+      "body": {
+        "batch_id": "r1c-batch-1",
+        "items": [
+          {
+            "cashier_id": "<id-1>",
+            "client_created_at": "<ts+0d>",
+            "client_id": "<id-2>",
+            "items": [
+              {
+                "product_id": "<id-3>",
+                "quantity": 1
+              }
+            ],
+            "register_id": "REG-01",
+            "tenders": [
+              {
+                "amount": 200,
+                "method": "CASH"
+              }
+            ]
+          }
+        ],
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "batch_id": "r1c-batch-1",
+        "duplicate_count": 1,
+        "error_count": 0,
+        "synced_count": 0
+      }
+    }
+  },
+  {
+    "name": "pos.sync.underpaid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/sync",
+      "body": {
+        "batch_id": "r1c-batch-2",
+        "items": [
+          {
+            "cashier_id": "<id-1>",
+            "client_created_at": "<ts+0d>",
+            "client_id": "<id-4>",
+            "items": [
+              {
+                "product_id": "<id-3>",
+                "quantity": 1
+              }
+            ],
+            "tenders": [
+              {
+                "amount": 0.01,
+                "method": "CASH"
+              }
+            ]
+          }
+        ],
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "batch_id": "r1c-batch-2",
+        "duplicate_count": 0,
+        "error_count": 1,
+        "errors": [
+          {
+            "client_id": "<id-4>",
+            "reason": "complete: insufficient tender: need 616 cents, got 1 cents"
+          }
+        ],
+        "synced_count": 0
+      }
+    }
+  },
+  {
+    "name": "pos.sync.no_batch_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/sync",
+      "body": {
+        "items": [
+          {
+            "client_id": "<id-5>"
+          }
+        ],
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.sync.no_items",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/sync",
+      "body": {
+        "batch_id": "r1c-batch-3",
+        "items": []
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.sync.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/sync",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.after_sync",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?register_id=REG-01"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "completed_at": "<ts+0d>",
+          "created_at": "<ts+0d>",
+          "id": "<id-2>",
+          "item_count": 1,
+          "register_id": "REG-01",
+          "status": "COMPLETED",
+          "total": 616
+        },
+        {
+          "completed_at": "<ts+0d>",
+          "created_at": "<ts+0d>",
+          "id": "<id-9>",
+          "item_count": 1,
+          "register_id": "REG-01",
+          "status": "VOIDED",
+          "total": 616
+        },
+        {
+          "completed_at": "<ts+0d>",
+          "created_at": "<ts+0d>",
+          "id": "<id-10>",
+          "item_count": 2,
+          "register_id": "REG-01",
+          "status": "COMPLETED",
+          "total": 1872
+        },
+        {
+          "created_at": "<ts+0d>",
+          "id": "<id-11>",
+          "item_count": 0,
+          "register_id": "REG-01",
+          "status": "OPEN",
+          "total": 0
+        },
+        {
+          "created_at": "<ts+0d>",
+          "id": "<id-4>",
+          "item_count": 1,
+          "register_id": "REG-01",
+          "status": "OPEN",
+          "total": 616
+        },
+        {
+          "created_at": "<ts+0d>",
+          "id": "<id-12>",
+          "item_count": 1,
+          "register_id": "REG-01",
+          "status": "VOIDED",
+          "total": 4256
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,455 @@
+[
+  {
+    "name": "staff.detail.create_own",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff",
+      "body": {
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff",
+        "role": "counter"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff",
+        "id": "<id-1>",
+        "modules": [],
+        "role": "counter",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.detail.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff",
+        "id": "<id-1>",
+        "modules": [],
+        "role": "counter",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.detail.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff/<id-2>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.detail.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.detail.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/staff/<id-1>",
+      "body": {
+        "active": true,
+        "full_name": "Golden D Staff Renamed",
+        "role": "yard"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff Renamed",
+        "id": "<id-1>",
+        "modules": [],
+        "role": "yard",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.detail.update.not_found",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/staff/<id-2>",
+      "body": {
+        "role": "yard"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.detail.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/staff/not-a-uuid",
+      "body": {
+        "role": "yard"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.detail.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/staff/<id-1>",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.modules.list_before",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/modules"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "enabled": true,
+          "id": "ai_lm",
+          "name": "AI_LM"
+        }
+      ]
+    }
+  },
+  {
+    "name": "staff.modules.set_disabled",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/modules/ai_lm",
+      "body": {
+        "enabled": false
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "enabled": false,
+        "id": "ai_lm",
+        "name": ""
+      }
+    }
+  },
+  {
+    "name": "staff.modules.set_enabled.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/modules/ai_lm",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.modules.list_after_disable",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/modules"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "enabled": false,
+          "id": "ai_lm",
+          "name": "AI_LM"
+        }
+      ]
+    }
+  },
+  {
+    "name": "staff.modules.grant",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff/<id-1>/modules",
+      "body": {
+        "module_id": "ai_lm"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff Renamed",
+        "id": "<id-1>",
+        "modules": [
+          "ai_lm"
+        ],
+        "role": "yard",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.modules.grant.missing_module",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff/<id-1>/modules",
+      "body": {
+        "module_id": ""
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.modules.grant.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff/not-a-uuid/modules",
+      "body": {
+        "module_id": "ai_lm"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.modules.grant.unknown_staff",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff/<id-2>/modules",
+      "body": {
+        "module_id": "ai_lm"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.modules.revoke",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/staff/<id-1>/modules/ai_lm"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff Renamed",
+        "id": "<id-1>",
+        "modules": [],
+        "role": "yard",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.modules.revoke.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/staff/<id-1>/modules/ai_lm"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff Renamed",
+        "id": "<id-1>",
+        "modules": [],
+        "role": "yard",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.modules.revoke.bad_id",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/staff/not-a-uuid/modules/ai_lm"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.modules.set_enabled_restore",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/modules/ai_lm",
+      "body": {
+        "enabled": true
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "enabled": true,
+        "id": "ai_lm",
+        "name": ""
+      }
+    }
+  },
+  {
+    "name": "staff.detail.get_final",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff Renamed",
+        "id": "<id-1>",
+        "modules": [],
+        "role": "yard",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  }
+]

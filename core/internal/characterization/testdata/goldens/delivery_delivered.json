@@ -1,0 +1,233 @@
+[
+  {
+    "name": "order.create.c_delivered",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders",
+      "body": {
+        "customer_id": "<id-1>",
+        "lines": [
+          {
+            "price_each": 550,
+            "product_id": "<id-2>",
+            "quantity": 2
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-3>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "id": "<id-4>",
+        "lines": [
+          {
+            "commission_rate": 0,
+            "id": "<id-5>",
+            "is_special_order": false,
+            "order_id": "<id-4>",
+            "price_each": 550,
+            "product_id": "<id-2>",
+            "quantity": 2,
+            "unit_cost": 0
+          }
+        ],
+        "margin_percent": 0,
+        "status": "DRAFT",
+        "total_amount": 1100,
+        "total_commission": 0,
+        "total_cost": 0,
+        "total_margin": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.create.c_delivered",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes",
+      "body": {
+        "driver_id": "<id-6>",
+        "notes": "r1b c delivered route",
+        "scheduled_date": "<day+4>",
+        "vehicle_id": "<id-7>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-6>",
+        "id": "<id-8>",
+        "notes": "r1b c delivered route",
+        "scheduled_date": "<ts+4d>",
+        "status": "DRAFT",
+        "stop_count": 0,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-7>"
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.assign.c_delivered",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries",
+      "body": {
+        "order_id": "<id-4>",
+        "route_id": "<id-8>",
+        "stop_sequence": 1
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "delivery": {
+          "created_at": "<ts+0d>",
+          "delivery_instructions": null,
+          "id": "<id-9>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-4>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-8>",
+          "status": "PENDING",
+          "stop_sequence": 1,
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.for_order.before",
+    "request": {
+      "method": "SQL",
+      "path": "SELECT count(*) AS invoices FROM invoices WHERE order_id = '<id-4>'::uuid"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "invoices": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "delivery.delivery.status.delivered_missing_pod",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/delivery/deliveries/<id-9>/status",
+      "body": {
+        "status": "DELIVERED"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.for_order.after_refusal",
+    "request": {
+      "method": "SQL",
+      "path": "SELECT count(*) AS invoices FROM invoices WHERE order_id = '<id-4>'::uuid"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "invoices": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "delivery.delivery.status.delivered",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/delivery/deliveries/<id-9>/status",
+      "body": {
+        "pod_proof_url": "/uploads/pod/golden-delivered.png",
+        "pod_signed_by": "R1C Receiver",
+        "signature_data_url": "data:image/png;base64,AAAA",
+        "status": "DELIVERED"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.get.after_delivered",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/deliveries/<id-9>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_name": "Golden Harness Co",
+        "delivery_instructions": null,
+        "id": "<id-9>",
+        "latitude": 49.888,
+        "longitude": -119.496,
+        "order_id": "<id-4>",
+        "order_number": "<id-4>",
+        "pod_proof_url": "/uploads/pod/golden-delivered.png",
+        "pod_signed_by": "R1C Receiver",
+        "pod_timestamp": "<ts+0d>",
+        "route_id": "<id-8>",
+        "status": "DELIVERED",
+        "stop_sequence": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "invoice.for_order.after_delivered",
+    "request": {
+      "method": "SQL",
+      "path": "SELECT status, total_amount::text AS total_amount, tax_amount::text AS tax_amount, (SELECT count(*) FROM invoice_lines l WHERE l.invoice_id = i.id) AS lines FROM invoices i WHERE order_id = '<id-4>'::uuid ORDER BY created_at, id"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "lines": 1,
+          "status": "UNPAID",
+          "tax_amount": "1.32",
+          "total_amount": "12.32"
+        }
+      ]
+    }
+  }
+]

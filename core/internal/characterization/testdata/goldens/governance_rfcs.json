@@ -1,0 +1,168 @@
+[
+  {
+    "name": "governance.rfc.create_own",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/governance/rfcs",
+      "body": {
+        "problem_statement": "r1b drafter d",
+        "proposed_solution": "none",
+        "title": "Golden D RFC"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "author_id": null,
+        "content": "# RFC: Golden D RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\n\n\n### 2. Proposed Solution\n\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "problem_statement": "",
+        "proposed_solution": "",
+        "status": "draft",
+        "title": "Golden D RFC",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/governance/rfcs"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/<id-1>",
+      "body": {
+        "Content": "body text",
+        "ProblemStatement": "updated problem",
+        "ProposedSolution": "updated solution",
+        "Status": "review",
+        "Title": "Golden D RFC v2"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "author_id": null,
+        "content": "body text",
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "problem_statement": "updated problem",
+        "proposed_solution": "updated solution",
+        "status": "review",
+        "title": "Golden D RFC v2",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/not-a-uuid",
+      "body": {
+        "Title": "x"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/<id-1>",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update.not_found",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/<id-5>",
+      "body": {
+        "Status": "draft",
+        "Title": "x"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.get_after_update",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/governance/rfcs/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "author_id": null,
+        "content": "body text",
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "problem_statement": "updated problem",
+        "proposed_solution": "updated solution",
+        "status": "review",
+        "title": "Golden D RFC v2",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  }
+]

@@ -1,0 +1,1388 @@
+[
+  {
+    "name": "portal_quotes.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes",
+      "body": {
+        "delivery_type": "DELIVERY",
+        "lines": [
+          {
+            "note": "catalog line",
+            "product_id": "<id-4>",
+            "quantity": 12
+          },
+          {
+            "description": "Custom cedar bracket",
+            "quantity": 4,
+            "uom": "ea"
+          }
+        ],
+        "notes": "golden scope"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": null,
+        "created_at": "<ts+0d>",
+        "delivery_type": "DELIVERY",
+        "erp_state": "DRAFT",
+        "expires_at": null,
+        "freight_amount": 0,
+        "id": "<id-5>",
+        "lines": [
+          {
+            "customer_note": "catalog line",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-6>",
+            "is_special_order": false,
+            "line_total": 0,
+            "price_uom": "PCS",
+            "product_id": "<id-4>",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 12,
+            "unit_price": 0,
+            "uom": "PCS"
+          },
+          {
+            "customer_note": "",
+            "description": "Custom cedar bracket",
+            "id": "<id-7>",
+            "is_special_order": true,
+            "line_total": 0,
+            "price_uom": "EA",
+            "product_id": null,
+            "product_sku": "SPECIAL-ORDER",
+            "quantity": 4,
+            "unit_price": 0,
+            "uom": "EA"
+          }
+        ],
+        "notes": "golden scope",
+        "priced": false,
+        "project_id": null,
+        "project_name": null,
+        "rejected_at": null,
+        "sent_at": null,
+        "status": "REQUESTED",
+        "total_amount": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.create.second",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes",
+      "body": {
+        "lines": [
+          {
+            "product_id": "<id-4>",
+            "quantity": 2
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": null,
+        "created_at": "<ts+0d>",
+        "delivery_type": "PICKUP",
+        "erp_state": "DRAFT",
+        "expires_at": null,
+        "freight_amount": 0,
+        "id": "<id-8>",
+        "lines": [
+          {
+            "customer_note": "",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-9>",
+            "is_special_order": false,
+            "line_total": 0,
+            "price_uom": "PCS",
+            "product_id": "<id-4>",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2,
+            "unit_price": 0,
+            "uom": "PCS"
+          }
+        ],
+        "notes": "",
+        "priced": false,
+        "project_id": null,
+        "project_name": null,
+        "rejected_at": null,
+        "sent_at": null,
+        "status": "REQUESTED",
+        "total_amount": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.create.no_lines",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes",
+      "body": {
+        "notes": "empty"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.create.bad_uom",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes",
+      "body": {
+        "lines": [
+          {
+            "description": "x",
+            "quantity": 1,
+            "uom": "parsec"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/quotes"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "DRAFT",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-8>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-9>",
+              "is_special_order": false,
+              "line_total": 0,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 2,
+              "unit_price": 0,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": false,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "REQUESTED",
+          "total_amount": 0,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "DELIVERY",
+          "erp_state": "DRAFT",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-5>",
+          "lines": [
+            {
+              "customer_note": "catalog line",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-6>",
+              "is_special_order": false,
+              "line_total": 0,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 12,
+              "unit_price": 0,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "Custom cedar bracket",
+              "id": "<id-7>",
+              "is_special_order": true,
+              "line_total": 0,
+              "price_uom": "EA",
+              "product_id": null,
+              "product_sku": "SPECIAL-ORDER",
+              "quantity": 4,
+              "unit_price": 0,
+              "uom": "EA"
+            }
+          ],
+          "notes": "golden scope",
+          "priced": false,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "REQUESTED",
+          "total_amount": 0,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "DRAFT",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-13>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-14>",
+              "is_special_order": false,
+              "line_total": 11,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 2,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": false,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "REQUESTED",
+          "total_amount": 11,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "SENT",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-15>",
+          "lines": [
+            {
+              "customer_note": "none",
+              "description": "events fixture line",
+              "id": "<id-16>",
+              "is_special_order": false,
+              "line_total": 500,
+              "price_uom": "EA",
+              "product_id": "<id-4>",
+              "product_sku": "EVT",
+              "quantity": 5,
+              "unit_price": 100,
+              "uom": "EA"
+            }
+          ],
+          "notes": "events fixture",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "PRICED",
+          "total_amount": 500,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": "<ts+0d>",
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "ACCEPTED",
+          "expires_at": "<ts+30d>",
+          "freight_amount": 0,
+          "id": "<id-17>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-18>",
+              "is_special_order": false,
+              "line_total": 66,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 12,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "ACCEPTED",
+          "total_amount": 66,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "EXPIRED",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-19>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-20>",
+              "is_special_order": false,
+              "line_total": 27.5,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 5,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": "<ts+0d>",
+          "status": "EXPIRED",
+          "total_amount": 27.5,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "REJECTED",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-21>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-22>",
+              "is_special_order": false,
+              "line_total": 27.5,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 5,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": "<ts+0d>",
+          "sent_at": "<ts+0d>",
+          "status": "DECLINED",
+          "total_amount": 27.5,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": "<ts+0d>",
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "ACCEPTED",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-23>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-24>",
+              "is_special_order": false,
+              "line_total": 27.5,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 5,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": "<ts+0d>",
+          "status": "ACCEPTED",
+          "total_amount": 27.5,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "DRAFT",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-25>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-26>",
+              "is_special_order": false,
+              "line_total": 27.5,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 5,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": false,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "REQUESTED",
+          "total_amount": 27.5,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "DRAFT",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-27>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-28>",
+              "is_special_order": false,
+              "line_total": 27.5,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 5,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": false,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": "<ts+0d>",
+          "sent_at": null,
+          "status": "REQUESTED",
+          "total_amount": 27.5,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": "<ts+0d>",
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "ACCEPTED",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-29>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-30>",
+              "is_special_order": false,
+              "line_total": 27.5,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 5,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "ACCEPTED",
+          "total_amount": 27.5,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": "<ts+0d>",
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "ACCEPTED",
+          "expires_at": null,
+          "freight_amount": 0,
+          "id": "<id-31>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-32>",
+              "is_special_order": false,
+              "line_total": 110,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 20,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": "<ts+0d>",
+          "status": "ACCEPTED",
+          "total_amount": 110,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "ACCEPTED",
+          "expires_at": "<ts+30d>",
+          "freight_amount": 0,
+          "id": "<id-33>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "5/8 Drywall Firecode 4x8",
+              "id": "<id-34>",
+              "is_special_order": false,
+              "line_total": 819,
+              "price_uom": "PCS",
+              "product_id": "<id-35>",
+              "product_sku": "DW-58-FC",
+              "quantity": 39,
+              "unit_price": 21,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "3/4 Plywood G1S 4x8 (Fir)",
+              "id": "<id-36>",
+              "is_special_order": false,
+              "line_total": 722,
+              "price_uom": "PCS",
+              "product_id": "<id-37>",
+              "product_sku": "PLY-34-CDX",
+              "quantity": 19,
+              "unit_price": 38,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "3\" Deck Screws (2.5kg)",
+              "id": "<id-38>",
+              "is_special_order": false,
+              "line_total": 779.74,
+              "price_uom": "BOX",
+              "product_id": "<id-39>",
+              "product_sku": "SCR-DECK-3-5",
+              "quantity": 26,
+              "unit_price": 29.99,
+              "uom": "BOX"
+            },
+            {
+              "customer_note": "",
+              "description": "2x8x16 Hem-Fir No.2",
+              "id": "<id-40>",
+              "is_special_order": false,
+              "line_total": 623,
+              "price_uom": "PCS",
+              "product_id": "<id-41>",
+              "product_sku": "LUM-2816-NO2",
+              "quantity": 28,
+              "unit_price": 22.25,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "Ext Door 36x80 Steel 6-Panel",
+              "id": "<id-42>",
+              "is_special_order": false,
+              "line_total": 6440,
+              "price_uom": "PCS",
+              "product_id": "<id-43>",
+              "product_sku": "DR-EXT-3680-STL",
+              "quantity": 23,
+              "unit_price": 280,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "Casing 2-1/4 MDF 14'",
+              "id": "<id-44>",
+              "is_special_order": false,
+              "line_total": 337.5,
+              "price_uom": "PCS",
+              "product_id": "<id-45>",
+              "product_sku": "MLD-CASE-MDF",
+              "quantity": 25,
+              "unit_price": 13.5,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "R-14 Fiberglass Batts 15x93",
+              "id": "<id-46>",
+              "is_special_order": false,
+              "line_total": 5984,
+              "price_uom": "BAG",
+              "product_id": "<id-47>",
+              "product_sku": "INS-R13-15",
+              "quantity": 88,
+              "unit_price": 68,
+              "uom": "BAG"
+            },
+            {
+              "customer_note": "",
+              "description": "Joist Hanger 2x10",
+              "id": "<id-48>",
+              "is_special_order": false,
+              "line_total": 12.95,
+              "price_uom": "PCS",
+              "product_id": "<id-49>",
+              "product_sku": "HANGER-210",
+              "quantity": 7,
+              "unit_price": 1.85,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "ACCEPTED",
+          "total_amount": 15718.19,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts-43d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "SENT",
+          "expires_at": "<ts-13d>",
+          "freight_amount": 0,
+          "id": "<id-50>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "R-20 Fiberglass Batts 15x93",
+              "id": "<id-51>",
+              "is_special_order": false,
+              "line_total": 7052,
+              "price_uom": "BAG",
+              "product_id": "<id-52>",
+              "product_sku": "INS-R19-15",
+              "quantity": 86,
+              "unit_price": 82,
+              "uom": "BAG"
+            },
+            {
+              "customer_note": "",
+              "description": "Vinyl H Mold 1/4 X 12'",
+              "id": "<id-53>",
+              "is_special_order": false,
+              "line_total": 324,
+              "price_uom": "EA",
+              "product_id": "<id-54>",
+              "product_sku": "CORNHMOLD14",
+              "quantity": 54,
+              "unit_price": 6,
+              "uom": "EA"
+            },
+            {
+              "customer_note": "",
+              "description": "Vented Soffit Hardie Textured 1/4 X 24 X 8",
+              "id": "<id-55>",
+              "is_special_order": false,
+              "line_total": 2703.75,
+              "price_uom": "EA",
+              "product_id": "<id-56>",
+              "product_sku": "CORNSFT2408V",
+              "quantity": 103,
+              "unit_price": 26.25,
+              "uom": "EA"
+            },
+            {
+              "customer_note": "",
+              "description": "2x8x16 Hem-Fir No.2",
+              "id": "<id-57>",
+              "is_special_order": false,
+              "line_total": 1579.75,
+              "price_uom": "PCS",
+              "product_id": "<id-41>",
+              "product_sku": "LUM-2816-NO2",
+              "quantity": 71,
+              "unit_price": 22.25,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "Cemtrim Textured 7/16 X 6 X 12",
+              "id": "<id-58>",
+              "is_special_order": false,
+              "line_total": 1504.44,
+              "price_uom": "EA",
+              "product_id": "<id-59>",
+              "product_sku": "CORNCTRMG12+",
+              "quantity": 84,
+              "unit_price": 17.91,
+              "uom": "EA"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "PRICED",
+          "total_amount": 13163.94,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts-68d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "DRAFT",
+          "expires_at": "<ts-38d>",
+          "freight_amount": 0,
+          "id": "<id-60>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "2x4x8 SPF Premium",
+              "id": "<id-61>",
+              "is_special_order": false,
+              "line_total": 275,
+              "price_uom": "PCS",
+              "product_id": "<id-4>",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 50,
+              "unit_price": 5.5,
+              "uom": "PCS"
+            },
+            {
+              "customer_note": "",
+              "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
+              "id": "<id-62>",
+              "is_special_order": false,
+              "line_total": 3687.62,
+              "price_uom": "EA",
+              "product_id": "<id-63>",
+              "product_sku": "CORNSFT1612V",
+              "quantity": 94,
+              "unit_price": 39.23,
+              "uom": "EA"
+            },
+            {
+              "customer_note": "",
+              "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
+              "id": "<id-64>",
+              "is_special_order": false,
+              "line_total": 274.61,
+              "price_uom": "EA",
+              "product_id": "<id-63>",
+              "product_sku": "CORNSFT1612V",
+              "quantity": 7,
+              "unit_price": 39.23,
+              "uom": "EA"
+            },
+            {
+              "customer_note": "",
+              "description": "Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX",
+              "id": "<id-65>",
+              "is_special_order": false,
+              "line_total": 463.32,
+              "price_uom": "EA",
+              "product_id": "<id-66>",
+              "product_sku": "CORNSHTGR49",
+              "quantity": 33,
+              "unit_price": 14.04,
+              "uom": "EA"
+            }
+          ],
+          "notes": "",
+          "priced": false,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "REQUESTED",
+          "total_amount": 4700.55,
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal_quotes.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/quotes/<id-5>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": null,
+        "created_at": "<ts+0d>",
+        "delivery_type": "DELIVERY",
+        "erp_state": "DRAFT",
+        "expires_at": null,
+        "freight_amount": 0,
+        "id": "<id-5>",
+        "lines": [
+          {
+            "customer_note": "catalog line",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-6>",
+            "is_special_order": false,
+            "line_total": 0,
+            "price_uom": "PCS",
+            "product_id": "<id-4>",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 12,
+            "unit_price": 0,
+            "uom": "PCS"
+          },
+          {
+            "customer_note": "",
+            "description": "Custom cedar bracket",
+            "id": "<id-7>",
+            "is_special_order": true,
+            "line_total": 0,
+            "price_uom": "EA",
+            "product_id": null,
+            "product_sku": "SPECIAL-ORDER",
+            "quantity": 4,
+            "unit_price": 0,
+            "uom": "EA"
+          }
+        ],
+        "notes": "golden scope",
+        "priced": false,
+        "project_id": null,
+        "project_name": null,
+        "rejected_at": null,
+        "sent_at": null,
+        "status": "REQUESTED",
+        "total_amount": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/quotes/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-67>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.get.unknown",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/quotes/<id-68>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-69>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.accept.unpriced",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes/<id-5>/accept"
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "QUOTE_NOT_PRICED",
+          "message": "Conflict",
+          "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
+        },
+        "meta": {
+          "request_id": "<id-70>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.decline.unpriced",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes/<id-8>/decline"
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "QUOTE_NOT_PRICED",
+          "message": "Conflict",
+          "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
+        },
+        "meta": {
+          "request_id": "<id-71>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.erp_send_a",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-5>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "to": "sent"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": null,
+        "branch_id": "<id-72>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "customer_name": "Kelbrook Construction",
+        "delivery_type": "delivery",
+        "expires_at": null,
+        "exposure_cents": 0,
+        "exposure_last_checked_at": null,
+        "exposure_state": "ok",
+        "freight_cents": 0,
+        "id": "<id-5>",
+        "job_id": null,
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "customer_note": null,
+            "description": "Custom cedar bracket",
+            "id": "<id-7>",
+            "line_total_cents": 0,
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "product_id": null,
+            "quantity": "4",
+            "quote_id": "<id-5>",
+            "sku": "SPECIAL-ORDER",
+            "unit_cost_ten_thousandths": 0,
+            "unit_price_ten_thousandths": 0,
+            "uom": "EA",
+            "uom_qty": "1"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_note": "catalog line",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-6>",
+            "line_total_cents": 0,
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "product_id": "<id-4>",
+            "quantity": "12",
+            "quote_id": "<id-5>",
+            "sku": "LUM-248-PREM",
+            "unit_cost_ten_thousandths": 35000,
+            "unit_price_ten_thousandths": 0,
+            "uom": "PCS",
+            "uom_qty": "1"
+          }
+        ],
+        "margin_total_cents": 0,
+        "number": "Q-000031",
+        "original_content_type": null,
+        "original_filename": null,
+        "parse_map": null,
+        "rejected_at": null,
+        "revision": 2,
+        "sent_at": "<ts+0d>",
+        "source": "portal",
+        "status": "sent",
+        "total_cents": 0,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": null,
+        "vehicle_name": null
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.erp_send_b",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-8>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "to": "sent"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": null,
+        "branch_id": "<id-72>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "customer_name": "Kelbrook Construction",
+        "delivery_type": "pickup",
+        "expires_at": null,
+        "exposure_cents": 0,
+        "exposure_last_checked_at": null,
+        "exposure_state": "ok",
+        "freight_cents": 0,
+        "id": "<id-8>",
+        "job_id": null,
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "customer_note": null,
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-9>",
+            "line_total_cents": 0,
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "product_id": "<id-4>",
+            "quantity": "2",
+            "quote_id": "<id-8>",
+            "sku": "LUM-248-PREM",
+            "unit_cost_ten_thousandths": 35000,
+            "unit_price_ten_thousandths": 0,
+            "uom": "PCS",
+            "uom_qty": "1"
+          }
+        ],
+        "margin_total_cents": 0,
+        "number": "Q-000032",
+        "original_content_type": null,
+        "original_filename": null,
+        "parse_map": null,
+        "rejected_at": null,
+        "revision": 2,
+        "sent_at": "<ts+0d>",
+        "source": "portal",
+        "status": "sent",
+        "total_cents": 0,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": null,
+        "vehicle_name": null
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.accept",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes/<id-5>/accept"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": "<ts+0d>",
+        "created_at": "<ts+0d>",
+        "delivery_type": "DELIVERY",
+        "erp_state": "ACCEPTED",
+        "expires_at": null,
+        "freight_amount": 0,
+        "id": "<id-5>",
+        "lines": [
+          {
+            "customer_note": "catalog line",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-6>",
+            "is_special_order": false,
+            "line_total": 0,
+            "price_uom": "PCS",
+            "product_id": "<id-4>",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 12,
+            "unit_price": 0,
+            "uom": "PCS"
+          },
+          {
+            "customer_note": "",
+            "description": "Custom cedar bracket",
+            "id": "<id-7>",
+            "is_special_order": true,
+            "line_total": 0,
+            "price_uom": "EA",
+            "product_id": null,
+            "product_sku": "SPECIAL-ORDER",
+            "quantity": 4,
+            "unit_price": 0,
+            "uom": "EA"
+          }
+        ],
+        "notes": "golden scope",
+        "priced": true,
+        "project_id": null,
+        "project_name": null,
+        "rejected_at": null,
+        "sent_at": "<ts+0d>",
+        "status": "ACCEPTED",
+        "total_amount": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.accept.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes/<id-5>/accept"
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "QUOTE_NOT_PRICED",
+          "message": "Conflict",
+          "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
+        },
+        "meta": {
+          "request_id": "<id-73>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.decline",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes/<id-8>/decline"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": null,
+        "created_at": "<ts+0d>",
+        "delivery_type": "PICKUP",
+        "erp_state": "REJECTED",
+        "expires_at": null,
+        "freight_amount": 0,
+        "id": "<id-8>",
+        "lines": [
+          {
+            "customer_note": "",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-9>",
+            "is_special_order": false,
+            "line_total": 0,
+            "price_uom": "PCS",
+            "product_id": "<id-4>",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2,
+            "unit_price": 0,
+            "uom": "PCS"
+          }
+        ],
+        "notes": "",
+        "priced": true,
+        "project_id": null,
+        "project_name": null,
+        "rejected_at": "<ts+0d>",
+        "sent_at": "<ts+0d>",
+        "status": "DECLINED",
+        "total_amount": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.accept.unknown",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes/<id-68>/accept"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-74>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_quotes.decline.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/quotes/not-a-uuid/decline"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-75>"
+        }
+      }
+    }
+  }
+]

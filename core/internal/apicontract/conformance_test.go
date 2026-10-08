@@ -118,6 +118,11 @@ func TestGoldenResponsesConform(t *testing.T) {
 		}
 		for _, step := range steps {
 			where := fmt.Sprintf("%s %s: %s %s", group, step.Name, step.Request.Method, step.Request.Path)
+			// A database probe step (method SQL) records a table's rows, not
+			// an HTTP exchange: there is no operation to conform to.
+			if step.Request.Method == "SQL" {
+				continue
+			}
 			// Pending routes have no operation to conform to yet; skip them first.
 			if matchesPending(pending, step.Request.Method, step.Request.Path) {
 				skippedPending++
@@ -181,6 +186,9 @@ type goldenStep struct {
 		ContentType string          `json:"content_type"`
 		Body        json.RawMessage `json:"body"`
 	} `json:"response"`
+	// MaskBody marks a step whose whole body the harness masked: status and
+	// content type are checked, the body is not.
+	MaskBody bool `json:"mask_body"`
 }
 
 // conformStep runs the three checks of one golden step against its resolved
@@ -223,6 +231,11 @@ func conformStep(compiler *jsonschema.Compiler, compiled map[string]bool, op *Op
 	if !ok {
 		problems = append(problems, fmt.Sprintf("content type %q is not declared on %s %s (declared: %s)",
 			step.Response.ContentType, op.ID, status, strings.Join(declared, ", ")))
+		return problems
+	}
+	if step.MaskBody {
+		// The body was masked as a whole; the status and content type above
+		// are all this step pins.
 		return problems
 	}
 	if bodyKind == bodyBinary || mt.Schema == nil {
@@ -404,7 +417,7 @@ var placeholderRe = regexp.MustCompile(`^<[a-z][a-z0-9-]*>([+-][0-9]+d?)?$`)
 // numericPlaceholders are the normaliser's placeholders for volatile numeric
 // fields (volatileNumberFields in the characterisation harness): they stand
 // where a number was recorded, every other placeholder where a string was.
-var numericPlaceholders = map[string]bool{"<ms>": true, "<poolstat>": true, "<days>": true}
+var numericPlaceholders = map[string]bool{"<ms>": true, "<poolstat>": true, "<days>": true, "<orders>": true}
 
 // collectPlaceholders records, as NUL joined paths mapped to the placeholder
 // text, every leaf of the instance whose value is exactly a normaliser

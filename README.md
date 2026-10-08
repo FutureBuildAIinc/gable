@@ -101,6 +101,14 @@ rotating addresses inside one /64 draws on a single budget. A malformed entry
 (including a zone identifier or an IPv4-mapped prefix shorter than /96) stops
 the server at boot. `X-Real-IP` is never read.
 
+## Event outbox retention
+
+The `worker` role deletes events outbox rows older than `OUTBOX_RETENTION_DAYS`
+(default 14, at most 3650, zero or negative turns the purge off), and only once
+every subscriber has moved past them. A consumer of `GET /api/v1/events` that
+falls further behind than that loses the older events; see
+`docs/adr/0003-events-outbox.md`, section 6.
+
 ## Documentation
 
 | Document | What's in it |

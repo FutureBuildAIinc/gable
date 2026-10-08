@@ -1,0 +1,512 @@
+[
+  {
+    "name": "edi.a.partner.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/edi/partners",
+      "body": {
+        "isa_receiver_id": "GOLDCATR",
+        "isa_sender_id": "GOLDCATS",
+        "name": "Golden Catalog Partner",
+        "notes": "item fixture"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "edi_version": "004010",
+        "gs_receiver_id": "",
+        "gs_sender_id": "",
+        "id": "<id-1>",
+        "is_active": false,
+        "isa_receiver_id": "GOLDCATR",
+        "isa_receiver_qualifier": "",
+        "isa_sender_id": "GOLDCATS",
+        "isa_sender_qualifier": "",
+        "name": "Golden Catalog Partner",
+        "notes": "item fixture",
+        "supported_documents": [
+          "832",
+          "846",
+          "850"
+        ],
+        "transport_config": "{}",
+        "transport_type": "SFTP",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "edi.partner.list",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/edi/partners"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "edi_version": "004010",
+          "gs_receiver_id": "",
+          "gs_sender_id": "",
+          "id": "<id-1>",
+          "is_active": false,
+          "isa_receiver_id": "GOLDCATR",
+          "isa_receiver_qualifier": "",
+          "isa_sender_id": "GOLDCATS",
+          "isa_sender_qualifier": "",
+          "name": "Golden Catalog Partner",
+          "notes": "item fixture",
+          "supported_documents": [
+            "832",
+            "846",
+            "850"
+          ],
+          "transport_config": "{}",
+          "transport_type": "SFTP",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "edi_version": "004010",
+          "gs_receiver_id": "",
+          "gs_sender_id": "",
+          "id": "<id-2>",
+          "is_active": false,
+          "isa_receiver_id": "GOLDRECEIVER",
+          "isa_receiver_qualifier": "",
+          "isa_sender_id": "GOLDSENDER",
+          "isa_sender_qualifier": "",
+          "name": "Golden EDI Partner",
+          "notes": "",
+          "supported_documents": [
+            "832",
+            "846",
+            "850"
+          ],
+          "transport_config": "{}",
+          "transport_type": "SFTP",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "edi_version": "004010",
+          "gs_receiver_id": "GAB",
+          "gs_sender_id": "DIB",
+          "id": "<id-3>",
+          "is_active": true,
+          "isa_receiver_id": "GABLE-987654",
+          "isa_receiver_qualifier": "ZZ",
+          "isa_sender_id": "DIB-111111",
+          "isa_sender_qualifier": "ZZ",
+          "name": "Do It Best",
+          "notes": "",
+          "supported_documents": [
+            "832",
+            "846",
+            "850"
+          ],
+          "transport_config": "{}",
+          "transport_type": "AS2",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "edi_version": "004010",
+          "gs_receiver_id": "GAB",
+          "gs_sender_id": "ORG",
+          "id": "<id-4>",
+          "is_active": true,
+          "isa_receiver_id": "GABLE-987654",
+          "isa_receiver_qualifier": "ZZ",
+          "isa_sender_id": "ORG-123456",
+          "isa_sender_qualifier": "ZZ",
+          "name": "Orgill",
+          "notes": "",
+          "supported_documents": [
+            "832",
+            "846",
+            "850"
+          ],
+          "transport_config": "{}",
+          "transport_type": "SFTP",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "edi.partner.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/edi/partners/<id-1>",
+      "body": {
+        "edi_version": "004010",
+        "is_active": true,
+        "isa_receiver_id": "GOLDCATR",
+        "isa_sender_id": "GOLDCATS",
+        "name": "Golden Catalog Partner Renamed",
+        "notes": "renamed",
+        "supported_documents": [
+          "832",
+          "850"
+        ],
+        "transport_config": "{}",
+        "transport_type": "AS2"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts-106751d>",
+        "edi_version": "004010",
+        "gs_receiver_id": "",
+        "gs_sender_id": "",
+        "id": "<id-1>",
+        "is_active": true,
+        "isa_receiver_id": "GOLDCATR",
+        "isa_receiver_qualifier": "",
+        "isa_sender_id": "GOLDCATS",
+        "isa_sender_qualifier": "",
+        "name": "Golden Catalog Partner Renamed",
+        "notes": "renamed",
+        "supported_documents": [
+          "832",
+          "850"
+        ],
+        "transport_config": "{}",
+        "transport_type": "AS2",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "edi.partner.get.after_update",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/edi/partners/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "catalog_count": 0,
+        "created_at": "<ts+0d>",
+        "edi_version": "004010",
+        "gs_receiver_id": "",
+        "gs_sender_id": "",
+        "id": "<id-1>",
+        "is_active": true,
+        "isa_receiver_id": "GOLDCATR",
+        "isa_receiver_qualifier": "",
+        "isa_sender_id": "GOLDCATS",
+        "isa_sender_qualifier": "",
+        "name": "Golden Catalog Partner Renamed",
+        "notes": "renamed",
+        "supported_documents": [
+          "832",
+          "850"
+        ],
+        "transport_config": "{}",
+        "transport_type": "AS2",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "edi.partner.update.not_found",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/edi/partners/<id-5>",
+      "body": {
+        "name": "Ghost"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.partner.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/edi/partners/not-a-uuid",
+      "body": {
+        "name": "Ghost"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.partner.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/edi/partners/<id-1>",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.catalog.list_empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/edi/partners/<id-1>/catalog"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "edi.catalog.import_x12",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/edi/partners/<id-1>/import-catalog",
+      "body": {
+        "x": "ST*832*0001~N1*SU*Golden Supplier~LIN*1*VP*GOLD-VP-1*SK*GOLD-SK-1~PID*F****Golden stud~CTP*RS*RES*12.50*1*EA~LIN*2*VP*GOLD-VP-2~PID*F****Golden plate~CTP*RS*RES*4.25*1*EA~SE*8*0001"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "format": "x12",
+        "parsed_count": 2,
+        "partner_id": "<id-1>",
+        "saved_count": 2
+      }
+    }
+  },
+  {
+    "name": "edi.catalog.list",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/edi/partners/<id-1>/catalog"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "description": "Golden plate",
+          "id": "<id-9>",
+          "min_order_qty": 1,
+          "pack_qty": 1,
+          "partner_id": "<id-1>",
+          "synced_at": "<ts+0d>",
+          "unit_cost": 4.25,
+          "uom": "EA",
+          "vendor_sku": "GOLD-VP-2"
+        },
+        {
+          "description": "Golden stud",
+          "id": "<id-10>",
+          "min_order_qty": 1,
+          "pack_qty": 1,
+          "partner_id": "<id-1>",
+          "synced_at": "<ts+0d>",
+          "unit_cost": 12.5,
+          "uom": "EA",
+          "vendor_sku": "GOLD-VP-1"
+        }
+      ]
+    }
+  },
+  {
+    "name": "edi.catalog.import_not_x12",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/edi/partners/<id-1>/import-catalog",
+      "body": {}
+    },
+    "response": {
+      "status": 422,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNPROCESSABLE_ENTITY",
+          "message": "Unprocessable Entity"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.catalog.import_csv_unreadable",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/edi/partners/<id-1>/import-catalog?format=csv",
+      "body": {
+        "a": "b"
+      }
+    },
+    "response": {
+      "status": 422,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNPROCESSABLE_ENTITY",
+          "message": "Unprocessable Entity"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.catalog.import.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/edi/partners/not-a-uuid/import-catalog",
+      "body": {
+        "x": "ST*832*0001~N1*SU*Golden Supplier~LIN*1*VP*GOLD-VP-1*SK*GOLD-SK-1~PID*F****Golden stud~CTP*RS*RES*12.50*1*EA~LIN*2*VP*GOLD-VP-2~PID*F****Golden plate~CTP*RS*RES*4.25*1*EA~SE*8*0001"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.catalog.list.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/edi/partners/not-a-uuid/catalog"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.partner.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/edi/partners/<id-1>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "edi.partner.get.after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/edi/partners/<id-1>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "edi.partner.delete.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/edi/partners/<id-1>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "edi.partner.delete.bad_id",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/edi/partners/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  }
+]
