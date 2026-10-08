@@ -530,6 +530,68 @@ func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (
 	return created, nil
 }
 
+// ConvertInProcess is the convert for in process callers (the frozen
+// integration seam): the same rules and events, no client revision to
+// precondition on.
+func (s *Service) ConvertInProcess(ctx context.Context, id uuid.UUID) (*order.Order, error) {
+	if s.orders == nil {
+		return nil, fmt.Errorf("the order service is not wired")
+	}
+	current, err := s.repo.GetQuote(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	src, err := quoteSourceFor(current, nil)
+	if err != nil {
+		return nil, err
+	}
+	priced, err := s.orders.PrepareQuoteTax(ctx, src)
+	if err != nil {
+		return nil, err
+	}
+	var created *order.Order
+	err = s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockQuote(ctx, id); err != nil {
+			return notFound(err)
+		}
+		cur, err := s.repo.GetQuote(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := validateStateTransition(cur.Status, QuoteStateAccepted); err != nil {
+			return err
+		}
+		if has, err := s.orders.QuoteHasOrder(ctx, id); err != nil {
+			return err
+		} else if has {
+			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+				Message: "this quote already has an order",
+				Details: []httpx.FieldError{httpx.Blocker("already_converted",
+					"the quote already has an order that is not cancelled")}}
+		}
+		src, err := quoteSourceFor(cur, nil)
+		if err != nil {
+			return err
+		}
+		from := cur.Status
+		now := httpx.TimestampOf(s.now().UTC())
+		cur.Status = QuoteStateAccepted
+		cur.AcceptedAt = &now
+		if err := s.repo.SetStatus(ctx, cur); err != nil {
+			return err
+		}
+		if err := s.record(ctx, cur, EventAccepted, from.Status()); err != nil {
+			return err
+		}
+		created, err = s.orders.CreateFromQuote(ctx, src, priced)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
 // WithOrderCreator wires the conversion seam.
 func (s *Service) WithOrderCreator(orders OrderCreator) *Service {
 	s.orders = orders

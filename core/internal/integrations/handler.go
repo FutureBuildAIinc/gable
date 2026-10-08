@@ -307,7 +307,7 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 	//    one transaction (ADR 0005 5.8), the pair and the scale 4 price
 	//    carried without loss. This seam's wire is frozen byte for byte; only
 	//    the calls inside the handler changed.
-	o, err := h.quoteSvc.Convert(ctx, quoteID, quote.Precondition{})
+	o, err := h.quoteSvc.ConvertInProcess(ctx, quoteID)
 	if err != nil {
 		slog.Error("failed to convert quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
 		var herr *httpx.Error
