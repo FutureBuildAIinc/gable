@@ -1,0 +1,1511 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The delivery module, transcribed from internal/delivery/handler.go and model.go
+# as they behave today: lists are nil slices (null when empty), a missing delivery,
+# vehicle update or route answers 500, and the photo routes take multipart forms.
+paths:
+  /api/v1/delivery/vehicles:
+    get:
+      operationId: deliveryVehicleList
+      tags:
+      - delivery
+      summary: List vehicles
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: All vehicles. The body is null when there are none.
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                - 'null'
+                items:
+                  $ref: '#/components/schemas/DeliveryVehicle'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: deliveryVehicleCreate
+      tags:
+      - delivery
+      summary: Create a vehicle
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryVehicleCreate'
+      responses:
+        '201':
+          description: The created vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryVehicle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/vehicles/{id}:
+    get:
+      operationId: deliveryVehicleGet
+      tags:
+      - delivery
+      summary: Get a vehicle
+      description: Any repository error, not only a missing row, answers 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryVehicle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: deliveryVehicleUpdate
+      tags:
+      - delivery
+      summary: Update a vehicle
+      description: A missing vehicle answers 500, not 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryVehicleUpdate'
+      responses:
+        '200':
+          description: The updated vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryVehicle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: deliveryVehicleDelete
+      tags:
+      - delivery
+      summary: Delete a vehicle
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '204':
+          description: Vehicle deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/vehicles/{id}/photo:
+    post:
+      operationId: deliveryVehiclePhoto
+      tags:
+      - delivery
+      summary: Upload a vehicle photo
+      description: A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over
+        10 MB answers 400.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeliveryPhotoUpload'
+      responses:
+        '200':
+          description: The stored photo URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryPhotoUrl'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/drivers:
+    get:
+      operationId: deliveryDriverList
+      tags:
+      - delivery
+      summary: List drivers
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: All drivers. The body is null when there are none.
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                - 'null'
+                items:
+                  $ref: '#/components/schemas/DeliveryDriver'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: deliveryDriverCreate
+      tags:
+      - delivery
+      summary: Create a driver
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryDriverCreate'
+      responses:
+        '201':
+          description: The created driver, status ACTIVE.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryDriver'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/drivers/{id}:
+    get:
+      operationId: deliveryDriverGet
+      tags:
+      - delivery
+      summary: Get a driver
+      description: Any repository error, not only a missing row, answers 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The driver.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryDriver'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: deliveryDriverUpdate
+      tags:
+      - delivery
+      summary: Update a driver
+      description: A missing driver answers 500, not 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryDriverUpdate'
+      responses:
+        '200':
+          description: The updated driver.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryDriver'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: deliveryDriverDelete
+      tags:
+      - delivery
+      summary: Delete a driver
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '204':
+          description: Driver deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/drivers/{id}/photo:
+    post:
+      operationId: deliveryDriverPhoto
+      tags:
+      - delivery
+      summary: Upload a driver photo
+      description: A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over
+        10 MB answers 400.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeliveryPhotoUpload'
+      responses:
+        '200':
+          description: The stored photo URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryPhotoUrl'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/routes:
+    get:
+      operationId: deliveryRouteList
+      tags:
+      - delivery
+      summary: List routes
+      parameters:
+      - name: date
+        in: query
+        description: Filter to one scheduled date. An unparseable date answers 500.
+        schema:
+          type: string
+          format: date
+      - name: driver_id
+        in: query
+        description: Filter to one driver.
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: Routes. The body is null when there are none.
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                - 'null'
+                items:
+                  $ref: '#/components/schemas/DeliveryRoute'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: deliveryRouteCreate
+      tags:
+      - delivery
+      summary: Create a route
+      description: An unparseable scheduled_date answers 500.
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryRouteCreate'
+      responses:
+        '201':
+          description: The created route, status DRAFT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryRoute'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/routes/{id}/dispatch:
+    post:
+      operationId: deliveryRouteDispatch
+      tags:
+      - delivery
+      summary: Dispatch a route
+      description: Only a DRAFT or SCHEDULED route can be dispatched, otherwise 500. The route becomes
+        IN_TRANSIT.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Dispatched; the body is empty.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/routes/{id}/reorder:
+    post:
+      operationId: deliveryRouteReorder
+      tags:
+      - delivery
+      summary: Reorder the stops of a route
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryRouteReorder'
+      responses:
+        '200':
+          description: Reordered; the body is empty.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/routes/{id}/optimize:
+    post:
+      operationId: deliveryRouteOptimize
+      tags:
+      - delivery
+      summary: Optimize the stop order of a route
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 'The optimization result. A route with no deliveries or no geocoded stops answers
+            an empty result: null order and legs and zero totals.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryRouteOptimizationResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/routes/{id}/complete:
+    post:
+      operationId: deliveryRouteComplete
+      tags:
+      - delivery
+      summary: Complete a route
+      description: 'Every failure answers 400: a route with no deliveries, a delivery not yet DELIVERED,
+        FAILED or PARTIAL, or a repository fault.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The route is completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryStatusAck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/delivery/routes/{id}/deliveries:
+    get:
+      operationId: deliveryRouteDeliveries
+      tags:
+      - delivery
+      summary: List the deliveries of a route
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: Deliveries in stop order. The body is null when there are none.
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                - 'null'
+                items:
+                  $ref: '#/components/schemas/Delivery'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/deliveries:
+    post:
+      operationId: deliveryCreate
+      tags:
+      - delivery
+      summary: Assign an order to a route
+      description: A missing route, an order blocked by unresolved index exposure or any other failure
+        answers 500.
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryCreate'
+      responses:
+        '201':
+          description: The created delivery, with a capacity warning when the vehicle would be over its
+            weight capacity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryAssignResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/deliveries/{id}:
+    get:
+      operationId: deliveryGet
+      tags:
+      - delivery
+      summary: Get a delivery
+      description: A missing delivery answers 500, not 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Delivery'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/deliveries/{id}/status:
+    put:
+      operationId: deliveryUpdateStatus
+      tags:
+      - delivery
+      summary: Complete a delivery
+      description: Only DELIVERED, FAILED and PARTIAL are accepted. DELIVERED and PARTIAL need pod_proof_url
+        and pod_signed_by. Any other value or a missing proof answers 500.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryStatusUpdate'
+      responses:
+        '200':
+          description: Updated; the body is empty.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/deliveries/{id}/adjust-qty:
+    post:
+      operationId: deliveryAdjustQty
+      tags:
+      - delivery
+      summary: Adjust delivered quantities on site
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryAdjustQty'
+      responses:
+        '200':
+          description: Adjusted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryAdjustAck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/deliveries/{id}/pod-photo:
+    post:
+      operationId: deliveryPodPhoto
+      tags:
+      - delivery
+      summary: Attach a proof of delivery photo
+      description: A missing photo, an unsupported extension (jpg, jpeg, png, webp) or a body over 10
+        MB answers 400.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeliveryPodPhotoUpload'
+      responses:
+        '201':
+          description: The stored photo record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryPodPhoto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/delivery/deliveries/{id}/pod-photos:
+    get:
+      operationId: deliveryPodPhotos
+      tags:
+      - delivery
+      summary: List the proof of delivery photos
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: Photo records; an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeliveryPodPhoto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  schemas:
+    DeliveryVehicle:
+      type: object
+      description: Transcribed from delivery.Vehicle. The expiry and service dates are stored as dates
+        and serialized as date-times.
+      required:
+      - id
+      - name
+      - vehicle_type
+      - license_plate
+      - capacity_weight_lbs
+      - vin
+      - year
+      - make
+      - model
+      - insurance_expiry
+      - next_service_date
+      - odometer_miles
+      - notes
+      - photo_url
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        vehicle_type:
+          $ref: '#/components/schemas/DeliveryVehicleType'
+        license_plate:
+          type: string
+        capacity_weight_lbs:
+          type:
+          - integer
+          - 'null'
+        vin:
+          type:
+          - string
+          - 'null'
+        year:
+          type:
+          - integer
+          - 'null'
+        make:
+          type:
+          - string
+          - 'null'
+        model:
+          type:
+          - string
+          - 'null'
+        insurance_expiry:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        next_service_date:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        odometer_miles:
+          type:
+          - integer
+          - 'null'
+        notes:
+          type:
+          - string
+          - 'null'
+        photo_url:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliveryVehicleType:
+      type: string
+      enum:
+      - BOX_TRUCK
+      - FLATBED
+      - PICKUP
+      - VAN
+      - CRANE
+    DeliveryVehicleCreate:
+      type: object
+      description: CreateVehicleRequest. Nothing is validated; an unparseable date is silently dropped.
+      properties:
+        name:
+          type: string
+        vehicle_type:
+          $ref: '#/components/schemas/DeliveryVehicleType'
+        license_plate:
+          type: string
+        capacity_weight_lbs:
+          type:
+          - integer
+          - 'null'
+        vin:
+          type:
+          - string
+          - 'null'
+        year:
+          type:
+          - integer
+          - 'null'
+        make:
+          type:
+          - string
+          - 'null'
+        model:
+          type:
+          - string
+          - 'null'
+        insurance_expiry:
+          type:
+          - string
+          - 'null'
+          format: date
+        next_service_date:
+          type:
+          - string
+          - 'null'
+          format: date
+        odometer_miles:
+          type:
+          - integer
+          - 'null'
+        notes:
+          type:
+          - string
+          - 'null'
+    DeliveryVehicleUpdate:
+      type: object
+      description: 'UpdateVehicleRequest. The handler overwrites every field: an omitted optional date
+        or value clears it.'
+      properties:
+        name:
+          type: string
+        vehicle_type:
+          $ref: '#/components/schemas/DeliveryVehicleType'
+        license_plate:
+          type: string
+        capacity_weight_lbs:
+          type:
+          - integer
+          - 'null'
+        vin:
+          type:
+          - string
+          - 'null'
+        year:
+          type:
+          - integer
+          - 'null'
+        make:
+          type:
+          - string
+          - 'null'
+        model:
+          type:
+          - string
+          - 'null'
+        insurance_expiry:
+          type:
+          - string
+          - 'null'
+          format: date
+        next_service_date:
+          type:
+          - string
+          - 'null'
+          format: date
+        odometer_miles:
+          type:
+          - integer
+          - 'null'
+        notes:
+          type:
+          - string
+          - 'null'
+    DeliveryPhotoUpload:
+      type: object
+      required:
+      - photo
+      properties:
+        photo:
+          type: string
+          format: binary
+          description: jpg, jpeg, png or webp, at most 10 MB.
+    DeliveryPhotoUrl:
+      type: object
+      required:
+      - photo_url
+      properties:
+        photo_url:
+          type: string
+    DeliveryDriverStatus:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+      - ON_LEAVE
+    DeliveryDriver:
+      type: object
+      description: Transcribed from delivery.Driver.
+      required:
+      - id
+      - name
+      - license_number
+      - status
+      - phone_number
+      - cdl_class
+      - cdl_expiry
+      - hire_date
+      - email
+      - photo_url
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        license_number:
+          type:
+          - string
+          - 'null'
+        status:
+          $ref: '#/components/schemas/DeliveryDriverStatus'
+        phone_number:
+          type:
+          - string
+          - 'null'
+        cdl_class:
+          type:
+          - string
+          - 'null'
+        cdl_expiry:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        hire_date:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        email:
+          type:
+          - string
+          - 'null'
+        photo_url:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliveryDriverCreate:
+      type: object
+      description: CreateDriverRequest. Nothing is validated.
+      properties:
+        name:
+          type: string
+        license_number:
+          type:
+          - string
+          - 'null'
+        phone_number:
+          type:
+          - string
+          - 'null'
+        cdl_class:
+          type:
+          - string
+          - 'null'
+        cdl_expiry:
+          type:
+          - string
+          - 'null'
+          format: date
+        hire_date:
+          type:
+          - string
+          - 'null'
+          format: date
+        email:
+          type:
+          - string
+          - 'null'
+    DeliveryDriverUpdate:
+      type: object
+      description: UpdateDriverRequest.
+      properties:
+        name:
+          type: string
+        license_number:
+          type:
+          - string
+          - 'null'
+        phone_number:
+          type:
+          - string
+          - 'null'
+        cdl_class:
+          type:
+          - string
+          - 'null'
+        cdl_expiry:
+          type:
+          - string
+          - 'null'
+          format: date
+        hire_date:
+          type:
+          - string
+          - 'null'
+          format: date
+        email:
+          type:
+          - string
+          - 'null'
+        status:
+          $ref: '#/components/schemas/DeliveryDriverStatus'
+    DeliveryRouteStatus:
+      type: string
+      enum:
+      - DRAFT
+      - SCHEDULED
+      - IN_TRANSIT
+      - COMPLETED
+      - CANCELLED
+    DeliveryRoute:
+      type: object
+      description: Transcribed from delivery.Route. The two totals and the joined vehicle and driver names
+        are omitted when empty.
+      required:
+      - id
+      - vehicle_id
+      - driver_id
+      - scheduled_date
+      - status
+      - notes
+      - created_at
+      - updated_at
+      - stop_count
+      properties:
+        id:
+          type: string
+          format: uuid
+        vehicle_id:
+          type: string
+          format: uuid
+        driver_id:
+          type: string
+          format: uuid
+        scheduled_date:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/DeliveryRouteStatus'
+        notes:
+          type:
+          - string
+          - 'null'
+        total_duration_mins:
+          type: integer
+        total_distance_miles:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        vehicle_name:
+          type: string
+        driver_name:
+          type: string
+        stop_count:
+          type: integer
+    DeliveryRouteCreate:
+      type: object
+      required:
+      - vehicle_id
+      - driver_id
+      - scheduled_date
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+        driver_id:
+          type: string
+          format: uuid
+        scheduled_date:
+          type: string
+          format: date
+        notes:
+          type:
+          - string
+          - 'null'
+    DeliveryRouteReorder:
+      type: object
+      required:
+      - ordered_delivery_ids
+      properties:
+        ordered_delivery_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    DeliveryStatus:
+      type: string
+      enum:
+      - PENDING
+      - OUT_FOR_DELIVERY
+      - DELIVERED
+      - FAILED
+      - PARTIAL
+    DeliveryPodPhoto:
+      type: object
+      description: Transcribed from delivery.PODPhoto.
+      required:
+      - id
+      - delivery_id
+      - photo_url
+      - photo_type
+      - uploaded_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        delivery_id:
+          type: string
+          format: uuid
+        photo_url:
+          type: string
+        photo_type:
+          type: string
+          description: signature, site or damage; site when the form leaves it empty.
+        uploaded_at:
+          type: string
+          format: date-time
+    Delivery:
+      type: object
+      description: Transcribed from delivery.Delivery. route_id is null for a stop not yet on a route.
+        The signature, the ETA, the scheduled window, the joined order fields and pod_photos are omitted
+        when empty.
+      required:
+      - id
+      - route_id
+      - order_id
+      - stop_sequence
+      - status
+      - pod_proof_url
+      - pod_signed_by
+      - pod_timestamp
+      - delivery_instructions
+      - latitude
+      - longitude
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        route_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        stop_sequence:
+          type: integer
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        pod_proof_url:
+          type:
+          - string
+          - 'null'
+        pod_signed_by:
+          type:
+          - string
+          - 'null'
+        pod_timestamp:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        signature_data_url:
+          type: string
+        delivery_instructions:
+          type:
+          - string
+          - 'null'
+        latitude:
+          type:
+          - number
+          - 'null'
+        longitude:
+          type:
+          - number
+          - 'null'
+        estimated_arrival:
+          type: string
+          format: date-time
+        scheduled_start:
+          type: string
+          format: date-time
+        scheduled_end:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        customer_name:
+          type: string
+        order_number:
+          type: string
+        address:
+          type: string
+        pod_photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryPodPhoto'
+    DeliveryCreate:
+      type: object
+      description: AssignOrderRequest.
+      required:
+      - route_id
+      - order_id
+      properties:
+        route_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        stop_sequence:
+          type: integer
+        delivery_instructions:
+          type:
+          - string
+          - 'null'
+    DeliveryCapacityWarning:
+      type: object
+      description: Soft warning only; the assignment still happens.
+      required:
+      - vehicle_capacity_lbs
+      - current_load_lbs
+      - order_weight_lbs
+      - total_after_lbs
+      properties:
+        vehicle_capacity_lbs:
+          type: number
+        current_load_lbs:
+          type: number
+        order_weight_lbs:
+          type: number
+        total_after_lbs:
+          type: number
+    DeliveryAssignResult:
+      type: object
+      required:
+      - delivery
+      properties:
+        delivery:
+          $ref: '#/components/schemas/Delivery'
+        capacity_warning:
+          $ref: '#/components/schemas/DeliveryCapacityWarning'
+    DeliveryStatusUpdate:
+      type: object
+      description: UpdateDeliveryStatusRequest.
+      required:
+      - status
+      properties:
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        pod_proof_url:
+          type:
+          - string
+          - 'null'
+        pod_signed_by:
+          type:
+          - string
+          - 'null'
+        signature_data_url:
+          type:
+          - string
+          - 'null'
+    DeliveryAdjustLine:
+      type: object
+      description: DeliveryLineAdjustment.
+      required:
+      - product_id
+      - original_qty
+      - adjusted_qty
+      - reason_code
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        original_qty:
+          type: number
+        adjusted_qty:
+          type: number
+        reason_code:
+          type: string
+          description: SHORT_SHIP, DAMAGED, REFUSED, WRONG_PRODUCT or OTHER; not validated by the handler.
+        notes:
+          type: string
+    DeliveryAdjustQty:
+      type: object
+      description: QtyAdjustmentRequest; the delivery id comes from the path.
+      required:
+      - adjusted_by
+      - adjustments
+      properties:
+        adjusted_by:
+          type: string
+          format: uuid
+        adjustments:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryAdjustLine'
+    DeliveryAdjustAck:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - adjusted
+    DeliveryStatusAck:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - completed
+    DeliveryPodPhotoUpload:
+      type: object
+      required:
+      - photo
+      properties:
+        photo:
+          type: string
+          format: binary
+          description: jpg, jpeg, png or webp, at most 10 MB.
+        photo_type:
+          type: string
+          description: signature, site or damage; defaults to site.
+    DeliveryRouteLeg:
+      type: object
+      description: RouteLeg.
+      required:
+      - stop_index
+      - duration_mins
+      - distance_miles
+      - eta
+      properties:
+        stop_index:
+          type: integer
+        duration_mins:
+          type: integer
+        distance_miles:
+          type: number
+        eta:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp.
+    DeliveryRouteOptimizationResult:
+      type: object
+      description: RouteOptimizationResult. optimized_order holds indices into the geocoded stops, not
+        delivery ids.
+      required:
+      - optimized_order
+      - legs
+      - total_duration_mins
+      - total_distance_miles
+      properties:
+        optimized_order:
+          type:
+          - array
+          - 'null'
+          items:
+            type: integer
+        legs:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/DeliveryRouteLeg'
+        total_duration_mins:
+          type: integer
+        total_distance_miles:
+          type: number
