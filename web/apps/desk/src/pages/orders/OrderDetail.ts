@@ -7,11 +7,10 @@ import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
-import { type Order, getStatusColor } from '../../types/order.ts';
-import type { OrderStatus } from '../../types/order.ts';
+import { type Order, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
-import { Truck, Check, Printer, User, DollarSign, Mail, Phone } from 'lucide';
-import { formatCents } from '../../lib/utils.ts';
+import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen } from 'lucide';
+import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -60,14 +59,23 @@ export class GableOrderDetail extends LitElement {
         }
     }
 
+    /**
+     * The confirm is the transition (ADR 0005 5.2). An over-the-limit
+     * customer lands the order on the credit hold: the answer is the held
+     * order, never an error, so the banner is the tell.
+     */
     private async handleConfirm() {
         if (!this.order) return;
-        if (!confirm('Confirming this order will allocate stock. Proceed?')) return;
-
+        if (!confirm('Confirm this order?')) return;
         this.processing = true;
         try {
-            await OrderService.confirmOrder(this.order.id);
-            await this.loadOrder(this.order.id);
+            const updated = await OrderService.confirmOrder(this.order.id, this.order.revision);
+            this.order = updated;
+            if (updated.status === 'on_hold') {
+                ToastService.show('The customer is over their credit limit: the order is on hold', 'error');
+            } else {
+                ToastService.show('Order confirmed', 'success');
+            }
         } catch (error) {
             ToastService.show('Failed to confirm order: ' + (error instanceof Error ? error.message : error), 'error');
         } finally {
@@ -75,16 +83,30 @@ export class GableOrderDetail extends LitElement {
         }
     }
 
-    private async handleFulfill() {
+    /** Releasing a hold skips the credit check (roles admin, owner, finance). */
+    private async handleRelease() {
         if (!this.order) return;
-        if (!confirm('Fulfilling this order will reduce stock and create an invoice. Proceed?')) return;
-
         this.processing = true;
         try {
-            await OrderService.fulfillOrder(this.order.id);
-            await this.loadOrder(this.order.id);
+            this.order = await OrderService.releaseHold(this.order.id, this.order.revision);
+            ToastService.show('Hold released', 'success');
         } catch (error) {
-            ToastService.show('Failed to fulfill order: ' + (error instanceof Error ? error.message : error), 'error');
+            ToastService.show('Failed to release hold: ' + (error instanceof Error ? error.message : error), 'error');
+        } finally {
+            this.processing = false;
+        }
+    }
+
+    private async handleCancel() {
+        if (!this.order) return;
+        const reason = prompt('Cancel this order. Reason:');
+        if (!reason) return;
+        this.processing = true;
+        try {
+            this.order = await OrderService.cancelOrder(this.order.id, this.order.revision, reason);
+            ToastService.show('Order cancelled', 'success');
+        } catch (error) {
+            ToastService.show('Failed to cancel order: ' + (error instanceof Error ? error.message : error), 'error');
         } finally {
             this.processing = false;
         }
@@ -95,6 +117,8 @@ export class GableOrderDetail extends LitElement {
         let bg = 'bg-white/10 text-white';
         if (color === 'info') bg = 'bg-blue-500/20 text-blue-400 border-blue-500/50';
         if (color === 'success') bg = 'bg-gable-green/20 text-gable-green border-gable-green/50';
+        if (color === 'warning') bg = 'bg-amber-500/20 text-amber-400 border-amber-500/50';
+        if (color === 'error') bg = 'bg-red-500/20 text-red-400 border-red-500/50';
         return bg;
     }
 
@@ -107,8 +131,9 @@ export class GableOrderDetail extends LitElement {
         }
 
         const order = this.order;
-        const marginColor = order.margin_percent >= 20 ? 'text-emerald-400' :
-            order.margin_percent >= 10 ? 'text-amber-400' : 'text-red-400';
+        const marginPct = order.margin_percent !== null ? Number(order.margin_percent) : null;
+        const marginColor = marginPct === null ? 'text-zinc-400' :
+            marginPct >= 20 ? 'text-emerald-400' : marginPct >= 10 ? 'text-amber-400' : 'text-red-400';
 
         return html`
             <div class="space-y-6 max-w-5xl mx-auto">
@@ -116,33 +141,47 @@ export class GableOrderDetail extends LitElement {
                 <div class="flex items-center justify-between pb-6 border-b border-white/10">
                     <div>
                         <div class="flex items-center gap-4 mb-2">
-                            <h1 class="text-3xl font-bold font-mono text-white">Order #${order.id.slice(0, 8)}</h1>
+                            <h1 class="text-3xl font-bold font-mono text-white">${order.number}</h1>
                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-transparent ${this.getStatusBadgeClass(order.status)}">
-                                ${order.status}
+                                ${formatOrderStatus(order.status)}
                             </span>
                         </div>
-                        <p class="text-muted-foreground">Created on ${new Date(order.created_at).toLocaleString()}</p>
+                        <p class="text-muted-foreground">
+                            Created on ${new Date(order.created_at).toLocaleString()}
+                            · ${order.currency}
+                            · ${order.delivery_type === 'pickup' ? 'Pickup' : 'Delivery'}
+                            ${order.tax_rate_percent !== null ? html` · tax ${order.tax_rate_percent}%` : html` · tax by provider`}
+                        </p>
                     </div>
                     <div class="flex gap-3">
-                        ${(order.status === 'DRAFT' || order.status === 'ON_HOLD') ? html`
+                        ${order.status === 'draft' ? html`
                             <button
                                 @click=${() => this.handleConfirm()}
                                 ?disabled=${this.processing}
                                 class="bg-gable-green text-black font-bold px-4 py-2 rounded hover:bg-gable-green/90 transition-colors flex items-center gap-2"
                             >
-                                ${this.processing ? 'Processing...' : html`${icon(Check, 18)} ${order.status === 'ON_HOLD' ? 'Retry Confirmation' : 'Confirm Order'}`}
+                                ${this.processing ? 'Processing...' : html`${icon(Check, 18)} Confirm Order`}
                             </button>
                         ` : nothing}
-                        ${order.status === 'CONFIRMED' ? html`
+                        ${order.status === 'on_hold' ? html`
                             <button
-                                @click=${() => this.handleFulfill()}
+                                @click=${() => this.handleRelease()}
                                 ?disabled=${this.processing}
-                                class="bg-blue-500 text-white font-bold px-4 py-2 rounded hover:bg-blue-600 transition-colors flex items-center gap-2"
+                                class="bg-amber-500 text-black font-bold px-4 py-2 rounded hover:bg-amber-600 transition-colors flex items-center gap-2"
                             >
-                                ${this.processing ? 'Processing...' : html`${icon(Truck, 18)} Fulfill & Invoice`}
+                                ${this.processing ? 'Processing...' : html`${icon(LockOpen, 18)} Release Hold`}
                             </button>
                         ` : nothing}
-                        ${(order.status === 'CONFIRMED' || order.status === 'FULFILLED') ? html`
+                        ${(order.status === 'draft' || order.status === 'confirmed' || order.status === 'backordered') ? html`
+                            <button
+                                @click=${() => this.handleCancel()}
+                                ?disabled=${this.processing}
+                                class="bg-red-500/20 text-red-400 font-bold px-4 py-2 rounded hover:bg-red-500/30 transition-colors flex items-center gap-2"
+                            >
+                                ${icon(XCircle, 18)} Cancel
+                            </button>
+                        ` : nothing}
+                        ${(order.status === 'confirmed' || order.status === 'backordered' || order.status === 'fulfilled') ? html`
                             <button
                                 @click=${() => window.open(`${API_URL}/api/v1/documents/print/pickticket/${order.id}`, '_blank')}
                                 class="bg-white/10 text-white font-bold px-4 py-2 rounded hover:bg-white/20 transition-colors flex items-center gap-2"
@@ -152,6 +191,16 @@ export class GableOrderDetail extends LitElement {
                         ` : nothing}
                     </div>
                 </div>
+
+                ${order.hold_reason ? html`
+                    <div class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-300">
+                        <span class="font-semibold">On hold:</span>
+                        ${order.hold_reason === 'credit_limit'
+                            ? 'the customer is over their credit limit'
+                            : 'held manually'}
+                        ${order.hold_note ? html` — ${order.hold_note}` : nothing}
+                    </div>
+                ` : nothing}
 
                 <div class="grid grid-cols-3 gap-6">
                     <!-- Main Content: Lines -->
@@ -163,54 +212,53 @@ export class GableOrderDetail extends LitElement {
                             <table class="w-full text-left text-sm" aria-label="Order line items">
                                 <thead class="bg-white/5">
                                     <tr>
-                                        <th class="p-4 text-muted-foreground font-medium">Product</th>
+                                        <th class="p-4 text-muted-foreground font-medium">Item</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Qty</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Price</th>
                                         <th class="p-4 text-muted-foreground font-medium text-right">Total</th>
-                                        <th class="p-4 text-muted-foreground font-medium text-right">Cost</th>
-                                        <th class="p-4 text-muted-foreground font-medium text-right">Margin</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-white/5">
-                                    ${order.lines?.map(line => {
-                                        const lineTotal = line.quantity * line.price_each;
-                                        const lineCost = line.quantity * line.unit_cost;
-                                        const lineMargin = lineTotal - lineCost;
-                                        const lineMarginPct = lineTotal > 0 ? (lineMargin / lineTotal) * 100 : 0;
-                                        const lmColor = lineMarginPct >= 20 ? 'text-emerald-400' :
-                                            lineMarginPct >= 10 ? 'text-amber-400' : 'text-red-400';
-                                        return html`
-                                            <tr>
-                                                <td class="p-4 text-white">
-                                                    <div class="font-mono text-sm">${line.product_sku || line.product_id.slice(0, 8)}</div>
-                                                    ${line.product_name ? html`<div class="text-xs text-muted-foreground">${line.product_name}</div>` : nothing}
-                                                </td>
-                                                <td class="p-4 text-white font-mono text-right">${line.quantity}</td>
-                                                <td class="p-4 text-white font-mono text-right">${formatCents(line.price_each)}</td>
-                                                <td class="p-4 text-gable-green font-mono text-right font-medium">
-                                                    ${formatCents(lineTotal)}
-                                                </td>
-                                                <td class="p-4 text-zinc-400 font-mono text-right">${formatCents(lineCost)}</td>
-                                                <td class="p-4 font-mono text-right ${lmColor}">
-                                                    ${formatCents(lineMargin)}
-                                                    <span class="text-xs ml-1">(${lineMarginPct.toFixed(1)}%)</span>
-                                                </td>
-                                            </tr>
-                                        `;
-                                    })}
+                                    ${order.lines?.filter(l => l.line_type !== 'component').map(line => html`
+                                        <tr>
+                                            <td class="p-4 text-white">
+                                                <div class="font-mono text-sm">
+                                                    ${line.sku || line.charge_code || (line.line_type === 'text' ? 'Note' : line.description.slice(0, 24))}
+                                                    <span class="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">${line.line_type}</span>
+                                                    ${line.price_source === 'override' ? html`<span class="ml-2 text-[10px] uppercase tracking-wide text-amber-400">override</span>` : ''}
+                                                    ${line.discount_percent !== null || line.discount_cents !== null ? html`<span class="ml-2 text-[10px] uppercase tracking-wide text-blue-400">discount</span>` : ''}
+                                                </div>
+                                                <div class="text-xs text-muted-foreground">${line.description}</div>
+                                            </td>
+                                            <td class="p-4 text-white font-mono text-right">
+                                                ${line.quantity ?? '—'}
+                                                ${line.uom ? html`<span class="text-xs text-zinc-500 ml-1">${line.uom}</span>` : ''}
+                                                ${line.price_uom && line.uom && line.price_uom !== line.uom
+                                                    ? html`<div class="text-[10px] text-zinc-500">per ${line.price_uom}</div>` : ''}
+                                            </td>
+                                            <td class="p-4 text-white font-mono text-right">
+                                                ${line.unit_price_ten_thousandths !== null
+                                                    ? html`${formatPrice4(line.unit_price_ten_thousandths)}`
+                                                    : '—'}
+                                            </td>
+                                            <td class="p-4 text-gable-green font-mono text-right font-medium">
+                                                ${line.line_total_cents !== null ? formatCents(line.line_total_cents) : '—'}
+                                            </td>
+                                        </tr>
+                                    `)}
                                 </tbody>
                                 <tfoot class="bg-white/5">
                                     <tr>
-                                        <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Grand Total</td>
-                                        <td class="p-4 text-right font-bold text-gable-green font-mono text-lg">
-                                            ${formatCents(order.total_amount)}
-                                        </td>
-                                        <td class="p-4 text-right font-mono text-zinc-400">
-                                            ${formatCents(order.total_cost)}
-                                        </td>
-                                        <td class="p-4 text-right font-mono font-bold ${marginColor}">
-                                            ${formatCents(order.total_margin)}
-                                        </td>
+                                        <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Subtotal</td>
+                                        <td class="p-4 text-right font-bold text-white font-mono">${formatCents(order.subtotal_cents)}</td>
+                                    </tr>
+                                    <tr>
+                                        <td colspan="3" class="p-4 text-right text-zinc-400">Tax</td>
+                                        <td class="p-4 text-right text-zinc-400 font-mono">${formatCents(order.tax_cents)}</td>
+                                    </tr>
+                                    <tr>
+                                        <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Total</td>
+                                        <td class="p-4 text-right font-bold text-gable-green font-mono text-lg">${formatCents(order.total_cents)}</td>
                                     </tr>
                                 </tfoot>
                             </table>
@@ -225,6 +273,13 @@ export class GableOrderDetail extends LitElement {
                             <div class="space-y-2 text-sm">
                                 ${order.customer_name ? html`<p class="text-white font-medium text-base">${order.customer_name}</p>` : nothing}
                                 <p class="text-muted-foreground">Account: <span class="text-white font-mono">${order.customer_id.slice(0, 8)}</span></p>
+                                ${order.customer_po ? html`<p class="text-muted-foreground">PO: <span class="text-white font-mono">${order.customer_po}</span></p>` : nothing}
+                                ${order.ship_to ? html`
+                                    <p class="text-muted-foreground pt-2">
+                                        ${order.ship_to.line1}<br>
+                                        ${order.ship_to.city}, ${order.ship_to.region} ${order.ship_to.postal_code}
+                                    </p>
+                                ` : nothing}
                             </div>
                         </div>
 
@@ -261,31 +316,37 @@ export class GableOrderDetail extends LitElement {
                             <div class="space-y-3 text-sm">
                                 <div class="flex justify-between">
                                     <span class="text-zinc-400">Revenue</span>
-                                    <span class="text-white font-mono font-medium">${formatCents(order.total_amount)}</span>
+                                    <span class="text-white font-mono font-medium">${formatCents(order.subtotal_cents)}</span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span class="text-zinc-400">Cost</span>
-                                    <span class="text-white font-mono">${formatCents(order.total_cost)}</span>
+                                    <span class="text-white font-mono">${formatCents(order.total_cost_cents)}</span>
                                 </div>
                                 <div class="border-t border-white/10 pt-3 flex justify-between">
                                     <span class="text-zinc-400">Margin</span>
                                     <span class="font-mono font-bold ${marginColor}">
-                                        ${formatCents(order.total_margin)} (${order.margin_percent.toFixed(1)}%)
+                                        ${formatCents(order.total_margin_cents)}${marginPct !== null ? ` (${marginPct.toFixed(1)}%)` : ''}
                                     </span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span class="text-zinc-400">Commission</span>
-                                    <span class="text-white font-mono">${formatCents(order.total_commission)}</span>
+                                    <span class="text-white font-mono">${formatCents(order.total_commission_cents)}</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Payment Info -->
+                        <!-- Invoices -->
                         <div class="bg-slate-steel rounded-lg border border-white/10 p-6">
-                            <h3 class="font-semibold text-white mb-4">Payment</h3>
-                            <div class="p-3 bg-white/5 rounded text-sm text-muted-foreground text-center">
-                                No payment recorded
-                            </div>
+                            <h3 class="font-semibold text-white mb-4">Invoices</h3>
+                            ${order.invoice_ids.length > 0 ? html`
+                                <div class="space-y-2">
+                                    ${order.invoice_ids.map(id => html`
+                                        <a href="/invoices/${id}" class="block font-mono text-sm text-gable-green hover:underline">${id.slice(0, 8)}</a>
+                                    `)}
+                                </div>
+                            ` : html`
+                                <p class="text-sm text-zinc-500">None yet</p>
+                            `}
                         </div>
                     </div>
                 </div>

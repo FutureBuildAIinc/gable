@@ -7,11 +7,10 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, Sparkles, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
-import { QuoteService, QuoteApiError, quoteErrorMessage, orderRequestFromQuotePayload } from '../../services/QuoteService.ts';
+import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 import { extensionCents, dollarsToCents } from '../../lib/money.ts';
-import { OrderService } from '../../services/OrderService.ts';
 import '../../components/quotes/exposure-banner.ts';
 
 type Tab = 'details' | 'original' | 'mapping';
@@ -90,8 +89,7 @@ export class GableQuoteDetail extends LitElement {
         if (!this.quote) return;
         this.processing = true;
         try {
-            const orderPayload = await QuoteService.convert(this.quote.id, this.quote.revision);
-            const order = await OrderService.createOrder(orderRequestFromQuotePayload(orderPayload));
+            const order = await QuoteService.convert(this.quote.id, this.quote.revision);
             ToastService.show('Quote converted to order', 'success');
             router.navigate(`/orders/${order.id}`);
         } catch (error) {

@@ -14,7 +14,6 @@ import {
   quoteErrorMessage,
   buildListQuery,
   ifMatch,
-  orderRequestFromQuotePayload,
 } from './QuoteService'
 import type { QuoteRequest } from '../types/quote'
 
@@ -189,19 +188,13 @@ describe('error envelope', () => {
   })
 })
 
-describe('orderRequestFromQuotePayload', () => {
-  it('maps price_each_cents and a decimal quantity onto the unconverted orders route', () => {
-    const req = orderRequestFromQuotePayload({
-      customer_id: 'c', quote_id: 'q', revision: 2,
-      lines: [{ product_id: 'p', quantity: '12.5', uom: 'PCS', price_each_cents: 550 }],
-    })
-    expect(req.lines[0]).toEqual({ product_id: 'p', quantity: 12.5, price_each: 550 })
-  })
-
-  it('refuses special order lines rather than dropping them', () => {
-    expect(() => orderRequestFromQuotePayload({
-      customer_id: 'c', quote_id: 'q', revision: 2,
-      lines: [{ product_id: null, quantity: '1', uom: 'EA', price_each_cents: 100 }],
-    })).toThrow()
+describe('QuoteService.convert', () => {
+  it('returns the created order from the one-act convert', async () => {
+    const order = { id: 'o1', number: 'SO-000001', status: 'draft', revision: 1, lines: [] }
+    fetchMock.mockImplementation(async () => jsonResponse(order, 201))
+    const got = await QuoteService.convert('q-1', 2)
+    expect(got).toEqual(order)
+    const call = fetchMock.mock.calls.at(-1) as unknown as [string, RequestInit]
+    expect(new Headers(call[1].headers).get('If-Match')).toBe('"2"')
   })
 })
