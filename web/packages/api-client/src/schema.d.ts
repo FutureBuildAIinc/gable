@@ -1869,7 +1869,7 @@ export interface paths {
         get: operations["governanceGetRfc"];
         /**
          * Replace an RFC's editable fields
-         * @description Admin or owner only. A full overwrite: title, status, problem statement, proposed solution and content are all set from the body, so an omitted key blanks the stored value. Status is not validated by the handler; a value outside the database's allowed set surfaces as a 500. An unknown id is a 500, not a 404.
+         * @description Admin or owner only. A full overwrite: title, status, problem statement, proposed solution and content are all set from the body, so an omitted key blanks the stored value. Status is not validated by the handler and the database has no check on it: any string up to 50 characters is stored (an empty one when the key is omitted), and only a longer one is a 500. An unknown id is a 500, not a 404.
          */
         put: operations["governanceUpdateRfc"];
         post?: never;
@@ -7151,8 +7151,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             title: string;
-            /** @enum {string} */
-            status: "draft" | "review" | "approved" | "rejected";
+            /** @description Normally one of draft, review, approved or rejected. The database has no check on it, so an RFC updated with another string (or with the key omitted, which stores an empty string) reads back with that value. */
+            status: string;
             problem_statement: string;
             proposed_solution: string;
             /** @description Markdown. */
