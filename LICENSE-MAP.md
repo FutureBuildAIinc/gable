@@ -14,8 +14,8 @@ carries a matching `SPDX-License-Identifier` header, and
 | `core/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
 | `core/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` | [LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt](LICENSES/LicenseRef-OpenLBM-Commons-1.0.txt) |
 | `core/pkg/apps/` | `LicenseRef-OpenLBM-Connector-1.0` | [LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt](LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt) |
-| `web/apps/desk/` | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
-| `web/packages/` | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
+| `web/apps/` *(the desk and the front door)* | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
+| `web/packages/` *(shared: auth, design-system)* | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
 | `docs/` | `LicenseRef-OpenLBM-Docs-1.0` | [LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt](LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt) |
 
 ## Precedence

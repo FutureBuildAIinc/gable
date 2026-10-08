@@ -150,9 +150,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            web/apps/desk/package-lock.json
-            web/packages/api-client/package-lock.json
+          cache-dependency-path: web/package-lock.json
 
       # Generated TypeScript types (R1-7): npm run drift regenerates
       # src/schema.d.ts from the committed core/api/openapi.yaml in check
@@ -163,30 +161,29 @@ jobs:
       - name: API client contract gates (types drift and typecheck)
         run: make contract-ts
 
+      # web/ is one npm workspace (apps/*, packages/*); one install covers
+      # the desk, the front door and the shared packages.
       - name: Install dependencies
-        working-directory: web/apps/desk
+        working-directory: web
         run: npm ci
 
+      # `tsc --noEmit` in every workspace that declares a typecheck script
+      # (both apps and the shared packages).
       - name: Type check
-        working-directory: web/apps/desk
-        run: npx tsc --noEmit
+        working-directory: web
+        run: npm run typecheck
 
+      # One eslint config (web/eslint.config.js) covers the whole workspace.
       - name: Lint
-        working-directory: web/apps/desk
+        working-directory: web
         run: npm run lint
 
-      # Prefers the coverage-instrumented script. The fallback keeps this job
-      # green on branches where `test:coverage` has not been added to
-      # web/apps/desk/package.json yet.
+      # Unit tests per workspace (each workspace that declares a test script
+      # runs it). `test:coverage` prefers the coverage-instrumented variant
+      # where a workspace declares one, which today is @gable/desk only.
       - name: Test (with coverage)
-        working-directory: web/apps/desk
-        run: |
-          if node -e "const s=require('./package.json').scripts||{};process.exit(s['test:coverage']?0:1)"; then
-            npm run test:coverage
-          else
-            echo "::warning::web/apps/desk/package.json has no \"test:coverage\" script; running \"npm run test\" without coverage."
-            npm run test -- --run
-          fi
+        working-directory: web
+        run: npm run test:coverage
 
       # REPORTING ONLY — see the note on the backend coverage step. No threshold.
       - name: Frontend coverage summary
@@ -218,8 +215,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Builds every workspace that declares a build script (both bundles).
       - name: Build
-        working-directory: web/apps/desk
+        working-directory: web
         run: npm run build
 
   license:
@@ -250,6 +248,100 @@ jobs:
       - name: REUSE gate
         run: python3 .github/scripts/reuse_gate.py
 
+  # ---------------------------------------------------------------------------
+  # End to end: the real stack. Both bundles built (dev auth builds), Postgres
+  # migrated and seeded, `core serve` with AUTH_MODE=dev, web/nginx.conf in
+  # nginx serving the bundles and proxying /api, then Playwright (Chromium)
+  # against that one origin. web/scripts/e2e-stack.sh is the same script a
+  # developer runs locally.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: Playwright
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gable_user
+          POSTGRES_PASSWORD: gable_password
+          POSTGRES_DB: gable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gable_user -d gable_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://gable_user:gable_password@localhost:5432/gable_test?sslmode=disable
+      BASE_URL: http://127.0.0.1:18080
+      SHOTS_DIR: ${{ github.workspace }}/web/test-results/shots
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      # The door and the desk read VITE_AUTH_DEV_MODE at build time: dev
+      # sign in is offered only by a build made with it.
+      - name: Build both bundles (dev auth)
+        working-directory: web
+        env:
+          VITE_AUTH_DEV_MODE: "true"
+        run: npm run build
+
+      - name: Migrate and seed
+        working-directory: core
+        env:
+          DEMO_SEED: "1"
+        run: |
+          go run ./cmd/migrate
+          go run ./cmd/seed
+
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Start the stack (core serve and nginx)
+        run: web/scripts/e2e-stack.sh up
+
+      - name: Playwright
+        working-directory: web
+        run: npx playwright test
+
+      - name: Stack log on failure
+        if: failure()
+        run: tail -n 100 /tmp/gable-e2e/core.log || true
+
+      - name: Stop the stack
+        if: always()
+        run: web/scripts/e2e-stack.sh down
+
+      - name: Upload screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: web/test-results
+          if-no-files-found: warn
+          retention-days: 14
+
   docker:
     name: Docker Build
     if: github.event_name != 'schedule'
@@ -262,8 +354,13 @@ jobs:
       - name: Build backend image
         run: docker build -f core/Dockerfile .
 
-      - name: Build frontend image
-        run: docker build -f web/apps/desk/Dockerfile .
+      - name: Build web image (both bundles, one nginx)
+        run: docker build -f web/Dockerfile -t gable-web:routing-check .
+
+      # Runs the image just built: / is the front door, every desk route is
+      # the desk through the SPA fallback, assets of both load.
+      - name: Prove the image's routing
+        run: web/scripts/check-routing.sh gable-web:routing-check
 
   # ---------------------------------------------------------------------------
   # Advisory. NOT a merge gate.
