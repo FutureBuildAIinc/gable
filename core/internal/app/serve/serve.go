@@ -1198,7 +1198,7 @@ func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, produc
 			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)
 		}
 	}
-	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, vendorID, desc, quantity, unitCost)
+	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, &productID, vendorID, desc, quantity, unitCost)
 }
 
 // posCalcAdapter bridges pricing.Service + customer.Service to pos.PriceCalculator.

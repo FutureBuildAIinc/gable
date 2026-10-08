@@ -17,6 +17,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
@@ -231,8 +232,8 @@ func TestConvert_CreatesTheAutomaticPurchaseOrders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if len(po.calls) != 1 || po.calls[0] != *o.Lines[0].QuoteLineID || po.qty[0] != 10 || po.cost[0] != 3.25 {
-		t.Fatalf("purchase orders asked for = lines %v qty %v cost %v, want the quote line once at 10 and 3.25", po.calls, po.qty, po.cost)
+	if len(po.calls) != 1 || po.calls[0] != o.Lines[0].ID || po.qty[0] != 10 || po.cost[0] != 3.25 {
+		t.Fatalf("purchase orders asked for = lines %v qty %v cost %v, want the ORDER line once at 10 and 3.25", po.calls, po.qty, po.cost)
 	}
 
 	// The seam's convert does the same, and a failing purchase order never
@@ -452,4 +453,53 @@ func TestConvert_FailedOrderEventRollsBackTheAcceptance(t *testing.T) {
 	if ev := eventsForEntity(t, db, "quote", q.ID.String()); fmt.Sprint(ev) != "[quote.created]" {
 		t.Errorf("quote events = %v, want only quote.created (quote.accepted rolled back)", ev)
 	}
+}
+
+// realPO adapts the real purchase order service to the quote's auto PO seam,
+// as serve's adapter does.
+type realPO struct{ svc *purchase_order.Service }
+
+func (p realPO) CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, qty, unitCost float64, linkedSOLineID uuid.UUID) error {
+	return p.svc.CreateFromSOLine(ctx, linkedSOLineID, &productID, vendorID, "special order", qty, unitCost)
+}
+
+// RULE (review round 2 P3-2): the automatic purchase order links to the new
+// ORDER line, through the real purchase order service: the line exists, names
+// the product and links to order_lines (its foreign key), and no empty header
+// is left behind.
+func TestConvert_AutoPurchaseOrderLinksToTheOrderLine(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := context.Background()
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET average_unit_cost = 3.25 WHERE id = $1`, w.f.productID); err != nil {
+		t.Fatal(err)
+	}
+	poSvc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil)
+	w.svc.WithAutoPO(realPO{poSvc})
+	var headersBefore int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM purchase_orders WHERE source = 'SPECIAL_ORDER'`).Scan(&headersBefore); err != nil {
+		t.Fatal(err)
+	}
+	q := w.otherBranchQuote(t)
+	o, err := w.svc.Convert(branchctx.WithSystem(ctx), q.ID, quote.Precondition{Revision: &q.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE linked_so_line_id = $1`, o.Lines[0].ID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE source = 'SPECIAL_ORDER' AND id NOT IN (SELECT po_id FROM purchase_order_lines)`)
+	})
+	var linked, product string
+	var qty string
+	if err := db.Pool.QueryRow(ctx, `SELECT linked_so_line_id::text, product_id::text, quantity::text FROM purchase_order_lines WHERE linked_so_line_id = $1`, o.Lines[0].ID).Scan(&linked, &product, &qty); err != nil {
+		t.Fatalf("no purchase order line links to the order line: %v", err)
+	}
+	if product != w.f.productID.String() || qty != "10.0000" {
+		t.Errorf("purchase order line = product %s qty %s, want the product and 10", product, qty)
+	}
+	var empty int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM purchase_orders p WHERE p.source = 'SPECIAL_ORDER' AND NOT EXISTS (SELECT 1 FROM purchase_order_lines l WHERE l.po_id = p.id) AND p.created_at > now() - interval '1 minute'`).Scan(&empty); err != nil || empty != 0 {
+		t.Errorf("%d empty special order headers left behind (%v)", empty, err)
+	}
+	_ = headersBefore
 }

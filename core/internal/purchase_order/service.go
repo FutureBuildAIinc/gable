@@ -307,42 +307,49 @@ type CreatePOLineInput struct {
 	Cost        float64
 }
 
-// CreateFromSOLine creates or updates a DRAFT PO for the vendor of the special order item
-func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
-	var po *PurchaseOrder
-	var err error
+// CreateFromSOLine creates or updates a DRAFT PO for the vendor of the special
+// order item, linking its line to the order line it serves and naming the
+// product, so the receipt puts the stock on hand and the order module's
+// release picks it up (ADR 0005 5.4). The header and the line are one
+// transaction: a line that cannot be linked leaves no empty header behind.
+func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, productID *uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
+	return s.db.RunInTx(ctx, func(ctx context.Context) error {
+		var po *PurchaseOrder
+		var err error
 
-	if vendorId != nil {
-		po, err = s.repo.GetDraftPOByVendor(ctx, vendorId)
-	}
-
-	if po == nil || err != nil {
-		newPO := &PurchaseOrder{
-			ID:       uuid.New(),
-			VendorID: vendorId,
-			Status:   StatusDraft,
-			Source:   SourceSpecialOrder,
+		if vendorId != nil {
+			po, err = s.repo.GetDraftPOByVendor(ctx, vendorId)
 		}
-		if err := s.repo.CreatePO(ctx, newPO); err != nil {
-			return fmt.Errorf("failed to create PO: %w", err)
+
+		if po == nil || err != nil {
+			newPO := &PurchaseOrder{
+				ID:       uuid.New(),
+				VendorID: vendorId,
+				Status:   StatusDraft,
+				Source:   SourceSpecialOrder,
+			}
+			if err := s.repo.CreatePO(ctx, newPO); err != nil {
+				return fmt.Errorf("failed to create PO: %w", err)
+			}
+			po = newPO
 		}
-		po = newPO
-	}
 
-	line := &PurchaseOrderLine{
-		ID:             uuid.New(),
-		POID:           po.ID,
-		Description:    description,
-		Quantity:       qty,
-		Cost:           cost,
-		LinkedSOLineID: &soLineId,
-	}
+		line := &PurchaseOrderLine{
+			ID:             uuid.New(),
+			POID:           po.ID,
+			ProductID:      productID,
+			Description:    description,
+			Quantity:       qty,
+			Cost:           cost,
+			LinkedSOLineID: &soLineId,
+		}
 
-	if err := s.repo.AddPOLine(ctx, line); err != nil {
-		return fmt.Errorf("failed to add PO line: %w", err)
-	}
+		if err := s.repo.AddPOLine(ctx, line); err != nil {
+			return fmt.Errorf("failed to add PO line: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 func (s *Service) SubmitPO(ctx context.Context, id uuid.UUID) error {

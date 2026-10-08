@@ -963,8 +963,8 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to OrderStatus, 
 }
 
 // linesFingerprint captures everything the provider priced: the lines in
-// order, their products, quantities, prices, discounts, taxable flags and
-// extensions, and the ship-to the rates came from. A line's own id is not
+// order, their types, products, skus, descriptions, charge codes, units,
+// quantities, prices, discounts, taxable flags and extensions, and the ship-to the rates came from. A line's own id is not
 // part of it: a quote conversion builds its lines twice (before the
 // transaction and inside it), each build minting fresh ids.
 func linesFingerprint(o *Order) string {
@@ -972,10 +972,14 @@ func linesFingerprint(o *Order) string {
 	b = append(b, []byte(derefUUID(o.ShipToID))...)
 	for i := range o.Lines {
 		l := &o.Lines[i]
-		b = append(b, []byte(fmt.Sprintf("|%d;%s;%s;%s;%s;%s;%s;%t",
+		// The provider request carries each taxable line's sku and description,
+		// and a non stock or charge line has no product to stand for them: so
+		// the sku, the description, the charge code and the unit are part of
+		// what was priced.
+		b = append(b, []byte(fmt.Sprintf("|%d;%s;%s;%s;%s;%s;%s;%s;%t;%q;%q;%q;%q",
 			i, derefUUID(l.ProductID), derefQtyStr(l.Quantity), derefPriceStr(l.UnitPrice),
-			derefQtyStr(l.DiscountPercent), derefCentsStr(l.DiscountAmount), derefCentsStr(l.LineTotal),
-			l.Taxable))...)
+			derefQtyStr(l.DiscountPercent), derefCentsStr(l.DiscountAmount), derefCentsStr(l.LineTotal), string(l.LineType),
+			l.Taxable, derefStr(l.SKU), l.Description, derefStr(l.ChargeCode), derefStr(l.UOM)))...)
 	}
 	return string(b)
 }
@@ -1057,6 +1061,9 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		if err := s.refreshTax(ctx, cur, priced); err != nil {
 			return nil, err
 		}
+		if err := s.repo.LockCustomerCredit(ctx, cur.CustomerID); err != nil {
+			return nil, err
+		}
 		// Allocation: a release allocates when the order never was (a credit
 		// hold lands before allocation); a manual hold kept its allocations.
 		if neverAllocated(cur) || hasBackorders(cur) {
@@ -1068,6 +1075,11 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		if cur.Status == StatusFulfilled {
 			cur.Status = StatusConfirmed
 		}
+		var heldReason, heldNote string
+		if cur.HoldReason != nil {
+			heldReason = string(*cur.HoldReason)
+		}
+		heldNote = derefStr(cur.HoldNote)
 		cur.HoldReason, cur.HoldNote = nil, nil
 		neverConfirmed := cur.ConfirmedAt == nil
 		if neverConfirmed {
@@ -1077,6 +1089,10 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 			cur.ConfirmedAt = &now
 		}
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
+			return nil, err
+		}
+		if err := s.auditTransition(ctx, cur, "order.hold_released", body.Actor, StatusOnHold, map[string]any{
+			"hold_reason": heldReason, "hold_note": heldNote}); err != nil {
 			return nil, err
 		}
 		if err := s.record(ctx, cur, EventHoldReleased, StatusOnHold.Status()); err != nil {
@@ -1109,6 +1125,9 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
 			return nil, err
 		}
+		if err := s.auditTransition(ctx, cur, "order.hold", body.Actor, from, map[string]any{"hold_reason": "manual", "hold_note": body.HoldNote}); err != nil {
+			return nil, err
+		}
 		return cur, s.record(ctx, cur, EventHold, from.Status())
 
 	case StatusDraft:
@@ -1123,6 +1142,9 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		cur.Status = StatusDraft
 		cur.HoldReason, cur.HoldNote = nil, nil
 		if err := s.repo.SaveTransition(ctx, cur); err != nil {
+			return nil, err
+		}
+		if err := s.auditTransition(ctx, cur, "order.reopened", body.Actor, from, nil); err != nil {
 			return nil, err
 		}
 		return cur, s.record(ctx, cur, EventReopened, from.Status())
@@ -1210,6 +1232,12 @@ func (s *Service) confirm(ctx context.Context, cur *Order, body TransitionBody, 
 			return nil, err
 		}
 	}
+	// One customer's credit reading acts serialize (ADR 0005 section 11): two
+	// confirms of one customer's orders cannot both read the exposure before
+	// either has been counted in it.
+	if err := s.repo.LockCustomerCredit(ctx, cur.CustomerID); err != nil {
+		return nil, err
+	}
 	facts, err := s.repo.CustomerFacts(ctx, cur.CustomerID)
 	if err != nil {
 		return nil, err
@@ -1217,6 +1245,7 @@ func (s *Service) confirm(ctx context.Context, cur *Order, body TransitionBody, 
 	if facts.PORequired && derefStr(cur.CustomerPO) == "" {
 		return nil, conflictBlocker("po_required", "the customer requires a purchase order number: set customer_po before confirming")
 	}
+	var contactLimit *httpx.Cents
 	if cur.OrderedByContactID != nil {
 		authority, err := s.repo.ContactAuthority(ctx, *cur.OrderedByContactID)
 		if err != nil {
@@ -1230,12 +1259,16 @@ func (s *Service) confirm(ctx context.Context, cur *Order, body TransitionBody, 
 		if !authority.CanPlaceOrders {
 			return nil, conflictBlocker("contact_authority", "the contact named on the order may not place orders")
 		}
-		if authority.OrderLimitCents != nil && cur.TotalCents > *authority.OrderLimitCents {
-			return nil, conflictBlocker("contact_authority", "the order is over the contact named on the order's limit")
-		}
+		contactLimit = authority.OrderLimitCents
 	}
 	if err := s.refreshTax(ctx, cur, priced); err != nil {
 		return nil, err
+	}
+	// The contact's order limit is checked against the REFRESHED total, the one
+	// this confirm will write: the draft's saved total predates a rate change
+	// or the provider's answer (review round 2 P3-1).
+	if contactLimit != nil && cur.TotalCents > *contactLimit {
+		return nil, conflictBlocker("contact_authority", "the order is over the contact named on the order's limit")
 	}
 
 	// The credit check (ADR 0005 section 5.3): exposure is read from the
@@ -1250,6 +1283,9 @@ func (s *Service) confirm(ctx context.Context, cur *Order, body TransitionBody, 
 			reason := HoldCreditLimit
 			cur.Status, cur.HoldReason = StatusOnHold, &reason
 			if err := s.repo.SaveTransition(ctx, cur); err != nil {
+				return nil, err
+			}
+			if err := s.auditTransition(ctx, cur, "order.hold", body.Actor, StatusDraft, map[string]any{"hold_reason": "credit_limit"}); err != nil {
 				return nil, err
 			}
 			return cur, s.record(ctx, cur, EventHold, StatusDraft.Status())
@@ -1736,4 +1772,19 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 	}
 	o.Lines = outLines
 	return &built{order: o}, nil
+}
+
+// auditTransition writes the audit row of a hold, a release or a reopen with
+// the actor (review round 2 P3-3): a finance release of a credit hold is the
+// override of the credit check, so who did it is recorded. It rides the act's
+// transaction.
+func (s *Service) auditTransition(ctx context.Context, cur *Order, action, actor string, from OrderStatus, extra map[string]any) error {
+	if s.audit == nil {
+		return nil
+	}
+	changes := map[string]any{"previous_status": from.Status(), "total_cents": int64(cur.TotalCents)}
+	for k, v := range extra {
+		changes[k] = v
+	}
+	return s.audit.Log(ctx, audit.Entry{Action: action, EntityType: "order", EntityID: cur.ID, UserID: actor, Changes: changes})
 }
