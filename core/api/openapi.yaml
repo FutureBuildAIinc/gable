@@ -16,15 +16,182 @@ info:
 security:
   - BearerJWT: []
 tags:
+  - name: accounts
+  - name: activities
   - name: customer
+  - name: delivery
+  - name: deposits
   - name: integration
+  - name: inventory
   - name: invoice
   - name: location
   - name: order
   - name: payment
+  - name: pos
   - name: product
   - name: quote
+  - name: sales-team
+  - name: vendors
 paths:
+  /api/v1/accounts/{id}:
+    get:
+      operationId: accountSummary
+      tags: [accounts]
+      summary: Get account summary
+      description: >-
+        Returns the customer's account summary including balance due, credit limit, and available credit. All amounts are in cents.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The account summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/accounts/{id}/transactions:
+    get:
+      operationId: accountTransactions
+      tags: [accounts]
+      summary: List account transactions
+      description: >-
+        Returns the customer's account transaction history. All amounts are in cents; negative amounts represent debits (payments, refunds) and positive amounts represent credits (invoices).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Array of transactions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomerTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/activities/{id}:
+    get:
+      operationId: activityGet
+      tags: [activities]
+      summary: Get one activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: activityUpdate
+      tags: [activities]
+      summary: Update an activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityUpdate"
+      responses:
+        "200":
+          description: The updated activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: activityDelete
+      tags: [activities]
+      summary: Delete an activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Activity deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/customers:
     get:
       operationId: customerList
@@ -202,6 +369,70 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/customers/{customerId}/activities:
+    get:
+      operationId: customerListActivities
+      tags: [customer]
+      summary: List customer activities
+      description: >-
+        Returns activities for a customer, ordered by activity_date descending. Returns a bare array that is null when the customer has no activities.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Activities, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerActivityList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: customerCreateActivity
+      tags: [customer]
+      summary: Create a customer activity
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerActivityCreate"
+      responses:
+        "201":
+          description: The created activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerActivity"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/customers/{customerId}/contacts:
     get:
       operationId: customerListContacts
@@ -367,6 +598,903 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/drivers:
+    get:
+      operationId: deliveryDriverList
+      tags: [delivery]
+      summary: List delivery drivers
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of drivers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeliveryDriver"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: deliveryDriverCreate
+      tags: [delivery]
+      summary: Create a delivery driver
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryDriverCreate"
+      responses:
+        "201":
+          description: The created driver.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/drivers/{id}:
+    get:
+      operationId: deliveryDriverGet
+      tags: [delivery]
+      summary: Get one delivery driver
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The driver.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: deliveryDriverUpdate
+      tags: [delivery]
+      summary: Update a delivery driver
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryDriverUpdate"
+      responses:
+        "200":
+          description: The updated driver.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deliveryDriverDelete
+      tags: [delivery]
+      summary: Delete a delivery driver
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Driver deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/drivers/{id}/photo:
+    post:
+      operationId: deliveryDriverPhoto
+      tags: [delivery]
+      summary: Upload a driver photo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryPhotoRequest"
+      responses:
+        "200":
+          description: Photo uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/vehicles:
+    get:
+      operationId: deliveryVehicleList
+      tags: [delivery]
+      summary: List delivery vehicles
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of vehicles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeliveryVehicle"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: deliveryVehicleCreate
+      tags: [delivery]
+      summary: Create a delivery vehicle
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryVehicleCreate"
+      responses:
+        "201":
+          description: The created vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/vehicles/{id}:
+    get:
+      operationId: deliveryVehicleGet
+      tags: [delivery]
+      summary: Get one delivery vehicle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: deliveryVehicleUpdate
+      tags: [delivery]
+      summary: Update a delivery vehicle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryVehicleUpdate"
+      responses:
+        "200":
+          description: The updated vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deliveryVehicleDelete
+      tags: [delivery]
+      summary: Delete a delivery vehicle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Vehicle deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/vehicles/{id}/photo:
+    post:
+      operationId: deliveryVehiclePhoto
+      tags: [delivery]
+      summary: Upload a vehicle photo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryPhotoRequest"
+      responses:
+        "200":
+          description: Photo uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/deliveries:
+    post:
+      operationId: deliveryCreate
+      tags: [delivery]
+      summary: Create a delivery
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryCreate"
+      responses:
+        "201":
+          description: The created delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/deliveries/{id}:
+    get:
+      operationId: deliveryGet
+      tags: [delivery]
+      summary: Get one delivery
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/deliveries/{id}/status:
+    put:
+      operationId: deliveryUpdateStatus
+      tags: [delivery]
+      summary: Update delivery status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryStatusUpdate"
+      responses:
+        "200":
+          description: The updated delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/deliveries/{id}/adjust-qty:
+    post:
+      operationId: deliveryAdjustQty
+      tags: [delivery]
+      summary: Adjust delivery quantity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryAdjustQty"
+      responses:
+        "200":
+          description: The updated delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/deliveries/{id}/pod-photo:
+    post:
+      operationId: deliveryPodPhoto
+      tags: [delivery]
+      summary: Upload proof of delivery photo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryPhotoRequest"
+      responses:
+        "200":
+          description: Photo uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/deliveries/{id}/pod-photos:
+    get:
+      operationId: deliveryPodPhotos
+      tags: [delivery]
+      summary: Get proof of delivery photos
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of photo URLs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/routes:
+    get:
+      operationId: deliveryRouteList
+      tags: [delivery]
+      summary: List delivery routes
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of routes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeliveryRoute"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: deliveryRouteCreate
+      tags: [delivery]
+      summary: Create a delivery route
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryRouteCreate"
+      responses:
+        "201":
+          description: The created route.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/routes/{id}/deliveries:
+    get:
+      operationId: deliveryRouteDeliveries
+      tags: [delivery]
+      summary: List deliveries for a route
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of deliveries on the route.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/routes/{id}/complete:
+    post:
+      operationId: deliveryRouteComplete
+      tags: [delivery]
+      summary: Mark route as complete
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The completed route.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/routes/{id}/dispatch:
+    post:
+      operationId: deliveryRouteDispatch
+      tags: [delivery]
+      summary: Dispatch route
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The dispatched route.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/routes/{id}/optimize:
+    post:
+      operationId: deliveryRouteOptimize
+      tags: [delivery]
+      summary: Optimize route
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The optimized route.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/delivery/routes/{id}/reorder:
+    post:
+      operationId: deliveryRouteReorder
+      tags: [delivery]
+      summary: Reorder route stops
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryRouteReorder"
+      responses:
+        "200":
+          description: The reordered route.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/deposits:
+    get:
+      operationId: depositList
+      tags: [deposits]
+      summary: List deposits
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Array of deposits.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deposit"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: depositCreate
+      tags: [deposits]
+      summary: Create a deposit
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositCreate"
+      responses:
+        "201":
+          description: The created deposit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/deposits/{id}:
+    get:
+      operationId: depositGet
+      tags: [deposits]
+      summary: Get one deposit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The deposit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/deposits/{id}/apply:
+    post:
+      operationId: depositApply
+      tags: [deposits]
+      summary: Apply deposit to invoices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositApply"
+      responses:
+        "200":
+          description: Application result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepositApplyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/integration/products:
@@ -658,6 +1786,99 @@ paths:
           $ref: "#/components/responses/IntegrationServerError"
         "503":
           $ref: "#/components/responses/IntegrationUnavailable"
+  /api/v1/inventory:
+    get:
+      operationId: inventoryList
+      tags: [inventory]
+      summary: List inventory for a product
+      description: >-
+        Returns null body today when no product_id query parameter is provided. When product_id is provided, returns the inventory record or null.
+      parameters:
+        - name: product_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Inventory record or null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Inventory"
+                nullable: true
+        "400":
+          description: Bad request when product_id is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/inventory/adjust:
+    post:
+      operationId: inventoryAdjust
+      tags: [inventory]
+      summary: Adjust inventory (cycle count)
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockAdjustmentRequest"
+      responses:
+        "200":
+          description: Adjustment result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryAdjustResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/inventory/transfer:
+    post:
+      operationId: inventoryTransfer
+      tags: [inventory]
+      summary: Transfer inventory between locations
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockMovementRequest"
+      responses:
+        "200":
+          description: Transfer result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryTransferResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/invoices:
     get:
       operationId: invoiceList
@@ -737,6 +1958,42 @@ paths:
                 $ref: "#/components/schemas/CreditMemo"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/invoices/{id}/email:
+    post:
+      operationId: invoiceEmail
+      tags: [invoice]
+      summary: Email invoice to customer
+      description: >-
+        Queues an email to the customer with the invoice PDF attached. Returns 202 Accepted immediately; the email is dispatched asynchronously. Fails if the customer has no email address on file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Email queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEmailResponse"
+        "400":
+          description: Customer has no email address on file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1649,6 +2906,584 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/open:
+    post:
+      operationId: posTillOpen
+      tags: [pos]
+      summary: Open a till session
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosTillOpenRequest"
+      responses:
+        "201":
+          description: The opened till session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/current:
+    get:
+      operationId: posTillCurrent
+      tags: [pos]
+      summary: Get current till session for a register
+      parameters:
+        - name: register_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Current till session with session data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillCurrentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/{id}/close:
+    post:
+      operationId: posTillClose
+      tags: [pos]
+      summary: Close a till session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosTillCloseRequest"
+      responses:
+        "200":
+          description: The closing report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/{id}/report:
+    get:
+      operationId: posTillReport
+      tags: [pos]
+      summary: Get X report for a till session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The X report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/{id}/zreport:
+    get:
+      operationId: posTillZReport
+      tags: [pos]
+      summary: Get Z report for a till session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The Z report snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosZReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions:
+    get:
+      operationId: posTransactionList
+      tags: [pos]
+      summary: List POS transactions
+      parameters:
+        - name: register_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of transactions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PosTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: posTransactionCreate
+      tags: [pos]
+      summary: Start a POS transaction
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosTransactionCreate"
+      responses:
+        "201":
+          description: The created transaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}:
+    get:
+      operationId: posTransactionGet
+      tags: [pos]
+      summary: Get one POS transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The transaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/complete:
+    post:
+      operationId: posTransactionComplete
+      tags: [pos]
+      summary: Complete a POS transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosTransactionComplete"
+      responses:
+        "200":
+          description: The completed transaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/items:
+    post:
+      operationId: posTransactionAddItem
+      tags: [pos]
+      summary: Add item to transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosLineItemInput"
+      responses:
+        "200":
+          description: The updated transaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/void:
+    post:
+      operationId: posTransactionVoid
+      tags: [pos]
+      summary: Void a POS transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The voided transaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/items/{itemId}:
+    delete:
+      operationId: posTransactionRemoveItem
+      tags: [pos]
+      summary: Remove item from transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The updated transaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/returns:
+    get:
+      operationId: posReturnList
+      tags: [pos]
+      summary: List POS returns
+      parameters:
+        - name: register_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of returns.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PosReturn"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: posReturnCreate
+      tags: [pos]
+      summary: Create a POS return
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosReturnRequest"
+      responses:
+        "201":
+          description: The completed return.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosReturn"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/returns/{id}:
+    get:
+      operationId: posReturnGet
+      tags: [pos]
+      summary: Get one POS return
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The return.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosReturn"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/catalog:
+    get:
+      operationId: posCatalog
+      tags: [pos]
+      summary: Get POS product catalog
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The product catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosCatalog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/products/search:
+    get:
+      operationId: posProductSearch
+      tags: [pos]
+      summary: Search POS products
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Search results.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PosProduct"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/zreports:
+    get:
+      operationId: posZReportList
+      tags: [pos]
+      summary: List Z reports
+      parameters:
+        - name: register_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of Z reports.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PosZReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/sync:
+    post:
+      operationId: posSync
+      tags: [pos]
+      summary: Sync POS data
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Sync result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSyncResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/products:
     get:
       operationId: productList
@@ -1744,6 +3579,387 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/products/{id}/detail:
+    get:
+      operationId: productDetail
+      tags: [product]
+      summary: Get product detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Product detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/content:
+    get:
+      operationId: productPimContentGet
+      tags: [product]
+      summary: Get PIM content for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: PIM content.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: productPimContentUpdate
+      tags: [product]
+      summary: Update PIM content for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PimContentUpdate"
+      responses:
+        "200":
+          description: Updated PIM content.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/media:
+    get:
+      operationId: productPimMediaList
+      tags: [product]
+      summary: List PIM media for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of PIM media.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PimMedia"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/media/{mediaId}:
+    delete:
+      operationId: productPimMediaDelete
+      tags: [product]
+      summary: Delete PIM media
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mediaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Media deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/media/{mediaId}/primary:
+    patch:
+      operationId: productPimMediaSetPrimary
+      tags: [product]
+      summary: Set primary PIM media
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mediaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Media updated.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PimMedia"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/collateral:
+    get:
+      operationId: productPimCollateralList
+      tags: [product]
+      summary: List PIM collateral for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of PIM collateral.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PimCollateral"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/collateral/{collateralId}:
+    delete:
+      operationId: productPimCollateralDelete
+      tags: [product]
+      summary: Delete PIM collateral
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: collateralId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Collateral deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/collateral:
+    post:
+      operationId: productPimGenerateCollateral
+      tags: [product]
+      summary: Generate PIM collateral
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/descriptions:
+    post:
+      operationId: productPimGenerateDescriptions
+      tags: [product]
+      summary: Generate PIM descriptions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/image:
+    post:
+      operationId: productPimGenerateImage
+      tags: [product]
+      summary: Generate PIM image
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/seo:
+    post:
+      operationId: productPimGenerateSeo
+      tags: [product]
+      summary: Generate PIM SEO content
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/products/{id}/margins:
     patch:
       operationId: productUpdateMarginRules
@@ -2053,6 +4269,233 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/exposure:
+    get:
+      operationId: exposureList
+      tags: [quote]
+      summary: List at-risk quotes for the current user
+      parameters:
+        - name: owner
+          in: query
+          required: false
+          schema:
+            type: string
+            default: me
+        - name: summary
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: At-risk quotes or portfolio summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ExposureRow"
+                  total:
+                    type: integer
+                  count:
+                    type: integer
+                  total_dollars:
+                    type: number
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/exposure:
+    get:
+      operationId: exposureGet
+      tags: [quote]
+      summary: Get exposure status for one quote
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The exposure status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/exposure/request-ack:
+    post:
+      operationId: exposureRequestAck
+      tags: [quote]
+      summary: Request customer acknowledgment of exposure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Acknowledgment requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureRequestAckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Quote is not in a state that requires acknowledgment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/exposure/acknowledge:
+    post:
+      operationId: exposureAcknowledge
+      tags: [quote]
+      summary: Acknowledge exposure on behalf of customer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcknowledgmentRequest"
+      responses:
+        "200":
+          description: Acknowledgment recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Quote is not in a state that requires acknowledgment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/exposure/override:
+    post:
+      operationId: exposureOverride
+      tags: [quote]
+      summary: Override exposure (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OverrideRequest"
+      responses:
+        "200":
+          description: Override recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Quote is not in a state that allows override.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/exposure/escalate-now:
+    post:
+      operationId: exposureEscalateNow
+      tags: [quote]
+      summary: Trigger immediate escalation check
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Escalation triggered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/quotes/{id}/file:
     get:
       operationId: quoteDownloadOriginalFile
@@ -2084,6 +4527,140 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/sales-team:
+    get:
+      operationId: salesTeamList
+      tags: [sales-team]
+      summary: List sales team members
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of sales persons.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalesPerson"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/sales-team/{id}:
+    get:
+      operationId: salesTeamGet
+      tags: [sales-team]
+      summary: Get one sales person
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The sales person.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesPerson"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/vendors:
+    get:
+      operationId: vendorList
+      tags: [vendors]
+      summary: List vendors
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Array of vendors.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Vendor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: vendorCreate
+      tags: [vendors]
+      summary: Create a vendor
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VendorCreate"
+      responses:
+        "201":
+          description: The created vendor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/vendors/{id}:
+    get:
+      operationId: vendorGet
+      tags: [vendors]
+      summary: Get one vendor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The vendor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     BearerJWT:
@@ -2293,6 +4870,96 @@ components:
             last_checked_at:
               type: [string, "null"]
               format: date-time
+    AccountSummary:
+      type: object
+      required: [customer_id, balance_due, credit_limit, available_credit]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        balance_due:
+          type: integer
+          description: Cents.
+        credit_limit:
+          type: integer
+          description: Cents.
+        available_credit:
+          type: integer
+          description: Cents.
+    CustomerTransaction:
+      type: object
+      required: [id, customer_id, type, amount, balance_after, reference_id, description, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [INVOICE, PAYMENT, ADJUSTMENT, REFUND]
+        amount:
+          type: integer
+          description: Cents. Negative for debits.
+        balance_after:
+          type: integer
+          description: Cents.
+        reference_id:
+          type: string
+          format: uuid
+          nullable: true
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Activity:
+      type: object
+      required: [id, customer_id, activity_type, description, activity_date, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        contact_id:
+          type: string
+          format: uuid
+          nullable: true
+        activity_type:
+          type: string
+          enum: [CALL, MEETING, EMAIL, NOTE]
+        description:
+          type: string
+        logged_by:
+          type: string
+          format: uuid
+          nullable: true
+        activity_date:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ActivityUpdate:
+      type: object
+      properties:
+        contact_id:
+          type: string
+          format: uuid
+        activity_type:
+          type: string
+          enum: [CALL, MEETING, EMAIL, NOTE]
+        description:
+          type: string
+        activity_date:
+          type: string
+          format: date-time
     Customer:
       type: object
       required: [id, primary_branch_id, name, account_number, tier, credit_limit, balance_due, is_active, created_at, updated_at]
@@ -2438,6 +5105,501 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/Contact"
+    CustomerActivity:
+      type: object
+      required: [id, customer_id, activity_type, description, activity_date, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        contact_id:
+          type: string
+          format: uuid
+          nullable: true
+        activity_type:
+          type: string
+          enum: [CALL, MEETING, EMAIL, NOTE]
+        description:
+          type: string
+        logged_by:
+          type: string
+          format: uuid
+          nullable: true
+        activity_date:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerActivityList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/CustomerActivity"
+    CustomerActivityCreate:
+      type: object
+      required: [activity_type, description]
+      properties:
+        contact_id:
+          type: string
+          format: uuid
+        activity_type:
+          type: string
+          enum: [CALL, MEETING, EMAIL, NOTE]
+        description:
+          type: string
+        activity_date:
+          type: string
+          format: date-time
+    DeliveryDriver:
+      type: object
+      required: [id, name, phone_number, license_number, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        phone_number:
+          type: string
+        license_number:
+          type: string
+        email:
+          type: string
+          nullable: true
+        cdl_class:
+          type: string
+          nullable: true
+        cdl_expiry:
+          type: string
+          format: date-time
+          nullable: true
+        photo_url:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        hire_date:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliveryDriverCreate:
+      type: object
+      required: [name, phone_number, license_number]
+      properties:
+        name:
+          type: string
+        phone_number:
+          type: string
+        license_number:
+          type: string
+        email:
+          type: string
+        cdl_class:
+          type: string
+        cdl_expiry:
+          type: string
+          format: date-time
+        hire_date:
+          type: string
+          format: date-time
+    DeliveryDriverUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        phone_number:
+          type: string
+        license_number:
+          type: string
+        email:
+          type: string
+        cdl_class:
+          type: string
+        cdl_expiry:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        hire_date:
+          type: string
+          format: date-time
+    DeliveryVehicle:
+      type: object
+      required: [id, name, vehicle_type, license_plate, capacity_weight_lbs, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        vehicle_type:
+          type: string
+          enum: [BOX_TRUCK, FLATBED, PICKUP, VAN, CRANE]
+        license_plate:
+          type: string
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        year:
+          type: integer
+          nullable: true
+        vin:
+          type: string
+          nullable: true
+        capacity_weight_lbs:
+          type: number
+        odometer_miles:
+          type: number
+          nullable: true
+          description: Float miles.
+        insurance_expiry:
+          type: string
+          format: date-time
+          nullable: true
+        next_service_date:
+          type: string
+          format: date-time
+          nullable: true
+        photo_url:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliveryVehicleCreate:
+      type: object
+      required: [name, vehicle_type, license_plate, capacity_weight_lbs]
+      properties:
+        name:
+          type: string
+        vehicle_type:
+          type: string
+          enum: [BOX_TRUCK, FLATBED, PICKUP, VAN, CRANE]
+        license_plate:
+          type: string
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        vin:
+          type: string
+        capacity_weight_lbs:
+          type: number
+        insurance_expiry:
+          type: string
+          format: date-time
+        next_service_date:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    DeliveryVehicleUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        vehicle_type:
+          type: string
+          enum: [BOX_TRUCK, FLATBED, PICKUP, VAN, CRANE]
+        license_plate:
+          type: string
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        vin:
+          type: string
+        capacity_weight_lbs:
+          type: number
+        odometer_miles:
+          type: number
+        insurance_expiry:
+          type: string
+          format: date-time
+        next_service_date:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    Delivery:
+      type: object
+      required: [id, order_id, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        route_id:
+          type: string
+          format: uuid
+          nullable: true
+        driver_id:
+          type: string
+          format: uuid
+          nullable: true
+        vehicle_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, LOADING, IN_TRANSIT, DELIVERED, FAILED]
+        scheduled_date:
+          type: string
+          format: date-time
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        pod_photo_urls:
+          type: array
+          items:
+            type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliveryCreate:
+      type: object
+      required: [order_id]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        route_id:
+          type: string
+          format: uuid
+        driver_id:
+          type: string
+          format: uuid
+        vehicle_id:
+          type: string
+          format: uuid
+        scheduled_date:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    DeliveryStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [PENDING, LOADING, IN_TRANSIT, DELIVERED, FAILED]
+        notes:
+          type: string
+    DeliveryAdjustQty:
+      type: object
+      required: [line_id, quantity]
+      properties:
+        line_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+        reason:
+          type: string
+    DeliveryPhotoRequest:
+      type: object
+      required: [photo_url]
+      properties:
+        photo_url:
+          type: string
+    DeliveryRoute:
+      type: object
+      required: [id, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        driver_id:
+          type: string
+          format: uuid
+          nullable: true
+        vehicle_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [PLANNED, LOADING, DISPATCHED, IN_PROGRESS, COMPLETED, CANCELLED]
+        scheduled_date:
+          type: string
+          format: date-time
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliveryRouteCreate:
+      type: object
+      required: [scheduled_date]
+      properties:
+        name:
+          type: string
+        driver_id:
+          type: string
+          format: uuid
+        vehicle_id:
+          type: string
+          format: uuid
+        scheduled_date:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    DeliveryRouteReorder:
+      type: object
+      required: [delivery_ids]
+      properties:
+        delivery_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    Deposit:
+      type: object
+      required: [id, customer_id, amount, applied_amount, remaining, status, method, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        gl_entry_id:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: integer
+          description: Cents.
+        applied_amount:
+          type: integer
+          description: Cents.
+        remaining:
+          type: integer
+          description: Cents.
+        status:
+          type: string
+          enum: [OPEN, APPLIED, VOIDED]
+        method:
+          type: string
+          enum: [CHECK, CASH, CARD, TRANSFER]
+        reference:
+          type: string
+        note:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DepositCreate:
+      type: object
+      required: [customer_id, amount_cents, method]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        amount_cents:
+          type: integer
+          description: Cents.
+        method:
+          type: string
+          enum: [CHECK, CASH, CARD, TRANSFER]
+        reference:
+          type: string
+    DepositApply:
+      type: object
+      required: [invoice_ids]
+      properties:
+        invoice_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    DepositApplyResponse:
+      type: object
+      required: [deposit, applications]
+      properties:
+        deposit:
+          $ref: "#/components/schemas/Deposit"
+        applications:
+          type: array
+          items:
+            $ref: "#/components/schemas/DepositApplication"
+    DepositApplication:
+      type: object
+      required: [invoice_id, amount_applied]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount_applied:
+          type: integer
+          description: Cents.
     IntegrationProduct:
       type: object
       required: [id, sku, name, category, uom, price, weight_lbs, length_in, width_in, height_in, stackable, geometry_source]
@@ -2759,6 +5921,78 @@ components:
           items:
             type: string
           description: Never null.
+    Inventory:
+      type: object
+      required: [id, product_id, location, quantity, allocated, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        location_id:
+          type: string
+          format: uuid
+          nullable: true
+        location:
+          type: string
+          description: Deprecated text field.
+        quantity:
+          type: number
+        allocated:
+          type: number
+        updated_at:
+          type: string
+          format: date-time
+    StockAdjustmentRequest:
+      type: object
+      required: [product_id, quantity, is_delta]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        location_id:
+          type: string
+          format: uuid
+          nullable: true
+        quantity:
+          type: number
+        reason:
+          type: string
+        is_delta:
+          type: boolean
+          description: If true, add/subtract. If false, replace.
+    StockMovementRequest:
+      type: object
+      required: [product_id, to_location_id, quantity]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        from_location_id:
+          type: string
+          format: uuid
+          nullable: true
+        to_location_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+        reason:
+          type: string
+    InventoryAdjustResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+    InventoryTransferResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
     InvoiceStatus:
       type: string
       enum: [UNPAID, PARTIAL, PAID, VOID, OVERDUE]
@@ -2902,6 +6136,13 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/CreditMemo"
+    InvoiceEmailResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [queued]
     LocationType:
       type: string
       enum: [BRANCH, ZONE, AISLE, RACK, SHELF, BIN, YARD]
@@ -3365,6 +6606,382 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/Payment"
+    PosTillSession:
+      type: object
+      required: [id, register_id, cashier_id, status, opening_float, opened_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        register_id:
+          type: string
+        cashier_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+        opening_float:
+          type: integer
+          description: Cents.
+        opened_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+    PosTillOpenRequest:
+      type: object
+      required: [register_id, opening_float]
+      properties:
+        register_id:
+          type: string
+        opening_float:
+          type: number
+          description: Float dollars (wire convention).
+    PosTillCloseRequest:
+      type: object
+      required: [counted_by_method]
+      properties:
+        counted_by_method:
+          type: object
+          additionalProperties:
+            type: number
+          description: Float dollars by method.
+        notes:
+          type: string
+    PosTillCurrentResponse:
+      type: object
+      required: [session]
+      properties:
+        session:
+          $ref: "#/components/schemas/PosTillSession"
+    PosTillReport:
+      type: object
+      required: [session, sale_count, sales_total, tax_total, change_given, tendered_by_method, expected_by_method]
+      properties:
+        session:
+          $ref: "#/components/schemas/PosTillSession"
+        sale_count:
+          type: integer
+        sales_total:
+          type: integer
+          description: Cents.
+        tax_total:
+          type: integer
+          description: Cents.
+        change_given:
+          type: integer
+          description: Cents.
+        tendered_by_method:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Cents.
+        expected_by_method:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Cents.
+    PosZReport:
+      type: object
+      required: [id, till_session_id, register_id, over_short, generated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        till_session_id:
+          type: string
+          format: uuid
+        register_id:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        over_short:
+          type: integer
+          description: Cents.
+        payload:
+          type: string
+          description: JSON raw message of the TillReport.
+        generated_at:
+          type: string
+          format: date-time
+    PosTransaction:
+      type: object
+      required: [id, register_id, cashier_id, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        register_id:
+          type: string
+        till_session_id:
+          type: string
+          format: uuid
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        cashier_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [OPEN, COMPLETED, VOIDED]
+        subtotal:
+          type: integer
+          description: Cents.
+        tax_amount:
+          type: integer
+          description: Cents.
+        total:
+          type: integer
+          description: Cents.
+        change_due:
+          type: integer
+          description: Cents.
+        created_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosLineItem"
+          nullable: true
+    PosTransactionCreate:
+      type: object
+      required: [register_id]
+      properties:
+        register_id:
+          type: string
+        customer_id:
+          type: string
+          format: uuid
+    PosTransactionComplete:
+      type: object
+      required: [tenders]
+      properties:
+        tenders:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosTenderInput"
+    PosLineItem:
+      type: object
+      required: [id, product_id, description, quantity, uom, unit_price, line_total]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: number
+        uom:
+          type: string
+        unit_price:
+          type: integer
+          description: Cents.
+        line_total:
+          type: integer
+          description: Cents.
+    PosLineItemInput:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+        uom:
+          type: string
+        unit_price:
+          type: number
+          description: Float dollars.
+    PosTenderInput:
+      type: object
+      required: [method, amount]
+      properties:
+        method:
+          type: string
+        amount:
+          type: number
+          description: Float dollars.
+        gateway_tx_id:
+          type: string
+    PosReturn:
+      type: object
+      required: [id, register_id, cashier_id, subtotal, tax_amount, total, refund_method, reason, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        register_id:
+          type: string
+        till_session_id:
+          type: string
+          format: uuid
+          nullable: true
+        original_transaction_id:
+          type: string
+          format: uuid
+          nullable: true
+        customer_id:
+          type: string
+          format: uuid
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        cashier_id:
+          type: string
+          format: uuid
+        subtotal:
+          type: integer
+          description: Cents.
+        tax_amount:
+          type: integer
+          description: Cents.
+        total:
+          type: integer
+          description: Cents.
+        refund_method:
+          type: string
+          enum: [CASH, CARD, ACCOUNT]
+        reason:
+          type: string
+        status:
+          type: string
+        gl_entry_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosReturnLine"
+          nullable: true
+    PosReturnLine:
+      type: object
+      required: [id, return_id, product_id, description, quantity, uom, unit_price, line_total, restock]
+      properties:
+        id:
+          type: string
+          format: uuid
+        return_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: number
+        uom:
+          type: string
+        unit_price:
+          type: integer
+          description: Cents.
+        line_total:
+          type: integer
+          description: Cents.
+        restock:
+          type: boolean
+    PosReturnRequest:
+      type: object
+      required: [register_id, refund_method, lines]
+      properties:
+        register_id:
+          type: string
+        original_transaction_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        refund_method:
+          type: string
+          enum: [CASH, CARD, ACCOUNT]
+        reason:
+          type: string
+        gateway_tx_id:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosReturnLineRequest"
+    PosReturnLineRequest:
+      type: object
+      required: [product_id, quantity, unit_price]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: number
+        uom:
+          type: string
+        unit_price:
+          type: number
+          description: Float dollars.
+        restock:
+          type: boolean
+    PosProduct:
+      type: object
+      required: [id, sku, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          description: Float dollars.
+        uom:
+          type: string
+    PosCatalog:
+      type: object
+      required: [products]
+      properties:
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosProduct"
+    PosSyncResponse:
+      type: object
+      properties:
+        synced_at:
+          type: string
+          format: date-time
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.
@@ -3501,6 +7118,118 @@ components:
         lead_time_days:
           type: [integer, "null"]
           description: Days; null clears to unpublished, zero asserts same day.
+    PimContent:
+      type: object
+      required: [id, product_id, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        short_description:
+          type: string
+        long_description:
+          type: string
+        marketing_copy:
+          type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        seo_keywords:
+          type: array
+          items:
+            type: string
+          nullable: true
+        seo_slug:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+        last_gen_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_gen_model:
+          type: string
+        last_gen_prompt:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PimContentUpdate:
+      type: object
+      properties:
+        short_description:
+          type: string
+        long_description:
+          type: string
+        marketing_copy:
+          type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        seo_keywords:
+          type: array
+          items:
+            type: string
+        seo_slug:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+    PimMedia:
+      type: object
+      required: [id, product_id, url, media_type, is_primary, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        url:
+          type: string
+        media_type:
+          type: string
+          enum: [IMAGE, VIDEO, DOCUMENT]
+        is_primary:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    PimCollateral:
+      type: object
+      required: [id, product_id, name, url, collateral_type, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        collateral_type:
+          type: string
+          enum: [BROCHURE, DATASHEET, CERTIFICATE, OTHER]
+        created_at:
+          type: string
+          format: date-time
+    PimGenerateResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [queued]
     QuoteState:
       type: string
       enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]
@@ -3783,4 +7512,249 @@ components:
           type: number
         accepted_value:
           type: number
+    ExposureStatus:
+      type: object
+      required: [quote_id, exposure_state, exposure_dollars, indexes]
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+        quote_short_id:
+          type: string
+          nullable: true
+        exposure_state:
+          type: string
+          description: One of OK, FLAGGED, ESCALATED, ACK_REQUIRED, ACKNOWLEDGED, BLOCKED, OVERRIDDEN.
+        exposure_dollars:
+          type: number
+        indexes:
+          type: array
+          items:
+            type: string
+        salesperson_id:
+          type: string
+          format: uuid
+          nullable: true
+        salesperson_name:
+          type: string
+          nullable: true
+        required_action:
+          type: string
+        last_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteExposureEvent"
+    QuoteExposureEvent:
+      type: object
+      required: [id, quote_id, event_type, idempotency_key, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        quote_line_id:
+          type: string
+          format: uuid
+          nullable: true
+        market_index_id:
+          type: string
+          format: uuid
+          nullable: true
+        market_index_history_id:
+          type: string
+          format: uuid
+          nullable: true
+        event_type:
+          type: string
+          enum: [DETECTED, FLAGGED, ESCALATED, ACK_REQUIRED, ACK_REQUESTED, ACKNOWLEDGED, CLEARED, BLOCKED, OVERRIDDEN]
+        base_index_value:
+          type: number
+          nullable: true
+        current_index_value:
+          type: number
+          nullable: true
+        delta_pct:
+          type: number
+          nullable: true
+        exposure_dollars:
+          type: number
+          nullable: true
+        threshold_pct:
+          type: number
+          nullable: true
+        policy:
+          type: string
+          nullable: true
+        actor_user_id:
+          type: string
+          nullable: true
+        actor_role:
+          type: string
+          nullable: true
+        method:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        idempotency_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ExposureRow:
+      type: object
+      required: [quote_id, short_id, customer_id, customer_name, days_open, indexes, max_delta_pct, exposure_dollars, policy, exposure_state, available_actions]
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+        short_id:
+          type: string
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        salesperson_id:
+          type: string
+          format: uuid
+          nullable: true
+        salesperson_name:
+          type: string
+          nullable: true
+        days_open:
+          type: integer
+        indexes:
+          type: array
+          items:
+            type: string
+        max_delta_pct:
+          type: number
+        exposure_dollars:
+          type: number
+        policy:
+          type: string
+        exposure_state:
+          type: string
+        available_actions:
+          type: array
+          items:
+            type: string
+    AcknowledgmentRequest:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [VERBAL, EMAIL, PORTAL]
+        customer_contact:
+          type: string
+        notes:
+          type: string
+    OverrideRequest:
+      type: object
+      required: [notes]
+      properties:
+        notes:
+          type: string
+    ExposureRequestAckResponse:
+      type: object
+      required: [event_id, salesperson_notified]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        salesperson_notified:
+          type: boolean
+    SalesPerson:
+      type: object
+      required: [id, name, email, phone, role, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Vendor:
+      type: object
+      required: [id, name, payment_terms, average_lead_time_days, fill_rate, total_spend_ytd, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        contact_email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        address_line1:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        zip:
+          type: string
+          nullable: true
+        payment_terms:
+          type: string
+        average_lead_time_days:
+          type: number
+        fill_rate:
+          type: number
+        total_spend_ytd:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    VendorCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        contact_email:
+          type: string
+        phone:
+          type: string
+        address_line1:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        payment_terms:
+          type: string
 

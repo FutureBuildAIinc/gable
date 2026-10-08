@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The accounts module, transcribed from internal/account/handler.go and model.go
+# as they behave today: cents for amounts, nullability per golden records.
+paths:
+  /api/v1/accounts/{id}:
+    get:
+      operationId: accountSummary
+      tags: [accounts]
+      summary: Get account summary
+      description: >-
+        Returns the customer's account summary including balance due, credit limit,
+        and available credit. All amounts are in cents.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The account summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/accounts/{id}/transactions:
+    get:
+      operationId: accountTransactions
+      tags: [accounts]
+      summary: List account transactions
+      description: >-
+        Returns the customer's account transaction history. All amounts are in cents;
+        negative amounts represent debits (payments, refunds) and positive amounts
+        represent credits (invoices).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Array of transactions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomerTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    AccountSummary:
+      type: object
+      required: [customer_id, balance_due, credit_limit, available_credit]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        balance_due:
+          type: integer
+          description: Cents.
+        credit_limit:
+          type: integer
+          description: Cents.
+        available_credit:
+          type: integer
+          description: Cents.
+    CustomerTransaction:
+      type: object
+      required: [id, customer_id, type, amount, balance_after, reference_id, description, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [INVOICE, PAYMENT, ADJUSTMENT, REFUND]
+        amount:
+          type: integer
+          description: Cents. Negative for debits.
+        balance_after:
+          type: integer
+          description: Cents.
+        reference_id:
+          type: string
+          format: uuid
+          nullable: true
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time

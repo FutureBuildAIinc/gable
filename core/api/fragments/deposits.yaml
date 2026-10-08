@@ -1,0 +1,228 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The deposits module, transcribed from internal/deposit/handler.go and model.go
+# as they behave today: cents amounts, nullability per golden records.
+paths:
+  /api/v1/deposits:
+    get:
+      operationId: depositList
+      tags: [deposits]
+      summary: List deposits
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Array of deposits.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deposit"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: depositCreate
+      tags: [deposits]
+      summary: Create a deposit
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositCreate"
+      responses:
+        "201":
+          description: The created deposit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/deposits/{id}:
+    get:
+      operationId: depositGet
+      tags: [deposits]
+      summary: Get one deposit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The deposit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/deposits/{id}/apply:
+    post:
+      operationId: depositApply
+      tags: [deposits]
+      summary: Apply deposit to invoices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositApply"
+      responses:
+        "200":
+          description: Application result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepositApplyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    Deposit:
+      type: object
+      required: [id, customer_id, amount, applied_amount, remaining, status, method, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        gl_entry_id:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: integer
+          description: Cents.
+        applied_amount:
+          type: integer
+          description: Cents.
+        remaining:
+          type: integer
+          description: Cents.
+        status:
+          type: string
+          enum: [OPEN, APPLIED, VOIDED]
+        method:
+          type: string
+          enum: [CHECK, CASH, CARD, TRANSFER]
+        reference:
+          type: string
+        note:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DepositCreate:
+      type: object
+      required: [customer_id, amount_cents, method]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        amount_cents:
+          type: integer
+          description: Cents.
+        method:
+          type: string
+          enum: [CHECK, CASH, CARD, TRANSFER]
+        reference:
+          type: string
+    DepositApply:
+      type: object
+      required: [invoice_ids]
+      properties:
+        invoice_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    DepositApplyResponse:
+      type: object
+      required: [deposit, applications]
+      properties:
+        deposit:
+          $ref: "#/components/schemas/Deposit"
+        applications:
+          type: array
+          items:
+            $ref: "#/components/schemas/DepositApplication"
+    DepositApplication:
+      type: object
+      required: [invoice_id, amount_applied]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount_applied:
+          type: integer
+          description: Cents.

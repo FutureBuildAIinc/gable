@@ -10,15 +10,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/integrations"
+	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/routecensus"
+	"github.com/gablelbm/gable/internal/salesteam"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,6 +76,23 @@ var modelBoundSchemas = []struct {
 	{"IntegrationOrder", integrations.IntegrationOrderResponse{}},
 	{"IntegrationDeliveryRouteResponse", integrations.DeliveryRouteResponse{}},
 	{"IntegrationValidateStaffResponse", integrations.ValidateStaffResponse{}},
+	// delivery — fragment schemas are partial response views; excluded from shape test
+	// inventory
+	{"Inventory", inventory.Inventory{}},
+	// deposits
+	{"Deposit", deposit.CustomerDeposit{}},
+	// accounts
+	{"AccountSummary", account.AccountSummary{}},
+	{"CustomerTransaction", account.CustomerTransaction{}},
+	// vendors — fragment schema is partial response view; excluded from shape test
+	// sales-team
+	{"SalesPerson", salesteam.SalesPerson{}},
+	// activities / crm
+	{"Activity", crm.Activity{}},
+	// quote / exposure
+	{"QuoteExposureEvent", pricing.QuoteExposureEvent{}},
+	{"ExposureRow", pricing.ExposureRow{}},
+	// pos — fragment schema names differ from Go model names; excluded from shape test
 }
 
 // TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md
@@ -99,7 +122,8 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			Schemas map[string]struct {
 				Required   []string `yaml:"required"`
 				Properties map[string]struct {
-					Type any `yaml:"type"`
+					Type     any  `yaml:"type"`
+					Nullable bool `yaml:"nullable"`
 				} `yaml:"properties"`
 			} `yaml:"schemas"`
 		} `yaml:"components"`
@@ -139,7 +163,7 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			if omitempty && required[name] {
 				problems = append(problems, where+": omitted when empty (omitempty) but listed in required")
 			}
-			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type) {
+			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type, prop.Nullable) {
 				problems = append(problems, where+": a nil pointer serializes as null today but the type carries no null leg")
 			}
 		}
@@ -182,17 +206,21 @@ func isNullableGoType(t reflect.Type) bool {
 	return strings.HasPrefix(s, "sql.Null") || strings.HasPrefix(s, "pgtype.")
 }
 
-// carriesNullLeg reports whether an OpenAPI type, a string or a list of
-// types, includes "null".
-func carriesNullLeg(typ any) bool {
+// carriesNullLeg reports whether an OpenAPI type — a string, a list of types,
+// or a struct with a Nullable boolean — includes "null".
+func carriesNullLeg(typ any, nullableField any) bool {
+	// OpenAPI 3.1 array form: type: ["string", "null"]
 	list, ok := typ.([]any)
-	if !ok {
-		return false
-	}
-	for _, item := range list {
-		if s, ok := item.(string); ok && s == "null" {
-			return true
+	if ok {
+		for _, item := range list {
+			if s, ok := item.(string); ok && s == "null" {
+				return true
+			}
 		}
+	}
+	// OpenAPI 3.0 nullable field: nullable: true
+	if nb, ok := nullableField.(bool); ok && nb {
+		return true
 	}
 	return false
 }

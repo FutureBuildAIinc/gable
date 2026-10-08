@@ -93,6 +93,44 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/invoices/{id}/email:
+    post:
+      operationId: invoiceEmail
+      tags: [invoice]
+      summary: Email invoice to customer
+      description: >-
+        Queues an email to the customer with the invoice PDF attached. Returns 202
+        Accepted immediately; the email is dispatched asynchronously. Fails if the
+        customer has no email address on file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Email queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEmailResponse"
+        "400":
+          description: Customer has no email address on file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/credit-memos/{customerId}:
     get:
       operationId: invoiceListCreditMemos
@@ -266,3 +304,10 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/CreditMemo"
+    InvoiceEmailResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [queued]

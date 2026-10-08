@@ -1,0 +1,174 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The inventory module, transcribed from internal/inventory/handler.go and model.go
+# as they behave today: float quantities, nullability per golden records.
+paths:
+  /api/v1/inventory:
+    get:
+      operationId: inventoryList
+      tags: [inventory]
+      summary: List inventory for a product
+      description: >-
+        Returns null body today when no product_id query parameter is provided.
+        When product_id is provided, returns the inventory record or null.
+      parameters:
+        - name: product_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Inventory record or null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Inventory"
+                nullable: true
+        "400":
+          description: Bad request when product_id is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/inventory/adjust:
+    post:
+      operationId: inventoryAdjust
+      tags: [inventory]
+      summary: Adjust inventory (cycle count)
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockAdjustmentRequest"
+      responses:
+        "200":
+          description: Adjustment result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryAdjustResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/inventory/transfer:
+    post:
+      operationId: inventoryTransfer
+      tags: [inventory]
+      summary: Transfer inventory between locations
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockMovementRequest"
+      responses:
+        "200":
+          description: Transfer result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryTransferResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    Inventory:
+      type: object
+      required: [id, product_id, location, quantity, allocated, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        location_id:
+          type: string
+          format: uuid
+          nullable: true
+        location:
+          type: string
+          description: Deprecated text field.
+        quantity:
+          type: number
+        allocated:
+          type: number
+        updated_at:
+          type: string
+          format: date-time
+    StockAdjustmentRequest:
+      type: object
+      required: [product_id, quantity, is_delta]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        location_id:
+          type: string
+          format: uuid
+          nullable: true
+        quantity:
+          type: number
+        reason:
+          type: string
+        is_delta:
+          type: boolean
+          description: If true, add/subtract. If false, replace.
+    StockMovementRequest:
+      type: object
+      required: [product_id, to_location_id, quantity]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        from_location_id:
+          type: string
+          format: uuid
+          nullable: true
+        to_location_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+        reason:
+          type: string
+    InventoryAdjustResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+    InventoryTransferResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string

@@ -103,6 +103,387 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/products/{id}/detail:
+    get:
+      operationId: productDetail
+      tags: [product]
+      summary: Get product detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Product detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/content:
+    get:
+      operationId: productPimContentGet
+      tags: [product]
+      summary: Get PIM content for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: PIM content.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: productPimContentUpdate
+      tags: [product]
+      summary: Update PIM content for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PimContentUpdate"
+      responses:
+        "200":
+          description: Updated PIM content.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/media:
+    get:
+      operationId: productPimMediaList
+      tags: [product]
+      summary: List PIM media for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of PIM media.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PimMedia"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/media/{mediaId}:
+    delete:
+      operationId: productPimMediaDelete
+      tags: [product]
+      summary: Delete PIM media
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mediaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Media deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/media/{mediaId}/primary:
+    patch:
+      operationId: productPimMediaSetPrimary
+      tags: [product]
+      summary: Set primary PIM media
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mediaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Media updated.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PimMedia"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/collateral:
+    get:
+      operationId: productPimCollateralList
+      tags: [product]
+      summary: List PIM collateral for a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Array of PIM collateral.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PimCollateral"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/collateral/{collateralId}:
+    delete:
+      operationId: productPimCollateralDelete
+      tags: [product]
+      summary: Delete PIM collateral
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: collateralId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Collateral deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/collateral:
+    post:
+      operationId: productPimGenerateCollateral
+      tags: [product]
+      summary: Generate PIM collateral
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/descriptions:
+    post:
+      operationId: productPimGenerateDescriptions
+      tags: [product]
+      summary: Generate PIM descriptions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/image:
+    post:
+      operationId: productPimGenerateImage
+      tags: [product]
+      summary: Generate PIM image
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/pim/generate/seo:
+    post:
+      operationId: productPimGenerateSeo
+      tags: [product]
+      summary: Generate PIM SEO content
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "202":
+          description: Generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PimGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/products/{id}/margins:
     patch:
       operationId: productUpdateMarginRules
@@ -348,3 +729,115 @@ components:
         lead_time_days:
           type: [integer, "null"]
           description: Days; null clears to unpublished, zero asserts same day.
+    PimContent:
+      type: object
+      required: [id, product_id, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        short_description:
+          type: string
+        long_description:
+          type: string
+        marketing_copy:
+          type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        seo_keywords:
+          type: array
+          items:
+            type: string
+          nullable: true
+        seo_slug:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+        last_gen_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_gen_model:
+          type: string
+        last_gen_prompt:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PimContentUpdate:
+      type: object
+      properties:
+        short_description:
+          type: string
+        long_description:
+          type: string
+        marketing_copy:
+          type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        seo_keywords:
+          type: array
+          items:
+            type: string
+        seo_slug:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+    PimMedia:
+      type: object
+      required: [id, product_id, url, media_type, is_primary, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        url:
+          type: string
+        media_type:
+          type: string
+          enum: [IMAGE, VIDEO, DOCUMENT]
+        is_primary:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    PimCollateral:
+      type: object
+      required: [id, product_id, name, url, collateral_type, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        collateral_type:
+          type: string
+          enum: [BROCHURE, DATASHEET, CERTIFICATE, OTHER]
+        created_at:
+          type: string
+          format: date-time
+    PimGenerateResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [queued]
