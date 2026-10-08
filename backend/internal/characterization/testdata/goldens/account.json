@@ -29,7 +29,7 @@
         {
           "amount": -1000,
           "balance_after": 1580,
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "customer_id": "<id-1>",
           "description": "Payment GOLD-PAY-1",
           "id": "<id-2>",
@@ -39,7 +39,7 @@
         {
           "amount": -500,
           "balance_after": 2580,
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "customer_id": "<id-1>",
           "description": "Credit Memo: golden characterisation",
           "id": "<id-4>",
@@ -49,7 +49,7 @@
         {
           "amount": 3080,
           "balance_after": 3080,
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "customer_id": "<id-1>",
           "description": "Invoice #<id-6>",
           "id": "<id-7>",

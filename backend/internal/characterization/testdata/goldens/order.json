@@ -19,7 +19,7 @@
       "status": 201,
       "content_type": "text/plain; charset=utf-8",
       "body": {
-        "text": "{\"id\":\"<id-3>\",\"branch_id\":\"<id-4>\",\"customer_id\":\"<id-1>\",\"status\":\"DRAFT\",\"total_amount\":2750,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\",\"total_cost\":0,\"total_margin\":0,\"margin_percent\":0,\"total_commission\":0,\"lines\":[{\"id\":\"<id-5>\",\"order_id\":\"<id-3>\",\"product_id\":\"<id-2>\",\"quantity\":5,\"price_each\":550,\"unit_cost\":0,\"commission_rate\":0,\"is_special_order\":false}]}\n"
+        "text": "{\"id\":\"<id-3>\",\"branch_id\":\"<id-4>\",\"customer_id\":\"<id-1>\",\"status\":\"DRAFT\",\"total_amount\":2750,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"total_cost\":0,\"total_margin\":0,\"margin_percent\":0,\"total_commission\":0,\"lines\":[{\"id\":\"<id-5>\",\"order_id\":\"<id-3>\",\"product_id\":\"<id-2>\",\"quantity\":5,\"price_each\":550,\"unit_cost\":0,\"commission_rate\":0,\"is_special_order\":false}]}\n"
       }
     }
   },
@@ -34,7 +34,7 @@
       "content_type": "application/json",
       "body": {
         "branch_id": "<id-6>",
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "id": "<id-3>",
@@ -58,7 +58,7 @@
         "total_commission": 0,
         "total_cost": 1750,
         "total_margin": 1000,
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -77,10 +77,123 @@
     }
   },
   {
+    "name": "order.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/orders?limit=1"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "data": [
+          {
+            "branch_id": "<id-6>",
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-3>",
+            "margin_percent": 0,
+            "status": "DRAFT",
+            "total_amount": 2750,
+            "total_commission": 0,
+            "total_cost": 0,
+            "total_margin": 0,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 1,
+        "offset": 0,
+        "total": 87
+      }
+    }
+  },
+  {
+    "name": "order.create.for_cancel",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders",
+      "body": {
+        "customer_id": "<id-1>",
+        "lines": [
+          {
+            "price_each": 550,
+            "product_id": "<id-2>",
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-7>\",\"branch_id\":\"<id-4>\",\"customer_id\":\"<id-1>\",\"status\":\"DRAFT\",\"total_amount\":550,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"total_cost\":0,\"total_margin\":0,\"margin_percent\":0,\"total_commission\":0,\"lines\":[{\"id\":\"<id-8>\",\"order_id\":\"<id-7>\",\"product_id\":\"<id-2>\",\"quantity\":1,\"price_each\":550,\"unit_cost\":0,\"commission_rate\":0,\"is_special_order\":false}]}\n"
+      }
+    }
+  },
+  {
+    "name": "order.cancel",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders/<id-7>/cancel",
+      "body": {
+        "reason": "golden characterisation cancel"
+      }
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "order.cancel.already_cancelled",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders/<id-7>/cancel",
+      "body": {
+        "reason": "second attempt"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "CONFLICT",
+          "message": "Conflict"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "order.exposure_override",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders/<id-3>/exposure-override",
+      "body": {
+        "notes": "golden characterisation override"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "overridden": true
+      }
+    }
+  },
+  {
     "name": "order.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/orders/<id-7>"
+      "path": "/api/v1/orders/<id-10>"
     },
     "response": {
       "status": 404,
@@ -91,7 +204,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-11>"
         }
       }
     }

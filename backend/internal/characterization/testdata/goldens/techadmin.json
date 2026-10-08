@@ -29,7 +29,7 @@
       "body": {
         "api_key": "<api-key>",
         "key": {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "id": "<id-1>",
           "last_used_at": null,
           "name": "golden-key",

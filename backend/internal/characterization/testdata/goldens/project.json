@@ -12,7 +12,7 @@
       "status": 201,
       "content_type": "text/plain; charset=utf-8",
       "body": {
-        "text": "{\"id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"name\":\"Golden Project\",\"status\":\"Active\",\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+        "text": "{\"id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"name\":\"Golden Project\",\"status\":\"Active\",\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
       }
     }
   },
@@ -30,12 +30,12 @@
         "invoices": [],
         "orders": [],
         "project": {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
           "id": "<id-1>",
           "name": "Golden Project",
           "status": "Active",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         }
       }
     }

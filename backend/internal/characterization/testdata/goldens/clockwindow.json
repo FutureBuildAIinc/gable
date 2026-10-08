@@ -1,0 +1,196 @@
+[
+  {
+    "name": "ap.aging",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/aging"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "current": 10000,
+          "past_30": 0,
+          "past_60": 0,
+          "past_90": 0,
+          "total": 10000,
+          "vendor_id": "<id-1>",
+          "vendor_name": "BC Roofing Wholesale"
+        }
+      ]
+    }
+  },
+  {
+    "name": "reports.sales_summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/sales-summary"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "end_date": "<day+0>",
+        "invoice_count": 10,
+        "outstanding_ar": 20423.85,
+        "start_date": "<day-30>",
+        "total_collected": 306232.76,
+        "total_invoiced": 73490.23
+      }
+    }
+  },
+  {
+    "name": "dashboard.summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/dashboard/summary"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active_orders": 21,
+        "outstanding_ar": 7864003,
+        "outstanding_ar_count": 11,
+        "pending_dispatch": 28,
+        "today_revenue": 30623276,
+        "today_revenue_change": 0
+      }
+    }
+  },
+  {
+    "name": "dashboard.revenue_trend",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/dashboard/revenue-trend"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "date": "<day+0>",
+          "revenue": 30623276
+        }
+      ]
+    }
+  },
+  {
+    "name": "gl.trial_balance",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/trial-balance"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "account_code": "1010",
+          "account_id": "<id-2>",
+          "account_name": "Cash",
+          "account_type": "ASSET",
+          "credit": 0,
+          "debit": 35000
+        },
+        {
+          "account_code": "1020",
+          "account_id": "<id-3>",
+          "account_name": "Accounts Receivable",
+          "account_type": "ASSET",
+          "credit": 0,
+          "debit": 3080
+        },
+        {
+          "account_code": "2200",
+          "account_id": "<id-4>",
+          "account_name": "Customer Deposits",
+          "account_type": "LIABILITY",
+          "credit": 25000,
+          "debit": 0
+        },
+        {
+          "account_code": "4010",
+          "account_id": "<id-5>",
+          "account_name": "Sales Revenue",
+          "account_type": "REVENUE",
+          "credit": 13080,
+          "debit": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "gl.profit_and_loss",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/profit-and-loss?start=<day-30>&end=<day+0>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "cogs": [],
+        "end_date": "<day+0>",
+        "expenses": [],
+        "gross_profit": 13080,
+        "net_income": 13080,
+        "revenue": [
+          {
+            "account_code": "4010",
+            "account_id": "<id-5>",
+            "account_name": "Sales Revenue",
+            "amount": 13080
+          }
+        ],
+        "start_date": "<day-30>",
+        "total_cogs": 0,
+        "total_expenses": 0,
+        "total_revenue": 13080
+      }
+    }
+  },
+  {
+    "name": "gl.balance_sheet",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/balance-sheet"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "as_of_date": "<day+0>",
+        "assets": [
+          {
+            "account_code": "1010",
+            "account_id": "<id-2>",
+            "account_name": "Cash",
+            "amount": 35000
+          },
+          {
+            "account_code": "1020",
+            "account_id": "<id-3>",
+            "account_name": "Accounts Receivable",
+            "amount": 3080
+          }
+        ],
+        "equity": [],
+        "liabilities": [
+          {
+            "account_code": "2200",
+            "account_id": "<id-4>",
+            "account_name": "Customer Deposits",
+            "amount": 25000
+          }
+        ],
+        "retained_earnings": 13080,
+        "total_assets": 38080,
+        "total_equity": 13080,
+        "total_liabilities": 25000
+      }
+    }
+  }
+]

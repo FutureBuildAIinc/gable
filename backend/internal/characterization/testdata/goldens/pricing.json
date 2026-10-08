@@ -11,51 +11,51 @@
       "body": [
         {
           "category": "Insulation",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "discount_pct": 10,
-          "expires_at": "<ts>",
+          "expires_at": "<ts+90d>",
           "id": "<id-1>",
           "is_active": true,
           "min_quantity": 10,
           "name": "Insulation Bundle Deal",
           "priority": 0,
           "rule_type": "PROMOTIONAL",
-          "starts_at": "<ts>",
-          "updated_at": "<ts>"
+          "starts_at": "<ts-30d>",
+          "updated_at": "<ts+0d>"
         },
         {
           "category": "Roofing",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "discount_pct": 5,
-          "expires_at": "<ts>",
+          "expires_at": "<ts+90d>",
           "id": "<id-2>",
           "is_active": true,
           "min_quantity": 0,
           "name": "Spring Roofing Promo",
           "priority": 0,
           "rule_type": "PROMOTIONAL",
-          "starts_at": "<ts>",
-          "updated_at": "<ts>"
+          "starts_at": "<ts-30d>",
+          "updated_at": "<ts+0d>"
         },
         {
           "category": "Hardware",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "discount_pct": 10,
-          "expires_at": "<ts>",
+          "expires_at": "<ts+90d>",
           "id": "<id-3>",
           "is_active": true,
           "min_quantity": 200,
           "name": "Hardware Bulk 200+",
           "priority": 0,
           "rule_type": "QUANTITY_BREAK",
-          "starts_at": "<ts>",
-          "updated_at": "<ts>"
+          "starts_at": "<ts-30d>",
+          "updated_at": "<ts+0d>"
         },
         {
           "category": "Sheet Goods",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "discount_pct": 5,
-          "expires_at": "<ts>",
+          "expires_at": "<ts+90d>",
           "id": "<id-4>",
           "is_active": true,
           "margin_floor_pct": 20,
@@ -63,14 +63,14 @@
           "name": "Sheet Goods Qty Break 50+",
           "priority": 0,
           "rule_type": "QUANTITY_BREAK",
-          "starts_at": "<ts>",
-          "updated_at": "<ts>"
+          "starts_at": "<ts-30d>",
+          "updated_at": "<ts+0d>"
         },
         {
           "category": "Lumber",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "discount_pct": 15,
-          "expires_at": "<ts>",
+          "expires_at": "<ts+90d>",
           "id": "<id-5>",
           "is_active": true,
           "margin_floor_pct": 15,
@@ -78,14 +78,14 @@
           "name": "Lumber Qty Break 500+",
           "priority": 0,
           "rule_type": "QUANTITY_BREAK",
-          "starts_at": "<ts>",
-          "updated_at": "<ts>"
+          "starts_at": "<ts-30d>",
+          "updated_at": "<ts+0d>"
         },
         {
           "category": "Lumber",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "discount_pct": 10,
-          "expires_at": "<ts>",
+          "expires_at": "<ts+90d>",
           "id": "<id-6>",
           "is_active": true,
           "margin_floor_pct": 20,
@@ -93,8 +93,8 @@
           "name": "Lumber Qty Break 100+",
           "priority": 0,
           "rule_type": "QUANTITY_BREAK",
-          "starts_at": "<ts>",
-          "updated_at": "<ts>"
+          "starts_at": "<ts-30d>",
+          "updated_at": "<ts+0d>"
         }
       ]
     }
@@ -117,7 +117,7 @@
       "status": 201,
       "content_type": "text/plain; charset=utf-8",
       "body": {
-        "text": "{\"id\":\"<id-8>\",\"name\":\"Golden quantity break\",\"rule_type\":\"QUANTITY_BREAK\",\"product_id\":\"<id-7>\",\"discount_pct\":5,\"min_quantity\":100,\"is_active\":false,\"priority\":5,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+        "text": "{\"id\":\"<id-8>\",\"name\":\"Golden quantity break\",\"rule_type\":\"QUANTITY_BREAK\",\"product_id\":\"<id-7>\",\"discount_pct\":5,\"min_quantity\":100,\"is_active\":false,\"priority\":5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
       }
     }
   },

@@ -14,7 +14,7 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "edi_version": "004010",
         "gs_receiver_id": "",
         "gs_sender_id": "",
@@ -33,7 +33,7 @@
         ],
         "transport_config": "{}",
         "transport_type": "SFTP",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -48,7 +48,7 @@
       "content_type": "application/json",
       "body": {
         "catalog_count": 0,
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "edi_version": "004010",
         "gs_receiver_id": "",
         "gs_sender_id": "",
@@ -67,7 +67,7 @@
         ],
         "transport_config": "{}",
         "transport_type": "SFTP",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },

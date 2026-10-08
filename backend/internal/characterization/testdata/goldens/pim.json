@@ -10,7 +10,7 @@
       "content_type": "application/json",
       "body": {
         "attributes": {},
-        "created_at": "<ts>",
+        "created_at": "<ts-106751d>",
         "id": "<id-2>",
         "last_gen_at": null,
         "last_gen_model": "",
@@ -23,7 +23,7 @@
         "seo_slug": "",
         "seo_title": "",
         "short_description": "",
-        "updated_at": "<ts>"
+        "updated_at": "<ts-106751d>"
       }
     }
   },
@@ -42,7 +42,7 @@
       "content_type": "application/json",
       "body": {
         "attributes": {},
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "id": "<id-3>",
         "last_gen_at": null,
         "last_gen_model": "",
@@ -55,7 +55,7 @@
         "seo_slug": "",
         "seo_title": "Golden SPF stud",
         "short_description": "Golden 2x4 premium stud",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -70,7 +70,7 @@
       "content_type": "application/json",
       "body": {
         "attributes": {},
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "id": "<id-3>",
         "last_gen_at": null,
         "last_gen_model": "",
@@ -83,7 +83,7 @@
         "seo_slug": "",
         "seo_title": "Golden SPF stud",
         "short_description": "Golden 2x4 premium stud",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   }

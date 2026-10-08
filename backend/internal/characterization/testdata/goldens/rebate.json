@@ -6,11 +6,11 @@
       "path": "/api/v1/pricing/rebates/programs",
       "body": {
         "program": {
-          "end_date": "<ts>",
+          "end_date": "<ts+730d>",
           "is_active": true,
           "name": "Golden Volume Rebate",
           "program_type": "VOLUME",
-          "start_date": "<ts>",
+          "start_date": "<ts+0d>",
           "vendor_id": "<id-1>"
         },
         "tiers": [
@@ -25,16 +25,16 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "created_at": "<ts>",
-        "end_date": "<ts>",
+        "created_at": "<ts+0d>",
+        "end_date": "<ts+730d>",
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Volume Rebate",
         "program_type": "VOLUME",
-        "start_date": "<ts>",
+        "start_date": "<ts+0d>",
         "tiers": [
           {
-            "created_at": "<ts>",
+            "created_at": "<ts+0d>",
             "id": "<id-3>",
             "max_volume": null,
             "min_volume": 100,
@@ -57,16 +57,16 @@
       "content_type": "application/json",
       "body": [
         {
-          "created_at": "<ts>",
-          "end_date": "<ts>",
+          "created_at": "<ts+0d>",
+          "end_date": "<ts+730d>",
           "id": "<id-2>",
           "is_active": true,
           "name": "Golden Volume Rebate",
           "program_type": "VOLUME",
-          "start_date": "<ts>",
+          "start_date": "<ts+0d>",
           "tiers": [
             {
-              "created_at": "<ts>",
+              "created_at": "<ts+0d>",
               "id": "<id-3>",
               "max_volume": null,
               "min_volume": 100,

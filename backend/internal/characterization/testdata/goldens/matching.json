@@ -14,7 +14,7 @@
         "id": "<id-1>",
         "price_tolerance_pct": 2,
         "qty_tolerance_pct": 0,
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -39,7 +39,7 @@
         "id": "<id-1>",
         "price_tolerance_pct": 1.5,
         "qty_tolerance_pct": 2.5,
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   }

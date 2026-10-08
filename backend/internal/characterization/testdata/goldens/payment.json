@@ -16,7 +16,7 @@
       "content_type": "application/json",
       "body": {
         "amount": 1000,
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "id": "<id-2>",
         "invoice_id": "<id-1>",
         "method": "CASH",
@@ -37,7 +37,7 @@
       "body": [
         {
           "amount": 1000,
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "id": "<id-2>",
           "invoice_id": "<id-1>",
           "method": "CASH",

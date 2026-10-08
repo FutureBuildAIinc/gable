@@ -29,6 +29,30 @@
     }
   },
   {
+    "name": "health.ready",
+    "request": {
+      "method": "GET",
+      "path": "/healthz/ready"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "checks": {
+          "database": {
+            "pool_idle": "<poolstat>",
+            "pool_in_use": "<poolstat>",
+            "pool_max": 10,
+            "pool_total": "<poolstat>",
+            "status": "connected"
+          }
+        },
+        "status": "ok",
+        "uptime": "<uptime>"
+      }
+    }
+  },
+  {
     "name": "health.method_not_allowed",
     "request": {
       "method": "DELETE",
@@ -39,6 +63,24 @@
       "content_type": "text/plain; charset=utf-8",
       "body": {
         "text": "Method Not Allowed\n"
+      }
+    }
+  },
+  {
+    "name": "a2a.purchase_order.unmounted",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/a2a/purchase-order",
+      "body": {
+        "external_id": "GOLD-A2A-1",
+        "vendor_name": "Golden Vendor Co"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "404 page not found\n"
       }
     }
   }

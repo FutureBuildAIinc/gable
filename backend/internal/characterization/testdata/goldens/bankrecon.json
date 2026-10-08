@@ -16,7 +16,7 @@
       "content_type": "application/json",
       "body": {
         "account_number": "000123456789",
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "gl_account_id": "<id-1>",
         "id": "<id-2>",
         "is_active": true,
@@ -37,7 +37,7 @@
       "body": [
         {
           "account_number": "000123456789",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "gl_account_id": "<id-1>",
           "id": "<id-2>",
           "is_active": true,

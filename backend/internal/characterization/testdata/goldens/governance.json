@@ -16,13 +16,13 @@
       "body": {
         "author_id": null,
         "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\n\n\n### 2. Proposed Solution\n\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "id": "<id-1>",
         "problem_statement": "",
         "proposed_solution": "",
         "status": "draft",
         "title": "Golden RFC",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -38,13 +38,13 @@
       "body": {
         "author_id": null,
         "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\n\n\n### 2. Proposed Solution\n\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "id": "<id-1>",
         "problem_statement": "",
         "proposed_solution": "",
         "status": "draft",
         "title": "Golden RFC",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   }

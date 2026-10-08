@@ -21,7 +21,7 @@
       "content_type": "application/json",
       "body": {
         "branch_id": "<id-3>",
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "id": "<id-4>",
         "lines": [
           {
@@ -36,7 +36,7 @@
         ],
         "source": "MANUAL",
         "status": "DRAFT",
-        "updated_at": "<ts>",
+        "updated_at": "<ts+0d>",
         "vendor_id": "<id-2>"
       }
     }
@@ -52,7 +52,7 @@
       "content_type": "application/json",
       "body": {
         "branch_id": "<id-3>",
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "id": "<id-4>",
         "lines": [
           {
@@ -67,7 +67,7 @@
         ],
         "source": "MANUAL",
         "status": "DRAFT",
-        "updated_at": "<ts>",
+        "updated_at": "<ts+0d>",
         "vendor_id": "<id-2>"
       }
     }

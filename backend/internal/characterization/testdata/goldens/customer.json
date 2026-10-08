@@ -20,7 +20,7 @@
       "status": 201,
       "content_type": "text/plain; charset=utf-8",
       "body": {
-        "text": "{\"id\":\"<id-2>\",\"primary_branch_id\":\"<id-1>\",\"name\":\"Golden Harness Co\",\"account_number\":\"GOLD-001\",\"email\":\"goldens@example.com\",\"phone\":\"250-555-0199\",\"address\":\"1 Golden Way, Kelowna BC\",\"tier\":\"GOLD\",\"credit_limit\":100000,\"balance_due\":0,\"is_active\":false,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+        "text": "{\"id\":\"<id-2>\",\"primary_branch_id\":\"<id-1>\",\"name\":\"Golden Harness Co\",\"account_number\":\"GOLD-001\",\"email\":\"goldens@example.com\",\"phone\":\"250-555-0199\",\"address\":\"1 Golden Way, Kelowna BC\",\"tier\":\"GOLD\",\"credit_limit\":100000,\"balance_due\":0,\"is_active\":false,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
       }
     }
   },
@@ -37,7 +37,7 @@
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
         "balance_due": 0,
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "credit_limit": 100000,
         "email": "goldens@example.com",
         "id": "<id-2>",
@@ -46,7 +46,7 @@
         "phone": "250-555-0199",
         "primary_branch_id": "<id-1>",
         "tier": "GOLD",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -65,7 +65,7 @@
             "account_number": "BWC-001",
             "address": "5315 Snowload Way, Big White BC",
             "balance_due": 0,
-            "created_at": "<ts>",
+            "created_at": "<ts+0d>",
             "credit_limit": 15000,
             "email": "jim@bigwhitecabins.ca",
             "id": "<id-3>",
@@ -73,24 +73,24 @@
             "name": "Big White Cabin Co",
             "phone": "250-555-2800",
             "price_level": {
-              "created_at": "<ts>",
+              "created_at": "<ts-106751d>",
               "id": "<id-4>",
               "multiplier": 0.85,
               "name": "Contractor",
-              "updated_at": "<ts>"
+              "updated_at": "<ts-106751d>"
             },
             "price_level_id": "<id-4>",
             "primary_branch_id": "<id-1>",
             "salesperson_id": "<id-5>",
             "salesperson_name": "Cameron Fraser",
             "tier": "SILVER",
-            "updated_at": "<ts>"
+            "updated_at": "<ts+0d>"
           },
           {
             "account_number": "GHR-001",
             "address": "780 Casement Ave, Kelowna BC",
             "balance_due": 34500,
-            "created_at": "<ts>",
+            "created_at": "<ts+0d>",
             "credit_limit": 30000,
             "email": "pay@glenmoreheritage.ca",
             "id": "<id-6>",
@@ -98,24 +98,24 @@
             "name": "Glenmore Heritage Reno",
             "phone": "250-555-2700",
             "price_level": {
-              "created_at": "<ts>",
+              "created_at": "<ts-106751d>",
               "id": "<id-4>",
               "multiplier": 0.85,
               "name": "Contractor",
-              "updated_at": "<ts>"
+              "updated_at": "<ts-106751d>"
             },
             "price_level_id": "<id-4>",
             "primary_branch_id": "<id-1>",
             "salesperson_id": "<id-7>",
             "salesperson_name": "Amanda Wong",
             "tier": "GOLD",
-            "updated_at": "<ts>"
+            "updated_at": "<ts+0d>"
           },
           {
             "account_number": "GOLD-001",
             "address": "1 Golden Way, Kelowna BC",
             "balance_due": 0,
-            "created_at": "<ts>",
+            "created_at": "<ts+0d>",
             "credit_limit": 100000,
             "email": "goldens@example.com",
             "id": "<id-2>",
@@ -124,7 +124,7 @@
             "phone": "250-555-0199",
             "primary_branch_id": "<id-1>",
             "tier": "GOLD",
-            "updated_at": "<ts>"
+            "updated_at": "<ts+0d>"
           }
         ],
         "limit": 3,
@@ -144,32 +144,32 @@
       "content_type": "application/json",
       "body": [
         {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "id": "<id-4>",
           "multiplier": 0.85,
           "name": "Contractor",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "id": "<id-8>",
           "multiplier": 1,
           "name": "Retail",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "id": "<id-9>",
           "multiplier": 1,
           "name": "Retail",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "id": "<id-10>",
           "multiplier": 0.75,
           "name": "VIP Builder",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         }
       ]
     }

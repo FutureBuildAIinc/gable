@@ -5,8 +5,8 @@
       "method": "POST",
       "path": "/api/v1/ap/invoices",
       "body": {
-        "due_date": "<date>",
-        "invoice_date": "<date>",
+        "due_date": "<day+0>",
+        "invoice_date": "<day+0>",
         "invoice_number": "GOLD-AP-001",
         "lines": [
           {
@@ -24,10 +24,10 @@
       "content_type": "application/json",
       "body": {
         "amount_paid": 0,
-        "created_at": "<ts>",
-        "due_date": "<ts>",
+        "created_at": "<ts+0d>",
+        "due_date": "<ts+0d>",
         "id": "<id-2>",
-        "invoice_date": "<ts>",
+        "invoice_date": "<ts+0d>",
         "invoice_number": "GOLD-AP-001",
         "status": "PENDING",
         "subtotal": 10000,
@@ -48,14 +48,14 @@
       "content_type": "application/json",
       "body": {
         "amount_paid": 0,
-        "created_at": "<ts>",
-        "due_date": "<ts>",
+        "created_at": "<ts+0d>",
+        "due_date": "<ts+0d>",
         "id": "<id-2>",
-        "invoice_date": "<ts>",
+        "invoice_date": "<ts+0d>",
         "invoice_number": "GOLD-AP-001",
         "lines": [
           {
-            "created_at": "<ts>",
+            "created_at": "<ts+0d>",
             "description": "golden ap line",
             "id": "<id-3>",
             "invoice_id": "<id-2>",
@@ -85,10 +85,10 @@
       "body": [
         {
           "amount_paid": 0,
-          "created_at": "<ts>",
-          "due_date": "<ts>",
+          "created_at": "<ts+0d>",
+          "due_date": "<ts+0d>",
           "id": "<id-2>",
-          "invoice_date": "<ts>",
+          "invoice_date": "<ts+0d>",
           "invoice_number": "GOLD-AP-001",
           "status": "PENDING",
           "subtotal": 10000,

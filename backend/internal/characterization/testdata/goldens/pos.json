@@ -16,7 +16,7 @@
         "cashier_id": "<id-1>",
         "id": "<id-2>",
         "notes": "",
-        "opened_at": "<ts>",
+        "opened_at": "<ts+0d>",
         "opening_float": 10000,
         "register_id": "REG-01",
         "status": "OPEN"
@@ -37,7 +37,7 @@
           "cashier_id": "<id-1>",
           "id": "<id-2>",
           "notes": "",
-          "opened_at": "<ts>",
+          "opened_at": "<ts+0d>",
           "opening_float": 10000,
           "register_id": "REG-01",
           "status": "OPEN"
@@ -62,7 +62,7 @@
         "branch_id": "<id-4>",
         "cashier_id": "<id-5>",
         "change_due": 0,
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "customer_id": "<id-3>",
         "id": "<id-6>",
         "register_id": "REG-01",

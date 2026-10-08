@@ -12,7 +12,7 @@
         {
           "balance": 0,
           "code": "1010",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Cash and checking accounts",
           "id": "<id-1>",
           "is_active": true,
@@ -20,12 +20,12 @@
           "normal_balance": "DEBIT",
           "subtype": "Current Asset",
           "type": "ASSET",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "1020",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Customer balances due",
           "id": "<id-2>",
           "is_active": true,
@@ -33,12 +33,12 @@
           "normal_balance": "DEBIT",
           "subtype": "Current Asset",
           "type": "ASSET",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "1030",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Lumber, hardware, and building materials on hand",
           "id": "<id-3>",
           "is_active": true,
@@ -46,12 +46,12 @@
           "normal_balance": "DEBIT",
           "subtype": "Current Asset",
           "type": "ASSET",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "1040",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Insurance, deposits, prepaid rent",
           "id": "<id-4>",
           "is_active": true,
@@ -59,12 +59,12 @@
           "normal_balance": "DEBIT",
           "subtype": "Current Asset",
           "type": "ASSET",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "1500",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Delivery trucks, forklifts, yard equipment",
           "id": "<id-5>",
           "is_active": true,
@@ -72,12 +72,12 @@
           "normal_balance": "DEBIT",
           "subtype": "Fixed Asset",
           "type": "ASSET",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "1510",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Contra-asset for depreciation",
           "id": "<id-6>",
           "is_active": true,
@@ -85,12 +85,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Fixed Asset",
           "type": "ASSET",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "2010",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Vendor balances owed",
           "id": "<id-7>",
           "is_active": true,
@@ -98,12 +98,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Current Liability",
           "type": "LIABILITY",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "2020",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Collected sales tax awaiting remittance",
           "id": "<id-8>",
           "is_active": true,
@@ -111,12 +111,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Current Liability",
           "type": "LIABILITY",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "2030",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Wages, utilities, and other accruals",
           "id": "<id-9>",
           "is_active": true,
@@ -124,12 +124,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Current Liability",
           "type": "LIABILITY",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "2200",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Customer prepayments held until applied to AR",
           "id": "<id-10>",
           "is_active": true,
@@ -137,12 +137,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Current Liability",
           "type": "LIABILITY",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "3010",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Owner investment and retained earnings",
           "id": "<id-11>",
           "is_active": true,
@@ -150,12 +150,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Owner Equity",
           "type": "EQUITY",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "3020",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Cumulative net income retained",
           "id": "<id-12>",
           "is_active": true,
@@ -163,12 +163,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Retained Earnings",
           "type": "EQUITY",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "4010",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Revenue from material sales",
           "id": "<id-13>",
           "is_active": true,
@@ -176,12 +176,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Operating",
           "type": "REVENUE",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "4020",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Revenue from delivery charges",
           "id": "<id-14>",
           "is_active": true,
@@ -189,12 +189,12 @@
           "normal_balance": "CREDIT",
           "subtype": "Operating",
           "type": "REVENUE",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "5010",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Direct cost of materials sold",
           "id": "<id-15>",
           "is_active": true,
@@ -202,12 +202,12 @@
           "normal_balance": "DEBIT",
           "subtype": "COGS",
           "type": "EXPENSE",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "5020",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Rent, utilities, wages, and general overhead",
           "id": "<id-16>",
           "is_active": true,
@@ -215,12 +215,12 @@
           "normal_balance": "DEBIT",
           "subtype": "Operating",
           "type": "EXPENSE",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         },
         {
           "balance": 0,
           "code": "5030",
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "description": "Till drawer counting variances (short = expense, over = credit)",
           "id": "<id-17>",
           "is_active": true,
@@ -228,7 +228,7 @@
           "normal_balance": "DEBIT",
           "subtype": "Operating",
           "type": "EXPENSE",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         }
       ]
     }
@@ -239,7 +239,7 @@
       "method": "POST",
       "path": "/api/v1/gl/journal-entries",
       "body": {
-        "entry_date": "<date>",
+        "entry_date": "<day+0>",
         "lines": [
           {
             "account_id": "<id-1>",
@@ -261,8 +261,8 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "created_at": "<ts>",
-        "entry_date": "<ts>",
+        "created_at": "<ts+0d>",
+        "entry_date": "<ts+0d>",
         "entry_number": 1,
         "id": "<id-18>",
         "lines": [
@@ -289,7 +289,7 @@
         "status": "DRAFT",
         "total_credit": 10000,
         "total_debit": 10000,
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -313,7 +313,7 @@
       "method": "POST",
       "path": "/api/v1/gl/journal-entries",
       "body": {
-        "entry_date": "<date>",
+        "entry_date": "<day+0>",
         "lines": [
           {
             "account_id": "<id-1>",

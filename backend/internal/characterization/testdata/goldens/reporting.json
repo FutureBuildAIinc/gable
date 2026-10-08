@@ -17,7 +17,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "created_at": "<ts>",
+        "created_at": "<ts+0d>",
         "created_by": "",
         "definition_json": {
           "metric": "total_amount"
@@ -26,7 +26,7 @@
         "entity_type": "orders",
         "id": "<id-1>",
         "name": "Golden Report",
-        "updated_at": "<ts>"
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -41,7 +41,7 @@
       "content_type": "application/json",
       "body": [
         {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "created_by": "",
           "definition_json": {
             "metric": "total_amount"
@@ -50,7 +50,7 @@
           "entity_type": "orders",
           "id": "<id-1>",
           "name": "Golden Report",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         }
       ]
     }
@@ -80,7 +80,7 @@
           "summary": "Schedules run on the server's cron engine: each run executes the saved report and renders it to CSV."
         },
         "schedule": {
-          "created_at": "<ts>",
+          "created_at": "<ts+0d>",
           "cron_expression": "0 6 * * * *",
           "format": "CSV",
           "id": "<id-2>",
@@ -89,7 +89,7 @@
           ],
           "report_id": "<id-1>",
           "status": "ACTIVE",
-          "updated_at": "<ts>"
+          "updated_at": "<ts+0d>"
         }
       }
     }
@@ -112,7 +112,7 @@
         },
         "schedules": [
           {
-            "created_at": "<ts>",
+            "created_at": "<ts+0d>",
             "cron_expression": "0 6 * * * *",
             "format": "CSV",
             "id": "<id-2>",
@@ -121,7 +121,7 @@
             ],
             "report_id": "<id-1>",
             "status": "ACTIVE",
-            "updated_at": "<ts>"
+            "updated_at": "<ts+0d>"
           }
         ]
       }
