@@ -455,6 +455,17 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 	if !strings.Contains(string(quoteBody), quoteA.String()) || !strings.Contains(string(quoteBody), quoteB.String()) {
 		t.Errorf("switch off, quote list does not carry both branches' quotes")
 	}
+	for _, yard := range []uuid.UUID{f.yardA, f.yardB} {
+		if _, err := db.Pool.Exec(context.Background(),
+			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, 5)`,
+			f.productID, yard, "wl-inv-"+yard.String()[:8]); err != nil {
+			t.Fatalf("seed inventory: %v", err)
+		}
+	}
+	_, invBody := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", "warehouse", "u-a", "")
+	if !strings.Contains(string(invBody), f.yardA.String()) || !strings.Contains(string(invBody), f.yardB.String()) {
+		t.Errorf("switch off, inventory list does not carry both branches' rows")
+	}
 }
 
 // The branch wall on records a path id addresses (ADR 0007 section 2.3): a
@@ -713,6 +724,54 @@ func TestBranchWall_QuoteListGrants(t *testing.T) {
 		}
 		if got := strings.Contains(string(body), quoteB.String()); got != c.wantB {
 			t.Errorf("quote list, %s: branch B's quote present = %v, want %v", c.name, got, c.wantB)
+		}
+	}
+}
+
+// The inventory levels list is filtered by the caller's branches like the
+// module's writes: a warehouse user held to branch A reads only branch A's
+// rows, through its context branch or, with none, through its grants; a bound
+// user with no grants reads none; an administrator without a header reads
+// every branch's.
+func TestBranchWall_InventoryListGrants(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	for _, r := range []struct {
+		yard uuid.UUID
+		name string
+	}{
+		{f.yardA, "wl-inv-a-" + f.yardA.String()[:8]},
+		{f.yardB, "wl-inv-b-" + f.yardB.String()[:8]},
+	} {
+		if _, err := db.Pool.Exec(context.Background(),
+			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, 5)`,
+			f.productID, r.yard, r.name); err != nil {
+			t.Fatalf("seed inventory: %v", err)
+		}
+	}
+	// The fixture's cleanup already deletes this product's inventory rows.
+
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantA, wantB            bool
+	}{
+		{"warehouse, header A", "warehouse", "u-a", A, true, false},
+		{"warehouse, no header", "warehouse", "u-a", "", true, false},
+		{"warehouse u-none, no header", "warehouse", "u-none", "", false, false},
+		{"admin, no header", "admin", "boss", "", true, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("inventory list, %s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), f.yardA.String()); got != c.wantA {
+			t.Errorf("inventory list, %s: branch A's row present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), f.yardB.String()); got != c.wantB {
+			t.Errorf("inventory list, %s: branch B's row present = %v, want %v", c.name, got, c.wantB)
 		}
 	}
 }
