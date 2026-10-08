@@ -54,9 +54,13 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	// kind and the id on a row can never disagree. A machine key is never the
 	// implicit source of user_id: that column meant "a user" until actor_kind
 	// existed, and legacy reports grouping by it would list key ids among
-	// users. The key id lives in actor_id only.
+	// users. The key id lives in actor_id only. The decision rests on the key
+	// id being in the context, not on the actor's kind: an agent marker over
+	// a keyed request rewrites the kind to agent while the principal is still
+	// the key, and must not smuggle the key id into user_id either.
 	userID := entry.UserID
-	if userID == "" && act.Kind != actor.KindKey {
+	_, viaMachineKey := actor.KeyIDFromContext(ctx)
+	if userID == "" && !viaMachineKey {
 		userID = act.ID
 	}
 	// No attribution at all is stored as NULL, the value the 088 backfill
@@ -125,11 +129,11 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 // AuditKeyRefusal records a refused machine-key request (a valid key refused
 // for lacking a scope, for a user-only route, or for a path machine keys do
 // not address). It implements the middleware package's KeyRefusalAuditor
-// seam. The row's actor is the key itself: the ctx the auth core passes
-// carries the key id, so actor_kind is 'key' and actor_id the key's id, and
-// user_id stays NULL (a key is never a user). A failure to write is logged
-// and swallowed: the refusal verdict has already been served, and a full
-// audit table must not turn a 403 into a 500.
+// seam. The row's actor is the key: the ctx the auth core passes carries the
+// key id, so actor_id is the key's id and user_id stays NULL (a key is never
+// a user, even when agent headers rewrite actor_kind to agent). A failure to
+// write is logged and swallowed: the refusal verdict has already been
+// served, and a full audit table must not turn a 403 into a 500.
 func (l *Logger) AuditKeyRefusal(ctx context.Context, keyID, action, scope, method, path string) {
 	id, err := uuid.Parse(keyID)
 	if err != nil {

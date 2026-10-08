@@ -291,6 +291,52 @@ func TestLog_KeyCallRecordsKeyID(t *testing.T) {
 	}
 }
 
+func TestLog_AgentOverMachineKeyKeepsUserIDNull(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+	entityID := uuid.New()
+
+	// The shape the review flagged: a machine-key request also carrying the
+	// agent headers. The actor middleware runs outside auth, so once the
+	// machine-key core has set the key id the context holds both, and
+	// pkg/actor resolves kind agent with the key id as the principal (an
+	// agent driving a keyed integration). The legacy user_id column must
+	// still stay NULL: an agent over a key is no more a user than the key
+	// alone is.
+	var reqCtx context.Context
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/quotes", nil)
+	req.Header.Set(actor.HeaderActingAs, "agent")
+	req.Header.Set(actor.HeaderAgentTool, "probe")
+	handler := actor.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCtx = r.Context()
+	}))
+	handler.ServeHTTP(rec, req)
+
+	ctx := actor.WithKeyID(reqCtx, "key-999")
+
+	logger.Log(ctx, audit.Entry{
+		Action:     "key.agent.action",
+		EntityType: "agent_key_test",
+		EntityID:   entityID,
+	})
+
+	rows := fetchRows(t, db, entityID)
+	if len(rows) != 1 {
+		t.Fatalf("audit rows = %d, want 1", len(rows))
+	}
+	r := rows[0]
+	if r.ActorKind != actor.KindAgent {
+		t.Errorf("actor_kind = %q, want %q (the marker must still mark the row)", r.ActorKind, actor.KindAgent)
+	}
+	if r.ActorID == nil || *r.ActorID != "key-999" {
+		t.Errorf("actor_id = %v, want the key id key-999 (the principal behind the agent)", r.ActorID)
+	}
+	if r.UserID != nil {
+		t.Errorf("user_id = %v, want NULL (an agent over a key is still not a user)", *r.UserID)
+	}
+}
+
 func TestLog_AgentCallRecordsUserMarkerAndTool(t *testing.T) {
 	db := testutil.RequireDB(t)
 	logger := audit.NewLogger(db)

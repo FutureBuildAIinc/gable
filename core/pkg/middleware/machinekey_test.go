@@ -605,6 +605,45 @@ func TestRealKeyRefusalWritesAuditRow(t *testing.T) {
 	}
 }
 
+func TestRealKeyRefusalWithAgentHeadersKeepsUserIDNull(t *testing.T) {
+	db := testutil.RequireDB(t)
+
+	raw, id := createKey(t, db, "quotes:read")
+	h := &okHandler{}
+	// cmd/server's order: the actor middleware sits outside the machine-key
+	// mount, so a refusal is audited on a context carrying both the agent
+	// headers and the key id. The row must record the agent over the key
+	// (kind agent, the key id in actor_id) and still keep user_id NULL: the
+	// decision that a key never fills the legacy user column cannot rest on
+	// the actor's kind, which the marker rewrites.
+	chain := actor.Middleware(newDBAuth(t, db).Handler(h))
+
+	req := bearerRequest(t, "POST", "/api/v1/quotes", raw)
+	req.Header.Set(actor.HeaderActingAs, "agent")
+	req.Header.Set(actor.HeaderAgentTool, "probe")
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var kind, actorID string
+	var userID *string
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT actor_kind, actor_id, user_id
+		   FROM audit_log WHERE actor_id = $1 AND action = 'key.scope_refused'`, id,
+	).Scan(&kind, &actorID, &userID)
+	if err != nil {
+		t.Fatalf("no key.scope_refused audit row for key %s: %v", id, err)
+	}
+	if kind != actor.KindAgent || actorID != id {
+		t.Fatalf("actor_kind = %q actor_id = %q, want agent and the key id %s", kind, actorID, id)
+	}
+	if userID != nil && *userID != "" {
+		t.Fatalf("user_id = %q on an agent-over-key refusal row, want NULL", *userID)
+	}
+}
+
 func TestRevokedRealKeyRefused401(t *testing.T) {
 	db := testutil.RequireDB(t)
 
