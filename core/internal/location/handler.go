@@ -4,6 +4,7 @@
 package location
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,11 +18,28 @@ type Handler struct {
 	service     *Service
 	userRepo    UserRepository
 	adminGuards []func(http.Handler) http.Handler // applied to admin-only routes
+	guard       LocationGuard                     // optional; see WithBranchWall
+	branchMw    func(http.Handler) http.Handler   // optional; see WithBranchWall
 }
 
 // NewHandler constructs the location handler. userRepo and adminGuards may be
 // nil; the handler will fall back to plain authenticated access in that case
 // (useful for legacy callers and tests).
+// LocationGuard applies the payload branch rule (ADR 0007 section 2.3) to a
+// location id a body names. *middleware.BranchGuard satisfies it.
+type LocationGuard interface {
+	CheckPayloadLocation(ctx context.Context, locationID uuid.UUID) error
+}
+
+// WithBranchWall puts the branch wall on POST /api/v1/locations: the route runs
+// behind branchMw (after the role guard), a parent_id must sit in a branch the
+// caller may target, and a BRANCH may be created by an administrator or owner
+// only. Without it the create is unscoped, so serve always sets it.
+func (h *Handler) WithBranchWall(g LocationGuard, branchMw func(http.Handler) http.Handler) *Handler {
+	h.guard, h.branchMw = g, branchMw
+	return h
+}
+
 func NewHandler(service *Service, userRepo UserRepository, adminGuards ...func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		service:     service,
@@ -57,7 +75,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	}
 
 	// Legacy / shared location endpoints.
-	mux.HandleFunc("POST /api/v1/locations", guard(h.CreateLocation))
+	create := http.HandlerFunc(h.CreateLocation)
+	if h.branchMw != nil {
+		create = h.branchMw(create).ServeHTTP
+	}
+	mux.HandleFunc("POST /api/v1/locations", guard(create))
 	mux.HandleFunc("GET /api/v1/locations", guard(h.ListLocations))
 	mux.HandleFunc("GET /api/v1/locations/{id}", guard(h.GetLocation))
 	mux.HandleFunc("PUT /api/v1/locations/{id}", adminGuard(h.UpdateLocation))
@@ -111,6 +133,21 @@ func (h *Handler) CreateLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	loc := req.resolve()
+	if loc.Type == LocTypeBranch && !callerMayCreateBranch(r) {
+		httputil.RespondError(w, r, "type BRANCH requires the admin or owner role", http.StatusForbidden, nil)
+		return
+	}
+	if loc.ParentID != nil && h.guard != nil {
+		err := h.guard.CheckPayloadLocation(r.Context(), *loc.ParentID)
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httputil.RespondError(w, r, "parent_id is in a branch this caller may not target", http.StatusForbidden, err)
+			return
+		}
+		if err != nil {
+			httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+			return
+		}
+	}
 	if err := h.service.CreateLocation(r.Context(), &loc); err != nil {
 		httputil.RespondError(w, r, "failed to create location", http.StatusBadRequest, err)
 		return
@@ -443,4 +480,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// callerMayCreateBranch reports whether the caller may create a BRANCH through
+// the location route: a user holding admin or owner, or no claims at all in dev
+// mode. A machine key has no claims but is not a user, so it is refused: a
+// branch is made through the admin only POST /api/v1/branches.
+func callerMayCreateBranch(r *http.Request) bool {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		_, isKey := middleware.KeyIDFromContext(r.Context())
+		return !isKey
+	}
+	return middleware.ClaimsHaveAnyRole(claims, "admin", "owner")
 }

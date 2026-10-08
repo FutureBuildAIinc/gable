@@ -216,17 +216,8 @@ func Run() {
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per
 	// the user_locations grant table. Controlled by system_settings keys
 	// `multi_branch_enabled` (kill switch) and `default_branch_required`.
-	branchMw := middleware.NewBranchMiddleware(db).Handler
-	// branchGuard holds a branch a request body names to the caller's branch
-	// grants (ADR 0007 section 2.3), so a body cannot move a write across the
-	// branch wall.
-	branchGuard := middleware.NewBranchGuard(db)
-
-	// scoped composes a role guard with the branch middleware. Use this for
-	// any module group whose entities carry a branch_id.
-	scoped := func(roles ...string) func(http.Handler) http.Handler {
-		return middleware.Compose(middleware.RequireRole(roles...), branchMw)
-	}
+	wall := newBranchWall(db)
+	scoped := wall.scoped // role guard plus branch middleware, for any module group whose entities carry a branch_id
 
 	// 5. Setup Router & Modules
 	mux := http.NewServeMux()
@@ -285,17 +276,16 @@ func Run() {
 		locationUserRepo,
 		middleware.RequireRole("admin", "owner"),
 	)
-	// Location routes are NOT branch-scoped at the middleware level: the
-	// branch switcher must be able to fetch /me/branches before a branch
-	// is selected, and branch CRUD endpoints don't operate on branch-scoped
-	// data.
-	locationHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
+	// Location routes are not branch scoped as a group: the branch switcher
+	// must fetch /me/branches before a branch is selected, and branch CRUD
+	// does not operate on branch-scoped data. POST /locations is the exception
+	// and runs behind the branch middleware (see branchWall.locations).
+	wall.locations(mux, locationHandler)
 
 	// Inventory Service needs to be shared to Order Service
 	inventoryRepo := inventory.NewRepository(db)
 	inventorySvc := inventory.NewService(inventoryRepo)
-	inventoryHandler := inventory.NewHandler(inventorySvc).WithBranchGuard(branchGuard)
-	inventoryHandler.RegisterRoutes(mux, scoped("admin", "owner", "warehouse"))
+	wall.inventory(mux, inventorySvc)
 
 	customerRepo := customer.NewRepository(db)
 	customerSvc := customer.NewService(customerRepo)
@@ -324,10 +314,8 @@ func Run() {
 	// last statement.
 	quoteSvc := quote.NewService(quoteRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db).
-		WithBranchGuard(branchGuard)
-	quoteHandler := quote.NewHandler(quoteSvc)
-	quoteHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
+		WithTxRunner(db)
+	wall.quotes(mux, quoteSvc)
 
 	// GL Module (Full General Ledger)
 	glAdapter := glint.NewMockGLAdapter()
@@ -411,8 +399,7 @@ func Run() {
 	poSvc.WithVelocityRepo(velocityRepo)
 	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc).
 		WithVelocityRepo(velocityRepo)
-	poHandler := purchase_order.NewHandler(poSvc, poRecSvc).WithBranchGuard(branchGuard)
-	poHandler.RegisterRoutes(mux, scoped("admin", "owner", "purchasing"))
+	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
 
 	// Auto-reorder scheduler. Disabled by default; an operator activates it
 	// by setting reorder.enabled=true in system_settings. Stops in step 3.5

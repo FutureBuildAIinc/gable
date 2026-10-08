@@ -210,7 +210,7 @@ POST	/api/v1/invoices/{id}/credit-memo	internal/invoice	h.HandleCreateCreditMemo
 POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
 GET	/api/v1/invoices/{id}/payments	internal/payment	h.GetPaymentHistory
 GET	/api/v1/locations	internal/location	h.ListLocations
-POST	/api/v1/locations	internal/location	h.CreateLocation
+POST	/api/v1/locations	internal/location	create
 DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation
 GET	/api/v1/locations/{id}	internal/location	h.GetLocation
 PUT	/api/v1/locations/{id}	internal/location	h.UpdateLocation
