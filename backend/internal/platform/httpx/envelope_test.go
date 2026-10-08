@@ -70,7 +70,7 @@ func TestWriteListItemsNeverNull(t *testing.T) {
 	}
 }
 
-// RULE: next_cursor is null when the page is the last the caller can fetch.
+// RULE: next_cursor is null when the response has carried the final row.
 func TestWriteListLastPageNullCursor(t *testing.T) {
 	w := httptest.NewRecorder()
 	WriteList(w, []envelopeRow{{ID: "1"}}, "", DefaultPageLimit)

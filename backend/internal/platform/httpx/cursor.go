@@ -92,8 +92,8 @@ func MintCursor(scope string, key ...string) (string, error) {
 }
 
 // cursorBadRequest is the 400 every refused cursor answers with: a client
-// error naming the cursor field, so a client resuming from a corrupted
-// token learns that instead of being restarted from the top of the list.
+// error naming the cursor field, so the caller is told its token is
+// unusable rather than being quietly wound back to the head of the list.
 func cursorBadRequest(message string) *Error {
 	return BadRequest(message, FieldError{Field: "cursor", Message: message})
 }
@@ -155,12 +155,12 @@ type CursorPage struct {
 	Limit int
 }
 
-// ParseCursorPage reads `cursor` and `limit` from the query string (ADR 0001
-// §2). Absent parameters are the first page at the default limit. A present
-// but malformed cursor, a repeated cursor, or a limit the server will not
-// honor is a 400 *Error naming the field: never a silent restart, never a
-// silent clamp.
-func ParseCursorPage(r *http.Request, scope string) (CursorPage, error) {
+// ParseListQuery reads `cursor` and `limit` from a list route's query string
+// (ADR 0001 §2). Absent parameters are the first page at the default limit.
+// A present but malformed cursor, a repeated cursor, or a limit the server
+// will not honor is a 400 *Error naming the field: never a silent restart,
+// never a silent clamp.
+func ParseListQuery(r *http.Request, scope string) (CursorPage, error) {
 	q := r.URL.Query()
 
 	page := CursorPage{Limit: DefaultPageLimit}

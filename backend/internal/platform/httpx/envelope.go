@@ -12,8 +12,8 @@ import (
 type ListEnvelope[T any] struct {
 	// Items is always a JSON array, never null; WriteList enforces it.
 	Items []T `json:"items"`
-	// NextCursor is the minted cursor of the next page, or null when this
-	// page is the last the caller can fetch.
+	// NextCursor is the minted cursor of the following page, or null once
+	// this response has carried the final row.
 	NextCursor *string `json:"next_cursor"`
 	// Limit is the effective page size the server used.
 	Limit int `json:"limit"`

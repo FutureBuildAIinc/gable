@@ -156,10 +156,10 @@ func pageRequest(t *testing.T, rawQuery string) *http.Request {
 }
 
 // RULE: no parameters is the first page at the default limit.
-func TestParseCursorPageDefaults(t *testing.T) {
-	page, err := ParseCursorPage(pageRequest(t, ""), testScope)
+func TestParseListQueryDefaults(t *testing.T) {
+	page, err := ParseListQuery(pageRequest(t, ""), testScope)
 	if err != nil {
-		t.Fatalf("ParseCursorPage: %v", err)
+		t.Fatalf("ParseListQuery: %v", err)
 	}
 	if page.Limit != DefaultPageLimit {
 		t.Errorf("limit = %d, want %d", page.Limit, DefaultPageLimit)
@@ -170,9 +170,9 @@ func TestParseCursorPageDefaults(t *testing.T) {
 }
 
 // RULE: limit is an integer in [1, MaxPageLimit]; 1 and the max are valid.
-func TestParseCursorPageLimitBounds(t *testing.T) {
+func TestParseListQueryLimitBounds(t *testing.T) {
 	for _, raw := range []string{"limit=1", "limit=200"} {
-		page, err := ParseCursorPage(pageRequest(t, raw), testScope)
+		page, err := ParseListQuery(pageRequest(t, raw), testScope)
 		if err != nil {
 			t.Fatalf("%s: %v", raw, err)
 		}
@@ -185,7 +185,7 @@ func TestParseCursorPageLimitBounds(t *testing.T) {
 // RULE (ADR 0001 §2, strictness): a limit the server will not honor is a
 // 400 naming the field, not a silent clamp. Unparseable is bad_request;
 // out of range is validation_failed.
-func TestParseCursorPageLimitRefused(t *testing.T) {
+func TestParseListQueryLimitRefused(t *testing.T) {
 	cases := []struct {
 		raw  string
 		code string
@@ -199,7 +199,7 @@ func TestParseCursorPageLimitRefused(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.raw, func(t *testing.T) {
-			_, err := ParseCursorPage(pageRequest(t, tc.raw), testScope)
+			_, err := ParseListQuery(pageRequest(t, tc.raw), testScope)
 			e := cursorErr(t, err)
 			if e.Code != tc.code {
 				t.Errorf("code = %q, want %q", e.Code, tc.code)
@@ -212,14 +212,14 @@ func TestParseCursorPageLimitRefused(t *testing.T) {
 }
 
 // RULE: a valid cursor resumes with its keyset decoded.
-func TestParseCursorPageWithCursor(t *testing.T) {
+func TestParseListQueryWithCursor(t *testing.T) {
 	raw, err := MintCursor(testScope, "zzz", "aaa")
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := ParseCursorPage(pageRequest(t, "cursor="+raw+"&limit=25"), testScope)
+	page, err := ParseListQuery(pageRequest(t, "cursor="+raw+"&limit=25"), testScope)
 	if err != nil {
-		t.Fatalf("ParseCursorPage: %v", err)
+		t.Fatalf("ParseListQuery: %v", err)
 	}
 	if len(page.Key) != 2 || page.Key[0] != "zzz" {
 		t.Errorf("key = %v, want the decoded tuple", page.Key)
@@ -230,15 +230,15 @@ func TestParseCursorPageWithCursor(t *testing.T) {
 }
 
 // RULE: a repeated cursor parameter is ambiguous and refused.
-func TestParseCursorPageDuplicateCursor(t *testing.T) {
+func TestParseListQueryDuplicateCursor(t *testing.T) {
 	raw, _ := MintCursor(testScope, "a")
-	_, err := ParseCursorPage(pageRequest(t, "cursor="+raw+"&cursor="+raw), testScope)
+	_, err := ParseListQuery(pageRequest(t, "cursor="+raw+"&cursor="+raw), testScope)
 	cursorErr(t, err)
 }
 
 // RULE: a repeated limit parameter is ambiguous and refused.
-func TestParseCursorPageDuplicateLimit(t *testing.T) {
-	_, err := ParseCursorPage(pageRequest(t, "limit=10&limit=20"), testScope)
+func TestParseListQueryDuplicateLimit(t *testing.T) {
+	_, err := ParseListQuery(pageRequest(t, "limit=10&limit=20"), testScope)
 	e := cursorErr(t, err)
 	if len(e.Details) != 1 || e.Details[0].Field != "limit" {
 		t.Errorf("details = %+v, want the limit field named", e.Details)
