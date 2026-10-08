@@ -75,7 +75,7 @@ migrate:
 # RESTART IDENTITY CASCADE before it writes, so an accidental run against a
 # database you care about destroys data. Reference data (products, customers,
 # vendors, locations, chart of accounts) upserts on natural keys and is safe to
-# re-run. See the gate and its reasoning in core/cmd/seed/main.go.
+# re-run. See the gate and its reasoning in core/internal/app/seed/seed.go.
 seed:
 	cd core && go run ./cmd/seed
 

@@ -48,7 +48,7 @@ faster.
 - [ ] New DB columns follow the conventions (UUID PKs, `DECIMAL(19,4)` for
       quantities, money-as-cents in app code, every quantity paired with a UOM).
 - [ ] New endpoints are under the correct prefix and wired into
-      `RegisterRoutes` in `core/cmd/server/main.go`.
+      `RegisterRoutes` in `core/internal/app/serve/serve.go`.
 - [ ] I have read `CONTRIBUTING.md` and agree to license my contribution under
       the OpenLBM Standard license governing the file(s) I touched (via the CLA).
 - [ ] No secrets, credentials, or live hostnames are committed.

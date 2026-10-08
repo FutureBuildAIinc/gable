@@ -82,7 +82,7 @@ Gable ships an authentication bypass for local development. When
 `AUTH_MODE=dev` is set:
 
 - The backend **skips JWT/JWKS verification entirely**. The auth middleware is
-  never constructed (`core/cmd/server/main.go:144-145`), so requests carry no
+  never constructed (`core/internal/app/serve/serve.go`), so requests carry no
   claims at all, and `RequireRole` passes through whenever claims are nil
   (`core/pkg/middleware/auth.go`). No user is impersonated — the request is
   simply unauthenticated and every role gate opens for it. The effect is full
