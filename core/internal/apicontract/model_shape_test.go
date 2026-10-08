@@ -113,6 +113,8 @@ var modelBoundSchemas = []struct {
 	// quote / exposure
 	{"QuoteExposureEvent", pricing.QuoteExposureEvent{}},
 	{"ExposureRow", pricing.ExposureRow{}},
+	{"EscalateNowResult", pricing.EscalateNowResult{}},
+	{"EscalateNowLine", pricing.EscalateNowLine{}},
 	// pos
 	{"PosTransaction", pos.POSTransaction{}},
 	{"PosLineItem", pos.POSLineItem{}},
