@@ -4,6 +4,10 @@
 package middleware
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -172,4 +176,270 @@ func MachineKeyUserOnlyPrefixes() []string {
 	out := make([]string, len(machineKeyUserOnlyPrefixes))
 	copy(out, machineKeyUserOnlyPrefixes)
 	return out
+}
+
+// --- the machine-key auth core ----------------------------------------------
+
+// KeyPrincipal is the identity a validated machine key carries.
+type KeyPrincipal struct {
+	// ID is the api_keys row's id, the value audit rows attribute to.
+	ID string
+	// Scopes are the key's stored scopes, verbatim.
+	Scopes []string
+}
+
+// ErrInvalidMachineKey is the credential verdict: the presented key is
+// unknown, revoked, or malformed. A KeyValidator returns it (wrapped or
+// verbatim) for anything that is the caller's credential failing, as opposed
+// to the key store being unreachable (any other error, answered 503).
+var ErrInvalidMachineKey = errors.New("invalid machine key")
+
+// KeyValidator checks a raw Bearer machine key. The techadmin service
+// satisfies it through a small adapter at the wiring site (cmd/server).
+type KeyValidator interface {
+	ValidateKey(ctx context.Context, rawKey string) (KeyPrincipal, error)
+}
+
+// KeyRefusalAuditor records a refused machine-key request. pkg/audit
+// implements it; it is an interface here because pkg/audit imports this
+// package (request ids), so this package cannot import pkg/audit. A nil
+// auditor refuses exactly the same and simply leaves no row.
+type KeyRefusalAuditor interface {
+	AuditKeyRefusal(ctx context.Context, keyID, action, scope, method, path string)
+}
+
+// Refusal actions written to the audit log.
+const (
+	// AuditActionKeyScopeRefused: the key is valid but holds neither the
+	// module's read nor its write scope for this method.
+	AuditActionKeyScopeRefused = "key.scope_refused"
+	// AuditActionKeyUserRequired: the route is user-only (key management);
+	// no scope would admit a key.
+	AuditActionKeyUserRequired = "key.user_required"
+	// AuditActionKeyPathRefused: the path is not a /api/v1 module route the
+	// key system knows (another seam, or an undeclared module).
+	AuditActionKeyPathRefused = "key.path_refused"
+)
+
+// keyIDContextKey and keyScopesContextKey carry the authenticated machine
+// key through the request context. The key id's canonical home is this
+// package because pkg/actor reads it while importing this package;
+// actor.WithKeyID and actor.KeyIDFromContext delegate to these.
+const (
+	keyIDContextKey     contextKey = "machine_key_id"
+	keyScopesContextKey contextKey = "machine_key_scopes"
+)
+
+// WithKeyID records a machine key's id in the context, for audit
+// attribution. Set by the machine-key auth core once a key validates.
+func WithKeyID(ctx context.Context, keyID string) context.Context {
+	return context.WithValue(ctx, keyIDContextKey, keyID)
+}
+
+// KeyIDFromContext returns the machine key id the auth layer set, if any.
+func KeyIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(keyIDContextKey).(string)
+	return id, ok && id != ""
+}
+
+// WithKeyScopes records the key's scopes in the context, so handlers and
+// guards can see what the caller holds.
+func WithKeyScopes(ctx context.Context, scopes []string) context.Context {
+	return context.WithValue(ctx, keyScopesContextKey, scopes)
+}
+
+// KeyScopesFromContext returns the authenticated machine key's scopes. The
+// second return is false when the request did not authenticate with a
+// machine key.
+func KeyScopesFromContext(ctx context.Context) ([]string, bool) {
+	scopes, ok := ctx.Value(keyScopesContextKey).([]string)
+	return scopes, ok
+}
+
+// MachineKeyAuth is the machine-key half of the auth layer. The JWT
+// middleware dispatches to it on a machine-key-shaped Bearer token
+// (AuthConfig.MachineKeys); with the JWT layer off (AUTH_MODE=dev) it mounts
+// standalone through Handler. Both mounts apply the same rules.
+type MachineKeyAuth struct {
+	keys        KeyValidator
+	auditor     KeyRefusalAuditor
+	publicPaths []string
+	logger      *slog.Logger
+}
+
+// NewMachineKeyAuth builds the machine-key auth core. keys must be non-nil;
+// auditor may be nil (refusals are then not audited); logger may be nil (a
+// default logger is used).
+func NewMachineKeyAuth(keys KeyValidator, auditor KeyRefusalAuditor, publicPaths []string, logger *slog.Logger) *MachineKeyAuth {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &MachineKeyAuth{keys: keys, auditor: auditor, publicPaths: publicPaths, logger: logger}
+}
+
+// Handler is the standalone mount, used where the JWT layer is off
+// (AUTH_MODE=dev): a request carrying no machine-key Bearer passes through
+// untouched (dev serves it unauthenticated, as before), a machine-key Bearer
+// is validated and scope checked exactly as behind the JWT middleware, and
+// public paths (the integration and a2a seams, health, metrics) are skipped
+// so those seams keep their own authentication in both modes.
+func (a *MachineKeyAuth) Handler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.isPublic(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		token, ok := bearerToken(r)
+		if !ok || !IsMachineKey(token) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		a.handle(w, r, token, next)
+	})
+}
+
+// bearerToken extracts an Authorization: Bearer token, reporting whether the
+// header carries one in the exact shape the auth layer accepts.
+func bearerToken(r *http.Request) (string, bool) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return "", false
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return "", false
+	}
+	return parts[1], true
+}
+
+// isPublic mirrors the JWT middleware's public path semantics: a trailing
+// slash means prefix, anything else exact match.
+func (a *MachineKeyAuth) isPublic(path string) bool {
+	return isPublicPath(a.publicPaths, path)
+}
+
+func isPublicPath(publicPaths []string, path string) bool {
+	for _, p := range publicPaths {
+		if strings.HasSuffix(p, "/") {
+			if strings.HasPrefix(path, p) {
+				return true
+			}
+		} else if path == p {
+			return true
+		}
+	}
+	return false
+}
+
+// handle authorizes one request whose Bearer token is a machine key: it
+// validates the key, refuses it anywhere a key is not a principal, checks
+// the module scope, and on success carries the key's id and scopes into the
+// request context (the id through the value pkg/actor reads, so audit rows
+// attribute to the key).
+func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey string, next http.Handler) {
+	principal, err := a.keys.ValidateKey(r.Context(), rawKey)
+	if err != nil {
+		if errors.Is(err, ErrInvalidMachineKey) {
+			a.logger.Warn("machine key rejected", "method", r.Method, "path", r.URL.Path, "request_id", GetRequestID(r.Context()))
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid machine key")
+			return
+		}
+		a.logger.Error("machine key validation failed", "error", err, "method", r.Method, "path", r.URL.Path, "request_id", GetRequestID(r.Context()))
+		respondAuthError(w, r, http.StatusServiceUnavailable, "unavailable", "machine key validation is unavailable")
+		return
+	}
+
+	// The context carries the key id from here on, so both the refusal
+	// audit rows and any downstream writes attribute to it.
+	ctx := WithKeyID(r.Context(), principal.ID)
+
+	module, isModuleRoute := ModuleForPath(r.URL.Path)
+	if !isModuleRoute || ModuleScopePolicyFor(module) != ModuleScopeAllowed {
+		// Fail closed: a machine key is a principal on declared /api/v1
+		// module routes only. Public seams never reach here (the caller's
+		// public path check runs first); anything else is refused.
+		a.auditRefusal(ctx, principal.ID, AuditActionKeyPathRefused, "", r)
+		respondAuthError(w, r, http.StatusForbidden, "forbidden", "machine keys are accepted on module routes under /api/v1 only")
+		return
+	}
+
+	for _, prefix := range machineKeyUserOnlyPrefixes {
+		if strings.HasPrefix(r.URL.Path, prefix) {
+			a.auditRefusal(ctx, principal.ID, AuditActionKeyUserRequired, "", r)
+			respondAuthError(w, r, http.StatusForbidden, "forbidden", "key management requires a user")
+			return
+		}
+	}
+
+	scope := RequiredScope(module, r.Method)
+	if !scopeHeld(principal.Scopes, scope) {
+		a.auditRefusal(ctx, principal.ID, AuditActionKeyScopeRefused, scope, r)
+		respondAuthError(w, r, http.StatusForbidden, "forbidden", "machine key lacks required scope "+scope)
+		return
+	}
+
+	ctx = WithKeyScopes(ctx, principal.Scopes)
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// scopeHeld is an exact match. There are no wildcard scopes: no existing key
+// data needs them (the table is empty at base and nothing seeds scopes), and
+// an exact vocabulary keeps a granted scope auditable as written.
+func scopeHeld(scopes []string, want string) bool {
+	for _, s := range scopes {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *MachineKeyAuth) auditRefusal(ctx context.Context, keyID, action, scope string, r *http.Request) {
+	if a.auditor == nil {
+		return
+	}
+	a.auditor.AuditKeyRefusal(ctx, keyID, action, scope, r.Method, r.URL.Path)
+}
+
+// --- the ADR error envelope, for auth-layer refusals -------------------------
+
+// authErrorBody is the wire ADR's error envelope (section 3). The shared
+// writer lands with the platform packages; the auth layer writes the same
+// shape here, as pkg/actor already does for its one rejection.
+type authErrorBody struct {
+	Error struct {
+		Code    string   `json:"code"`
+		Message string   `json:"message"`
+		Details []string `json:"details,omitempty"`
+	} `json:"error"`
+	Meta struct {
+		RequestID string `json:"request_id"`
+	} `json:"meta"`
+}
+
+// respondAuthError writes an auth-layer refusal in the ADR envelope: a
+// lowercase snake_case code from the ADR table, the specific message kept
+// verbatim (4xx only; this layer writes no 500 with detail), and the request
+// id so a client can quote one identifier for any response.
+func respondAuthError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	reqID := w.Header().Get("X-Request-ID")
+	if reqID == "" {
+		reqID = r.Header.Get("X-Request-ID")
+	}
+
+	var body authErrorBody
+	body.Error.Code = code
+	body.Error.Message = message
+	body.Meta.RequestID = reqID
+
+	slog.Warn("auth refusal",
+		"code", code,
+		"status", status,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"request_id", reqID,
+	)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }

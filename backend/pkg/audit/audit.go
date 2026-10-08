@@ -122,6 +122,36 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	return nil
 }
 
+// AuditKeyRefusal records a refused machine-key request (a valid key refused
+// for lacking a scope, for a user-only route, or for a path machine keys do
+// not address). It implements the middleware package's KeyRefusalAuditor
+// seam. The row's actor is the key itself: the ctx the auth core passes
+// carries the key id, so actor_kind is 'key' and actor_id the key's id, and
+// user_id stays NULL (a key is never a user). A failure to write is logged
+// and swallowed: the refusal verdict has already been served, and a full
+// audit table must not turn a 403 into a 500.
+func (l *Logger) AuditKeyRefusal(ctx context.Context, keyID, action, scope, method, path string) {
+	id, err := uuid.Parse(keyID)
+	if err != nil {
+		// The id comes from the api_keys row the validator read; a
+		// non-uuid here is a wiring fault worth a loud log line.
+		slog.Error("audit: machine key refusal with non-uuid key id", "key_id", keyID, "action", action)
+		id = uuid.Nil
+	}
+	changes := map[string]interface{}{"method": method, "path": path}
+	if scope != "" {
+		changes["scope"] = scope
+	}
+	if err := l.Log(ctx, Entry{
+		Action:     action,
+		EntityType: "api_key",
+		EntityID:   id,
+		Changes:    changes,
+	}); err != nil {
+		slog.Error("audit: failed to write machine key refusal", "action", action, "key_id", keyID, "error", err)
+	}
+}
+
 // Drain is retained for graceful-shutdown callers: writes are synchronous
 // now, so there is never anything in flight to wait for.
 func (l *Logger) Drain() {}
