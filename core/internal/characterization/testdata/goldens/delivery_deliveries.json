@@ -1,10 +1,7 @@
 [
   {
     "name": "delivery.delivery.assign.first",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/deliveries",
@@ -23,8 +20,8 @@
           "created_at": "<ts+0d>",
           "delivery_instructions": "r1b c first stop",
           "id": "<id-3>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-1>",
           "pod_proof_url": null,
           "pod_signed_by": null,
@@ -39,10 +36,7 @@
   },
   {
     "name": "delivery.delivery.assign.second",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/deliveries",
@@ -60,8 +54,8 @@
           "created_at": "<ts+0d>",
           "delivery_instructions": null,
           "id": "<id-5>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-4>",
           "pod_proof_url": null,
           "pod_signed_by": null,
@@ -122,10 +116,7 @@
   },
   {
     "name": "delivery.delivery.get",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/delivery/deliveries/<id-3>"
@@ -138,8 +129,8 @@
         "customer_name": "Golden Harness Co",
         "delivery_instructions": "r1b c first stop",
         "id": "<id-3>",
-        "latitude": 0,
-        "longitude": 0,
+        "latitude": 49.888,
+        "longitude": -119.496,
         "order_id": "<id-1>",
         "order_number": "<id-1>",
         "pod_proof_url": null,
@@ -194,10 +185,7 @@
   },
   {
     "name": "delivery.route.deliveries.two",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/delivery/routes/<id-2>/deliveries"
@@ -212,8 +200,8 @@
           "customer_name": "Golden Harness Co",
           "delivery_instructions": "r1b c first stop",
           "id": "<id-3>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-1>",
           "order_number": "<id-1>",
           "pod_proof_url": null,
@@ -230,8 +218,8 @@
           "customer_name": "Golden Harness Co",
           "delivery_instructions": null,
           "id": "<id-5>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-4>",
           "order_number": "<id-4>",
           "pod_proof_url": null,

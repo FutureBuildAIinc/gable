@@ -234,16 +234,21 @@ each used only where a route needed it.
   order: no route lists invoices by order, so the probe pins the count before
   and after a refused completion and the invoice a DELIVERED completion makes.
   The conformance test skips probe steps.
+- **A step can mask mock coordinates** (`maskMockGeo`, recorded as
+  `mask_mock_geo`): `latitude` and `longitude` on delivery rows. With no routing
+  key configured the mock geocoder derives them from two bytes of the order's
+  random uuid, so they differ per run, but always inside 0.128 degrees of the
+  demo anchor. Only a number inside that band is replaced (by the anchor, so the
+  schema still validates); a null coordinate or one outside the band stays in the
+  golden, so a delivery that loses its coordinates or gets a wrong one changes
+  it. A test pins that reach.
 - **A step can pin response headers** (`captureHeaders`, recorded under the
   response's `headers`): used for `Idempotency-Replayed` in the `idempotency`
   group. No other header is recorded.
 - **A step can mask named response fields** (`maskFields`, recorded in the
   golden as `mask_fields`, like the older mask flags): used where one field is
   derived from a per-run id or the calendar and everything else on the step
-  stays pinned. Today: `latitude` and `longitude` on delivery rows (the mock
-  geocoder, used because no routing key is configured, derives them from bytes
-  of the order's random uuid; masked to numeric 0 so the schema still
-  validates), `photo_url` on proof of delivery photos (the stored file name
+  stays pinned. Today: `photo_url` on proof of delivery photos (the stored file name
   carries eight random hex characters), `vendor_id` on the purchase order list
   (the seed assigns vendors from rand draws consumed inside map iteration, so
   the rows tie on the sort key and the placeholder numbering would shift), and

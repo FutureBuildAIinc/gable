@@ -3,8 +3,6 @@
 
 package characterization
 
-import "encoding/json"
-
 // R1-1b drafter C: the remaining delivery, POS and purchase-order routes.
 // Every variable these groups extract is prefixed c_ so it can never collide
 // with another drafter's. The groups run after every earlier group, so they
@@ -188,7 +186,8 @@ func r1bCDeliveryGroups() []groupDef {
 //     delivery.delivery.assign.second, delivery.delivery.get,
 //     delivery.route.deliveries.two, delivery.route.deliveries.optimized,
 //     delivery.route.deliveries.reordered and delivery.delivery.get.after_status
-//     (a stepDef flag over the existing maskField, keys latitude and longitude).
+//     (the maskMockGeo stepDef flag: only values inside the mock geocoder's
+//     band are masked, so a null or out of band coordinate still shows).
 //   - the POD photo url: HandleUploadPODPhoto names the file
 //     "<delivery id>-<8 random hex>.<ext>" and returns the url; the normaliser
 //     masks full UUIDs only. Needed on delivery.delivery.pod_photo
@@ -204,7 +203,6 @@ func r1bCDeliveryGroups() []groupDef {
 // Masks for the fields the product derives from per-run ids or draws (see
 // the list above); each is recorded in the golden next to the step.
 var (
-	geoMask    = map[string]any{"latitude": json.Number("0"), "longitude": json.Number("0")}
 	photoMask  = map[string]any{"photo_url": "<pod-photo-url>"}
 	vendorMask = map[string]any{"vendor_id": "<vendor>"}
 )
@@ -215,7 +213,7 @@ func r1bCMaskedGroups() []groupDef {
 			name: "delivery_deliveries",
 			steps: []stepDef{
 				{
-					name: "delivery.delivery.assign.first", method: "POST", path: "/api/v1/delivery/deliveries", maskFields: geoMask,
+					name: "delivery.delivery.assign.first", method: "POST", path: "/api/v1/delivery/deliveries", maskMockGeo: true,
 					body: map[string]any{
 						"route_id": "{c_route}", "order_id": "{myOrder}", "stop_sequence": 1,
 						"delivery_instructions": "r1b c first stop",
@@ -223,7 +221,7 @@ func r1bCMaskedGroups() []groupDef {
 					extract: map[string]string{"c_delivery": "/delivery/id"},
 				},
 				{
-					name: "delivery.delivery.assign.second", method: "POST", path: "/api/v1/delivery/deliveries", maskFields: geoMask,
+					name: "delivery.delivery.assign.second", method: "POST", path: "/api/v1/delivery/deliveries", maskMockGeo: true,
 					body: map[string]any{
 						"route_id": "{c_route}", "order_id": "{myCancelOrder}", "stop_sequence": 2,
 					},
@@ -232,10 +230,10 @@ func r1bCMaskedGroups() []groupDef {
 				{name: "delivery.delivery.assign.bad_body", method: "POST", path: "/api/v1/delivery/deliveries", body: "not an object"},
 				{name: "delivery.delivery.assign.unknown_route", method: "POST", path: "/api/v1/delivery/deliveries",
 					body: map[string]any{"route_id": cMissingID, "order_id": "{myOrder}", "stop_sequence": 1}},
-				{name: "delivery.delivery.get", method: "GET", path: "/api/v1/delivery/deliveries/{c_delivery}", maskFields: geoMask},
+				{name: "delivery.delivery.get", method: "GET", path: "/api/v1/delivery/deliveries/{c_delivery}", maskMockGeo: true},
 				{name: "delivery.delivery.get.not_found", method: "GET", path: "/api/v1/delivery/deliveries/" + cMissingID},
 				{name: "delivery.delivery.get.bad_id", method: "GET", path: "/api/v1/delivery/deliveries/not-a-uuid"},
-				{name: "delivery.route.deliveries.two", method: "GET", path: "/api/v1/delivery/routes/{c_route}/deliveries", maskFields: geoMask},
+				{name: "delivery.route.deliveries.two", method: "GET", path: "/api/v1/delivery/routes/{c_route}/deliveries", maskMockGeo: true},
 				{
 					name: "delivery.delivery.adjust_qty", method: "POST", path: "/api/v1/delivery/deliveries/{c_delivery}/adjust-qty",
 					body: map[string]any{
@@ -287,7 +285,7 @@ func r1bCMaskedGroups() []groupDef {
 				{name: "delivery.route.optimize", method: "POST", path: "/api/v1/delivery/routes/{c_route}/optimize"},
 				{name: "delivery.route.optimize.empty", method: "POST", path: "/api/v1/delivery/routes/{c_route_empty}/optimize"},
 				{name: "delivery.route.optimize.bad_id", method: "POST", path: "/api/v1/delivery/routes/not-a-uuid/optimize"},
-				{name: "delivery.route.deliveries.optimized", method: "GET", path: "/api/v1/delivery/routes/{c_route}/deliveries", maskFields: geoMask},
+				{name: "delivery.route.deliveries.optimized", method: "GET", path: "/api/v1/delivery/routes/{c_route}/deliveries", maskMockGeo: true},
 				{
 					name: "delivery.route.reorder", method: "POST", path: "/api/v1/delivery/routes/{c_route}/reorder",
 					body: map[string]any{"ordered_delivery_ids": []any{"{c_delivery2}", "{c_delivery}"}},
@@ -297,7 +295,7 @@ func r1bCMaskedGroups() []groupDef {
 				{name: "delivery.route.reorder.bad_body", method: "POST", path: "/api/v1/delivery/routes/{c_route}/reorder", body: "not an object"},
 				{name: "delivery.route.reorder.unknown_delivery", method: "POST", path: "/api/v1/delivery/routes/{c_route}/reorder",
 					body: map[string]any{"ordered_delivery_ids": []any{cMissingID}}},
-				{name: "delivery.route.deliveries.reordered", method: "GET", path: "/api/v1/delivery/routes/{c_route}/deliveries", maskFields: geoMask},
+				{name: "delivery.route.deliveries.reordered", method: "GET", path: "/api/v1/delivery/routes/{c_route}/deliveries", maskMockGeo: true},
 				{name: "delivery.route.complete.pending", method: "POST", path: "/api/v1/delivery/routes/{c_route}/complete"},
 				{name: "delivery.route.complete.empty", method: "POST", path: "/api/v1/delivery/routes/{c_route_empty}/complete"},
 				{name: "delivery.route.complete.bad_id", method: "POST", path: "/api/v1/delivery/routes/not-a-uuid/complete"},
@@ -326,7 +324,7 @@ func r1bCMaskedGroups() []groupDef {
 				{name: "delivery.route.complete.one_pending", method: "POST", path: "/api/v1/delivery/routes/{c_route}/complete"},
 				{name: "delivery.delivery.status.failed", method: "PUT", path: "/api/v1/delivery/deliveries/{c_delivery2}/status",
 					body: map[string]any{"status": "FAILED"}},
-				{name: "delivery.delivery.get.after_status", method: "GET", path: "/api/v1/delivery/deliveries/{c_delivery}", maskFields: geoMask},
+				{name: "delivery.delivery.get.after_status", method: "GET", path: "/api/v1/delivery/deliveries/{c_delivery}", maskMockGeo: true},
 				{name: "delivery.route.complete", method: "POST", path: "/api/v1/delivery/routes/{c_route}/complete"},
 				{name: "delivery.route.list_by_date.after", method: "GET", path: "/api/v1/delivery/routes?date={today+2}"},
 				{name: "delivery.route.dispatch.completed", method: "POST", path: "/api/v1/delivery/routes/{c_route}/dispatch"},
@@ -680,7 +678,7 @@ func r1bCDeliveredGroups() []groupDef {
 					extract: map[string]string{"c_route_dl": "/id"},
 				},
 				{
-					name: "delivery.delivery.assign.c_delivered", method: "POST", path: "/api/v1/delivery/deliveries", maskFields: geoMask,
+					name: "delivery.delivery.assign.c_delivered", method: "POST", path: "/api/v1/delivery/deliveries", maskMockGeo: true,
 					body: map[string]any{
 						"route_id": "{c_route_dl}", "order_id": "{c_order_dl}", "stop_sequence": 1,
 					},
@@ -697,7 +695,7 @@ func r1bCDeliveredGroups() []groupDef {
 						"signature_data_url": "data:image/png;base64,AAAA",
 					},
 				},
-				{name: "delivery.delivery.get.after_delivered", method: "GET", path: "/api/v1/delivery/deliveries/{c_delivery_dl}", maskFields: geoMask},
+				{name: "delivery.delivery.get.after_delivered", method: "GET", path: "/api/v1/delivery/deliveries/{c_delivery_dl}", maskMockGeo: true},
 				{
 					name: "invoice.for_order.after_delivered",
 					sql: `SELECT status, total_amount::text AS total_amount, tax_amount::text AS tax_amount,

@@ -71,10 +71,7 @@
   },
   {
     "name": "delivery.route.deliveries.optimized",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/delivery/routes/<id-1>/deliveries"
@@ -90,8 +87,8 @@
           "delivery_instructions": "r1b c first stop",
           "estimated_arrival": "<ts+0d>",
           "id": "<id-4>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-5>",
           "order_number": "<id-5>",
           "pod_proof_url": null,
@@ -109,8 +106,8 @@
           "delivery_instructions": null,
           "estimated_arrival": "<ts+0d>",
           "id": "<id-6>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-7>",
           "order_number": "<id-7>",
           "pod_proof_url": null,
@@ -209,10 +206,7 @@
   },
   {
     "name": "delivery.route.deliveries.reordered",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/delivery/routes/<id-1>/deliveries"
@@ -228,8 +222,8 @@
           "delivery_instructions": null,
           "estimated_arrival": "<ts+0d>",
           "id": "<id-6>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-7>",
           "order_number": "<id-7>",
           "pod_proof_url": null,
@@ -247,8 +241,8 @@
           "delivery_instructions": "r1b c first stop",
           "estimated_arrival": "<ts+0d>",
           "id": "<id-4>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-5>",
           "order_number": "<id-5>",
           "pod_proof_url": null,
@@ -562,10 +556,7 @@
   },
   {
     "name": "delivery.delivery.get.after_status",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/delivery/deliveries/<id-4>"
@@ -579,8 +570,8 @@
         "delivery_instructions": "r1b c first stop",
         "estimated_arrival": "<ts+0d>",
         "id": "<id-4>",
-        "latitude": 0,
-        "longitude": 0,
+        "latitude": 49.888,
+        "longitude": -119.496,
         "order_id": "<id-5>",
         "order_number": "<id-5>",
         "pod_proof_url": "/uploads/pod/golden.png",

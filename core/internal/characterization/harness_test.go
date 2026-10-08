@@ -543,9 +543,16 @@ type capturedStep struct {
 	// geocoder's coordinates, a random upload file name, a fiscal period's
 	// year); everything else on the step stays pinned. Recorded in the
 	// golden, like the other mask flags.
-	MaskFields map[string]any   `json:"mask_fields,omitempty"`
-	Request    capturedRequest  `json:"request"`
-	Response   capturedResponse `json:"response"`
+	MaskFields map[string]any `json:"mask_fields,omitempty"`
+	// MaskMockGeo, when true, replaces a latitude or longitude value with the
+	// demo anchor's coordinate when it lies inside the band the mock geocoder
+	// can produce (it derives them from two bytes of the order uuid, which is
+	// random per run). A null coordinate, or one outside the band, stays
+	// as it is, so a delivery that lost its coordinates or got a wrong one
+	// still changes the golden. Recorded in the golden, like the other masks.
+	MaskMockGeo bool             `json:"mask_mock_geo,omitempty"`
+	Request     capturedRequest  `json:"request"`
+	Response    capturedResponse `json:"response"`
 }
 
 // doStep executes one scenario step: substitute {vars}, send, capture the
@@ -670,6 +677,10 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		for key, ph := range s.maskFields {
 			maskField(step.Response.Body, key, ph)
 		}
+	}
+	step.MaskMockGeo = s.maskMockGeo
+	if s.maskMockGeo {
+		maskMockGeo(step.Response.Body)
 	}
 	if s.sortPrimaryArray {
 		switch body := step.Response.Body.(type) {
@@ -820,6 +831,44 @@ func maskField(v any, key string, ph any) {
 	case []any:
 		for _, vv := range x {
 			maskField(vv, key, ph)
+		}
+	}
+}
+
+// Mock geocoder band (delivery.mockGeocode): the demo anchor plus an offset of
+// (byte - 128) / 1000 degrees per axis, so within 0.128 of it.
+const (
+	mockGeoAnchorLat = 49.888
+	mockGeoAnchorLng = -119.496
+	mockGeoBand      = 0.1285
+)
+
+// maskMockGeo rewrites, in place, every latitude and longitude number that
+// lies in the mock geocoder's band to the anchor coordinate. Anything else
+// under those keys (null, a number outside the band) is left alone.
+func maskMockGeo(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, vv := range x {
+			var anchor float64
+			switch k {
+			case "latitude":
+				anchor = mockGeoAnchorLat
+			case "longitude":
+				anchor = mockGeoAnchorLng
+			default:
+				maskMockGeo(vv)
+				continue
+			}
+			if n, ok := vv.(json.Number); ok {
+				if f, err := n.Float64(); err == nil && f > anchor-mockGeoBand && f < anchor+mockGeoBand {
+					x[k] = json.Number(strconv.FormatFloat(anchor, 'f', -1, 64))
+				}
+			}
+		}
+	case []any:
+		for _, vv := range x {
+			maskMockGeo(vv)
 		}
 	}
 }

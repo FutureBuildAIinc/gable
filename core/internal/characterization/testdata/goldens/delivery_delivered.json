@@ -75,10 +75,7 @@
   },
   {
     "name": "delivery.delivery.assign.c_delivered",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/deliveries",
@@ -96,8 +93,8 @@
           "created_at": "<ts+0d>",
           "delivery_instructions": null,
           "id": "<id-9>",
-          "latitude": 0,
-          "longitude": 0,
+          "latitude": 49.888,
+          "longitude": -119.496,
           "order_id": "<id-4>",
           "pod_proof_url": null,
           "pod_signed_by": null,
@@ -187,10 +184,7 @@
   },
   {
     "name": "delivery.delivery.get.after_delivered",
-    "mask_fields": {
-      "latitude": 0,
-      "longitude": 0
-    },
+    "mask_mock_geo": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/delivery/deliveries/<id-9>"
@@ -203,8 +197,8 @@
         "customer_name": "Golden Harness Co",
         "delivery_instructions": null,
         "id": "<id-9>",
-        "latitude": 0,
-        "longitude": 0,
+        "latitude": 49.888,
+        "longitude": -119.496,
         "order_id": "<id-4>",
         "order_number": "<id-4>",
         "pod_proof_url": "/uploads/pod/golden-delivered.png",
