@@ -48,20 +48,34 @@ func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Se
 	}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/integration/products", h.authMiddleware(h.ListProductsByCategory))
-	mux.HandleFunc("POST /api/integration/quotes/bulk-price", h.authMiddleware(h.BulkCalculatePrice))
-	mux.HandleFunc("POST /api/integration/quotes", h.authMiddleware(h.CreateQuote))
-	mux.HandleFunc("POST /api/integration/quotes/{id}/accept-and-convert", h.authMiddleware(h.AcceptAndConvertQuote))
+// RegisterRoutes registers the integration surface. An optional wrap runs
+// INSIDE the auth chain (between the X-Integration-Key check and the route
+// handler): the idempotency layer goes there, where the caller's identity
+// (its tenant) is what the auth surface establishes. Without a wrap the
+// routes register exactly as before.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, wrap ...func(http.Handler) http.Handler) {
+	route := func(next http.HandlerFunc) http.HandlerFunc {
+		var inner http.Handler = next
+		for i := len(wrap) - 1; i >= 0; i-- {
+			if wrap[i] != nil {
+				inner = wrap[i](inner)
+			}
+		}
+		return h.authMiddleware(inner.ServeHTTP)
+	}
+	mux.HandleFunc("GET /api/integration/products", route(h.ListProductsByCategory))
+	mux.HandleFunc("POST /api/integration/quotes/bulk-price", route(h.BulkCalculatePrice))
+	mux.HandleFunc("POST /api/integration/quotes", route(h.CreateQuote))
+	mux.HandleFunc("POST /api/integration/quotes/{id}/accept-and-convert", route(h.AcceptAndConvertQuote))
 
 	// AI_LM load-management, routing and staff-authentication surface. See
 	// ailm.go for the wire contract these satisfy.
-	mux.HandleFunc("GET /api/integration/vehicles", h.authMiddleware(h.ListVehicles))
-	mux.HandleFunc("GET /api/integration/drivers", h.authMiddleware(h.ListDrivers))
-	mux.HandleFunc("GET /api/integration/locations", h.authMiddleware(h.ListLocations))
-	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
-	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
-	mux.HandleFunc("POST /api/integration/validate-staff", h.authMiddleware(h.ValidateStaff))
+	mux.HandleFunc("GET /api/integration/vehicles", route(h.ListVehicles))
+	mux.HandleFunc("GET /api/integration/drivers", route(h.ListDrivers))
+	mux.HandleFunc("GET /api/integration/locations", route(h.ListLocations))
+	mux.HandleFunc("GET /api/integration/orders", route(h.ListOrdersForDate))
+	mux.HandleFunc("POST /api/integration/delivery-routes", route(h.CreateDeliveryRoute))
+	mux.HandleFunc("POST /api/integration/validate-staff", route(h.ValidateStaff))
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
