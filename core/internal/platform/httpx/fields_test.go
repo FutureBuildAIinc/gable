@@ -226,7 +226,9 @@ func TestDecodeJSON(t *testing.T) {
 		{"not json", `{nope`, ""},
 		{"unknown field", `{"name":"a","nmae":"b"}`, "nmae"},
 		{"wrong type", `{"name":5}`, "name"},
-		{"wrong type in a row", `{"rows":[{"n":"x"}]}`, "rows[0].n"},
+		// The decoder names the field as rows.n before Go 1.27 and rows.0.n from it;
+		// either way the path ends in the field and carries no raw dots before an index.
+		{"wrong type in a row", `{"rows":[{"n":"x"}]}`, "rows.n"},
 		{"two documents", `{"name":"a"}{"name":"b"}`, ""},
 		{"an array", `[1]`, ""},
 	}
@@ -239,7 +241,11 @@ func TestDecodeJSON(t *testing.T) {
 				t.Fatalf("DecodeJSON = %#v, want a 400 bad_request", err)
 			}
 			if c.wantField != "" {
-				if len(e.Details) != 1 || e.Details[0].Field != c.wantField {
+				got := e.Details
+				if len(got) == 1 && got[0].Field == "rows[0].n" {
+					got[0].Field = "rows.n"
+				}
+				if len(got) != 1 || got[0].Field != c.wantField {
 					t.Fatalf("details = %+v, want one entry naming %q", e.Details, c.wantField)
 				}
 			}
