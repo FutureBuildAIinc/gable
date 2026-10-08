@@ -189,3 +189,28 @@ own scoped-key migration, if ever, is decided on its own record.
 - Route additions under `/api/v1` must declare their module segment in the
   vocabulary, which is the point: a new route arrives with a scope policy or
   not at all.
+
+## Known limits
+
+Accepted with this record, each named with the later item that narrows it:
+
+- **A key is not branch bound.** `api_keys` carries no branch, so a key
+  reads and writes every branch the module routes expose unless the caller
+  itself pins `X-Branch-Id` (section 6); a `quotes:read` key can read every
+  branch's quotes. Branch bound keys narrow this with the confirm gated
+  write scopes of cycle 5, item R5-2.
+- **`admin` and `users` are broad scopes.** The module is the only
+  granularity, so `admin:write` reaches AI settings, routing settings,
+  staff and module grants alike, and `users:write` reaches branch grants
+  for human users, wider than "per module" sounds. Finer scope names (for
+  example `admin:settings`, `users:grants`) narrow this with the same
+  confirm gated write scopes of cycle 5, item R5-2 (`*:propose`,
+  `*:commit`).
+- **The prefix lookup is a timing oracle for prefix existence.** A request
+  whose 12 character prefix matches a stored key but whose body is wrong
+  pays one Argon2id compare; an unknown prefix returns before any hash
+  work, so response time tells a caller whether a prefix exists. The
+  impact is low: the prefix is not a secret (an administrator reads it
+  from the key row), the global rate limit bounds probing, and the hash
+  compare itself is constant time. A dummy compare on the miss path would
+  close it if it ever matters.
