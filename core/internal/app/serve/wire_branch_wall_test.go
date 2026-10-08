@@ -178,6 +178,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	mux := http.NewServeMux()
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)), location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
 	wall.inventory(mux, inventory.NewService(inventory.NewRepository(db)))
+	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.purchaseOrders(mux, purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil))
@@ -650,5 +651,63 @@ func TestBranchWall_MatchingExceptions(t *testing.T) {
 		if got := strings.Contains(string(body), f.poB.String()); got != c.wantB {
 			t.Errorf("matching exceptions, %s: branch B's exception present = %v, want %v", c.name, got, c.wantB)
 		}
+	}
+}
+
+// TestBranchWall_CatalogReads: a product read sums stock over the caller's
+// branches only (ADR 0007 section 2.3, ADR 0006 7.1), and a branch read by id
+// is held to the record rule: a branch the caller may not target is a 403.
+func TestBranchWall_CatalogReads(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A, B := f.branchA.String(), f.branchB.String()
+	for _, r := range []struct {
+		yard           uuid.UUID
+		qty, allocated int
+	}{{f.yardA, 10, 2}, {f.yardB, 100, 5}} {
+		if _, err := db.Pool.Exec(context.Background(),
+			`INSERT INTO inventory (product_id, location, location_id, quantity, allocated) VALUES ($1, 'wl', $2, $3, $4)`,
+			f.productID, r.yard, r.qty, r.allocated); err != nil {
+			t.Fatalf("seed stock: %v", err)
+		}
+	}
+	stock := func(role, sub, header string) [3]string {
+		status, body := f.callBody(t, "GET", "/api/v1/products/"+f.productID.String(), "", role, sub, header)
+		if status != http.StatusOK {
+			t.Fatalf("%s product read: %d %s", role, status, body)
+		}
+		var v struct{ OnHand, Allocated, Available string }
+		var raw map[string]any
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatal(err)
+		}
+		v.OnHand, v.Allocated, v.Available = raw["on_hand"].(string), raw["allocated"].(string), raw["available"].(string)
+		return [3]string{v.OnHand, v.Allocated, v.Available}
+	}
+	if got := stock("warehouse", "u-a", A); got != [3]string{"10", "2", "8"} {
+		t.Errorf("a branch A caller sums %v, want its own stock 10/2/8", got)
+	}
+	if got := stock("warehouse", "u-a", ""); got != [3]string{"10", "2", "8"} {
+		t.Errorf("a bound caller with no header sums %v, want its granted branches 10/2/8", got)
+	}
+	if got := stock("admin", "boss", ""); got != [3]string{"110", "7", "103"} {
+		t.Errorf("an administrator with no header sums %v, want every branch 110/7/103", got)
+	}
+	if got := stock("admin", "boss", B); got != [3]string{"100", "5", "95"} {
+		t.Errorf("an administrator in branch B sums %v, want 100/5/95", got)
+	}
+
+	if got := f.call(t, "GET", "/api/v1/branches/"+B, "", "sales", "u-a", A); got != http.StatusForbidden {
+		t.Errorf("branch B read by a branch A caller: %d, want 403", got)
+	}
+	if got := f.call(t, "GET", "/api/v1/branches/"+A, "", "sales", "u-a", A); got != http.StatusOK {
+		t.Errorf("own branch read: %d, want 200", got)
+	}
+	if got := f.call(t, "GET", "/api/v1/branches/"+B, "", "admin", "boss", ""); got != http.StatusOK {
+		t.Errorf("administrator branch read: %d, want 200", got)
+	}
+	// A branch route refuses a path id that is not a branch.
+	if got := f.call(t, "PUT", "/api/v1/branches/"+f.yardA.String(), `{"code":"x","revision":1}`, "admin", "boss", ""); got != http.StatusNotFound {
+		t.Errorf("branch update of a yard: %d, want 404", got)
 	}
 }

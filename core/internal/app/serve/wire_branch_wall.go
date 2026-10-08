@@ -12,6 +12,7 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/database"
@@ -45,6 +46,14 @@ func newBranchWall(db *database.DB) *branchWall {
 // list).
 func (w *branchWall) locations(mux *http.ServeMux, h *location.Handler) {
 	h.WithBranchWall(w.guard, w.mw).RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
+}
+
+// products mounts the product routes behind the branch middleware: the stock
+// totals a product read carries (on_hand, allocated, available) and the
+// reorder alerts are sums over inventory, so they are held to the caller's
+// branches like every other branch scoped read.
+func (w *branchWall) products(mux *http.ServeMux, h *product.Handler) {
+	h.RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "warehouse"))
 }
 
 func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {

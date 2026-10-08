@@ -235,7 +235,7 @@ func Run() {
 	productRepo := product.NewRepository(db)
 	productSvc := product.NewService(productRepo)
 	productHandler := product.NewHandler(productSvc)
-	productHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales", "warehouse"))
+	wall.products(mux, productHandler)
 
 	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
 	// fallback) powers all AI features: material-list/freight OCR, PIM content, and

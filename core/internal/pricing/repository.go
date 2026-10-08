@@ -5,13 +5,16 @@ package pricing
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Repository interface {
@@ -323,6 +326,20 @@ func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) 
 		timeOf(rule.StartsAt), timeOf(rule.ExpiresAt), rule.IsActive, rule.Priority, rule.Revision, rule.CreatedAt.Time, rule.UpdatedAt.Time,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505":
+				return httpx.Duplicate("a rule with this name and scope already exists")
+			case "23503":
+				for _, field := range []string{"product_id", "customer_id", "job_id"} {
+					if strings.Contains(pgErr.ConstraintName, field) {
+						return httpx.BadRequest(field+" does not name an existing row",
+							httpx.FieldError{Field: field, Message: "no such row"})
+					}
+				}
+			}
+		}
 		return fmt.Errorf("failed to create pricing rule: %w", err)
 	}
 	return nil

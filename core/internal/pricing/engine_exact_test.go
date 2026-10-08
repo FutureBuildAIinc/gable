@@ -5,6 +5,7 @@ package pricing
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -145,18 +146,24 @@ func TestCalculateScaledMatchesCompatibilityEntry(t *testing.T) {
 		cust  *customer.Customer
 		rules []PricingRule
 		base  float64
+		// baseCommit is the FinalPrice the base commit's float64 engine
+		// answered for the fixture at quantity 20 (recorded by running the
+		// fixture against it). The compatibility entry point answers the
+		// same value apart from the cent rounding this item removes: never
+		// more than a cent apart, and equal where the base did not round.
+		baseCommit float64
 	}{
-		{name: "retail no rules", cust: &customer.Customer{ID: uuid.New()}, base: 10.00},
-		{name: "gold tier", cust: gold, base: subCentBase},
-		{name: "price level", cust: levelled, base: subCentBase},
+		{name: "retail no rules", cust: &customer.Customer{ID: uuid.New()}, base: 10.00, baseCommit: 10},
+		{name: "gold tier", cust: gold, base: subCentBase, baseCommit: 1.166625},
+		{name: "price level", cust: levelled, base: subCentBase, baseCommit: 1.25926875},
 		{name: "quantity break", cust: &customer.Customer{ID: uuid.New()},
 			rules: []PricingRule{{ID: uuid.New(), Name: "20+", RuleType: RuleTypeQuantityBreak,
 				DiscountPct: pctQtyPtr(8), MinQuantity: qtyOf(20), IsActive: true}},
-			base: 10.00},
+			base: 10.00, baseCommit: 9.2},
 		{name: "fixed price rule", cust: &customer.Customer{ID: uuid.New()},
 			rules: []PricingRule{{ID: uuid.New(), Name: "Flat", RuleType: RuleTypePromotional,
 				FixedPrice: pricePtrOf(9.4261), IsActive: true}},
-			base: 10.00},
+			base: 10.00, baseCommit: 9.43},
 	}
 
 	for _, fx := range fixtures {
@@ -173,6 +180,9 @@ func TestCalculateScaledMatchesCompatibilityEntry(t *testing.T) {
 			}
 			if compat.FinalPrice != scaled.Float64() {
 				t.Fatalf("CalculatePriceWithQty answered %v while CalculateScaled answered %v", compat.FinalPrice, scaled.Float64())
+			}
+			if diff := math.Abs(compat.FinalPrice - fx.baseCommit); diff >= 0.005 {
+				t.Fatalf("the compatibility answer %v is %v from the base commit's %v, more than the cent rounding removed", compat.FinalPrice, diff, fx.baseCommit)
 			}
 			if compat.Source != scaled.Source || compat.Details != scaled.Details {
 				t.Fatalf("the two entry points disagree: %+v vs %+v", compat, scaled)
