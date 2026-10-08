@@ -74,10 +74,10 @@ type envelope struct {
 }
 
 type item struct {
-	EventID  string          `json:"event_id"`
-	Type     string          `json:"type"`
-	Org      string          `json:"org"`
-	BranchID *string         `json:"branch_id"`
+	EventID  string  `json:"event_id"`
+	Type     string  `json:"type"`
+	Org      string  `json:"org"`
+	BranchID *string `json:"branch_id"`
 	Entity   struct {
 		Kind string `json:"kind"`
 		ID   string `json:"id"`

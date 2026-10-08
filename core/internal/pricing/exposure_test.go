@@ -323,12 +323,12 @@ func (a *recordingAudit) count() int {
 // --- fixture -------------------------------------------------------------
 
 type scannerFixture struct {
-	scanner  *ExposureScanner
-	exposure *fakeExposureRepo
-	escal    *MockEscalatorRepository
-	quotes   *fakeQuoteReader
+	scanner   *ExposureScanner
+	exposure  *fakeExposureRepo
+	escal     *MockEscalatorRepository
+	quotes    *fakeQuoteReader
 	outboxRec *recordingOutbox
-	audit    *recordingAudit
+	audit     *recordingAudit
 
 	indexID     uuid.UUID
 	quoteID     uuid.UUID
