@@ -173,7 +173,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: "#/components/responses/WireNotFound"
     put:
       operationId: orderUpdate
       tags:
@@ -218,7 +218,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: "#/components/responses/WireNotFound"
         '409':
           $ref: '#/components/responses/ConflictEither'
         '413':
@@ -287,7 +287,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/WireError'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: "#/components/responses/WireNotFound"
         '409':
           $ref: '#/components/responses/ConflictEither'
         '413':

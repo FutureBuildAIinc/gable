@@ -6185,7 +6185,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: "#/components/responses/WireNotFound"
     put:
       operationId: orderUpdate
       tags:
@@ -6227,7 +6227,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: "#/components/responses/WireNotFound"
         '409':
           $ref: '#/components/responses/ConflictEither'
         '413':
@@ -6286,7 +6286,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/WireError'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: "#/components/responses/WireNotFound"
         '409':
           $ref: '#/components/responses/ConflictEither'
         '413':
@@ -10777,11 +10777,11 @@ paths:
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/quotes/{id}/convert:
     post:
-      operationId: quoteConvertToOrderPayload
+      operationId: quoteConvertToOrder
       tags: [quote]
-      summary: Accept the quote and return the order creation payload
+      summary: Accept the quote and create its order in one act
       description: >-
-        A transition to accepted on the client's revision, then the body the client maps onto POST /api/v1/orders itself; no order is created here. The orders route is not converted yet and reads a numeric quantity and price_each in cents, so the client maps quantity and price_each_cents onto it. Until the orders contract carries the conversion pair (cycle 2), a quote with a line whose pair is not 1 to 1, or whose price_uom differs from uom, is refused with 409 invalid_state_transition and a line_not_convertible blocker naming lines[i]; the quote is left as it was.
+        A transition to accepted on the client's revision and the creation of the order in ONE transaction (ADR 0005 section 5.8), answering 201 with the order: no payload crosses the client, so a retry cannot create a second order. The lines carry the conversion pair and the scale 4 price without loss; the quote's freight becomes one FREIGHT charge line; a stocked line sold in another unit than its product's stocking unit is refused with 409 unit_not_stock_unit until cycle 3; a quote that already has an order not cancelled is 409 already_converted. Events: quote.accepted, then order.created.
       parameters:
         - name: id
           in: path
@@ -10793,17 +10793,21 @@ paths:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
-        "200":
-          description: The order creation payload, with the accepted quote's revision as the ETag.
+        "201":
+          description: The created order, with its revision as the ETag.
           headers:
+            Location:
+              description: /api/v1/orders/{id} of the created order.
+              schema:
+                type: string
             ETag:
-              description: The accepted quote's revision in quotes, for example "3".
+              description: The created order's revision in quotes, for example "1".
               schema:
                 type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuoteOrderPayload"
+                $ref: "#/components/schemas/Order"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
@@ -20565,41 +20569,6 @@ components:
           type: integer
           format: int64
           minimum: 1
-    QuoteOrderPayload:
-      type: object
-      required: [customer_id, quote_id, revision, lines]
-      description: What the client maps onto POST /api/v1/orders, which is not converted yet and reads a numeric quantity and price_each in cents.
-      properties:
-        customer_id:
-          type: string
-          format: uuid
-        quote_id:
-          type: string
-          format: uuid
-        revision:
-          type: integer
-          format: int64
-          minimum: 1
-          description: The accepted quote's revision.
-        lines:
-          type: array
-          items:
-            $ref: "#/components/schemas/QuoteOrderPayloadLine"
-    QuoteOrderPayloadLine:
-      type: object
-      required: [product_id, quantity, uom, price_each_cents]
-      properties:
-        product_id:
-          type: [string, "null"]
-          format: uuid
-        quantity:
-          $ref: "#/components/schemas/Quantity"
-        uom:
-          $ref: "#/components/schemas/QuoteUom"
-        price_each_cents:
-          type: integer
-          format: int64
-          description: The price per sale unit in cents (the unit price through the line's conversion pair).
     QuotePage:
       type: object
       required: [items, next_cursor, limit]

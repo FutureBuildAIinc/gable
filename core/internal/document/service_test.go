@@ -347,10 +347,11 @@ func TestGeneratePickTicketPDF_QuantityAndUOM(t *testing.T) {
 	prodRef := prodID
 	qty := httpx.Quantity(125000)
 	uom := "MBF"
+	sku := "2X4-8"
 	createdAt := httpx.TimestampOf(time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC))
 	ord := &order.Order{
 		OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: createdAt},
-		Lines:        []order.OrderLine{{Line: salesdoc.Line{ProductID: &prodRef, Quantity: &qty, UOM: &uom, LineType: salesdoc.LineProduct}}},
+		Lines:        []order.OrderLine{{Line: salesdoc.Line{ProductID: &prodRef, SKU: &sku, Description: "SPF Stud", Quantity: &qty, UOM: &uom, LineType: salesdoc.LineProduct}}},
 	}
 	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme Construction"})
 	if err != nil {
@@ -360,7 +361,7 @@ func TestGeneratePickTicketPDF_QuantityAndUOM(t *testing.T) {
 
 	mustContain(t, doc, "PICK TICKET")
 	mustContain(t, doc, "2X4-8 - SPF Stud")
-	mustContain(t, doc, "12.50 [MBF]")
+	mustContain(t, doc, "12.5 [MBF]")
 	mustContain(t, doc, "Acme Construction")
 	mustContain(t, doc, "2026-03-04")
 }
@@ -379,8 +380,10 @@ func TestGeneratePickTicketPDF_UOMFallback(t *testing.T) {
 	ord := &order.Order{
 		OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: httpx.TimestampOf(time.Now())},
 		Lines: []order.OrderLine{
-			{Line: salesdoc.Line{ProductID: &knownRef, Quantity: &q3, LineType: salesdoc.LineProduct}},
-			{Line: salesdoc.Line{ProductID: &unknownRef, Quantity: &q5, LineType: salesdoc.LineProduct}}, // unknown product
+			// The pick ticket reads the line's own snapshots; a product row
+			// the line does not describe is not looked up any more.
+			{Line: salesdoc.Line{ProductID: &knownRef, Description: "Known thing", Quantity: &q3, LineType: salesdoc.LineProduct}},
+			{Line: salesdoc.Line{ProductID: &unknownRef, Description: "Unknown product", Quantity: &q5, LineType: salesdoc.LineProduct}},
 		},
 	}
 	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme"})
@@ -389,10 +392,10 @@ func TestGeneratePickTicketPDF_UOMFallback(t *testing.T) {
 	}
 	assertPDF(t, doc)
 
-	mustContain(t, doc, "Unknown Product")
-	mustContain(t, doc, "5.00 [EA]")
-	// A product row with no UOM configured renders an empty bracket today.
-	mustContain(t, doc, "3.00 []")
+	mustContain(t, doc, "Unknown product")
+	mustContain(t, doc, "5 [EA]")
+	// A line with no unit falls back to EA rather than an empty bracket.
+	mustContain(t, doc, "3 [EA]")
 }
 
 // CORRECTNESS: the pick ticket must not carry pricing. It goes to the yard and

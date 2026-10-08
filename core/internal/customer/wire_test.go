@@ -753,8 +753,8 @@ func TestWire_CurrencyChangeRefusedWithAnOpenOrder(t *testing.T) {
 	}
 
 	var orderID uuid.UUID
-	if err := f.db.Pool.QueryRow(ctx, `INSERT INTO orders (customer_id, status, total_amount, branch_id)
-		VALUES ($1, 'CONFIRMED', 10, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')) RETURNING id`, id).Scan(&orderID); err != nil {
+	if err := f.db.Pool.QueryRow(ctx, `INSERT INTO orders (customer_id, status, total_amount, branch_id, delivery_type, currency)
+		VALUES ($1, 'CONFIRMED', 10, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), 'PICKUP', 'USD') RETURNING id`, id).Scan(&orderID); err != nil {
 		t.Fatal(err)
 	}
 	r := put(1, "USD")
