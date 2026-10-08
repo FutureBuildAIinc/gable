@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/gablelbm/gable/internal/ai"
+	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/joho/godotenv"
 )
 
@@ -61,6 +62,12 @@ type Config struct {
 
 	// Auth & Security
 	AuthMode string // "dev" to disable auth; otherwise JWKS_URL is required
+
+	// TrustedProxies lists the reverse proxy networks whose X-Forwarded-For
+	// is believed (TRUSTED_PROXIES, comma separated CIDRs or addresses).
+	// Empty by default: no forwarding header is trusted and the client is the
+	// TCP peer. A deployment behind a load balancer sets the balancer's network.
+	TrustedProxies clientip.Trusted
 
 	// Logging
 	LogLevel string // DEBUG, INFO, WARN, ERROR (default: INFO)
@@ -175,6 +182,12 @@ func Load() (*Config, error) {
 	if err := ai.ValidateBaseURL(cfg.OpenRouterBaseURL); err != nil {
 		return nil, fmt.Errorf("invalid OPENROUTER_BASE_URL: %w", err)
 	}
+
+	trusted, err := clientip.Parse(getEnv("TRUSTED_PROXIES", ""))
+	if err != nil {
+		return nil, fmt.Errorf("invalid TRUSTED_PROXIES: %w", err)
+	}
+	cfg.TrustedProxies = trusted
 
 	return cfg, nil
 }

@@ -66,6 +66,7 @@ import (
 	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -147,6 +148,7 @@ func Run() {
 	}
 
 	logger.Info("Starting server...", "port", cfg.Port, "auth_mode", cfg.AuthMode, "log_level", cfg.LogLevel)
+	cfg.TrustedProxies.LogConfigured(logger)
 
 	// 3. Database Connection
 	db, err := database.Connect(cfg.DatabaseURL, database.PoolConfig{
@@ -752,7 +754,7 @@ func Run() {
 	// see. The global layer skips the portal prefix, so nothing runs twice.
 	portalIdem := middleware.IdempotencyForPortalAuth(db)
 	portalChain := func(next http.Handler) http.Handler { return portalMw(portalIdem(next)) }
-	portalHandler.RegisterRoutes(mux, portalChain, middleware.StrictRateLimit(10))
+	portalHandler.RegisterRoutes(mux, portalChain, middleware.StrictRateLimit(10, cfg.TrustedProxies))
 
 	// Project Module (Sprint 34: Project Management Dashboard)
 	projectRepo := project.NewRepository(db)
@@ -938,7 +940,7 @@ func Run() {
 	finalHandler = middleware.CORSMiddleware(finalHandler)
 
 	// Rate limiting (120 requests/minute per IP)
-	finalHandler = middleware.RateLimit(120)(finalHandler)
+	finalHandler = middleware.RateLimit(120, cfg.TrustedProxies)(finalHandler)
 
 	// Panic recovery
 	finalHandler = middleware.Recovery(logger)(finalHandler)
@@ -950,7 +952,7 @@ func Run() {
 	finalHandler = metrics.HTTPMetrics(finalHandler)
 
 	// Access logging (outermost — captures full request lifecycle)
-	finalHandler = RequestLogger(logger, finalHandler)
+	finalHandler = RequestLogger(logger, cfg.TrustedProxies, finalHandler)
 
 	// 7. Start Server with Graceful Shutdown
 	srv := &http.Server{
@@ -1101,8 +1103,12 @@ func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 }
 
 // RequestLogger logs incoming requests with status code, bytes written, and request ID.
-func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {
+// remote_addr is the resolved client (see clientip), and a forwarding header
+// from a peer outside the trusted proxies is reported as a warning.
+func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Handler) http.Handler {
+	watch := clientip.NewForwardingWatch(logger, trusted)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		watch.Observe(r)
 		start := time.Now()
 		sw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
@@ -1112,7 +1118,7 @@ func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 			"status", sw.status,
 			"bytes", sw.bytesWritten,
 			"duration_ms", time.Since(start).Milliseconds(),
-			"remote_addr", r.RemoteAddr,
+			"remote_addr", trusted.Of(r),
 			"request_id", middleware.GetRequestID(r.Context()),
 		)
 	})

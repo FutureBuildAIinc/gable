@@ -119,7 +119,7 @@ If the wrong total is off by exactly 100×, you have found the bug and can say s
 
 Also possible without being a display bug: money conventions genuinely differ per module
 (ERP orders/invoices and the `account` module use cents; portal, quotes, and DailyTill use
-float dollars). `CLAUDE.md` § "Money convention is not uniform across modules" has the table.
+float dollars). `AGENTS.md` § "Money convention is not uniform across modules" has the table.
 
 ### b. Demo data vanished / numbers reset
 

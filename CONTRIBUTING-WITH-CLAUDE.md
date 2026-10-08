@@ -46,7 +46,7 @@ That's it. Type what you want in plain English and press enter.
 
 This repository ships a `.claude/` folder containing everything below. When you start Claude
 Code from inside `gable`, it picks that up automatically — the skills, the shortcuts, and
-`CLAUDE.md` (a long file of conventions and gotchas that stops it giving you generic advice).
+`CLAUDE.md`, which imports `AGENTS.md` (a long file of conventions and gotchas that stops it giving you generic advice).
 
 You don't install anything. You don't configure anything. It's already there.
 
@@ -214,7 +214,7 @@ to this project than most patches.
 |---|---|
 | Build and run Gable locally | [`README.md`](./README.md) quickstart |
 | Understand the branch model, PR workflow, CLA | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
-| Understand the conventions and gotchas | [`CLAUDE.md`](./CLAUDE.md) |
+| Understand the conventions and gotchas | [`AGENTS.md`](./AGENTS.md) |
 | Understand the architecture | [`docs/architecture.md`](./docs/architecture.md) |
 | Report a security problem | [`SECURITY.md`](./SECURITY.md) |
 | Know how we treat each other | [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) |

@@ -83,6 +83,24 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 > on your own machine against throwaway data, and must **never** be set on a
 > reachable or production deployment — see [SECURITY.md](./SECURITY.md).
 
+## Behind a reverse proxy
+
+The global and login rate limits key on the caller's address. By default that is
+the TCP peer, and `X-Forwarded-For` is ignored, because any direct caller can
+send it. If a load balancer or reverse proxy fronts the server, set
+`TRUSTED_PROXIES` to a comma separated list of that proxy's networks (CIDRs or
+single addresses, IPv4 or IPv6), for example `TRUSTED_PROXIES=10.0.0.0/8,fd00::/8`.
+When the peer is inside one of them, `X-Forwarded-For` is read from the right,
+trusted hops are skipped, and the first untrusted address is the client.
+Without it, every caller behind the proxy shares the proxy's budget, and the
+server says so: it logs the setting's state at boot, and warns (at most once an
+hour) when `X-Forwarded-For` arrives from a peer outside `TRUSTED_PROXIES`.
+A chain made only of trusted hops has no client to find, so those callers key
+on the proxy peer and share one budget. IPv6 callers are counted per /64, so
+rotating addresses inside one /64 draws on a single budget. A malformed entry
+(including a zone identifier or an IPv4-mapped prefix shorter than /96) stops
+the server at boot. `X-Real-IP` is never read.
+
 ## Documentation
 
 | Document | What's in it |
@@ -91,7 +109,7 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 | [`docs/modularization-blueprint.md`](./docs/modularization-blueprint.md) | The installable-apps platform: design and phases |
 | [`docs/design-system.md`](./docs/design-system.md) | Colors, typography, component patterns |
 | [`docs/database-erd.md`](./docs/database-erd.md) | Full schema + entity-relationship diagram |
-| [`CLAUDE.md`](./CLAUDE.md) | Stack, conventions, pre-flight checks, and gotchas for contributors |
+| [`AGENTS.md`](./AGENTS.md) | Stack, conventions, pre-flight checks, and gotchas for contributors |
 | [`.do/`](./.do/) | Example Digital Ocean App Platform deploy specs for self-hosting |
 
 ## Licensing

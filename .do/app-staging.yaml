@@ -71,13 +71,20 @@ services:
       #   - key: PORTAL_JWT_SECRET
       #     scope: RUN_TIME
       #     type: SECRET
+      # TRUSTED_PROXIES: comma separated CIDRs of the proxy in front of the
+      # app. Unset, the rate limits key on the TCP peer and ignore
+      # X-Forwarded-For. Set it to your platform's proxy network (check its
+      # documentation for the range) so each real client gets its own budget
+      # (see README, "Behind a reverse proxy"):
+      #   - key: TRUSTED_PROXIES
+      #     value: <proxy network CIDR>
       - key: DATABASE_URL
         value: ${gable-db.DATABASE_URL}
         scope: RUN_AND_BUILD_TIME
         type: SECRET
 
   - name: frontend
-    dockerfile_path: web/apps/desk/Dockerfile
+    dockerfile_path: web/Dockerfile
     source_dir: /
     github:
       repo: your-org/gable
@@ -95,9 +102,6 @@ services:
       - key: VITE_API_URL
         value: ""
         scope: BUILD_TIME
-      - key: BACKEND_URL
-        value: ${backend.PRIVATE_URL}
-        scope: RUN_TIME
     routes:
       - path: /
 

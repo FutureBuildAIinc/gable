@@ -13,7 +13,7 @@ const client = createClient({ baseUrl: "https://erp.example.test" });
 
 // Happy paths -------------------------------------------------------------
 
-async function happy() {
+async function _happy() {
   const page = await client.get("/api/v1/quotes", { query: { limit: 50, status: "sent", include: "total" } });
   const quoteTotal: number = page.body.total ?? 0;
   const nextCursor: string | null = page.body.next_cursor;
@@ -53,7 +53,7 @@ async function happy() {
 
 // Wrong paths: each line must be a compile error --------------------------
 
-async function wrong() {
+async function _wrong() {
   // @ts-expect-error unknown path
   await client.get("/api/v1/widgets");
 
