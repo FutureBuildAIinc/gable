@@ -177,36 +177,48 @@ func TestExactDoubleRegistrationFails(t *testing.T) {
 	}
 }
 
-// diffRoutes compares two rendered censuses by route key and returns one
-// human line per added and removed route.
-func diffRoutes(oldRender, newRender string) (added, removed []string) {
-	type entry struct {
-		method, pattern, module string
+// TestDiffRoutesReportsHandlerOnlyChange pins the fix for the review's F6:
+// the staleness diff works on the full row, so a handler-only change is
+// reported as the old row removed and the new row added.
+func TestDiffRoutesReportsHandlerOnlyChange(t *testing.T) {
+	oldRender := "GET\t/a\tinternal/aa\toldHandler\n"
+	newRender := "GET\t/a\tinternal/aa\tnewHandler\n"
+	added, removed := diffRoutes(oldRender, newRender)
+	if len(added) != 1 || !strings.Contains(added[0], "newHandler") {
+		t.Fatalf("want the new row added, got %q", added)
 	}
-	parse := func(render string) map[string]entry {
-		routes := map[string]entry{}
+	if len(removed) != 1 || !strings.Contains(removed[0], "oldHandler") {
+		t.Fatalf("want the old row removed, got %q", removed)
+	}
+}
+
+// diffRoutes compares two rendered censuses by full row and returns the
+// rows present in newRender only and in oldRender only, so a change in any
+// column, handler included, is reported.
+func diffRoutes(oldRender, newRender string) (added, removed []string) {
+	rows := func(render string) map[string]bool {
+		present := map[string]bool{}
 		for _, line := range strings.Split(render, "\n") {
 			if strings.HasPrefix(line, "#") || line == "" || strings.HasPrefix(line, "method\t") {
 				continue
 			}
-			fields := strings.Split(line, "\t")
-			if len(fields) != 4 {
+			if len(strings.Split(line, "\t")) != 4 {
 				continue
 			}
-			routes[fields[0]+" "+fields[1]] = entry{method: fields[0], pattern: fields[1], module: fields[2]}
+			present[line] = true
 		}
-		return routes
+		return present
 	}
-	oldRoutes := parse(oldRender)
-	newRoutes := parse(newRender)
-	for k, e := range newRoutes {
-		if _, ok := oldRoutes[k]; !ok {
-			added = append(added, fmt.Sprintf("%s %s (%s)", e.method, e.pattern, e.module))
+	oldRows := rows(oldRender)
+	newRows := rows(newRender)
+	for line := range newRows {
+		if !oldRows[line] {
+			added = append(added, line)
 		}
 	}
-	for k, e := range oldRoutes {
-		if _, ok := newRoutes[k]; !ok {
-			removed = append(removed, fmt.Sprintf("%s %s (%s)", e.method, e.pattern, e.module))
+	for line := range oldRows {
+		if !newRows[line] {
+			removed = append(removed, line)
 		}
 	}
 	sort.Strings(added)
