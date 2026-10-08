@@ -398,13 +398,15 @@ func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID u
 			return fmt.Errorf("failed to insert quote header: %w", err)
 		}
 
-		for _, l := range lines {
+		for i, l := range lines {
+			// position keeps the contractor's order: every line of one
+			// transaction shares a created_at, so it cannot.
 			_, err := exec.Exec(txCtx, `
 				INSERT INTO quote_lines (
 					id, quote_id, product_id, sku, description, customer_note,
-					quantity, uom, unit_price, line_total, created_at
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uom_type, 0, 0, NOW())
-			`, uuid.New(), quoteID, l.ProductID, l.SKU, l.Description, l.CustomerNote, l.Quantity, l.UOM)
+					quantity, uom, unit_price, line_total, position, created_at
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uom_type, 0, 0, $9, NOW())
+			`, uuid.New(), quoteID, l.ProductID, l.SKU, l.Description, l.CustomerNote, l.Quantity, l.UOM, i)
 			if err != nil {
 				return fmt.Errorf("failed to insert quote line: %w", err)
 			}
@@ -530,7 +532,7 @@ func (r *PostgresRepository) getPortalQuoteLines(ctx context.Context, quoteID uu
 		       COALESCE(ql.price_uom, ql.uom::text), ql.unit_price::float8, ql.line_total::float8
 		FROM quote_lines ql
 		WHERE ql.quote_id = $1
-		ORDER BY ql.created_at ASC
+		ORDER BY ql.position ASC, ql.created_at ASC, ql.id ASC
 	`, quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quote lines: %w", err)

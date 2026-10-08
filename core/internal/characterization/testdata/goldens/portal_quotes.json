@@ -1108,23 +1108,6 @@
         "lines": [
           {
             "created_at": "<ts+0d>",
-            "customer_note": null,
-            "description": "Custom cedar bracket",
-            "id": "<id-7>",
-            "line_total_cents": 0,
-            "price_uom": "EA",
-            "price_uom_qty": "1",
-            "product_id": null,
-            "quantity": "4",
-            "quote_id": "<id-5>",
-            "sku": "SPECIAL-ORDER",
-            "unit_cost_ten_thousandths": 0,
-            "unit_price_ten_thousandths": 0,
-            "uom": "EA",
-            "uom_qty": "1"
-          },
-          {
-            "created_at": "<ts+0d>",
             "customer_note": "catalog line",
             "description": "2x4x8 SPF Premium",
             "id": "<id-6>",
@@ -1138,6 +1121,23 @@
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 0,
             "uom": "PCS",
+            "uom_qty": "1"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_note": null,
+            "description": "Custom cedar bracket",
+            "id": "<id-7>",
+            "line_total_cents": 0,
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "product_id": null,
+            "quantity": "4",
+            "quote_id": "<id-5>",
+            "sku": "SPECIAL-ORDER",
+            "unit_cost_ten_thousandths": 0,
+            "unit_price_ten_thousandths": 0,
+            "uom": "EA",
             "uom_qty": "1"
           }
         ],
