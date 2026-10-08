@@ -26,9 +26,31 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Connector-1.0"
 
-# Surfaces & native client apps.
+# Surfaces & native client apps: one row for every app bundle under
+# web/apps/ (the desk and the front door share the Surface licence).
 [[annotations]]
-path = "web/apps/desk/**"
+path = "web/apps/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
+
+# Shared web packages (auth, design-system, later api-client): Surface
+# licensed, same as the apps that consume them. The desk's shared tokens,
+# components and auth code were MOVED here (identifier for identifier).
+[[annotations]]
+path = "web/packages/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
+
+# Web workspace manifests: the npm workspace root and its lockfile. Build
+# manifests next to Surface code take the Surface licence (same reasoning as
+# core/go.mod taking Commons below).
+[[annotations]]
+path = [
+  "web/package.json",
+  "web/package-lock.json",
+]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"

@@ -112,24 +112,27 @@ cover:
 
 # ---------------------------------------------------------------------------
 # Frontend gates (the `frontend` job in ci.yml)
+#
+# web/ is one npm workspace (apps/*, packages/*): every target below runs
+# from web/ and fans out to the workspaces (desk, front-door, packages).
 # ---------------------------------------------------------------------------
 fe-install:
-	cd web/apps/desk && npm ci
+	cd web && npm ci
 
 fe-typecheck:
-	cd web/apps/desk && npx tsc --noEmit
+	cd web && npm run typecheck
 
 fe-lint:
-	cd web/apps/desk && npm run lint
+	cd web && npm run lint
 
 fe-test:
-	cd web/apps/desk && npm run test -- --run
+	cd web && npm run test
 
 fe-cover:
-	cd web/apps/desk && npm run test:coverage
+	cd web && npm run test:coverage
 
 fe-build:
-	cd web/apps/desk && npm run build
+	cd web && npm run build
 
 # ---------------------------------------------------------------------------
 # Licensing gate (the `license` job in ci.yml)

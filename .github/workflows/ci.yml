@@ -141,32 +141,31 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: web/apps/desk/package-lock.json
+          cache-dependency-path: web/package-lock.json
 
+      # web/ is one npm workspace (apps/*, packages/*); one install covers
+      # the desk, the front door and the shared packages.
       - name: Install dependencies
-        working-directory: web/apps/desk
+        working-directory: web
         run: npm ci
 
+      # `tsc --noEmit` in every workspace that declares a typecheck script
+      # (both apps and the shared packages).
       - name: Type check
-        working-directory: web/apps/desk
-        run: npx tsc --noEmit
+        working-directory: web
+        run: npm run typecheck
 
+      # One eslint config (web/eslint.config.js) covers the whole workspace.
       - name: Lint
-        working-directory: web/apps/desk
+        working-directory: web
         run: npm run lint
 
-      # Prefers the coverage-instrumented script. The fallback keeps this job
-      # green on branches where `test:coverage` has not been added to
-      # web/apps/desk/package.json yet.
+      # Unit tests per workspace (each workspace that declares a test script
+      # runs it). `test:coverage` prefers the coverage-instrumented variant
+      # where a workspace declares one, which today is @gable/desk only.
       - name: Test (with coverage)
-        working-directory: web/apps/desk
-        run: |
-          if node -e "const s=require('./package.json').scripts||{};process.exit(s['test:coverage']?0:1)"; then
-            npm run test:coverage
-          else
-            echo "::warning::web/apps/desk/package.json has no \"test:coverage\" script; running \"npm run test\" without coverage."
-            npm run test -- --run
-          fi
+        working-directory: web
+        run: npm run test:coverage
 
       # REPORTING ONLY — see the note on the backend coverage step. No threshold.
       - name: Frontend coverage summary
@@ -198,8 +197,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Builds every workspace that declares a build script (both bundles).
       - name: Build
-        working-directory: web/apps/desk
+        working-directory: web
         run: npm run build
 
   license:
