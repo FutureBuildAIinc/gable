@@ -60,23 +60,44 @@ func (w *idempotencyResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-// principalID derives the caller a claim is keyed on. The idempotency
-// middleware runs inside the auth middleware, so the JWT subject (or the
-// portal claims, or an integration key's tenant) is already in the context.
-// Under AUTH_MODE=dev the caller is the fixed "dev" principal, mirroring the
-// devActor convention in internal/pricing. An unidentifiable caller gets "":
-// the request then passes through uncached rather than joining the shared
-// anonymous namespace the in-memory store kept (which could replay one
-// anonymous caller's response to another).
-func principalID(r *http.Request) string {
-	ctx := r.Context()
-	if pc, ok := ctx.Value(PortalClaimsKey).(*PortalClaims); ok && pc != nil {
-		return "portal:" + pc.CustomerID.String() + ":" + pc.CustomerUserID.String()
-	}
-	if claims := ClaimsFromContext(ctx); claims != nil && claims.Subject != "" {
+// The principal a claim is keyed on says whose retry a stored answer belongs
+// to. Three extractors, one per surface, because the identity is established
+// in three places:
+//
+//   - the ERP API identifies itself with the JWT subject, which the auth
+//     middleware (outside which the global layer runs) puts in the context.
+//     Under AUTH_MODE=dev there is no JWT layer: a caller with no identity is
+//     the fixed dev principal, mirroring the devActor convention in
+//     internal/pricing. Outside dev an unidentifiable caller gets "": the
+//     request passes through uncached rather than joining a shared anonymous
+//     namespace (which could replay one anonymous caller's response to
+//     another).
+//   - the portal API authenticates per customer and user inside its own
+//     chain (portalMw), which runs after the global layer: the portal layer
+//     wraps inside it and reads the claims it injects.
+//   - the integration API authenticates a shared key and identifies the
+//     caller by its tenant (the X-Tenant-ID header). A tenantless caller
+//     behaves like an anonymous one: dev principal under AUTH_MODE=dev,
+//     uncached outside it.
+func globalIdempotencyPrincipal(r *http.Request) string {
+	if claims := ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
 		return "user:" + claims.Subject
 	}
-	if tenant := TenantIDFromContext(ctx); tenant != "" {
+	if devAuthMode() {
+		return "dev"
+	}
+	return ""
+}
+
+func portalIdempotencyPrincipal(r *http.Request) string {
+	if pc, ok := r.Context().Value(PortalClaimsKey).(*PortalClaims); ok && pc != nil {
+		return "portal:" + pc.CustomerID.String() + ":" + pc.CustomerUserID.String()
+	}
+	return ""
+}
+
+func integrationIdempotencyPrincipal(r *http.Request) string {
+	if tenant := r.Header.Get("X-Tenant-ID"); tenant != "" {
 		return "tenant:" + tenant
 	}
 	if devAuthMode() {
@@ -89,11 +110,27 @@ func devAuthMode() bool {
 	return strings.EqualFold(os.Getenv("AUTH_MODE"), "dev")
 }
 
-// Idempotency returns middleware that makes POST/PUT requests carrying an
-// Idempotency-Key (or the legacy X-Idempotency-Key) exactly-once per caller:
-// the claim and the stored response live in the idempotency_keys table
-// (migration 087), so a replay survives a restart and is shared across
-// instances behind a load balancer.
+// idempotencyOwnedPrefixes are the surfaces that carry their own idempotency
+// layer inside their auth chain, where the principal that scopes their claims
+// is established. The global layer skips them so no request runs through
+// both.
+var idempotencyOwnedPrefixes = []string{"/api/portal/v1/", "/api/integration/"}
+
+func skipIdempotencyOwnedPrefix(r *http.Request) bool {
+	for _, p := range idempotencyOwnedPrefixes {
+		if strings.HasPrefix(r.URL.Path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// Idempotency returns the global idempotency layer: it covers the ERP API's
+// POST/PUT routes, whose principal (the JWT subject) the auth middleware
+// outside it establishes. Portal and integration routes are NOT covered here:
+// their principals are established inside their own auth chains, so they
+// carry IdempotencyForPortalAuth and IdempotencyForIntegrationAuth there, and
+// this layer skips their prefixes so nothing runs twice.
 //
 // Scope rules: POST and PUT only; 2xx and 3xx responses are stored and
 // replayed (a 4xx or 5xx releases the claim so the client can retry);
@@ -109,14 +146,46 @@ func devAuthMode() bool {
 // concurrent request with the same key gets 409 idempotency_in_progress while
 // the first is in progress; the same key with a different request fingerprint
 // gets 422 idempotency_key_reused; a completed key replays its stored status
-// and body with Idempotency-Replayed: true. If the database is unreachable
+// and body with Idempotency-Replayed: true. Each claim carries a token
+// (claim_id) that complete and release must match, so a holder whose lease
+// lapsed cannot touch a successor's claim. If the database is unreachable
 // the middleware fails open: the request is served uncached.
 func Idempotency(db *database.DB) func(http.Handler) http.Handler {
+	return idempotencyLayer(db, globalIdempotencyPrincipal, skipIdempotencyOwnedPrefix)
+}
+
+// IdempotencyForPortalAuth is the portal surface's idempotency layer. Wire it
+// INSIDE the portal auth middleware (portalMw(portalIdem(handler))): the
+// claim is scoped on the customer and user the portal auth chain
+// establishes, which the global layer cannot see. A request without portal
+// claims passes through uncached.
+func IdempotencyForPortalAuth(db *database.DB) func(http.Handler) http.Handler {
+	return idempotencyLayer(db, portalIdempotencyPrincipal, nil)
+}
+
+// IdempotencyForIntegrationAuth is the integration surface's idempotency
+// layer. Wire it INSIDE the integration auth chain (after the
+// X-Integration-Key check): the claim is scoped on the caller's tenant (the
+// X-Tenant-ID header). Under AUTH_MODE=dev a tenantless caller joins the
+// fixed dev principal; outside dev it passes through uncached.
+func IdempotencyForIntegrationAuth(db *database.DB) func(http.Handler) http.Handler {
+	return idempotencyLayer(db, integrationIdempotencyPrincipal, nil)
+}
+
+// idempotencyLayer builds one idempotency middleware: principalOf derives the
+// caller a claim is scoped on ("" means pass through uncached), and skip, when
+// set, names requests this layer must leave to another one.
+func idempotencyLayer(db *database.DB, principalOf func(*http.Request) string, skip func(*http.Request) bool) func(http.Handler) http.Handler {
 	store := &idempotencyStore{db: db}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if db == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if skip != nil && skip(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -136,7 +205,7 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			principal := principalID(r)
+			principal := principalOf(r)
 			if principal == "" {
 				next.ServeHTTP(w, r)
 				return

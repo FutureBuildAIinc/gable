@@ -678,13 +678,19 @@ func main() {
 		portalAuthMw := middleware.NewPortalAuthMiddleware([]byte(portalJWTSecret), logger)
 		portalMw = portalAuthMw.Handler
 	}
-	portalHandler.RegisterRoutes(mux, portalMw, middleware.StrictRateLimit(10))
+	// Portal routes get their idempotency layer INSIDE portalMw: the claim is
+	// scoped on the customer and user the portal auth chain establishes,
+	// which the global layer (already inside the JWT auth middleware) cannot
+	// see. The global layer skips the portal prefix, so nothing runs twice.
+	portalIdem := middleware.IdempotencyForPortalAuth(db)
+	portalChain := func(next http.Handler) http.Handler { return portalMw(portalIdem(next)) }
+	portalHandler.RegisterRoutes(mux, portalChain, middleware.StrictRateLimit(10))
 
 	// Project Module (Sprint 34: Project Management Dashboard)
 	projectRepo := project.NewRepository(db)
 	projectSvc := project.NewService(projectRepo)
 	projectHandler := project.NewHandler(projectSvc)
-	projectHandler.RegisterRoutes(mux, portalMw)
+	projectHandler.RegisterRoutes(mux, portalChain)
 
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff
@@ -713,7 +719,11 @@ func main() {
 	// Reuse the module-level quoteSvc (a second quote.NewService instance was
 	// constructed inline here historically — two live services over one repo).
 	integrationHandler := integrations.NewHandler(db, pricingSvc, quoteSvc, orderSvc, customerSvc, productSvc, integrationAPIKey)
-	integrationHandler.RegisterRoutes(mux)
+	// The integration surface's idempotency layer runs INSIDE the
+	// X-Integration-Key check (RegisterRoutes puts the wrap there): the claim
+	// is scoped on the caller's tenant, and a caller that failed auth never
+	// claims a key. The global layer skips the integration prefix.
+	integrationHandler.RegisterRoutes(mux, middleware.IdempotencyForIntegrationAuth(db))
 
 	// 5z. Apps platform: catalog the unconverted modules, mount converted
 	// apps through the enablement gate, expose the Apps API, and sync
@@ -827,10 +837,15 @@ func main() {
 	// Cache-Control headers (innermost — runs after auth, before response)
 	finalHandler = middleware.CacheControl(finalHandler)
 
-	// Idempotency keys (POST/PUT with Idempotency-Key). Inside auth so the
-	// claim is keyed on the authenticated principal, and inside the request
-	// size limit so the fingerprint read honours it. Claims live in Postgres
-	// (migration 087), so a replay survives a restart.
+	// Idempotency keys (POST/PUT with Idempotency-Key), one layer per surface
+	// where the principal that scopes a claim is established. The global
+	// layer here covers the ERP API only: it runs inside auth (the JWT
+	// subject is the principal) and inside the request size limit (the
+	// fingerprint read honours it), and it skips /api/portal/v1/ and
+	// /api/integration/ because those surfaces carry their own layer inside
+	// their auth chains (see the portal and integration wiring below), so
+	// nothing runs twice. Claims live in Postgres (migration 087), so a
+	// replay survives a restart.
 	finalHandler = middleware.Idempotency(db)(finalHandler)
 
 	// Request size limit (10MB default)
