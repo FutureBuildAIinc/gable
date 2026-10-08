@@ -532,8 +532,8 @@ func (f *fakeOrderRepo) BranchLocalDate(_ context.Context, _ uuid.UUID, at time.
 func (f *fakeOrderRepo) DeliveryOrderID(context.Context, uuid.UUID) (uuid.UUID, bool, error) {
 	return uuid.Nil, false, nil
 }
-func (f *fakeOrderRepo) SpecialOrderUnitCost(context.Context, uuid.UUID) (httpx.Price, bool, error) {
-	return 0, false, nil
+func (f *fakeOrderRepo) NonStockReceiptsFor(context.Context, uuid.UUID) (order.NonStockReceipts, bool, error) {
+	return order.NonStockReceipts{}, false, nil
 }
 
 func (f *fakeOrderRepo) NextNumber(context.Context) (string, error) { return "SO-000001", nil }

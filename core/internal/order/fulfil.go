@@ -747,18 +747,28 @@ func (s *Service) lineCosts(ctx context.Context, cur *Order, plan *fulfilPlan) (
 		if l.LineType == salesdoc.LineKit || l.LineType == salesdoc.LineCharge {
 			continue
 		}
-		var unit httpx.Price
 		if l.ProductID == nil {
-			if cost, ok, err := s.repo.SpecialOrderUnitCost(ctx, l.ID); err != nil {
+			// a non stock or direct ship line: relieved from the linked
+			// receipts' posted values, never from one purchase line's cost
+			rc, ok, err := s.repo.NonStockReceiptsFor(ctx, l.ID)
+			if err != nil {
 				return nil, err
-			} else if ok {
-				unit = cost
 			}
+			if !ok {
+				continue
+			}
+			cents := nonStockRelief(rc, l.QuantityFulfilled, it.qty)
+			if cents <= 0 {
+				continue
+			}
+			// the display figure: relieved cents per billed unit
+			unit := httpx.Price((int64(cents)*1_000_000 + int64(it.qty)/2) / int64(it.qty))
+			out[it.idx] = lineCost{unit: unit, cents: cents}
+			continue
 		}
-		if unit == 0 && l.ProductID != nil {
-			if ref, ok := refs[l.ProductID.String()]; ok {
-				unit = ref.AverageCost
-			}
+		var unit httpx.Price
+		if ref, ok := refs[l.ProductID.String()]; ok {
+			unit = ref.AverageCost
 		}
 		if unit <= 0 {
 			continue
@@ -766,6 +776,29 @@ func (s *Service) lineCosts(ctx context.Context, cur *Order, plan *fulfilPlan) (
 		out[it.idx] = lineCost{unit: unit, cents: salesdoc.CostOf(it.qty, unit)}
 	}
 	return out, nil
+}
+
+// nonStockRelief is the cost one bill of a non stock or direct ship line
+// relieves from 1030 (ADR 0005 8.4 as PR 35 amends it): the unrelieved posted
+// value of the linked receipts x the billed quantity / (the received quantity
+// less the quantity billed before), rounded half away from zero, and the bill
+// that brings billed up to received takes the unrelieved remainder, so the
+// line's bills relieve exactly what its receipts posted. A bill ahead of the
+// receipts relieves nothing.
+func nonStockRelief(rc NonStockReceipts, billedBefore, qty httpx.Quantity) httpx.Cents {
+	unrelieved := int64(rc.PostedCents - rc.RelievedCents)
+	remaining := int64(rc.Received - billedBefore)
+	if unrelieved <= 0 || remaining <= 0 || qty <= 0 {
+		return 0
+	}
+	if int64(qty) >= remaining {
+		return httpx.Cents(unrelieved)
+	}
+	n := new(big.Int).Mul(big.NewInt(unrelieved), big.NewInt(int64(qty)))
+	d := big.NewInt(remaining)
+	n.Add(n, new(big.Int).Rsh(d, 1))
+	n.Div(n, d)
+	return httpx.Cents(n.Int64())
 }
 
 // recordInvoice writes invoice.created through the transaction's executor.

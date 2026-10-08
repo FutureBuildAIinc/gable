@@ -683,6 +683,67 @@ func TestNonStockLineCostComesFromTheReceivedPurchaseOrderLine(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0008 3.4 row 2, ADR 0005 8.4 as PR 35 amends it; PR 35 review P2-D):
+// a non stock line relieves 1030 from its linked receipt lines' posted values
+// pro rata to the billed quantity, the last bill taking the remainder, never
+// from the first linked purchase line's cost. Two purchase lines fill one
+// order line of 3 (1 at 3.33 posts 333, 2 at 5.00 posts 1000: 1333 in all);
+// the first bill of 1 relieves round(1333 / 3) = 444 and the last takes the
+// remaining 889, so 1030 nets to the 1333 the receipts posted. The first line's
+// cost alone would relieve 3 x 3.33 = 999.
+func TestNonStockReliefComesFromTheLinkedReceiptsProRata(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	f.serveWith(f.withStock(), f.withMoney())
+	f.cleanMoney()
+	ctx := context.Background()
+	vendor, po := uuid.New(), uuid.New()
+	must := func(sql string, args ...any) {
+		if _, err := db.Pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	must(`INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "pr-"+vendor.String()[:8])
+	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`, po, vendor)
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
+	})
+
+	r := f.do("POST", "/api/v1/orders", f.createBody(map[string]any{
+		"description": "Custom millwork", "quantity": "3", "uom": "EA", "unit_price_ten_thousandths": 100000,
+		"is_special_order": true, "special_order_unit_cost_ten_thousandths": 30000,
+	}))
+	if r.status != 201 {
+		t.Fatalf("create = %d: %s", r.status, r.raw)
+	}
+	id := str(t, r.body, "id")
+	lineID := str(t, r.body["lines"].([]any)[0].(map[string]any), "id")
+	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id, created_at) VALUES ($1, $2, 'first', 1, 3.33, 1, $3, now() - interval '1 minute')`, uuid.New(), po, lineID)
+	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id) VALUES ($1, $2, 'second', 2, 5.00, 2, $3)`, uuid.New(), po, lineID)
+	r = f.transition(id, 1, "confirmed")
+	if r.status != 200 {
+		t.Fatalf("confirm = %d: %s", r.status, r.raw)
+	}
+
+	one := f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter", "lines": []map[string]any{{"order_line_id": lineID, "quantity": "1"}}})
+	if one.status != 201 {
+		t.Fatalf("first bill = %d: %s", one.status, one.raw)
+	}
+	if _, legs := f.entryLegs(invoiceIDOf(t, one)); legs["5010"].debit != 444 || legs["1030"].credit != 444 {
+		t.Errorf("first bill legs = %+v, want 444 (1333 x 1 / 3)", legs)
+	}
+	rest := f.fulfil(id, revision(t, one), map[string]any{"picked_up_by": "Counter"})
+	if rest.status != 201 {
+		t.Fatalf("last bill = %d: %s", rest.status, rest.raw)
+	}
+	if _, legs := f.entryLegs(invoiceIDOf(t, rest)); legs["5010"].debit != 889 || legs["1030"].credit != 889 {
+		t.Errorf("last bill legs = %+v, want the 889 remainder (1333 less 444)", legs)
+	}
+}
+
 // RULE (ADR 0005 8.4 as PR 35 amends it; C2-2b implements the amendment ahead
 // of that merge): a STOCKED special order line relieves COGS at the moving
 // average, because its receipt entered stock and moved the average; the

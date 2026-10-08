@@ -109,7 +109,7 @@ type Repository interface {
 	UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	DeliveryOrderID(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error)
-	SpecialOrderUnitCost(ctx context.Context, orderLineID uuid.UUID) (httpx.Price, bool, error)
+	NonStockReceiptsFor(ctx context.Context, orderLineID uuid.UUID) (NonStockReceipts, bool, error)
 	OrderExistsForQuote(ctx context.Context, quoteID uuid.UUID) (bool, error)
 }
 
@@ -1134,22 +1134,33 @@ func (r *PostgresRepository) DeliveryOrderID(ctx context.Context, deliveryID uui
 	return *orderID, true, nil
 }
 
-// SpecialOrderUnitCost is the unit cost of the received purchase order line
-// linked to an order line (ADR 0005 8.4), as a scale 4 price; false when none
-// is received yet.
-func (r *PostgresRepository) SpecialOrderUnitCost(ctx context.Context, orderLineID uuid.UUID) (httpx.Price, bool, error) {
-	var cost *int64
+// NonStockReceipts is what the received purchase order lines linked to a non
+// stock (or direct ship) order line posted to 1030, and what the order line's
+// earlier bills have already relieved (ADR 0005 8.4 as PR 35 amends it).
+type NonStockReceipts struct {
+	PostedCents   httpx.Cents    // sum of round(qty_received x cost) per linked line, the Extend a receipt posts
+	Received      httpx.Quantity // sum of qty_received over the linked lines, scale 4
+	RelievedCents httpx.Cents    // the cost the order line's invoice lines already carry
+}
+
+// NonStockReceiptsFor reads the receipts linked to an order line; false when
+// none is received yet.
+func (r *PostgresRepository) NonStockReceiptsFor(ctx context.Context, orderLineID uuid.UUID) (NonStockReceipts, bool, error) {
+	var out NonStockReceipts
+	var posted, received, relieved int64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT ROUND(cost * 10000)::bigint FROM purchase_order_lines
-		WHERE linked_so_line_id = $1 AND COALESCE(qty_received, 0) > 0
-		ORDER BY created_at, id LIMIT 1`, orderLineID).Scan(&cost)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cost == nil) {
-		return 0, false, nil
-	}
+		SELECT COALESCE(SUM(ROUND(qty_received * cost, 2) * 100), 0)::bigint,
+		       COALESCE(SUM(ROUND(qty_received * 10000)), 0)::bigint,
+		       (SELECT COALESCE(SUM(ROUND(il.cost * 100)), 0)::bigint FROM invoice_lines il WHERE il.order_line_id = $1)
+		FROM purchase_order_lines
+		WHERE linked_so_line_id = $1 AND COALESCE(qty_received, 0) > 0`, orderLineID).Scan(&posted, &received, &relieved)
 	if err != nil {
-		return 0, false, fmt.Errorf("failed to read the special order cost: %w", err)
+		return out, false, fmt.Errorf("failed to read the special order receipts: %w", err)
 	}
-	return httpx.Price(*cost), true, nil
+	if received <= 0 {
+		return out, false, nil
+	}
+	return NonStockReceipts{PostedCents: httpx.Cents(posted), Received: httpx.Quantity(received), RelievedCents: httpx.Cents(relieved)}, true, nil
 }
 
 // FulfillmentRequest is a row of order_fulfillment_requests (ADR 0005 5.5):
