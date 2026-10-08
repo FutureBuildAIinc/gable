@@ -10,26 +10,35 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/delivery"
+	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/integrations"
+	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/portal"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/project"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/routecensus"
+	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/vendor"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,6 +76,10 @@ var modelBoundSchemas = []struct {
 	{"Product", product.Product{}},
 	{"Geometry", product.Geometry{}},
 	{"ReorderAlert", product.ReorderAlert{}},
+	{"PimContent", pim.PIMContent{}},
+	{"PimMedia", pim.PIMMedia{}},
+	{"PimCollateral", pim.PIMCollateral{}},
+	{"ProductDetail", pim.ProductDetail{}},
 	{"ProductLeadTimeUpdate", product.LeadTimeRequest{}},
 	// location
 	{"Location", location.Location{}},
@@ -81,6 +94,48 @@ var modelBoundSchemas = []struct {
 	{"IntegrationOrder", integrations.IntegrationOrderResponse{}},
 	{"IntegrationDeliveryRouteResponse", integrations.DeliveryRouteResponse{}},
 	{"IntegrationValidateStaffResponse", integrations.ValidateStaffResponse{}},
+	// delivery
+	{"DeliveryVehicle", delivery.Vehicle{}},
+	{"DeliveryDriver", delivery.Driver{}},
+	{"DeliveryRoute", delivery.Route{}},
+	{"Delivery", delivery.Delivery{}},
+	{"DeliveryPodPhoto", delivery.PODPhoto{}},
+	{"DeliveryCapacityWarning", delivery.CapacityWarning{}},
+	{"DeliveryRouteLeg", delivery.RouteLeg{}},
+	{"DeliveryRouteOptimizationResult", delivery.RouteOptimizationResult{}},
+	// inventory
+	{"Inventory", inventory.Inventory{}},
+	// deposits
+	{"Deposit", deposit.CustomerDeposit{}},
+	{"DepositApplication", deposit.DepositApplication{}},
+	// accounts
+	{"AccountSummary", account.AccountSummary{}},
+	{"CustomerTransaction", account.CustomerTransaction{}},
+	// vendors
+	{"Vendor", vendor.Vendor{}},
+	// sales-team
+	{"SalesPerson", salesteam.SalesPerson{}},
+	// activities / crm
+	{"Activity", crm.Activity{}},
+	// quote / exposure
+	{"QuoteExposureEvent", pricing.QuoteExposureEvent{}},
+	{"ExposureRow", pricing.ExposureRow{}},
+	{"EscalateNowResult", pricing.EscalateNowResult{}},
+	{"EscalateNowLine", pricing.EscalateNowLine{}},
+	// pos
+	{"PosTransaction", pos.POSTransaction{}},
+	{"PosLineItem", pos.POSLineItem{}},
+	{"PosTender", pos.POSTender{}},
+	{"PosTransactionSummary", pos.TransactionSummary{}},
+	{"PosSearchResult", pos.QuickSearchResult{}},
+	{"PosCatalogProduct", pos.CatalogProduct{}},
+	{"PosTillSession", pos.TillSession{}},
+	{"PosTillReport", pos.TillReport{}},
+	{"PosZReport", pos.ZReport{}},
+	{"PosReturn", pos.POSReturn{}},
+	{"PosReturnLine", pos.POSReturnLine{}},
+	{"PosSyncResponse", pos.OfflineSyncResponse{}},
+	{"PosSyncError", pos.SyncError{}},
 	// portal (R1-7c)
 	// Health schemas (live, ready, metrics) are inline map[string]any in serve.go
 	// with no struct to bind, so they are omitted from this table.
@@ -193,7 +248,10 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			Schemas map[string]struct {
 				Required   []string `yaml:"required"`
 				Properties map[string]struct {
-					Type any `yaml:"type"`
+					Type  any `yaml:"type"`
+					OneOf []struct {
+						Type any `yaml:"type"`
+					} `yaml:"oneOf"`
 				} `yaml:"properties"`
 			} `yaml:"schemas"`
 		} `yaml:"components"`
@@ -233,7 +291,7 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			if omitempty && required[name] {
 				problems = append(problems, where+": omitted when empty (omitempty) but listed in required")
 			}
-			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type) {
+			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type) && !oneOfCarriesNull(prop.OneOf) {
 				problems = append(problems, where+": a nil pointer serializes as null today but the type carries no null leg")
 			}
 		}
@@ -276,8 +334,8 @@ func isNullableGoType(t reflect.Type) bool {
 	return strings.HasPrefix(s, "sql.Null") || strings.HasPrefix(s, "pgtype.")
 }
 
-// carriesNullLeg reports whether an OpenAPI type, a string or a list of
-// types, includes "null".
+// carriesNullLeg reports whether an OpenAPI 3.1 type includes "null". Only
+// the type array form counts: the 3.0 nullable keyword does not exist in 3.1.
 func carriesNullLeg(typ any) bool {
 	list, ok := typ.([]any)
 	if !ok {
@@ -285,6 +343,19 @@ func carriesNullLeg(typ any) bool {
 	}
 	for _, item := range list {
 		if s, ok := item.(string); ok && s == "null" {
+			return true
+		}
+	}
+	return false
+}
+
+// oneOfCarriesNull reports whether a oneOf list has a leg typed "null": the
+// 3.1 spelling of a nullable $ref, which cannot take a type array beside it.
+func oneOfCarriesNull(legs []struct {
+	Type any `yaml:"type"`
+}) bool {
+	for _, leg := range legs {
+		if s, ok := leg.Type.(string); ok && s == "null" {
 			return true
 		}
 	}

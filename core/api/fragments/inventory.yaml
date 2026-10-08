@@ -1,0 +1,191 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The inventory module, transcribed from internal/inventory/handler.go and model.go
+# as they behave today: float quantities, the list is a nil slice (null when empty)
+# and both writes answer a bare status acknowledgement.
+paths:
+  /api/v1/inventory:
+    get:
+      operationId: inventoryList
+      tags:
+      - inventory
+      summary: List inventory rows of a product
+      description: A product_id that is not a UUID reaches the service and answers 500, not 400.
+      parameters:
+      - name: product_id
+        in: query
+        required: true
+        description: Required; a missing value answers 400.
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The product's inventory rows, one per location. The body is null when the product
+            has none.
+          content:
+            application/json:
+              schema:
+                type:
+                - array
+                - 'null'
+                items:
+                  $ref: '#/components/schemas/Inventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/inventory/adjust:
+    post:
+      operationId: inventoryAdjust
+      tags:
+      - inventory
+      summary: Adjust inventory (cycle count)
+      description: A result that would leave negative stock answers 500.
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockAdjustmentRequest'
+      responses:
+        '200':
+          description: Adjusted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryStatusAck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/inventory/transfer:
+    post:
+      operationId: inventoryTransfer
+      tags:
+      - inventory
+      summary: Transfer inventory between locations
+      description: A cross-branch move, a non positive quantity or insufficient unallocated stock answers
+        500.
+      parameters:
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockMovementRequest'
+      responses:
+        '200':
+          description: Transferred.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryStatusAck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  schemas:
+    Inventory:
+      type: object
+      description: inventory.Inventory. location_id is omitted when unset.
+      required:
+      - id
+      - product_id
+      - location
+      - quantity
+      - allocated
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        location_id:
+          type: string
+          format: uuid
+        location:
+          type: string
+          description: Deprecated text field.
+        quantity:
+          type: number
+        allocated:
+          type: number
+        updated_at:
+          type: string
+          format: date-time
+    StockAdjustmentRequest:
+      type: object
+      required:
+      - product_id
+      - quantity
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        location_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        quantity:
+          type: number
+          description: The new quantity, or the delta when is_delta is true.
+        reason:
+          type: string
+        is_delta:
+          type: boolean
+          description: If true, add or subtract; if false, replace.
+    StockMovementRequest:
+      type: object
+      required:
+      - product_id
+      - to_location_id
+      - quantity
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        from_location_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        to_location_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+        reason:
+          type: string
+    InventoryStatusAck:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - ok

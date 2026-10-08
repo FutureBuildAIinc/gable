@@ -103,6 +103,405 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/products/{id}/detail:
+    get:
+      operationId: productDetail
+      tags:
+      - product
+      summary: Get product detail
+      description: A missing product answers 500, not 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: The product with its PIM content, media and collateral.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/content:
+    get:
+      operationId: productPimContentGet
+      tags:
+      - product
+      summary: Get PIM content for a product
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: PIM content; an empty record (zero id, empty text, no keywords) when the product
+            has none yet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PimContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: productPimContentUpdate
+      tags:
+      - product
+      summary: Update PIM content for a product
+      description: Only the fields present in the body are changed.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PimContentUpdate'
+      responses:
+        '200':
+          description: The merged PIM content.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PimContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/media:
+    get:
+      operationId: productPimMediaList
+      tags:
+      - product
+      summary: List PIM media for a product
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: Media; an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PimMedia'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/media/{mediaId}:
+    delete:
+      operationId: productPimMediaDelete
+      tags:
+      - product
+      summary: Delete PIM media
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: mediaId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '204':
+          description: Media deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/media/{mediaId}/primary:
+    patch:
+      operationId: productPimMediaSetPrimary
+      tags:
+      - product
+      summary: Set primary PIM media
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: mediaId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Primary media set; the body is empty.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/collateral:
+    get:
+      operationId: productPimCollateralList
+      tags:
+      - product
+      summary: List PIM collateral for a product
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: Collateral; an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PimCollateral'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/collateral/{collateralId}:
+    delete:
+      operationId: productPimCollateralDelete
+      tags:
+      - product
+      summary: Delete PIM collateral
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: collateralId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '204':
+          description: Collateral deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/generate/collateral:
+    post:
+      operationId: productPimGenerateCollateral
+      tags:
+      - product
+      summary: Generate PIM collateral
+      description: Answers 500 when no AI client is configured.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PimGenerateCollateralRequest'
+      responses:
+        '200':
+          description: The generated collateral, already stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PimCollateral'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/generate/descriptions:
+    post:
+      operationId: productPimGenerateDescriptions
+      tags:
+      - product
+      summary: Generate PIM descriptions
+      description: Answers 500 when no AI client is configured.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PimGenerateDescriptionsRequest'
+      responses:
+        '200':
+          description: The PIM content with the generated descriptions and attributes, already stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PimContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/generate/image:
+    post:
+      operationId: productPimGenerateImage
+      tags:
+      - product
+      summary: Generate PIM image
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PimGenerateImageRequest'
+      responses:
+        '202':
+          description: Generation runs in the background; the placeholder media row (status generating)
+            is returned for polling the media list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PimMedia'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/pim/generate/seo:
+    post:
+      operationId: productPimGenerateSeo
+      tags:
+      - product
+      summary: Generate PIM SEO content
+      description: Answers 500 when no AI client is configured.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PimGenerateSeoRequest'
+      responses:
+        '200':
+          description: The PIM content with the generated SEO fields, already stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PimContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/margins:
     patch:
       operationId: productUpdateMarginRules
@@ -348,3 +747,315 @@ components:
         lead_time_days:
           type: [integer, "null"]
           description: Days; null clears to unpublished, zero asserts same day.
+    PimContent:
+      type: object
+      description: pim.PIMContent. The handler always sends all fifteen fields. A product with no content
+        yet answers a record with a zero id and zero timestamps.
+      required:
+      - id
+      - product_id
+      - short_description
+      - long_description
+      - marketing_copy
+      - attributes
+      - seo_title
+      - seo_description
+      - seo_keywords
+      - seo_slug
+      - last_gen_model
+      - last_gen_prompt
+      - last_gen_at
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        short_description:
+          type: string
+        long_description:
+          type: string
+        marketing_copy:
+          type: string
+        attributes:
+          type:
+          - object
+          - 'null'
+          additionalProperties:
+            type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        seo_keywords:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+        seo_slug:
+          type: string
+        last_gen_model:
+          type: string
+        last_gen_prompt:
+          type: string
+        last_gen_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PimMedia:
+      type: object
+      description: pim.PIMMedia.
+      required:
+      - id
+      - product_id
+      - media_type
+      - url
+      - alt_text
+      - sort_order
+      - is_primary
+      - status
+      - gen_model
+      - gen_prompt
+      - gen_style
+      - generated_at
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        media_type:
+          type: string
+          description: hero for generated images.
+        url:
+          type: string
+        alt_text:
+          type: string
+        sort_order:
+          type: integer
+        is_primary:
+          type: boolean
+        status:
+          type: string
+          enum:
+          - generating
+          - ready
+          - failed
+        gen_model:
+          type: string
+        gen_prompt:
+          type: string
+        gen_style:
+          type: string
+        generated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PimCollateral:
+      type: object
+      description: pim.PIMCollateral.
+      required:
+      - id
+      - product_id
+      - collateral_type
+      - title
+      - content
+      - tone
+      - audience
+      - gen_model
+      - gen_prompt
+      - generated_at
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        collateral_type:
+          type: string
+          description: sell_sheet, facebook, instagram, linkedin or email_blast; anything else generates
+            a generic piece.
+        title:
+          type: string
+        content:
+          type: string
+        tone:
+          type: string
+        audience:
+          type: string
+        gen_model:
+          type: string
+        gen_prompt:
+          type: string
+        generated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductDetail:
+      type: object
+      description: pim.ProductDetail. content is null when the product has none.
+      required:
+      - id
+      - sku
+      - description
+      - uom_primary
+      - base_price
+      - vendor
+      - upc
+      - weight_lbs
+      - reorder_point
+      - reorder_qty
+      - total_quantity
+      - total_allocated
+      - average_unit_cost
+      - target_margin
+      - commission_rate
+      - created_at
+      - updated_at
+      - content
+      - media
+      - collateral
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        uom_primary:
+          type: string
+        base_price:
+          type: number
+          description: Float dollars today.
+        vendor:
+          type:
+          - string
+          - 'null'
+        upc:
+          type:
+          - string
+          - 'null'
+        weight_lbs:
+          type: number
+        reorder_point:
+          type: number
+        reorder_qty:
+          type: number
+        total_quantity:
+          type: number
+        total_allocated:
+          type: number
+        average_unit_cost:
+          type: number
+        target_margin:
+          type: number
+        commission_rate:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        content:
+          oneOf:
+          - $ref: '#/components/schemas/PimContent'
+          - type: 'null'
+        media:
+          type: array
+          items:
+            $ref: '#/components/schemas/PimMedia'
+        collateral:
+          type: array
+          items:
+            $ref: '#/components/schemas/PimCollateral'
+    PimContentUpdate:
+      type: object
+      description: 'UpdateContentRequest: every field optional, absent means unchanged.'
+      properties:
+        short_description:
+          type: string
+        long_description:
+          type: string
+        marketing_copy:
+          type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        seo_keywords:
+          type: array
+          items:
+            type: string
+        seo_slug:
+          type: string
+    PimGenerateDescriptionsRequest:
+      type: object
+      properties:
+        tone:
+          type: string
+          description: Defaults to professional.
+        audience:
+          type: string
+          description: Defaults to contractors and builders.
+    PimGenerateSeoRequest:
+      type: object
+      properties:
+        target_keywords:
+          type: array
+          items:
+            type: string
+    PimGenerateImageRequest:
+      type: object
+      properties:
+        style:
+          type: string
+        prompt:
+          type: string
+    PimGenerateCollateralRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          description: sell_sheet, facebook, instagram, linkedin or email_blast; anything else generates
+            a generic piece.
+        tone:
+          type: string
+        audience:
+          type: string

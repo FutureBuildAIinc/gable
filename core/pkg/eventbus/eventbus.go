@@ -95,6 +95,15 @@ const BackendInProcess Backend = "inprocess"
 // ErrBusClosed is returned by Publish and Subscribe after Close.
 var ErrBusClosed = errors.New("eventbus: bus is closed")
 
+// SubjectMatches reports whether subject matches pattern under this
+// package's token wildcard rules ("*" matches exactly one token, ">" one or
+// more trailing tokens). Exposed so the outbox drain, whose rows carry the
+// event type as their bus subject, routes rows to subscribers with exactly
+// the matcher the bus itself uses; no second pattern vocabulary exists.
+func SubjectMatches(pattern, subject string) bool {
+	return subjectMatch(pattern, subject)
+}
+
 // Event is the envelope carried over the bus. EventID is stable per logical
 // event and is used for idempotent consumer handling. Payload is opaque JSON.
 type Event struct {

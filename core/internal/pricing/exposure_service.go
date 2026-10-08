@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/quote"
-	"github.com/gablelbm/gable/pkg/eventbus"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -28,9 +28,10 @@ type ExposureService struct {
 	exposure   ExposureRepository
 	escalators EscalatorRepository
 	quoteRepo  quote.QuoteLineReader
-	bus        eventbus.Publisher // optional; nil disables event publishing
+	events     EventRecorder // optional; nil disables event recording
 	audit      AuditWriter
 	checker    ExposureChecker
+	tx         TxRunner // optional; nil runs each method's writes unwrapped (tests)
 	logger     *slog.Logger
 }
 
@@ -55,11 +56,31 @@ func NewExposureService(
 	}
 }
 
-// WithEventBus wires the publisher used for post-write notification events.
-// Optional: a nil bus disables publishing entirely.
-func (s *ExposureService) WithEventBus(bus eventbus.Publisher) *ExposureService {
-	s.bus = bus
+// WithOutbox wires the recorder used for notification events. Optional: a
+// nil recorder disables recording entirely.
+func (s *ExposureService) WithOutbox(events EventRecorder) *ExposureService {
+	s.events = events
 	return s
+}
+
+// WithTxRunner wires the transaction wrapper the write methods use, so the
+// ledger row, the rollup flips and the outbox event are one transactional
+// fact (a failed event write rolls the acknowledgment back with it, and a
+// crash can no longer leave a committed ack without its event). `*database.DB`
+// satisfies TxRunner; a nil runner (tests, unwired deployments) runs the
+// writes without wrapping, as before.
+func (s *ExposureService) WithTxRunner(tx TxRunner) *ExposureService {
+	s.tx = tx
+	return s
+}
+
+// runInTx wraps fn in one transaction when a runner is configured and joins
+// the caller's transaction when the caller already opened one.
+func (s *ExposureService) runInTx(ctx context.Context, fn func(context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
 }
 
 // ----- Acknowledge -----
@@ -110,20 +131,30 @@ func (s *ExposureService) Acknowledge(ctx context.Context, quoteID uuid.UUID, re
 		ExposureDollars: float64Ptr(status.ExposureDollars),
 		CreatedAt:       now,
 	}
-	if _, err := s.exposure.InsertEvent(ctx, ev); err != nil {
-		return nil, fmt.Errorf("acknowledge: insert event: %w", err)
-	}
+	// One transactional fact: the ledger row, the rollup flips and the
+	// outbox event commit together or not at all. The outbox write is the
+	// transaction's last statement (ADR 0003 section 2: the advisory lock is
+	// held to commit, and statements after it serialize every other event
+	// writer behind this one).
+	err = s.runInTx(ctx, func(txCtx context.Context) error {
+		if _, err := s.exposure.InsertEvent(txCtx, ev); err != nil {
+			return fmt.Errorf("acknowledge: insert event: %w", err)
+		}
 
-	// Flip rollup to ACKNOWLEDGED on the quote AND each active line escalator.
-	if err := s.quoteRepo.UpdateQuoteExposure(ctx, quoteID, string(ExposureStateAcknowledged), 0, now); err != nil {
-		return ev, fmt.Errorf("acknowledge: update quote rollup: %w", err)
-	}
-	if err := s.flipAllActiveEscalators(ctx, quoteID, ExposureStateAcknowledged, now); err != nil {
-		return ev, fmt.Errorf("acknowledge: flip escalators: %w", err)
+		// Flip rollup to ACKNOWLEDGED on the quote AND each active line escalator.
+		if err := s.quoteRepo.UpdateQuoteExposure(txCtx, quoteID, string(ExposureStateAcknowledged), 0, now); err != nil {
+			return fmt.Errorf("acknowledge: update quote rollup: %w", err)
+		}
+		if err := s.flipAllActiveEscalators(txCtx, quoteID, ExposureStateAcknowledged, now); err != nil {
+			return fmt.Errorf("acknowledge: flip escalators: %w", err)
+		}
+		return s.recordStatus(txCtx, EventAcknowledged, status)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("acknowledge: %w", err)
 	}
 
 	s.writeAudit(ctx, ev)
-	s.publishStatus(ctx, EventAcknowledged, status)
 	return ev, nil
 }
 
@@ -145,13 +176,19 @@ func (s *ExposureService) RequestAck(ctx context.Context, quoteID uuid.UUID, act
 		IdempotencyKey: userEventKey(quoteID, EventAckRequested, actor, now),
 		CreatedAt:      now,
 	}
-	if _, err := s.exposure.InsertEvent(ctx, ev); err != nil {
-		return nil, fmt.Errorf("request-ack: insert event: %w", err)
+	// The ledger row and the notification event are one transactional fact,
+	// with the outbox write as the transaction's last statement; the drain
+	// delivers the committed row on the ACK_REQUIRED subject, so the
+	// notifier's per-(salesperson, index) routing engages.
+	err = s.runInTx(ctx, func(txCtx context.Context) error {
+		if _, err := s.exposure.InsertEvent(txCtx, ev); err != nil {
+			return fmt.Errorf("request-ack: insert event: %w", err)
+		}
+		return s.recordStatus(txCtx, EventAckRequired, status)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("request-ack: %w", err)
 	}
-
-	// Notify the salesperson — best-effort. Publish as an ACK_REQUIRED subject
-	// so the notifier's per-(salesperson, index) routing engages.
-	s.publishStatus(ctx, EventAckRequired, status)
 
 	s.writeAudit(ctx, ev)
 	return ev, nil
@@ -359,16 +396,20 @@ func (s *ExposureService) flipActiveRaisedEscalators(ctx context.Context, quoteI
 	return nil
 }
 
-// publishStatus emits an ExposureNotification derived from an ExposureStatus
-// to the subject mapped from the event type. Best-effort; no-ops when the bus
-// is unconfigured or the event has no subject.
-func (s *ExposureService) publishStatus(ctx context.Context, eventType EventType, status ExposureStatus) {
-	if s.bus == nil {
-		return
+// recordStatus writes an ExposureNotification derived from an ExposureStatus
+// into the outbox, on the subject mapped from the event type. The row
+// commits with the mutation when the caller is inside a transaction (the
+// seam resolves the caller's executor) and the drain hands it to the bus.
+// No-ops when no recorder is configured or the event has no subject; an
+// error is the caller's to propagate, so a notification that cannot be
+// recorded is not silently dropped.
+func (s *ExposureService) recordStatus(ctx context.Context, eventType EventType, status ExposureStatus) error {
+	if s.events == nil {
+		return nil
 	}
 	subject := SubjectForEvent(eventType)
 	if subject == "" {
-		return
+		return nil
 	}
 	indexCode := ""
 	if len(status.Indexes) > 0 {
@@ -385,12 +426,15 @@ func (s *ExposureService) publishStatus(ctx context.Context, eventType EventType
 	}
 	payload, err := json.Marshal(notif)
 	if err != nil {
-		s.logger.Warn("exposure-service: marshal notification", "err", err)
-		return
+		return fmt.Errorf("marshal notification: %w", err)
 	}
-	if err := s.bus.Publish(ctx, subject, payload); err != nil {
-		s.logger.Warn("exposure-service: publish notification", "subject", subject, "err", err)
-	}
+	return s.events.Write(ctx, outbox.Event{
+		Type:       subject,
+		EntityType: "quote",
+		EntityID:   status.QuoteID,
+		Data:       payload,
+		At:         time.Now().UTC(),
+	})
 }
 
 // writeAudit fires the audit log entry. The caller's context is NOT passed

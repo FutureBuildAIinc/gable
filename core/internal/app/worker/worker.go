@@ -3,10 +3,10 @@
 
 // Package worker is the worker role of the core binary: the background
 // jobs that do not belong to the HTTP server. Today that is the
-// idempotency retention purge, which R1-4 moved out of serve; the cron
-// schedulers that serve mounts beside its own HTTP surface (auto-reorder
-// and scheduled report delivery) stay in serve until the outbox item
-// (R1-12) gives the worker its drain.
+// idempotency retention purge, which R1-4 moved out of serve, and the
+// outbox drain (R1-12), which delivers committed events to their
+// subscribers; the cron schedulers that serve mounts beside its own HTTP
+// surface (auto-reorder and scheduled report delivery) stay in serve.
 package worker
 
 import (
@@ -19,8 +19,11 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/eventbus"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 )
 
 // Run starts the worker's jobs and blocks until SIGINT or SIGTERM, then
@@ -83,14 +86,27 @@ func Run() {
 		logger.Error("idempotency purge scheduler failed to start", "error", err)
 	}
 
-	logger.Info("Worker started", "jobs", "idempotency-purge")
+	// Outbox drain: deliver committed events (pkg/outbox) to the registered
+	// subscribers, past each subscriber's cursor. The exposure notifier is the
+	// subscriber today; it dedups on the outbox event id. The drain runs only
+	// here, so serve replicas never contend for the cursors. A start failure
+	// is logged, not fatal, as for the scheduler above.
+	drain := newOutboxDrain(db, logger)
+	if err := drain.Start(context.Background()); err != nil {
+		logger.Error("outbox drain failed to start; event subscribers receive nothing until it runs", "error", err)
+	}
+
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
 
 	// Step 1: stop the background jobs. Same reasoning as serve's job stops:
 	// no purge statement may start against a draining pool, and an in-flight
-	// batch finishes before step 2 closes it.
+	// batch (or drain window) finishes before step 2 closes it.
+	logger.Info("Shutdown step 1/2: stopping outbox drain...")
+	drain.Stop()
+	logger.Info("Shutdown step 1/2: outbox drain stopped")
 	logger.Info("Shutdown step 1/2: stopping idempotency purge scheduler...")
 	idempotencyScheduler.Stop()
 	logger.Info("Shutdown step 1/2: idempotency purge scheduler stopped")
@@ -101,4 +117,14 @@ func Run() {
 	logger.Info("Shutdown step 2/2: database pool closed")
 
 	logger.Info("Worker exiting: clean shutdown complete")
+}
+
+// newOutboxDrain builds the drain with its subscribers registered. The
+// exposure notifier receives every quote.exposure.* event; its email service
+// is the log-only LogEmailService, as in serve, until a real sender exists.
+func newOutboxDrain(db *database.DB, logger *slog.Logger) *outbox.DrainRunner {
+	drain := outbox.NewDrainRunner(db, logger)
+	notifier := notification.NewExposureNotifier(notification.NewLogEmailService(logger), db, logger)
+	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
+	return drain
 }

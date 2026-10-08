@@ -41,7 +41,7 @@ Four failure modes, all loud:
    cannot see it. The allow list `allowMethodValues` in the same file names
    the bindings the repo has reviewed as not a router; today it holds one
    entry, the exposure notifier's `notifier.Handle` event bus subscription
-   in `internal/app/serve/wire_exposure.go`. The same holds for a pattern name the
+   in `internal/app/worker/worker.go`. The same holds for a pattern name the
    enclosing function binds as a receiver, parameter, named result or
    variable: the census refuses to guess the value a shadowing binding
    would carry at run time.
