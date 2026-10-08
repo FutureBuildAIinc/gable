@@ -154,6 +154,29 @@ func TestShadowedPatternNameIsUnresolved(t *testing.T) {
 	}
 }
 
+// TestExactDoubleRegistrationFails pins the fix for the review's F5: two
+// identical registrations outside mutually exclusive branches are a
+// duplicate, while the if/else pair still collapses to one route.
+func TestExactDoubleRegistrationFails(t *testing.T) {
+	result := collectFixture(t, "double")
+	err := result.Validate()
+	if err == nil {
+		t.Fatalf("want a duplicate registration, got none (routes %+v)", result.Routes)
+	}
+	if !strings.Contains(err.Error(), "GET /zz/dup") {
+		t.Fatalf("the duplicate message must name GET /zz/dup, got: %v", err)
+	}
+	cond := 0
+	for _, r := range result.Routes {
+		if r.Pattern == "/zz/cond" {
+			cond++
+		}
+	}
+	if cond != 1 {
+		t.Fatalf("the if/else pair must collapse to one route, got %d: %+v", cond, result.Routes)
+	}
+}
+
 // diffRoutes compares two rendered censuses by route key and returns one
 // human line per added and removed route.
 func diffRoutes(oldRender, newRender string) (added, removed []string) {

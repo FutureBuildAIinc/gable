@@ -48,6 +48,20 @@ type Route struct {
 	// a one-argument wrapper call such as guard(h.ListQuotes) names the
 	// wrapped handler.
 	Handler string
+
+	// site records where the registration call sits, for duplicate
+	// detection. It is never rendered.
+	site routeSite
+}
+
+// routeSite locates one registration call site. ifPos and inElse say
+// whether the call sits inside an if statement's if or else branch, which
+// is how mutually exclusive registrations are recognised.
+type routeSite struct {
+	file   string // module relative
+	line   int
+	ifPos  token.Pos // 0 when the call is not inside an if
+	inElse bool
 }
 
 // Unresolved is a Handle or HandleFunc call whose pattern argument is not a
@@ -67,13 +81,13 @@ func (u Unresolved) String() string {
 // Result is the census of one source tree.
 type Result struct {
 	Routes []Route
-	// Duplicates lists (method, pattern) pairs the sources register with
-	// two different registrations (different handler or module). Registering
-	// the same pair twice panics the ServeMux at boot when both runs happen,
-	// and two different registrations of one pattern cannot both be honoured,
-	// so a pair like that is an error. Two registrations that are identical
-	// in every column (a conditional if/else around one handler, as the
-	// portal login limiter does) are one route and appear once in Routes.
+	// Duplicates lists (method, pattern) pairs the sources register more
+	// than once: two different registrations (different handler or module)
+	// of one pattern cannot both be honoured, and an identical pair
+	// registered twice outside mutually exclusive branches panics the
+	// ServeMux at boot. Only registrations in the if and else branches of
+	// one if/else (the portal login limiter is one) are mutually exclusive;
+	// they are one route and appear once in Routes.
 	Duplicates []string
 	Unresolved []Unresolved
 	// Restricted lists registration constructs the census refuses: they
@@ -530,10 +544,17 @@ func Collect(moduleRoot string) (Result, error) {
 				})
 				return true
 			}
+			pos, inElse := ifBranch(fu.file, call)
 			route := Route{
 				Module:  fu.relDir,
 				Pattern: pattern,
 				Handler: describeHandler(fset, call.Args[1]),
+				site: routeSite{
+					file:   fu.relPath,
+					line:   fset.Position(call.Pos()).Line,
+					ifPos:  pos,
+					inElse: inElse,
+				},
 			}
 			if m := methodPatternRe.FindStringSubmatch(pattern); m != nil {
 				route.Method = strings.ToUpper(m[1])
@@ -812,39 +833,93 @@ func SortRoutes(routes []Route) {
 	})
 }
 
-// dedupe collapses routes registered identically more than once (a
-// conditional if/else around one handler registers the same route through
-// two call sites) and reports (method, pattern) pairs registered with two
-// different registrations as duplicates.
+// dedupe collapses the registrations of one (method, pattern) pair that
+// sit in mutually exclusive branches of one if/else, and reports every
+// other repeated pair as a duplicate: two different registrations of one
+// pair cannot both be honoured, and an identical pair registered twice
+// outside mutually exclusive branches panics the ServeMux at boot.
 func dedupe(routes []Route) ([]Route, []string) {
 	SortRoutes(routes)
-	out := make([]Route, 0, len(routes))
-	for i, r := range routes {
-		if i > 0 && routes[i-1] == r {
-			continue
-		}
-		out = append(out, r)
-	}
-
-	type reg struct {
-		line     Route
-		conflict bool
-	}
-	seen := map[string]*reg{}
+	var out []Route
 	var dups []string
-	for _, r := range routes {
-		k := r.Method + " " + r.Pattern
-		s, ok := seen[k]
-		if !ok {
-			seen[k] = &reg{line: r}
-			continue
+	for i := 0; i < len(routes); {
+		j := i + 1
+		for j < len(routes) && routes[j].Method == routes[i].Method && routes[j].Pattern == routes[i].Pattern {
+			j++
 		}
-		if s.line != r && !s.conflict {
-			s.conflict = true
-			dups = append(dups, fmt.Sprintf("%s registered as %q in %s and as %q in %s",
-				k, s.line.Handler, s.line.Module, r.Handler, r.Module))
-		}
+		out = append(out, collapse(routes[i:j], &dups))
+		i = j
 	}
 	sort.Strings(dups)
 	return out, dups
+}
+
+// collapse reduces one (method, pattern) group to the route it declares,
+// appending a duplicate line for every registration the group carries
+// beyond the collapsed ones.
+func collapse(group []Route, dups *[]string) Route {
+	first := group[0]
+	key := first.Method + " " + first.Pattern
+	for _, r := range group[1:] {
+		if r.Module != first.Module || r.Handler != first.Handler {
+			*dups = append(*dups, fmt.Sprintf(
+				"%s registered as %q in %s (%s:%d) and as %q in %s (%s:%d)",
+				key, first.Handler, first.Module, first.site.file, first.site.line,
+				r.Handler, r.Module, r.site.file, r.site.line))
+			return first
+		}
+	}
+	remaining := group
+	for len(remaining) > 1 {
+		paired := false
+		for k := 1; k < len(remaining); k++ {
+			a, b := remaining[0].site, remaining[k].site
+			if a.ifPos != token.NoPos && a.ifPos == b.ifPos && a.inElse != b.inElse {
+				remaining = append(remaining[:k], remaining[k+1:]...)
+				remaining = remaining[1:]
+				paired = true
+				break
+			}
+		}
+		if !paired {
+			*dups = append(*dups, fmt.Sprintf(
+				"%s registered identically %d times (%s:%d and %s:%d among them); registered twice outside mutually exclusive branches the ServeMux panics at boot",
+				key, len(remaining),
+				remaining[0].site.file, remaining[0].site.line,
+				remaining[1].site.file, remaining[1].site.line))
+			break
+		}
+	}
+	return first
+}
+
+// ifBranch reports the position of the innermost if statement n sits in
+// and whether n sits in that if's else branch. It reports 0 when n is not
+// inside an if.
+func ifBranch(f *ast.File, n ast.Node) (token.Pos, bool) {
+	type side struct {
+		from, to token.Pos
+		inElse   bool
+	}
+	bestPos, bestElse, bestSize := token.NoPos, false, -1
+	ast.Inspect(f, func(node ast.Node) bool {
+		ifStmt, ok := node.(*ast.IfStmt)
+		if !ok {
+			return true
+		}
+		sides := []side{{ifStmt.Body.Pos(), ifStmt.Body.End(), false}}
+		if ifStmt.Else != nil {
+			sides = append(sides, side{ifStmt.Else.Pos(), ifStmt.Else.End(), true})
+		}
+		for _, s := range sides {
+			if s.from <= n.Pos() && n.End() <= s.to {
+				size := int(s.to - s.from)
+				if bestSize == -1 || size < bestSize {
+					bestPos, bestElse, bestSize = ifStmt.Pos(), s.inElse, size
+				}
+			}
+		}
+		return true
+	})
+	return bestPos, bestElse
 }
