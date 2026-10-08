@@ -202,7 +202,7 @@ func (r *PostgresExposureRepository) ListActiveEscalatorsForIndex(ctx context.Co
 			pe.effective_date, pe.expiration_date, pe.is_active, pe.created_at, pe.updated_at,
 			q.id, q.state::text, SUBSTRING(q.id::text FROM 1 FOR 8),
 			c.id, COALESCE(c.name, ''), c.salesperson_id, COALESCE(st.name, ''),
-			ql.quantity, ql.unit_price,
+			ql.quantity, ql.unit_price, ql.uom_qty, ql.price_uom_qty,
 			c.escalation_agreement_signed_at, COALESCE(c.escalation_agreement_ref, '')
 		FROM price_escalators pe
 		JOIN quote_lines ql  ON ql.id = pe.quote_line_id
@@ -229,7 +229,7 @@ func (r *PostgresExposureRepository) ListActiveEscalatorsForIndex(ctx context.Co
 			&pe.EffectiveDate, &pe.ExpirationDate, &pe.IsActive, &pe.CreatedAt, &pe.UpdatedAt,
 			&ewc.QuoteID, &ewc.QuoteState, &ewc.QuoteShortID,
 			&ewc.CustomerID, &ewc.CustomerName, &ewc.SalespersonID, &ewc.SalespersonName,
-			&ewc.LineQuantity, &ewc.LineUnitPrice,
+			&ewc.LineQuantity, &ewc.LineUnitPrice, &ewc.LineUOMQty, &ewc.LinePriceUOMQty,
 			&ewc.CustomerAgreementSignedAt, &ewc.CustomerAgreementRef,
 		); err != nil {
 			return nil, fmt.Errorf("scan escalator with context: %w", err)

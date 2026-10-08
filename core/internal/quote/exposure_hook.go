@@ -59,6 +59,8 @@ type QuoteLineForSnapshot struct {
 	ProductID     uuid.UUID
 	SKU           string
 	Quantity      float64
+	UOMQty        float64 // the line's conversion pair, uom_qty of the sale unit
+	PriceUOMQty   float64 // equals price_uom_qty of the price unit
 	UnitPrice     float64
 	IsCommodity   bool
 	MarketIndexID *uuid.UUID // resolved by the caller (product override or category default)

@@ -116,6 +116,7 @@ type PortalQuoteLineDTO struct {
 
 	Quantity  float64 `json:"quantity"`
 	UOM       string  `json:"uom"`
+	PriceUOM  string  `json:"price_uom"` // the unit unit_price is quoted per
 	UnitPrice float64 `json:"unit_price"`
 	LineTotal float64 `json:"line_total"`
 
@@ -526,7 +527,7 @@ func (r *PostgresRepository) getPortalQuoteLines(ctx context.Context, quoteID uu
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT ql.id, ql.product_id, COALESCE(ql.sku, ''), COALESCE(ql.description, ''),
 		       COALESCE(ql.customer_note, ''), ql.quantity::float8, ql.uom::text,
-		       ql.unit_price::float8, ql.line_total::float8
+		       COALESCE(ql.price_uom, ql.uom::text), ql.unit_price::float8, ql.line_total::float8
 		FROM quote_lines ql
 		WHERE ql.quote_id = $1
 		ORDER BY ql.created_at ASC
@@ -540,7 +541,7 @@ func (r *PostgresRepository) getPortalQuoteLines(ctx context.Context, quoteID uu
 	for rows.Next() {
 		var l PortalQuoteLineDTO
 		if err := rows.Scan(&l.ID, &l.ProductID, &l.ProductSKU, &l.Description,
-			&l.CustomerNote, &l.Quantity, &l.UOM, &l.UnitPrice, &l.LineTotal); err != nil {
+			&l.CustomerNote, &l.Quantity, &l.UOM, &l.PriceUOM, &l.UnitPrice, &l.LineTotal); err != nil {
 			return nil, fmt.Errorf("failed to scan quote line: %w", err)
 		}
 		l.IsSpecialOrder = l.ProductID == nil

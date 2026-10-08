@@ -498,7 +498,7 @@ func (r *PostgresRepository) GetQuoteWithLinesAndCustomer(ctx context.Context, q
 	q.ShortID = q.ID.String()[:8]
 
 	linesQuery := `
-		SELECT ql.id, ql.product_id, ql.sku, ql.quantity, ql.unit_price,
+		SELECT ql.id, ql.product_id, ql.sku, ql.quantity, ql.uom_qty, ql.price_uom_qty, ql.unit_price,
 			COALESCE(p.is_commodity, FALSE), p.market_index_id
 		FROM quote_lines ql
 		LEFT JOIN products p ON p.id = ql.product_id
@@ -513,7 +513,7 @@ func (r *PostgresRepository) GetQuoteWithLinesAndCustomer(ctx context.Context, q
 	for rows.Next() {
 		var l QuoteLineForSnapshot
 		if err := rows.Scan(
-			&l.ID, &l.ProductID, &l.SKU, &l.Quantity, &l.UnitPrice,
+			&l.ID, &l.ProductID, &l.SKU, &l.Quantity, &l.UOMQty, &l.PriceUOMQty, &l.UnitPrice,
 			&l.IsCommodity, &l.MarketIndexID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan quote line for snapshot: %w", err)

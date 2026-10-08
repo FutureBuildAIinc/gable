@@ -6875,7 +6875,9 @@ export interface components {
             customer_note: string;
             quantity: number;
             uom: string;
-            /** @description Float dollars; 0 until the dealer prices the line. */
+            /** @description The unit unit_price is quoted per; equal to uom unless the dealer priced the line per another unit. */
+            price_uom: string;
+            /** @description Float dollars per price_uom; 0 until the dealer prices the line. */
             unit_price: number;
             /** @description Float dollars; 0 until the dealer prices the line. */
             line_total: number;

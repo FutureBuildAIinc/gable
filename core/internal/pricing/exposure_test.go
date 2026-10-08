@@ -341,6 +341,8 @@ type fixtureOpts struct {
 	currentIndex  float64
 	basePrice     float64
 	quantity      float64
+	uomQty        float64 // the line's conversion pair; zero means 1 to 1
+	priceUOMQty   float64
 	thresholdPct  float64
 	policy        EscalationPolicy
 	agreementSign bool
@@ -402,6 +404,8 @@ func newScannerFixture(t *testing.T, o fixtureOpts) *scannerFixture {
 		CustomerID:                uuid.New(),
 		CustomerName:              "Acme Construction",
 		LineQuantity:              o.quantity,
+		LineUOMQty:                o.uomQty,
+		LinePriceUOMQty:           o.priceUOMQty,
 		LineUnitPrice:             o.basePrice,
 		CustomerAgreementSignedAt: signedAt,
 	}}
@@ -594,6 +598,30 @@ func TestScanner_ExposureDollarsAreUnsignedMagnitude(t *testing.T) {
 	}
 	if ev.DeltaPct == nil || *ev.DeltaPct >= 0 {
 		t.Errorf("delta_pct = %v, want a negative value — direction belongs on delta, not dollars", ev.DeltaPct)
+	}
+}
+
+// CORRECTNESS: a line priced per another unit exposes its price quantity, not
+// its sale quantity. 187.5 pieces priced at 200.00 per MBF, 187.5 pieces to 1
+// MBF, is one MBF: a 15% fall exposes 30.00, not 187.5 times that.
+func TestScanner_ExposureAppliesTheLinesConversionPair(t *testing.T) {
+	f := newScannerFixture(t, fixtureOpts{
+		baseIndex: 400, currentIndex: 340, // -15%
+		basePrice: 200, quantity: 187.5, uomQty: 187.5, priceUOMQty: 1,
+		thresholdPct: 5, policy: PolicyFlagForRequote,
+	})
+
+	if err := f.scanner.OnMarketIndexUpdated(context.Background(), f.indexID, uuid.New()); err != nil {
+		t.Fatalf("OnMarketIndexUpdated: %v", err)
+	}
+
+	ev := f.lastEvent(t)
+	if ev.ExposureDollars == nil {
+		t.Fatal("exposure_dollars is nil")
+	}
+	// |340/400 - 1| * 200 * (187.5 * 1 / 187.5) = 0.15 * 200 = 30
+	if math.Abs(*ev.ExposureDollars-30) > 0.01 {
+		t.Errorf("exposure_dollars = %v, want 30 (the price quantity is 1 MBF)", *ev.ExposureDollars)
 	}
 }
 
