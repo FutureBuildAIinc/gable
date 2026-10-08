@@ -215,31 +215,76 @@ field name carrying the suffix `_cents`: `total_cents`, `amount_cents`,
 `balance_cents`. No float ever carries money on the wire: a JSON number with
 a decimal point in a money field is a decode error, not a rounding event.
 The ledger modules already work in int64 cents internally; this makes the
-whole surface agree with them. Cycle 1 is single currency per deployment;
-when multi-currency arrives (cycle 2, per the plan) the money fields gain
-their currency companion fields in their own listed contract change.
+whole surface agree with them.
 
 Unit prices that need precision below one cent are integers too, at a fixed
 scale of 4, field name carrying the suffix `_ten_thousandths`:
 `unit_price_ten_thousandths: 13725` is a unit price of 1.3725. Scale 4 is
-chosen against the database: physical quantities and prices are stored as
-`DECIMAL(19,4)` (the project's pinned column convention; the normalizing
-migration that made it so is in the history beside `CLAUDE.md`'s convention
-table). A scale-4 integer is that column multiplied by ten thousand: every
-value the database keeps is representable exactly, and every value the wire
-can express persists exactly, in both directions, with no rounding anywhere.
-A finer suffix such as `_micros` (scale 6) was considered and rejected: the
-wire would then carry values (a price of 0.000005) that the column silently
-rounds away on store, a contract that admits numbers the system cannot keep.
-Scale 4 is also the domain's precision: unit pricing in lumber quotes to a
-hundredth of a cent (per board foot, per each), which is one hundredth of a
-cent in minor-unit terms. int64 at scale 4 still reaches nine hundred
-trillion major units.
+what the database already keeps wherever sub cent precision exists today:
+`quote_lines.unit_price`, `contract_price`, and `products.base_price` are
+all `NUMERIC(12,4)`. Other unit price columns still sit at scale 2
+(`order_lines.price_each`, `invoice_lines.price_each`, and the POS, AP and
+portal cart `unit_price` columns), so today a scale 4 quote price is
+rounded to cents the moment it becomes an order or invoice line. That
+stops at conversion: a module may not expose a `_ten_thousandths` field
+backed by a scale 2 column; the same change that first exposes the field
+widens the column to scale 4 (migration note step 2b). Amount columns stay
+at scale 2 or move to integer cents. Converting between storage and the
+wire goes through the package's `ParseCents` and `ParsePrice` and never
+through float64. A finer suffix such as `_micros` (scale 6) was considered
+and rejected: the wire would carry values the column silently rounds away
+on store, a contract that admits numbers the system cannot keep.
+
+Money and quantity fields are required unless the contract documents the
+field optional, and null is not zero: a missing amount and a zero amount
+are different facts, and the package's value types refuse JSON null. A
+field that is genuinely optional is the pointer type, where null decodes
+to nil.
+
+`_cents` is always the amount times 100 in the record's currency, and
+`_ten_thousandths` is always the price times 10,000 in the major unit,
+whatever the currency turns out to be. Currencies whose minor unit is
+finer than two places are out of scope until a cycle decides them. Cycle 1
+is single currency per deployment; when multi-currency arrives it is one
+`currency` field (ISO 4217) per document, required on every document that
+carries money, not one field per amount, in its own listed contract
+change.
+
+int64 at scale 4 passes JavaScript's exact number range only above about
+900 billion major units. The web client treats these values as ordinary
+numbers below that bound, which no dealer document approaches, and any
+client that expects to cross it carries them as strings.
 
 Line totals, tax amounts, and every other derived amount stay in cents:
-the extension of a line (quantity at scale 4 times price at scale 4) is
-rounded once, to cents, at the point the line is priced, and that one
-rounding rule lives in the pricing code, not on the wire.
+the extension of a line is rounded once, to cents, by the one rule
+section 7a fixes, implemented once in the package, never per module.
+
+### 7a. Quantities, units and the extension
+
+Quantities and unit conversion factors travel as JSON strings holding a
+plain decimal with at most 4 fraction digits (`"12.5"`, `"1000"`,
+`"0.001"`), parsed with the package's fixed scale helpers, never as JSON
+numbers: a float on either side of a line's arithmetic would make the
+extension unreproducible for clients and agents. The package's `Quantity`
+type is the wire type (parse, database form, and shortest exact string
+form); the factor's own precision is what cycle 3's units design works
+with, and the wire type is fixed now so that design refines values, not
+shapes.
+
+Every quantity carries its unit of measure beside it, in a `uom` field.
+A unit price is per its price unit: where the price unit can differ from
+the line's sale unit, the line carries `price_uom` beside
+`unit_price_ten_thousandths`. Commodity lumber is priced per `MBF` and
+fasteners per `M` or `CWT`; a price of 3.75 per M is 0.00375 each, which
+no per-each scale 4 field could hold, so the conversion belongs to the
+line, not to the price.
+
+The extension of a line is the quantity converted to the price unit
+(through the factor stored on the line, 1 when the units agree),
+multiplied by the unit price, rounded once, to cents, half away from
+zero. The rounding mode is named here and implemented once in the
+package (`Extend`), exact in big arithmetic until that one rounding;
+no module prices a line any other way.
 
 ### 8. Document numbers
 
