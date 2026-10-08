@@ -191,7 +191,7 @@
             "priced_unit_price_ten_thousandths": 47500,
             "product_id": "<id-4>",
             "quantity": "2",
-            "quantity_allocated": "0",
+            "quantity_allocated": "2",
             "quantity_backordered": "0",
             "quantity_fulfilled": "0",
             "quote_line_id": null,

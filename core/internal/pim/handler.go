@@ -5,8 +5,11 @@ package pim
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
@@ -46,19 +49,32 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("DELETE /api/v1/products/{id}/pim/collateral/{collateralId}", guard(h.HandleDeleteCollateral))
 }
 
+// HandleGetProductDetail answers the PIM aggregate. The product summary in
+// it is the converted product wire (ADR 0006 7.1), so the route speaks the
+// wire contract's error envelope, strict query and revision ETag.
 func (h *Handler) HandleGetProductDetail(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "invalid product id", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
+		return
+	}
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 
 	detail, err := h.service.GetProductDetail(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to get product detail", http.StatusInternalServerError, err)
+		if errors.Is(err, product.ErrNotFound) {
+			httpx.WriteError(w, r, httpx.NotFound("no such product"))
+			return
+		}
+		httpx.WriteError(w, r, err)
 		return
 	}
 
+	httpx.WriteRevisionETag(w, detail.Product.Revision)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(detail)
 }

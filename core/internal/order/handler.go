@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -25,14 +26,24 @@ type Handler struct {
 
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
+// RegisterRoutes mounts the order routes. The first guard is the orders'
+// roles; the second, when given, guards the fulfilment request routes (admin,
+// owner, finance and warehouse: ADR 0005 5.7).
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
-	guard := func(handler http.HandlerFunc) http.HandlerFunc {
-		if len(roleGuard) > 0 && roleGuard[0] != nil {
+	guardWith := func(i int, handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > i && roleGuard[i] != nil {
 			return func(w http.ResponseWriter, r *http.Request) {
-				roleGuard[0](handler).ServeHTTP(w, r)
+				roleGuard[i](handler).ServeHTTP(w, r)
 			}
 		}
 		return handler
+	}
+	guard := func(handler http.HandlerFunc) http.HandlerFunc { return guardWith(0, handler) }
+	requestGuard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 1 {
+			return guardWith(1, handler)
+		}
+		return guardWith(0, handler)
 	}
 
 	mux.HandleFunc("GET /api/v1/orders", guard(h.HandleListOrders))
@@ -40,6 +51,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/orders/{id}", guard(h.HandleGetOrder))
 	mux.HandleFunc("PUT /api/v1/orders/{id}", guard(h.HandleUpdateOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/transitions", guard(h.HandleTransition))
+	mux.HandleFunc("POST /api/v1/orders/{id}/allocate", guard(h.HandleAllocate))
+	mux.HandleFunc("POST /api/v1/orders/{id}/fulfillments", guard(h.HandleFulfil))
+	mux.HandleFunc("GET /api/v1/orders/fulfillment-requests", requestGuard(h.HandleListFulfilmentRequests))
+	mux.HandleFunc("POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry", requestGuard(h.HandleRetryFulfilmentRequest))
 	mux.HandleFunc("GET /api/v1/orders/{id}/exposure-gate", guard(h.HandleExposureGate))
 	mux.HandleFunc("POST /api/v1/orders/{id}/exposure-override", guard(h.HandleExposureOverride))
 }
@@ -416,4 +431,210 @@ func writeExposureConflict(w http.ResponseWriter, r *http.Request, payload map[s
 	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
 		Message: "the order's source quote has unresolved index exposure",
 		Details: details})
+}
+
+// AllocateRequest is the body of POST /orders/{id}/allocate: the revision
+// precondition (beside If-Match).
+type AllocateRequest struct {
+	Revision json.RawMessage `json:"revision"`
+}
+
+// HandleAllocate runs the allocation for one order on demand (ADR 0005 5.4):
+// the desk's retry for a back order. 200 with the order.
+func (h *Handler) HandleAllocate(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req AllocateRequest
+	// The body is optional: the precondition may ride in If-Match alone.
+	if r.ContentLength != 0 && r.Body != http.NoBody {
+		if err := httpx.DecodeJSON(r, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	v := &httpx.Validator{}
+	var revision *int64
+	if n, ok := v.Int("revision", req.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		revision = &n
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	o, err := h.service.AllocateOrder(r.Context(), id, Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeOrder(w, http.StatusOK, o)
+}
+
+// FulfilBody is the body of POST /orders/{id}/fulfillments (ADR 0005 5.6).
+type FulfilBody struct {
+	Revision   json.RawMessage `json:"revision"`
+	Lines      []FulfilEntry   `json:"lines"`
+	PickedUpBy *string         `json:"picked_up_by"`
+	DeliveryID *string         `json:"delivery_id"`
+}
+
+// FulfilEntry names one order line and the quantity to bill.
+type FulfilEntry struct {
+	OrderLineID *string         `json:"order_line_id"`
+	Quantity    json.RawMessage `json:"quantity"`
+}
+
+// HandleFulfil bills the allocated quantities: 201 with the updated order (its
+// new revision in the body and the ETag) and Location naming the invoice.
+func (h *Handler) HandleFulfil(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var body FulfilBody
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	v := &httpx.Validator{}
+	var revision *int64
+	if n, ok := v.Int("revision", body.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		revision = &n
+	}
+	req := FulfilRequest{Actor: actor(r)}
+	for i, e := range body.Lines {
+		path := fmt.Sprintf("lines[%d]", i)
+		var entry FulfilLineRequest
+		if lineID, ok := v.UUID(path+".order_line_id", e.OrderLineID, true); ok {
+			entry.OrderLineID = lineID
+		}
+		if q, ok := v.Quantity(path+".quantity", e.Quantity, true); ok {
+			entry.Quantity = q
+		}
+		req.Lines = append(req.Lines, entry)
+	}
+	if body.Lines != nil && len(body.Lines) == 0 {
+		v.Check(false, "lines", "must name at least one line, or be left out to fulfil everything allocated")
+	}
+	if body.PickedUpBy != nil {
+		req.PickedUpBy = *body.PickedUpBy
+	}
+	if id, ok := v.UUID("delivery_id", body.DeliveryID, false); ok {
+		req.DeliveryID = &id
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	pre := Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}
+	res, err := h.service.Fulfil(r.Context(), id, &pre, req)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/invoices/"+res.InvoiceID.String())
+	writeOrder(w, http.StatusCreated, res.Order)
+}
+
+const requestCursorScope = "orders.fulfillment_requests.position"
+
+// HandleListFulfilmentRequests lists the fulfilment queue (list envelope,
+// filters parked and order_id).
+func (h *Handler) HandleListFulfilmentRequests(w http.ResponseWriter, r *http.Request) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "parked", "order_id")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	page, err := httpx.ParseListQuery(r, requestCursorScope)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f := RequestFilter{Limit: page.Limit}
+	v := &httpx.Validator{}
+	if vals := q["parked"]; len(vals) > 0 {
+		switch {
+		case len(vals) > 1:
+			v.Check(false, "parked", "parameter is repeated")
+		case vals[0] == "true":
+			t := true
+			f.Parked = &t
+		case vals[0] == "false":
+			t := false
+			f.Parked = &t
+		default:
+			v.Check(false, "parked", "must be true or false")
+		}
+	}
+	if vals := q["order_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "order_id", "parameter is repeated")
+		} else if id, ok := v.UUID("order_id", &vals[0], true); ok {
+			f.OrderID = &id
+		}
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if page.Key != nil {
+		if len(page.Key) != 1 {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		n, perr := strconv.ParseInt(page.Key[0], 10, 64)
+		if perr != nil {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		f.AfterPosition = &n
+	}
+	items, hasMore, err := h.service.ListFulfilmentRequests(r.Context(), f)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if hasMore && len(items) > 0 {
+		next, err = httpx.MintCursor(requestCursorScope, strconv.FormatInt(items[len(items)-1].Position, 10))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	httpx.WriteList(w, items, next, f.Limit)
+}
+
+// HandleRetryFulfilmentRequest clears a parked request so the worker takes it
+// again: 204.
+func (h *Handler) HandleRetryFulfilmentRequest(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("delivery_id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("invalid delivery id",
+			httpx.FieldError{Field: "delivery_id", Message: "must be a UUID"}))
+		return
+	}
+	if err := h.service.RetryFulfilmentRequest(r.Context(), id); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

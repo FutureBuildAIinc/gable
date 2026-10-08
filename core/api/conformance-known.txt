@@ -4,5 +4,4 @@
 # Known deviations from contract conformance. The conformance test fails when
 # an unlisted step fails and when a listed step now passes (strike the line).
 # One line per golden step: group, tab, step name, tab, reason.
-product_item	product.dimensions.not_found	PATCH on a missing product answers 200 with an empty body; the fragment declares the product JSON (recorded as it is, a refactor decision)
 quote_file	quote.file.download	GET on a manual quote with no stored file answers 200 with an empty octet-stream body; the fragment says 404 for a quote with no stored file (recorded as it is)

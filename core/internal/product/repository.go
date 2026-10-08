@@ -5,26 +5,39 @@ package product
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// ErrNotFound is the read answer for a row that is not there.
+var ErrNotFound = errors.New("product not found")
+
+// ErrStaleRevision is a write's answer when the row moved past the revision
+// the caller built on (ADR 0001 section 11).
+var ErrStaleRevision = errors.New("stale revision")
 
 // Repository defines the interface for product data access
 type Repository interface {
 	CreateProduct(ctx context.Context, p *Product) error
 	GetProduct(ctx context.Context, id uuid.UUID) (*Product, error)
 	ListProducts(ctx context.Context) ([]Product, error)
-	ListProductsPaginated(ctx context.Context, limit, offset int) ([]Product, int, error)
+	ListProductsPage(ctx context.Context, after *time.Time, afterID *uuid.UUID, limit int) ([]Product, error)
+	CountProducts(ctx context.Context) (int64, error)
 	ListBelowReorder(ctx context.Context) ([]ReorderAlert, error)
 	UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error
-	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error
+	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64, revision int64) (int64, error)
 	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
-	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error
-	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error
+	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry, revision int64) (int64, error)
+	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error)
 }
 
 // KitStore is the kit definition store the kit component routes use. It is
@@ -33,7 +46,8 @@ type Repository interface {
 // serve kit definitions simply answers 503 on those two routes.
 type KitStore interface {
 	ListKitComponents(ctx context.Context, kitID uuid.UUID) ([]KitComponent, error)
-	ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, comps []KitComponent) error
+	LockKitProduct(ctx context.Context, kitID uuid.UUID) (revision int64, sku string, err error)
+	ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, comps []KitComponent, revision int64) (int64, error)
 	ProductKitRef(ctx context.Context, id uuid.UUID, sku, description, uom *string, isKit *bool) error
 }
 
@@ -47,98 +61,177 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// productColumns reads every column the domain row carries, with the scaled
+// and quantity columns read as text so the scan is exact (ADR 0001 section
+// 7: never through float64).
+const productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::text, p.vendor, p.vendor_id, p.upc,
+	       COALESCE(p.weight_lbs, 0)::text,
+	       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
+	       COALESCE(p.reorder_point, 0)::text, COALESCE(p.reorder_qty, 0)::text,
+	       p.lead_time_days, p.revision, p.created_at, p.updated_at,
+	       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)`
+
+// stockColumns and stockJoin read a product's stock totals in the same
+// statement as the product, in the stocking unit (ADR 0006 7.1): one
+// lateral aggregate per product row, never a second statement per row.
+// The totals are held to the branch wall like every other branch scoped
+// read: a context branch sums its own stock, a bound caller with no context
+// branch sums the branches granted to them, and an unwalled caller sums
+// every branch. $%d is the context branch and $%d the granted user sub.
+const stockColumns = `, COALESCE(st.on_hand, '0'), COALESCE(st.allocated, '0')`
+
+func stockJoin(branchArg, subArg int) string {
+	return fmt.Sprintf(` LEFT JOIN LATERAL (
+		SELECT SUM(i.quantity)::text AS on_hand, SUM(i.allocated)::text AS allocated
+		  FROM inventory i LEFT JOIN locations l ON l.id = i.location_id
+		 WHERE i.product_id = p.id
+		   AND (($%[1]d::uuid IS NOT NULL AND l.branch_id = $%[1]d)
+		     OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NOT NULL AND l.branch_id IN
+		         (SELECT branch_id FROM user_locations WHERE user_sub = $%[2]d))
+		     OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NULL))
+	) st ON TRUE`, branchArg, subArg)
+}
+
+// scanProduct fills a domain row from the shared column list.
+func scanProduct(scanner interface{ Scan(dest ...any) error }) (*Product, error) {
+	return scanProductWith(scanner, false)
+}
+
+// scanProductStock fills a domain row from the shared column list followed
+// by stockColumns.
+func scanProductStock(scanner interface{ Scan(dest ...any) error }) (*Product, error) {
+	return scanProductWith(scanner, true)
+}
+
+func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock bool) (*Product, error) {
+	var p Product
+	var basePrice, weight, reorderPoint, reorderQty, avgCost, onHand, allocated string
+	var created, updated time.Time
+	dest := []any{
+		&p.ID, &p.SKU, &p.Description, &p.UOMPrimary, &basePrice, &p.Vendor, &p.VendorID, &p.UPC,
+		&weight,
+		&p.LengthIn, &p.WidthIn, &p.HeightIn, &p.Stackable, &p.GeometrySource,
+		&reorderPoint, &reorderQty,
+		&p.LeadTimeDays, &p.Revision, &created, &updated,
+		&avgCost, &p.TargetMargin, &p.CommissionRate,
+	}
+	if withStock {
+		dest = append(dest, &onHand, &allocated)
+	}
+	if err := scanner.Scan(dest...); err != nil {
+		return nil, err
+	}
+	var err error
+	if withStock {
+		q, err := httpx.ParseQuantity(onHand)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read on hand: %w", err)
+		}
+		a, err := httpx.ParseQuantity(allocated)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read allocated: %w", err)
+		}
+		p.OnHand, p.Allocated, p.Available = q, a, q-a
+		p.TotalQuantity, p.TotalAllocated = qtyFloat(q), qtyFloat(a)
+	}
+	if p.BasePriceScaled, err = httpx.ParsePrice(basePrice); err != nil {
+		return nil, fmt.Errorf("read base price: %w", err)
+	}
+	p.BasePrice = float64(p.BasePriceScaled) / 10_000
+	if p.ReorderPointQ, err = httpx.ParseQuantity(reorderPoint); err != nil {
+		return nil, fmt.Errorf("read reorder point: %w", err)
+	}
+	p.ReorderPoint = qtyFloat(p.ReorderPointQ)
+	if p.ReorderQtyQ, err = httpx.ParseQuantity(reorderQty); err != nil {
+		return nil, fmt.Errorf("read reorder qty: %w", err)
+	}
+	p.ReorderQty = qtyFloat(p.ReorderQtyQ)
+	if p.AverageUnitCostScaled, err = httpx.ParsePrice(avgCost); err != nil {
+		return nil, fmt.Errorf("read average cost: %w", err)
+	}
+	p.AverageUnitCost = float64(p.AverageUnitCostScaled) / 10_000
+	if w, err := httpx.ParseQuantity(weight); err == nil {
+		p.WeightLbs = qtyFloat(w)
+	}
+	p.CreatedAt = httpx.TimestampOf(created)
+	p.UpdatedAt = httpx.TimestampOf(updated)
+	return &p, nil
+}
+
+// qtyFloat renders a quantity as the float the unconverted readers expect.
+func qtyFloat(q httpx.Quantity) float64 { return float64(q) / 10_000 }
+
 // CreateProduct inserts a new product into the database
 func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) error {
 	query := `
 		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc,
-		                      weight_lbs, length_in, width_in, height_in, stackable, geometry_source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		RETURNING id, created_at, updated_at, average_unit_cost, target_margin, commission_rate`
+		                      weight_lbs, length_in, width_in, height_in, stackable, geometry_source,
+		                      reorder_point, reorder_qty)
+		VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14::numeric, $15::numeric)
+		RETURNING id, created_at, updated_at, revision, average_unit_cost::text, target_margin, commission_rate`
 
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.VendorID, p.UPC,
-		p.WeightLbs, p.LengthIn, p.WidthIn, p.HeightIn, p.Stackable, p.GeometrySource).Scan(
-		&p.ID,
-		&p.CreatedAt,
-		&p.UpdatedAt,
-		&p.AverageUnitCost,
-		&p.TargetMargin,
-		&p.CommissionRate,
+	var avgCost string
+	var created, updated time.Time
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary,
+		p.BasePriceScaled.DecimalString(), p.Vendor, p.VendorID, p.UPC,
+		p.WeightLbs, p.LengthIn, p.WidthIn, p.HeightIn, p.Stackable, p.GeometrySource,
+		p.ReorderPointQ.DecimalString(), p.ReorderQtyQ.DecimalString(),
+	).Scan(
+		&p.ID, &created, &updated, &p.Revision, &avgCost, &p.TargetMargin, &p.CommissionRate,
 	)
-
 	if err != nil {
-		return fmt.Errorf("failed to create product: %w", err)
+		return mapWriteError(err)
 	}
-
+	if p.AverageUnitCostScaled, err = httpx.ParsePrice(avgCost); err != nil {
+		return fmt.Errorf("read average cost: %w", err)
+	}
+	p.AverageUnitCost = float64(p.AverageUnitCostScaled) / 10_000
+	p.CreatedAt, p.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
 	return nil
+}
+
+// mapWriteError turns a database refusal into the boundary error the handler
+// answers: a unique violation names the field that collided, a foreign key
+// violation names the reference that does not exist (the recipe's rule: a
+// bad reference is a 400, never a 500).
+func mapWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			return httpx.Duplicate("a product with this sku already exists",
+				httpx.FieldError{Field: "sku", Message: "already in use"})
+		case "23503":
+			return httpx.BadRequest("vendor_id does not name an existing vendor",
+				httpx.FieldError{Field: "vendor_id", Message: "no such vendor"})
+		}
+	}
+	return fmt.Errorf("failed to create product: %w", err)
 }
 
 // GetProduct retrieves a product by its ID
 func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Product, error) {
 	query := `
-		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0),
-		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
-		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
-		       p.created_at, p.updated_at,
-		       COALESCE(SUM(i.quantity), 0) as total_quantity,
-		       COALESCE(SUM(i.allocated), 0) as total_allocated,
-		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)
-		FROM products p
-		LEFT JOIN inventory i ON p.id = i.product_id
-		WHERE p.id = $1
-		GROUP BY p.id`
+		SELECT ` + productColumns + stockColumns + `
+		FROM products p` + stockJoin(2, 3) + `
+		WHERE p.id = $1`
 
-	var p Product
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
-		&p.ID,
-		&p.SKU,
-		&p.Description,
-		&p.UOMPrimary,
-		&p.BasePrice,
-		&p.Vendor,
-		&p.VendorID,
-		&p.UPC,
-		&p.WeightLbs,
-		&p.LengthIn,
-		&p.WidthIn,
-		&p.HeightIn,
-		&p.Stackable,
-		&p.GeometrySource,
-		&p.ReorderPoint,
-		&p.ReorderQty,
-		&p.CreatedAt,
-		&p.UpdatedAt,
-		&p.TotalQuantity,
-		&p.TotalAllocated,
-		&p.AverageUnitCost,
-		&p.TargetMargin,
-		&p.CommissionRate,
-	)
-
+	p, err := scanProductStock(r.db.GetExecutor(ctx).QueryRow(ctx, query, id,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("product not found")
+			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get product: %w", err)
 	}
-
-	return &p, nil
+	return p, nil
 }
 
-// ListProducts retrieves all products
+// ListProducts retrieves all products (the reorder scheduler's read)
 func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error) {
 	query := `
-		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0),
-		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
-		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
-		       p.created_at, p.updated_at,
-		       COALESCE(SUM(i.quantity), 0) as total_quantity,
-		       COALESCE(SUM(i.allocated), 0) as total_allocated,
-		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)
+		SELECT ` + productColumns + `
 		FROM products p
-		LEFT JOIN inventory i ON p.id = i.product_id
-		GROUP BY p.id
 		ORDER BY p.sku ASC`
 
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
@@ -149,129 +242,82 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 
 	var products []Product
 	for rows.Next() {
-		var p Product
-		if err := rows.Scan(
-			&p.ID,
-			&p.SKU,
-			&p.Description,
-			&p.UOMPrimary,
-			&p.BasePrice,
-			&p.Vendor,
-			&p.VendorID,
-			&p.UPC,
-			&p.WeightLbs,
-			&p.LengthIn,
-			&p.WidthIn,
-			&p.HeightIn,
-			&p.Stackable,
-			&p.GeometrySource,
-			&p.ReorderPoint,
-			&p.ReorderQty,
-			&p.CreatedAt,
-			&p.UpdatedAt,
-			&p.TotalQuantity,
-			&p.TotalAllocated,
-			&p.AverageUnitCost,
-			&p.TargetMargin,
-			&p.CommissionRate,
-		); err != nil {
+		p, err := scanProduct(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan product: %w", err)
 		}
-		products = append(products, p)
+		products = append(products, *p)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("row error: %w", err)
 	}
-
 	return products, nil
 }
 
-// ListProductsPaginated retrieves products with pagination
-func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, offset int) ([]Product, int, error) {
-	// Get total count
-	countQuery := `SELECT COUNT(*) FROM products`
-	var total int
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("failed to count products: %w", err)
+// ListProductsPage is the list's keyset query: `created_at DESC, id DESC`,
+// the ordering migration 093 built its index on. after is nil for the first
+// page; the caller asks for limit+1 rows and reads whether another page
+// exists.
+func (r *PostgresRepository) ListProductsPage(ctx context.Context, after *time.Time, afterID *uuid.UUID, limit int) ([]Product, error) {
+	args := []any{middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
+	query := `SELECT ` + productColumns + stockColumns + ` FROM products p` + stockJoin(1, 2)
+	if after != nil {
+		query += ` WHERE (p.created_at, p.id) < ($3, $4)`
+		args = append(args, *after, *afterID)
 	}
+	query += ` ORDER BY p.created_at DESC, p.id DESC`
+	args = append(args, limit)
+	query += fmt.Sprintf(` LIMIT $%d`, len(args))
 
-	query := `
-		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0),
-		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
-		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
-		       p.created_at, p.updated_at,
-		       COALESCE(SUM(i.quantity), 0) as total_quantity,
-		       COALESCE(SUM(i.allocated), 0) as total_allocated,
-		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)
-		FROM products p
-		LEFT JOIN inventory i ON p.id = i.product_id
-		GROUP BY p.id
-		ORDER BY p.sku ASC
-		LIMIT $1 OFFSET $2`
-
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list products: %w", err)
+		return nil, fmt.Errorf("failed to list products: %w", err)
 	}
 	defer rows.Close()
 
 	var products []Product
 	for rows.Next() {
-		var p Product
-		if err := rows.Scan(
-			&p.ID,
-			&p.SKU,
-			&p.Description,
-			&p.UOMPrimary,
-			&p.BasePrice,
-			&p.Vendor,
-			&p.VendorID,
-			&p.UPC,
-			&p.WeightLbs,
-			&p.LengthIn,
-			&p.WidthIn,
-			&p.HeightIn,
-			&p.Stackable,
-			&p.GeometrySource,
-			&p.ReorderPoint,
-			&p.ReorderQty,
-			&p.CreatedAt,
-			&p.UpdatedAt,
-			&p.TotalQuantity,
-			&p.TotalAllocated,
-			&p.AverageUnitCost,
-			&p.TargetMargin,
-			&p.CommissionRate,
-		); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan product: %w", err)
+		p, err := scanProductStock(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan product: %w", err)
 		}
-		products = append(products, p)
+		products = append(products, *p)
 	}
-
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("row error: %w", err)
+		return nil, fmt.Errorf("row error: %w", err)
 	}
+	return products, nil
+}
 
-	return products, total, nil
+// CountProducts is the include=total query.
+func (r *PostgresRepository) CountProducts(ctx context.Context) (int64, error) {
+	var total int64
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT COUNT(*) FROM products`).Scan(&total); err != nil {
+		return 0, fmt.Errorf("failed to count products: %w", err)
+	}
+	return total, nil
 }
 
 // ListBelowReorder returns products whose current stock is below their reorder point
 func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAlert, error) {
 	query := `
 		SELECT p.id, p.sku, p.description, p.vendor, p.vendor_id,
-		       p.reorder_point, COALESCE(p.reorder_qty, 0),
-		       COALESCE(SUM(i.quantity), 0) AS current_stock,
-		       p.reorder_point - COALESCE(SUM(i.quantity), 0) AS deficit
+		       p.reorder_point::text, COALESCE(p.reorder_qty, 0)::text,
+		       COALESCE(SUM(i.quantity), 0)::text AS current_stock,
+		       (p.reorder_point - COALESCE(SUM(i.quantity), 0))::text AS deficit
 		FROM products p
 		LEFT JOIN inventory i ON p.id = i.product_id
+		  AND ($1::uuid IS NULL AND $2::text IS NULL
+		    OR i.location_id IN (SELECT l.id FROM locations l
+		         WHERE ($1::uuid IS NOT NULL AND l.branch_id = $1)
+		            OR ($1::uuid IS NULL AND l.branch_id IN
+		                (SELECT branch_id FROM user_locations WHERE user_sub = $2))))
 		WHERE p.reorder_point > 0
 		GROUP BY p.id
 		HAVING COALESCE(SUM(i.quantity), 0) < p.reorder_point
 		ORDER BY (p.reorder_point - COALESCE(SUM(i.quantity), 0)) DESC`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list reorder alerts: %w", err)
 	}
@@ -280,22 +326,28 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 	var alerts []ReorderAlert
 	for rows.Next() {
 		var a ReorderAlert
+		var rp, rq, stock, deficit string
 		if err := rows.Scan(
-			&a.ProductID,
-			&a.SKU,
-			&a.Description,
-			&a.Vendor,
-			&a.VendorID,
-			&a.ReorderPoint,
-			&a.ReorderQty,
-			&a.CurrentStock,
-			&a.Deficit,
+			&a.ProductID, &a.SKU, &a.Description, &a.Vendor, &a.VendorID,
+			&rp, &rq, &stock, &deficit,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan reorder alert: %w", err)
 		}
+		var err error
+		if a.ReorderPoint, err = httpx.ParseQuantity(rp); err != nil {
+			return nil, fmt.Errorf("failed to read reorder point: %w", err)
+		}
+		if a.ReorderQty, err = httpx.ParseQuantity(rq); err != nil {
+			return nil, fmt.Errorf("failed to read reorder qty: %w", err)
+		}
+		if a.CurrentStock, err = httpx.ParseQuantity(stock); err != nil {
+			return nil, fmt.Errorf("failed to read current stock: %w", err)
+		}
+		if a.Deficit, err = httpx.ParseQuantity(deficit); err != nil {
+			return nil, fmt.Errorf("failed to read deficit: %w", err)
+		}
 		alerts = append(alerts, a)
 	}
-
 	return alerts, nil
 }
 
@@ -312,14 +364,37 @@ func (r *PostgresRepository) UpdateAverageCost(ctx context.Context, id uuid.UUID
 	return err
 }
 
-func (r *PostgresRepository) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error {
-	query := `UPDATE products SET target_margin = $1, commission_rate = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, targetMargin, commissionRate, id)
-	return err
+// conditionalUpdate runs one revision-carrying update: the check and the
+// write are one database act, and zero rows means the caller's revision is
+// stale or the row is gone (ADR 0001 section 11).
+func (r *PostgresRepository) conditionalUpdate(ctx context.Context, id uuid.UUID, revision int64, sets string, args ...any) (int64, error) {
+	query := fmt.Sprintf(`UPDATE products SET %s, revision = revision + 1, updated_at = NOW()
+		WHERE id = $1 AND revision = $2 RETURNING revision`, sets)
+	all := append([]any{id, revision}, args...)
+	var newRevision int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, all...).Scan(&newRevision)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// Tell a missing row from a stale revision: the caller answers
+			// 404 or 409 from the two errors.
+			var exists bool
+			if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE id = $1)`, id).Scan(&exists); err == nil && exists {
+				return 0, ErrStaleRevision
+			}
+			return 0, ErrNotFound
+		}
+		return 0, fmt.Errorf("failed to update product: %w", err)
+	}
+	return newRevision, nil
+}
+
+func (r *PostgresRepository) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64, revision int64) (int64, error) {
+	return r.conditionalUpdate(ctx, id, revision, `target_margin = $3, commission_rate = $4`, targetMargin, commissionRate)
 }
 
 // UpdateReorderTargets writes the recomputed reorder_point and reorder_qty
-// produced by the auto-reorder scheduler's RefreshReorderTargets job.
+// produced by the auto-reorder scheduler's RefreshReorderTargets job. The
+// scheduler is a system writer and carries no revision.
 func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
 	query := `UPDATE products SET reorder_point = $1, reorder_qty = $2, updated_at = NOW() WHERE id = $3`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, reorderPoint, reorderQty, id)
@@ -334,16 +409,8 @@ func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.U
 // lead-time-vs-delivery-date warning stays silent rather than being computed
 // from a zero. Writing 0 here would say "available today", which is a
 // different — and schedulable — claim.
-func (r *PostgresRepository) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error {
-	query := `UPDATE products SET lead_time_days = $1, updated_at = NOW() WHERE id = $2`
-	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query, leadTimeDays, id)
-	if err != nil {
-		return fmt.Errorf("failed to update lead time: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("product not found")
-	}
-	return nil
+func (r *PostgresRepository) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error) {
+	return r.conditionalUpdate(ctx, id, revision, `lead_time_days = $3`, leadTimeDays)
 }
 
 // updateDimensionsQuery is the geometry write. It is a package-level constant
@@ -352,9 +419,10 @@ func (r *PostgresRepository) UpdateLeadTime(ctx context.Context, id uuid.UUID, l
 // here is exactly how the nullable-geometry contract would be lost.
 const updateDimensionsQuery = `
 	UPDATE products
-	SET length_in = $1, width_in = $2, height_in = $3,
-	    stackable = $4, geometry_source = $5, updated_at = NOW()
-	WHERE id = $6`
+	SET length_in = $3, width_in = $4, height_in = $5,
+	    stackable = $6, geometry_source = $7, revision = revision + 1
+	WHERE id = $1 AND revision = $2
+	RETURNING revision`
 
 // UpdateDimensions writes the parametric 3D geometry (inches) that the PIM owns
 // as the canonical digital-twin source consumed by AI_LM's Load Builder.
@@ -365,11 +433,19 @@ const updateDimensionsQuery = `
 // would make GET /api/integration/products report a real zero-volume box, and
 // AI_LM's resolveGeometry() would trust it instead of falling back to its own
 // defaults. See migration 080_ailm_integration_contract.sql.
-func (r *PostgresRepository) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error {
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, updateDimensionsQuery,
-		g.LengthIn, g.WidthIn, g.HeightIn, g.Stackable, g.GeometrySource, id)
+func (r *PostgresRepository) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry, revision int64) (int64, error) {
+	var newRevision int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, updateDimensionsQuery,
+		id, revision, g.LengthIn, g.WidthIn, g.HeightIn, g.Stackable, g.GeometrySource).Scan(&newRevision)
 	if err != nil {
-		return fmt.Errorf("failed to update product dimensions: %w", err)
+		if err == pgx.ErrNoRows {
+			var exists bool
+			if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE id = $1)`, id).Scan(&exists); err == nil && exists {
+				return 0, ErrStaleRevision
+			}
+			return 0, ErrNotFound
+		}
+		return 0, fmt.Errorf("failed to update product dimensions: %w", err)
 	}
-	return nil
+	return newRevision, nil
 }

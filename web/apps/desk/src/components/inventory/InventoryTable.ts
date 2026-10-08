@@ -7,6 +7,8 @@ import { icon } from '../../lib/icons';
 import { Edit2, ArrowRightLeft, Package } from 'lucide';
 import { router } from '../../lib/router';
 import type { Product } from '../../types/product';
+import { formatPrice4 } from '../../lib/utils';
+import { formatQuantity } from '../../lib/money';
 
 @customElement('gable-inventory-table')
 export class GableInventoryTable extends LitElement {
@@ -66,8 +68,8 @@ export class GableInventoryTable extends LitElement {
                   </tr>
                 `
                 : this.products.map((p) => {
-                    const available = (p.total_quantity || 0) - (p.total_allocated || 0);
-                    const isLowStock = available < 100;
+                    // The server sends available (on hand less allocated) as a decimal string in the stocking unit.
+                    const isLowStock = Number(p.available) < 100;
 
                     return html`
                       <tr class="group hover:bg-white/5 transition-colors cursor-pointer" @click=${() => this._navigateToProduct(p.id)}>
@@ -88,11 +90,11 @@ export class GableInventoryTable extends LitElement {
                         </td>
                         <td class="px-6 py-4 text-center">
                           <span class="inline-flex items-center px-2 py-1 rounded text-xs font-mono font-medium bg-white/5 text-zinc-400 border border-white/10">
-                            ${p.uom_primary}
+                            ${p.stock_uom}
                           </span>
                         </td>
                         <td class="px-6 py-4 text-right font-mono text-emerald-400">
-                          $${(p.average_unit_cost || 0).toFixed(2)}
+                          ${formatPrice4(p.average_unit_cost_ten_thousandths)}
                         </td>
                         <td class="px-6 py-4 text-right font-mono text-zinc-300">
                           ${(p.target_margin || 0).toFixed(1)}% <br />
@@ -100,12 +102,12 @@ export class GableInventoryTable extends LitElement {
                         </td>
                         <td class="px-6 py-4 text-right">
                           <span class="font-mono text-white group-hover:text-gable-green transition-colors">
-                            $${(p.base_price || 0).toFixed(2)}
+                            ${formatPrice4(p.base_price_ten_thousandths)}
                           </span>
                         </td>
                         <td class="px-6 py-4 text-right">
                           <span class="font-mono font-bold ${isLowStock ? 'text-rose-500' : 'text-emerald-400'}">
-                            ${available.toLocaleString()}
+                            ${formatQuantity(p.available)}
                           </span>
                         </td>
                         <td class="px-6 py-4 text-right">

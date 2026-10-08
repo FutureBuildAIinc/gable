@@ -25,7 +25,7 @@ async function signIn(page: Page, name: string) {
 
 interface Seeded {
   customer: { id: string; name: string };
-  product: { id: string; sku: string; uom_primary: string };
+  product: { id: string; sku: string; stock_uom: string };
 }
 
 // The server limits one address to 120 requests a minute and the desk makes
@@ -38,8 +38,11 @@ async function firstCustomerAndProduct(request: import('@playwright/test').APIRe
   // named E2E-*, so the seeded customers are the ones a quote is built for.
   const customers = (await (await request.get('/api/v1/customers?limit=200')).json()) as { items: { id: string; name: string; account_number: string }[] };
   const customer = customers.items.find((c) => !c.account_number.startsWith('E2E-'))!;
-  const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string; uom_primary: string }[] | { data: { id: string; sku: string; uom_primary: string }[] };
-  const product = (Array.isArray(products) ? products : products.data)[0];
+  // The product list is the cursor envelope, newest first; the product spec adds products with
+  // E2E- SKUs, so the seeded products are the ones a quote is built for.
+  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string }[] };
+  // An EA stocked product: the convert test sells it per M by the each.
+  const product = products.items.find((p) => !p.sku.startsWith('E2E-') && p.stock_uom === 'EA')!;
   seeded = { customer, product };
   return seeded;
 }
@@ -70,7 +73,7 @@ test.describe('Quote flow on the new contract', () => {
     expect(quote.revision).toBe(1);
     expect(Number.isInteger(quote.total_cents)).toBe(true);
     expect(quote.lines[0].quantity).toBe('12');
-    expect(quote.lines[0].uom).toBe(product.uom_primary);
+    expect(quote.lines[0].uom).toBe(product.stock_uom);
 
     // The record page: the document number is the heading.
     await expect(page).toHaveURL(new RegExp(`/quotes/${quote.id}$`));
@@ -97,13 +100,12 @@ test.describe('Quote flow on the new contract', () => {
 
   test('a line with no unit gets a select of the unit codes that stays while the server complains', async ({ page, request }) => {
     const { customer, product } = await firstCustomerAndProduct(request);
-    // The catalogue answers one product with no primary unit, so the builder
+    // The catalogue answers one product with no stocking unit, so the builder
     // meets the empty-unit state the select exists for.
-    await page.route('**/api/v1/products', async (route) => {
+    await page.route(/\/api\/v1\/products(\?|$)/, async (route) => {
       const res = await route.fetch();
       const body = await res.json();
-      const list = Array.isArray(body) ? body : body.data;
-      for (const p of list) if (p.id === product.id) p.uom_primary = '';
+      for (const p of body.items) if (p.id === product.id) p.stock_uom = '';
       await route.fulfill({ response: res, json: body });
     });
     await signIn(page, 'Playwright Unit Select');
@@ -159,7 +161,7 @@ test.describe('Quote flow on the new contract', () => {
     const { customer, product } = await firstCustomerAndProduct(request);
     const draft = (qty: string) => ({
       customer_id: customer.id,
-      lines: [{ product_id: product.id, quantity: qty, uom: product.uom_primary, unit_price_ten_thousandths: 10000 }],
+      lines: [{ product_id: product.id, quantity: qty, uom: product.stock_uom, unit_price_ten_thousandths: 10000 }],
     });
     const made = await (await request.post('/api/v1/quotes', { data: draft('2') })).json();
     await signIn(page, 'Playwright Edit');
@@ -210,7 +212,7 @@ test.describe('Quote flow on the new contract', () => {
       data: {
         customer_id: customer.id,
         lines: [
-          { product_id: product.id, quantity: '1', uom: product.uom_primary, unit_price_ten_thousandths: 10000 },
+          { product_id: product.id, quantity: '1', uom: product.stock_uom, unit_price_ten_thousandths: 10000 },
           {
             product_id: product.id, quantity: '1500', uom: 'EA', price_uom: 'M', uom_qty: '1000', price_uom_qty: '1',
             unit_price_ten_thousandths: 37500,
@@ -251,7 +253,7 @@ test.describe('Quote flow on the new contract', () => {
       const r = await request.post('/api/v1/quotes', {
         data: {
           customer_id: customer.id,
-          lines: [{ product_id: product.id, quantity: '1', uom: product.uom_primary, unit_price_ten_thousandths: 10000 }],
+          lines: [{ product_id: product.id, quantity: '1', uom: product.stock_uom, unit_price_ten_thousandths: 10000 }],
         },
       });
       expect(r.status(), await r.text()).toBe(201);
@@ -284,8 +286,8 @@ test.describe('Quote flow on the new contract', () => {
     });
     expect(defaulted.status()).toBe(201);
     const defaultedBody = await defaulted.json();
-    expect(defaultedBody.lines[0].uom).toBe(product.uom_primary);
-    expect(defaultedBody.lines[0].price_uom).toBe(product.uom_primary);
+    expect(defaultedBody.lines[0].uom).toBe(product.stock_uom);
+    expect(defaultedBody.lines[0].price_uom).toBe(product.stock_uom);
 
     const missing = await request.post('/api/v1/quotes', {
       data: { customer_id: customer.id, lines: [{ sku: 'SPECIAL-1', description: 'special order', quantity: '1', unit_price_ten_thousandths: 10000 }] },
@@ -296,7 +298,7 @@ test.describe('Quote flow on the new contract', () => {
     expect(body.error.details.map((d: { field: string }) => d.field)).toContain('lines[0].uom');
 
     const ok = await (await request.post('/api/v1/quotes', {
-      data: { customer_id: customer.id, lines: [{ product_id: product.id, quantity: '1', uom: product.uom_primary, unit_price_ten_thousandths: 10000 }] },
+      data: { customer_id: customer.id, lines: [{ product_id: product.id, quantity: '1', uom: product.stock_uom, unit_price_ten_thousandths: 10000 }] },
     })).json();
     const stale = await request.post(`/api/v1/quotes/${ok.id}/transitions`, { data: { to: 'sent', revision: 9 } });
     expect(stale.status()).toBe(409);

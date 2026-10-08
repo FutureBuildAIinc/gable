@@ -9,6 +9,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import { ProductService } from '../../services/product.service';
 import type { Product } from '../../types/product';
+import { scaleTenThousandths } from '../../lib/money';
 import type { CreatePOLine } from '../../types/purchaseOrder';
 import { ArrowLeft, Plus, Trash2, Save } from 'lucide';
 
@@ -27,7 +28,7 @@ export class NewPurchaseOrder extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
-        ProductService.getProducts()
+        ProductService.listAllProducts()
             .then(p => this.products = p)
             .catch(() => ToastService.show('Failed to load products', 'error'));
 
@@ -67,7 +68,9 @@ export class NewPurchaseOrder extends LitElement {
                 const product = this.products.find(p => p.id === value);
                 if (product) {
                     updated.description = `${product.sku} - ${product.description}`;
-                    if (updated.cost === 0) updated.cost = product.base_price * 0.6;
+                    // A starting cost of 60 percent of the base price. The PO route is not converted and reads
+                    // float dollars, so the integer ten thousandths price is scaled and rounded to cents first.
+                    if (updated.cost === 0) updated.cost = scaleTenThousandths(product.base_price_ten_thousandths, 6, 1000) / 100;
                 }
             }
             return updated;

@@ -5,10 +5,11 @@ package product
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"time"
 
-	"github.com/gablelbm/gable/pkg/httputil"
-	"github.com/gablelbm/gable/pkg/pagination"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
@@ -45,140 +46,191 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PUT /api/v1/products/{id}/kit-components", guard(h.HandlePutKitComponents))
 }
 
-// LeadTimeRequest is the body of PATCH /products/{id}/lead-time.
-//
-// LeadTimeDays is a pointer so `{"lead_time_days": null}` clears the value
-// back to "unpublished" and is distinguishable from `{"lead_time_days": 0}`,
-// which is a dealer asserting same-day availability.
-type LeadTimeRequest struct {
-	LeadTimeDays *int `json:"lead_time_days"`
+// productsOrdering is the list's ordering scope: created_at DESC, id DESC,
+// the ordering migration 093 indexed.
+const productsOrdering = "products.created_at_id_desc"
+
+func writeProductError(w http.ResponseWriter, r *http.Request, err error) {
+	httpx.WriteError(w, r, err)
 }
 
-// HandleUpdateLeadTime handles PATCH /products/{id}/lead-time — the dealer-side
-// write for the lead time the portal catalog publishes (migration 084).
-func (h *Handler) HandleUpdateLeadTime(w http.ResponseWriter, r *http.Request) {
+func cursorError() error {
+	return httpx.BadRequest("cursor keyset is malformed",
+		httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func pathID(r *http.Request) (uuid.UUID, *httpx.Error) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
-		return
+		return uuid.Nil, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"})
 	}
-
-	var req LeadTimeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	if err := h.service.UpdateLeadTime(r.Context(), id, req.LeadTimeDays); err != nil {
-		httputil.RespondError(w, r, "failed to update lead time", http.StatusBadRequest, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(req)
+	return id, nil
 }
 
 // HandleGetProduct handles GET /products/{id}
 func (h *Handler) HandleGetProduct(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
+	id, bad := pathID(r)
+	if bad != nil {
+		writeProductError(w, r, bad)
 		return
 	}
-
 	p, err := h.service.GetProduct(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "product not found", http.StatusNotFound, err)
+		if errors.Is(err, ErrNotFound) {
+			writeProductError(w, r, httpx.NotFound("no such product"))
+			return
+		}
+		writeProductError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(p)
+	view := ViewOf(p)
+	httpx.WriteRevisionETag(w, view.Revision)
+	writeJSON(w, http.StatusOK, view)
 }
 
 // HandleCreateProduct handles POST /products
 func (h *Handler) HandleCreateProduct(w http.ResponseWriter, r *http.Request) {
-	var p Product
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	p, err := ParseCreate(r)
+	if err != nil {
+		writeProductError(w, r, err)
 		return
 	}
-
-	if err := h.service.CreateProduct(r.Context(), &p); err != nil {
-		httputil.RespondError(w, r, "failed to create product", http.StatusInternalServerError, err)
+	if err := h.service.CreateProduct(r.Context(), p); err != nil {
+		writeProductError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(p)
+	view := ViewOf(p)
+	w.Header().Set("Location", "/api/v1/products/"+view.ID.String())
+	httpx.WriteRevisionETag(w, view.Revision)
+	writeJSON(w, http.StatusCreated, view)
 }
 
 // HandleReorderAlerts handles GET /products/reorder-alerts
 func (h *Handler) HandleReorderAlerts(w http.ResponseWriter, r *http.Request) {
-	alerts, err := h.service.ListBelowReorder(r.Context())
-	if err != nil {
-		httputil.RespondError(w, r, "Failed to fetch reorder alerts", http.StatusInternalServerError, err)
+	if _, err := httpx.StrictQuery(r); err != nil {
+		writeProductError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(alerts)
+	alerts, err := h.service.ListBelowReorder(r.Context())
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	httpx.WriteList(w, alerts, "", 0)
 }
 
 // HandleListProducts handles GET /products
 func (h *Handler) HandleListProducts(w http.ResponseWriter, r *http.Request) {
-	page := pagination.FromRequest(r)
-	products, total, err := h.service.ListProductsPaginated(r.Context(), page.Limit, page.Offset)
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include")
 	if err != nil {
-		httputil.RespondError(w, r, "Failed to fetch products", http.StatusInternalServerError, err)
+		writeProductError(w, r, err)
 		return
 	}
-
-	resp := pagination.PagedResponse[Product]{
-		Data:   products,
-		Total:  total,
-		Limit:  page.Limit,
-		Offset: page.Offset,
+	page, err := httpx.ParseListQuery(r, productsOrdering)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
 	}
-	if resp.Data == nil {
-		resp.Data = []Product{}
+	wantTotal := false
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			writeProductError(w, r, httpx.BadRequest("include parameter is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"}))
+			return
+		}
+		set, ierr := httpx.ParseInclude(vals[0], httpx.IncludeTotal)
+		if ierr != nil {
+			writeProductError(w, r, ierr)
+			return
+		}
+		wantTotal = set.Has(httpx.IncludeTotal)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	var after *time.Time
+	var afterID *uuid.UUID
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			writeProductError(w, r, cursorError())
+			return
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			writeProductError(w, r, cursorError())
+			return
+		}
+		after, afterID = &at, &id
+	}
+
+	rows, more, err := h.service.ListProductsPage(r.Context(), after, afterID, page.Limit)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	views := make([]View, len(rows))
+	for i := range rows {
+		views[i] = ViewOf(&rows[i])
+	}
+	next := ""
+	if more && len(views) > 0 {
+		last := views[len(views)-1]
+		next, err = httpx.MintCursor(productsOrdering,
+			httpx.FormatKeyTime(last.CreatedAt.Time), last.ID.String())
+		if err != nil {
+			writeProductError(w, r, err)
+			return
+		}
+	}
+	opts := []httpx.ListOption{}
+	if wantTotal {
+		total, err := h.service.CountProducts(r.Context())
+		if err != nil {
+			writeProductError(w, r, err)
+			return
+		}
+		opts = append(opts, httpx.WithTotal(total))
+	}
+	httpx.WriteList(w, views, next, page.Limit, opts...)
 }
 
 // HandleUpdateMarginRules handles PATCH /products/{id}/margins
 func (h *Handler) HandleUpdateMarginRules(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	if idStr == "" {
-		httputil.RespondError(w, r, "id is required", http.StatusBadRequest, nil)
+	id, bad := pathID(r)
+	if bad != nil {
+		writeProductError(w, r, bad)
 		return
 	}
-
-	id, err := uuid.Parse(idStr)
+	targetMargin, commissionRate, revision, err := parseMargins(r)
 	if err != nil {
-		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
+		writeProductError(w, r, err)
 		return
 	}
-
-	var req struct {
-		TargetMargin   float64 `json:"target_margin"`
-		CommissionRate float64 `json:"commission_rate"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+	p, err := h.service.GetProduct(r.Context(), id)
+	if err != nil {
+		writeProductError(w, r, mapRead(err))
 		return
 	}
-
-	if err := h.service.UpdateMarginRules(r.Context(), id, req.TargetMargin, req.CommissionRate); err != nil {
-		httputil.RespondError(w, r, "Failed to update margin rules", http.StatusInternalServerError, err)
+	if err := httpx.CheckRevision(p.Revision, r.Header.Get("If-Match"), revision); err != nil {
+		writeProductError(w, r, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
+	newRevision, err := h.service.UpdateMarginRules(r.Context(), id, targetMargin, commissionRate, p.Revision)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	p.TargetMargin, p.CommissionRate = targetMargin, commissionRate
+	p.Revision = newRevision
+	view := ViewOf(p)
+	httpx.WriteRevisionETag(w, view.Revision)
+	writeJSON(w, http.StatusOK, view)
 }
 
 // HandleUpdateDimensions handles PATCH /products/{id}/dimensions — the write
@@ -192,47 +244,84 @@ func (h *Handler) HandleUpdateMarginRules(w http.ResponseWriter, r *http.Request
 //	{"length_in": null}  -> length_in IS NULL   ("no geometry recorded")
 //	{"length_in": 0}     -> length_in = 0       (a real, if odd, measurement)
 //	{}                   -> every column NULL   (the editor's "clear" path)
-//
-// A 200 with the persisted Geometry is returned so a client can see exactly
-// which fields ended up null without a follow-up GET.
 func (h *Handler) HandleUpdateDimensions(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	if idStr == "" {
-		httputil.RespondError(w, r, "id is required", http.StatusBadRequest, nil)
+	id, bad := pathID(r)
+	if bad != nil {
+		writeProductError(w, r, bad)
 		return
 	}
-
-	id, err := uuid.Parse(idStr)
+	g, revision, err := parseDimensions(r)
 	if err != nil {
-		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
+		writeProductError(w, r, err)
 		return
 	}
-
-	var g Geometry
-	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
-		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	if err := h.service.UpdateDimensions(r.Context(), id, g); err != nil {
-		httputil.RespondError(w, r, "Failed to update dimensions", http.StatusInternalServerError, err)
-		return
-	}
-
-	updated, err := h.service.GetProduct(r.Context(), id)
+	p, err := h.service.GetProduct(r.Context(), id)
 	if err != nil {
-		// The write succeeded; only the read-back failed. Reporting 500 here
-		// would tell the operator their edit was lost when it was not.
-		w.WriteHeader(http.StatusOK)
+		writeProductError(w, r, mapRead(err))
 		return
 	}
+	if err := httpx.CheckRevision(p.Revision, r.Header.Get("If-Match"), revision); err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	newRevision, err := h.service.UpdateDimensions(r.Context(), id, g, p.Revision)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	// The service settles the geometry's provenance on its own copy; the
+	// answer is the row as stored, so read it back. A read-back failure does
+	// not fail the write: the geometry is persisted, and the operator is
+	// handed the revision the write answered.
+	if updated, rerr := h.service.GetProduct(r.Context(), id); rerr == nil {
+		p = updated
+	} else {
+		p.LengthIn, p.WidthIn, p.HeightIn = g.LengthIn, g.WidthIn, g.HeightIn
+		p.Stackable, p.GeometrySource = g.Stackable, g.GeometrySource
+		p.Revision = newRevision
+	}
+	view := ViewOf(p)
+	httpx.WriteRevisionETag(w, view.Revision)
+	writeJSON(w, http.StatusOK, view)
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(Geometry{
-		LengthIn:       updated.LengthIn,
-		WidthIn:        updated.WidthIn,
-		HeightIn:       updated.HeightIn,
-		Stackable:      updated.Stackable,
-		GeometrySource: updated.GeometrySource,
-	})
+// HandleUpdateLeadTime handles PATCH /products/{id}/lead-time, the dealer-side
+// write for the lead time the portal catalog publishes (migration 084).
+func (h *Handler) HandleUpdateLeadTime(w http.ResponseWriter, r *http.Request) {
+	id, bad := pathID(r)
+	if bad != nil {
+		writeProductError(w, r, bad)
+		return
+	}
+	days, revision, err := parseLeadTime(r)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	p, err := h.service.GetProduct(r.Context(), id)
+	if err != nil {
+		writeProductError(w, r, mapRead(err))
+		return
+	}
+	if err := httpx.CheckRevision(p.Revision, r.Header.Get("If-Match"), revision); err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	newRevision, err := h.service.UpdateLeadTime(r.Context(), id, days, p.Revision)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	p.LeadTimeDays = days
+	p.Revision = newRevision
+	view := ViewOf(p)
+	httpx.WriteRevisionETag(w, view.Revision)
+	writeJSON(w, http.StatusOK, view)
+}
+
+func mapRead(err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return httpx.NotFound("no such product")
+	}
+	return err
 }

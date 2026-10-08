@@ -6,9 +6,11 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { X, Percent } from 'lucide';
 import type { Product } from '../../types/product';
-import { fetchWithAuth } from '../../services/fetchClient';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { ProductService } from '../../services/product.service';
+import { ApiError, apiErrorMessage } from '../../services/apiError';
+import { ToastService } from '../../lib/toast-service';
+import { formatPrice4 } from '../../lib/utils';
+import { scaleTenThousandths } from '../../lib/money';
 
 @customElement('gable-product-margin-modal')
 export class GableProductMarginModal extends LitElement {
@@ -29,40 +31,46 @@ export class GableProductMarginModal extends LitElement {
     }
   }
 
+  /**
+   * The price that earns the target margin over the weighted average cost, in ten thousandths.
+   * The percentages are the wire's float numbers; they are taken to hundredths of a percent and
+   * the price is computed in integers: cost x 10000 / (10000 - margin in hundredths of a percent).
+   */
   private get _projectedPrice(): number {
     if (!this.product) return 0;
-    return this.product.average_unit_cost > 0 && this._targetMargin > 0
-      ? this.product.average_unit_cost / (1 - (this._targetMargin / 100))
-      : this.product.base_price;
+    const cost = this.product.average_unit_cost_ten_thousandths;
+    const marginBp = Math.round(this._targetMargin * 100);
+    return cost > 0 && marginBp > 0 && marginBp < 10000
+      ? scaleTenThousandths(cost, 10000, 10000 - marginBp)
+      : this.product.base_price_ten_thousandths;
   }
 
   private get _projectedCommission(): number {
-    return this._projectedPrice * (this._commissionRate / 100);
+    return scaleTenThousandths(this._projectedPrice, Math.round(this._commissionRate * 100), 10000);
   }
 
+  /** Writes the margins on the revision this modal loaded; a stale revision reloads the product with a toast. */
   private async _handleSave() {
     if (!this.product) return;
     this._isSaving = true;
     this._error = '';
     try {
-      const res = await fetchWithAuth(`${API_URL}/api/v1/products/${this.product.id}/margins`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target_margin: this._targetMargin,
-          commission_rate: this._commissionRate,
-        }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || 'Failed to update margins');
-      }
-
-      this.dispatchEvent(new CustomEvent('success', { bubbles: true, composed: true }));
+      const saved = await ProductService.updateMargins(
+        this.product.id,
+        { target_margin: this._targetMargin, commission_rate: this._commissionRate },
+        this.product.revision,
+      );
+      this.dispatchEvent(new CustomEvent('success', { detail: saved, bubbles: true, composed: true }));
       this._close();
     } catch (err: unknown) {
-      this._error = err instanceof Error ? err.message : 'An error occurred while saving.';
+      if (err instanceof ApiError && err.isStaleRevision) {
+        ToastService.show(`${err.message} The product was reloaded.`, 'error');
+        // The parent reloads on success; the fresh revision reaches this modal through the product property.
+        this.dispatchEvent(new CustomEvent('success', { bubbles: true, composed: true }));
+        this._close();
+      } else {
+        this._error = apiErrorMessage(err, 'An error occurred while saving.');
+      }
     } finally {
       this._isSaving = false;
     }
@@ -90,7 +98,7 @@ export class GableProductMarginModal extends LitElement {
 
           <div class="p-6 space-y-6 flex-1 overflow-y-auto">
             ${this._error ? html`
-              <div class="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-sm">
+              <div class="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-sm whitespace-pre-line" role="alert">
                 ${this._error}
               </div>
             ` : nothing}
@@ -98,11 +106,11 @@ export class GableProductMarginModal extends LitElement {
             <div class="bg-black/20 rounded-lg p-4 border border-white/5 space-y-2">
               <div class="flex justify-between text-sm">
                 <span class="text-zinc-400">Current Cost (Weighted Avg)</span>
-                <span class="text-white font-mono font-medium">$${(this.product.average_unit_cost || 0).toFixed(2)}</span>
+                <span class="text-white font-mono font-medium">${formatPrice4(this.product.average_unit_cost_ten_thousandths)}</span>
               </div>
               <div class="flex justify-between text-sm">
                 <span class="text-zinc-400">Current Base Price</span>
-                <span class="text-white font-mono font-medium">$${(this.product.base_price || 0).toFixed(2)}</span>
+                <span class="text-white font-mono font-medium">${formatPrice4(this.product.base_price_ten_thousandths)}</span>
               </div>
             </div>
 
@@ -124,7 +132,7 @@ export class GableProductMarginModal extends LitElement {
                     class="w-full bg-black/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white font-mono focus:border-gable-green/50 focus:outline-none transition-colors"
                   />
                 </div>
-                <p class="text-xs text-zinc-500 mt-1">Suggested Price: <span class="text-emerald-400 font-mono">$${this._projectedPrice.toFixed(2)}</span></p>
+                <p class="text-xs text-zinc-500 mt-1">Suggested Price: <span class="text-emerald-400 font-mono">${formatPrice4(this._projectedPrice)}</span></p>
               </div>
 
               <div>
@@ -144,7 +152,7 @@ export class GableProductMarginModal extends LitElement {
                     class="w-full bg-black/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white font-mono focus:border-gable-green/50 focus:outline-none transition-colors"
                   />
                 </div>
-                <p class="text-xs text-zinc-500 mt-1">Projected Commission: <span class="text-emerald-400 font-mono">$${this._projectedCommission.toFixed(2)}</span></p>
+                <p class="text-xs text-zinc-500 mt-1">Projected Commission: <span class="text-emerald-400 font-mono">${formatPrice4(this._projectedCommission)}</span></p>
               </div>
             </div>
           </div>

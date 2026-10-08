@@ -49,7 +49,7 @@ export class GableInventoryTransferModal extends LitElement {
     }
 
     try {
-      const locs = await LocationService.listLocations();
+      const locs = await LocationService.listAllLocations();
       this._locations = locs;
     } catch {
       ToastService.show('Failed to load data', 'error');

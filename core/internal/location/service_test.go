@@ -11,7 +11,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -23,6 +25,21 @@ import (
 // produces orphan rows whose branch_id trigger has nothing to derive from.
 //
 // Tests are CORRECTNESS unless labelled CHARACTERIZATION.
+
+// errText flattens a contract error into the message plus every field
+// detail, so substring assertions keep working after the module moved onto
+// the envelope.
+func errText(err error) string {
+	var wire *httpx.Error
+	if errors.As(err, &wire) {
+		out := wire.Message
+		for _, d := range wire.Details {
+			out += "; " + d.Field + " " + d.Message
+		}
+		return out
+	}
+	return err.Error()
+}
 
 // --- fakes ---------------------------------------------------------------
 
@@ -41,6 +58,8 @@ type fakeRepo struct {
 	isBranchErr        error
 	branchTreeArgument uuid.UUID
 }
+
+func strp(v string) *string { return &v }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{locations: map[uuid.UUID]*Location{}}
@@ -69,7 +88,7 @@ func (f *fakeRepo) GetLocation(_ context.Context, id uuid.UUID) (*Location, erro
 	return loc, nil
 }
 
-func (f *fakeRepo) UpdateLocation(_ context.Context, loc *Location) error {
+func (f *fakeRepo) UpdateLocation(_ context.Context, loc *Location, revision int64) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -78,7 +97,7 @@ func (f *fakeRepo) UpdateLocation(_ context.Context, loc *Location) error {
 	return nil
 }
 
-func (f *fakeRepo) DeleteLocation(_ context.Context, id uuid.UUID) error {
+func (f *fakeRepo) DeleteLocation(_ context.Context, id uuid.UUID, revision int64) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -90,34 +109,38 @@ func (f *fakeRepo) DeleteLocation(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (f *fakeRepo) ListLocations(context.Context) ([]Location, error) {
+func (f *fakeRepo) ListLocationsPage(ctx context.Context, scope ListScope, after *time.Time, afterID *uuid.UUID, limit int) ([]Location, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	out := make([]Location, 0, len(f.locations))
 	for _, l := range f.locations {
+		if scope.Branches != nil {
+			match := false
+			for _, b := range scope.Branches {
+				if l.BranchID != nil && *l.BranchID == b {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
 		out = append(out, *l)
 	}
 	return out, nil
 }
 
-func (f *fakeRepo) ListLocationsInBranches(_ context.Context, branches []uuid.UUID) ([]Location, error) {
-	if f.err != nil {
-		return nil, f.err
+func (f *fakeRepo) CountLocations(ctx context.Context, scope ListScope) (int64, error) {
+	rows, err := f.ListLocationsPage(ctx, scope, nil, nil, 1000)
+	if err != nil {
+		return 0, err
 	}
-	out := make([]Location, 0, len(f.locations))
-	for _, l := range f.locations {
-		for _, b := range branches {
-			if l.BranchID != nil && *l.BranchID == b {
-				out = append(out, *l)
-				break
-			}
-		}
-	}
-	return out, nil
+	return int64(len(rows)), nil
 }
 
-func (f *fakeRepo) ListBranches(_ context.Context, includeInactive bool) ([]Location, error) {
+func (f *fakeRepo) ListBranchesPage(_ context.Context, includeInactive bool, _ *time.Time, _ *uuid.UUID, _ int) ([]Location, error) {
 	f.listBranchesArgs = append(f.listBranchesArgs, includeInactive)
 	if f.err != nil {
 		return nil, f.err
@@ -132,6 +155,14 @@ func (f *fakeRepo) ListBranches(_ context.Context, includeInactive bool) ([]Loca
 		}
 	}
 	return active, nil
+}
+
+func (f *fakeRepo) CountBranches(_ context.Context, includeInactive bool) (int64, error) {
+	rows, err := f.ListBranchesPage(nil, includeInactive, nil, nil, 1000)
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(rows)), nil
 }
 
 func (f *fakeRepo) GetBranchTree(_ context.Context, branchID uuid.UUID) ([]Location, error) {
@@ -237,17 +268,17 @@ func TestCreateLocation_HierarchyRules(t *testing.T) {
 	}{
 		{
 			name: "a branch at the root is valid",
-			loc:  Location{Type: LocTypeBranch, Code: "VAN", Name: "Vancouver"},
+			loc:  Location{Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver")},
 		},
 		{
 			name:    "a branch with a parent is refused",
-			loc:     Location{Type: LocTypeBranch, Code: "VAN", Name: "Vancouver", ParentID: uuidPtr(parent)},
-			wantErr: "root-level",
+			loc:     Location{Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver"), ParentID: uuidPtr(parent)},
+			wantErr: "send no parent",
 		},
 		{
 			name:    "a branch without a name is refused",
 			loc:     Location{Type: LocTypeBranch, Code: "VAN"},
-			wantErr: "branch name is required",
+			wantErr: "required on a branch",
 		},
 		{
 			name: "a bin under a parent is valid",
@@ -256,29 +287,29 @@ func TestCreateLocation_HierarchyRules(t *testing.T) {
 		{
 			name:    "a bin with no parent is refused",
 			loc:     Location{Type: LocTypeBin, Code: "B2"},
-			wantErr: "require a parent_id",
+			wantErr: "required on a non-branch",
 		},
 		{
 			name:    "a yard with no parent is refused too",
 			loc:     Location{Type: LocTypeYard, Code: "Y1"},
-			wantErr: "require a parent_id",
+			wantErr: "required on a non-branch",
 		},
 		{
 			name:    "no code is refused",
-			loc:     Location{Type: LocTypeBranch, Name: "Vancouver"},
-			wantErr: "location code is required",
+			loc:     Location{Type: LocTypeBranch, Name: strp("Vancouver")},
+			wantErr: "code is required",
 		},
 		{
 			name:    "no type is refused",
-			loc:     Location{Code: "VAN", Name: "Vancouver"},
-			wantErr: "location type is required",
+			loc:     Location{Code: "VAN", Name: strp("Vancouver")},
+			wantErr: "type is required",
 		},
 		{
-			// The type is not validated against the known set, so an
-			// unrecognised type falls into the "needs a parent" branch.
-			name:    "an unknown type without a parent is refused",
+			// The wire validates the type against its vocabulary (ADR 0001
+			// section 6), so an unknown type is refused on the type itself.
+			name:    "an unknown type is refused",
 			loc:     Location{Type: LocationType("WAREHOUSE"), Code: "W1"},
-			wantErr: "require a parent_id",
+			wantErr: "must be one of",
 		},
 	}
 
@@ -300,8 +331,10 @@ func TestCreateLocation_HierarchyRules(t *testing.T) {
 			if err == nil {
 				t.Fatalf("CreateLocation succeeded, want an error mentioning %q", tc.wantErr)
 			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+			// The field errors live in the envelope's details (ADR 0001
+			// section 3), so the check reads the whole error text.
+			if !strings.Contains(errText(err), tc.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", errText(err), tc.wantErr)
 			}
 			if len(repo.created) != 0 {
 				t.Errorf("persisted %d locations despite the validation failure", len(repo.created))
@@ -315,7 +348,7 @@ func TestCreateLocation_HierarchyRules(t *testing.T) {
 // explicit path must be left alone.
 func TestCreateLocation_BranchPathDefaultsToTheName(t *testing.T) {
 	repo := newFakeRepo()
-	loc := Location{Type: LocTypeBranch, Code: "VAN", Name: "Vancouver Yard"}
+	loc := Location{Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver Yard")}
 	if err := NewService(repo).CreateLocation(context.Background(), &loc); err != nil {
 		t.Fatalf("CreateLocation: %v", err)
 	}
@@ -324,7 +357,7 @@ func TestCreateLocation_BranchPathDefaultsToTheName(t *testing.T) {
 	}
 
 	repo2 := newFakeRepo()
-	explicit := Location{Type: LocTypeBranch, Code: "VAN", Name: "Vancouver Yard", Path: "West/Vancouver"}
+	explicit := Location{Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver Yard"), Path: "West/Vancouver"}
 	if err := NewService(repo2).CreateLocation(context.Background(), &explicit); err != nil {
 		t.Fatalf("CreateLocation: %v", err)
 	}
@@ -344,7 +377,7 @@ func TestCreateLocation_BranchPathDefaultsToTheName(t *testing.T) {
 // TestCreateLocation_DefaultsToActive below.
 func TestCreateLocation_MustAllowCreatingAnInactiveLocation(t *testing.T) {
 	repo := newFakeRepo()
-	loc := Location{Type: LocTypeBranch, Code: "OLD", Name: "Decommissioned Yard", Active: false}
+	loc := Location{Type: LocTypeBranch, Code: "OLD", Name: strp("Decommissioned Yard"), Active: false}
 	if err := NewService(repo).CreateLocation(context.Background(), &loc); err != nil {
 		t.Fatalf("CreateLocation: %v", err)
 	}
@@ -366,7 +399,7 @@ func TestCreateLocation_DefaultsToActive(t *testing.T) {
 	mux := newTestMux(repo, nil)
 
 	rec := do(t, mux, http.MethodPost, "/api/v1/locations",
-		`{"type":"BRANCH","code":"VAN","name":"Vancouver"}`)
+		`{"type":"branch","code":"VAN","name":"Vancouver"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
 	}
@@ -385,7 +418,7 @@ func TestCreateLocation_DefaultsToActive(t *testing.T) {
 	}
 
 	rec = do(t, mux, http.MethodPost, "/api/v1/locations",
-		`{"type":"BRANCH","code":"OLD","name":"Decommissioned Yard","active":false}`)
+		`{"type":"branch","code":"OLD","name":"Decommissioned Yard","active":false}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
 	}
@@ -425,7 +458,7 @@ func TestCreateBranch_ActiveDefaultAndExplicitFalse(t *testing.T) {
 func TestCreateLocation_PropagatesRepositoryFailure(t *testing.T) {
 	repo := newFakeRepo()
 	repo.err = errors.New("insert failed")
-	loc := Location{Type: LocTypeBranch, Code: "VAN", Name: "Vancouver"}
+	loc := Location{Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver")}
 	if err := NewService(repo).CreateLocation(context.Background(), &loc); err == nil {
 		t.Fatal("want an error when the insert fails")
 	}
@@ -442,16 +475,16 @@ func TestUpdateLocation_Validation(t *testing.T) {
 		wantErr string
 	}{
 		{"valid", Location{ID: uuid.New(), Code: "VAN"}, ""},
-		{"no id", Location{Code: "VAN"}, "location id is required"},
-		{"no code", Location{ID: uuid.New()}, "location code is required"},
-		{"neither", Location{}, "location id is required"},
+		{"no id", Location{Code: "VAN"}, "is required"},
+		{"no code", Location{ID: uuid.New()}, "is required"},
+		{"neither", Location{}, "is required"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newFakeRepo()
 			loc := tc.loc
-			err := NewService(repo).UpdateLocation(context.Background(), &loc)
+			err := NewService(repo).UpdateLocation(context.Background(), &loc, 0)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("UpdateLocation: %v", err)
@@ -461,8 +494,8 @@ func TestUpdateLocation_Validation(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("error = %v, want it to mention %q", err, tc.wantErr)
+			if err == nil || !strings.Contains(errText(err), tc.wantErr) {
+				t.Fatalf("error = %v, want it to mention %q", errText(err), tc.wantErr)
 			}
 			if len(repo.updated) != 0 {
 				t.Errorf("wrote %d updates despite the validation failure", len(repo.updated))
@@ -481,7 +514,7 @@ func TestUpdateLocation_DoesNotRevalidateTheHierarchy(t *testing.T) {
 	parent := uuid.New()
 	loc := Location{ID: uuid.New(), Code: "VAN", Type: LocTypeBranch, ParentID: &parent}
 
-	if err := NewService(repo).UpdateLocation(context.Background(), &loc); err != nil {
+	if err := NewService(repo).UpdateLocation(context.Background(), &loc, 0); err != nil {
 		t.Fatalf("UpdateLocation rejected a parented branch (%v); if hierarchy validation has been added, this characterization test should become a rejection test", err)
 	}
 	if len(repo.updated) != 1 || repo.updated[0].ParentID == nil {
@@ -497,12 +530,12 @@ func TestUpdateLocation_DoesNotRevalidateTheHierarchy(t *testing.T) {
 func TestListBranches_PassesTheIncludeInactiveFlag(t *testing.T) {
 	repo := newFakeRepo()
 	repo.branches = []Location{
-		{ID: uuid.New(), Type: LocTypeBranch, Code: "VAN", Name: "Vancouver", Active: true},
-		{ID: uuid.New(), Type: LocTypeBranch, Code: "OLD", Name: "Closed Yard", Active: false},
+		{ID: uuid.New(), Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver"), Active: true},
+		{ID: uuid.New(), Type: LocTypeBranch, Code: "OLD", Name: strp("Closed Yard"), Active: false},
 	}
 	svc := NewService(repo)
 
-	active, err := svc.ListBranches(context.Background(), false)
+	active, _, err := svc.ListBranchesPage(context.Background(), false, nil, nil, 50)
 	if err != nil {
 		t.Fatalf("ListBranches: %v", err)
 	}
@@ -510,7 +543,7 @@ func TestListBranches_PassesTheIncludeInactiveFlag(t *testing.T) {
 		t.Fatalf("got %+v, want only the active branch", active)
 	}
 
-	all, err := svc.ListBranches(context.Background(), true)
+	all, _, err := svc.ListBranchesPage(context.Background(), true, nil, nil, 50)
 	if err != nil {
 		t.Fatalf("ListBranches: %v", err)
 	}
@@ -532,17 +565,17 @@ func TestListLocationsIn_AnEmptyGrantListIsNoRows(t *testing.T) {
 	repo.locations[uuid.New()] = &Location{ID: uuid.New(), Type: LocTypeYard, Code: "Y1", BranchID: &branchID}
 	svc := NewService(repo)
 
-	all, err := svc.ListLocationsIn(context.Background(), nil)
+	all, _, err := svc.ListLocationsPage(context.Background(), ListScope{}, nil, nil, 50)
 	if err != nil {
-		t.Fatalf("ListLocationsIn nil slice: %v", err)
+		t.Fatalf("ListLocationsPage nil slice: %v", err)
 	}
 	if len(all) != 1 {
 		t.Errorf("nil slice means every branch: %d rows, want 1", len(all))
 	}
 
-	none, err := svc.ListLocationsIn(context.Background(), []uuid.UUID{})
+	none, _, err := svc.ListLocationsPage(context.Background(), ListScope{Branches: []uuid.UUID{}}, nil, nil, 50)
 	if err != nil {
-		t.Fatalf("ListLocationsIn empty slice: %v", err)
+		t.Fatalf("ListLocationsPage empty slice: %v", err)
 	}
 	if len(none) != 0 {
 		t.Errorf("an empty grant list is no rows: %d rows, want 0", len(none))
@@ -576,13 +609,17 @@ func TestGetBranchTree_PassesTheBranchID(t *testing.T) {
 
 func TestDeleteLocation_PropagatesNotFound(t *testing.T) {
 	repo := newFakeRepo()
-	if err := NewService(repo).DeleteLocation(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("error = %v, want ErrNotFound", err)
+	// The service maps the repository's ErrNotFound onto the wire contract's
+	// 404 answer (ADR 0001 section 3); the not-found fact survives the map.
+	err := NewService(repo).DeleteLocation(context.Background(), uuid.New(), 0)
+	var wire *httpx.Error
+	if !errors.As(err, &wire) || wire.Status != http.StatusNotFound {
+		t.Fatalf("error = %v, want the contract's 404", err)
 	}
 
 	id := uuid.New()
 	repo.locations[id] = &Location{ID: id, Active: true}
-	if err := NewService(repo).DeleteLocation(context.Background(), id); err != nil {
+	if err := NewService(repo).DeleteLocation(context.Background(), id, 0); err != nil {
 		t.Fatalf("DeleteLocation: %v", err)
 	}
 	if repo.locations[id].Active {
@@ -633,7 +670,7 @@ func TestCreateBranch_ForcesTypeAndClearsParent(t *testing.T) {
 	repo := newFakeRepo()
 	mux := newTestMux(repo, nil)
 
-	body := `{"code":"VAN","name":"Vancouver","type":"BIN","parent_id":"` + uuid.NewString() + `"}`
+	body := `{"code":"VAN","name":"Vancouver","type":"bin","parent_id":"` + uuid.NewString() + `"}`
 	rec := do(t, mux, http.MethodPost, "/api/v1/branches", body)
 
 	if rec.Code != http.StatusCreated {
@@ -669,7 +706,7 @@ func TestGetBranch_BranchIs200(t *testing.T) {
 	repo := newFakeRepo()
 	id := uuid.New()
 	rate := 0.12
-	repo.locations[id] = &Location{ID: id, Type: LocTypeBranch, Code: "VAN", Name: "Vancouver", DefaultTaxRate: &rate, Active: true}
+	repo.locations[id] = &Location{ID: id, Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver"), DefaultTaxRate: &rate, Active: true}
 
 	rec := do(t, newTestMux(repo, nil), http.MethodGet, "/api/v1/branches/"+id.String(), "")
 	if rec.Code != http.StatusOK {
@@ -716,7 +753,7 @@ func TestCreateLocationHandler_InvalidBodyIs400(t *testing.T) {
 	repo := newFakeRepo()
 	mux := newTestMux(repo, nil)
 
-	for _, body := range []string{"{not json", `{"code":"","type":"BRANCH"}`, `{"code":"B1","type":"BIN"}`} {
+	for _, body := range []string{"{not json", `{"code":"","type":"branch"}`, `{"code":"B1","type":"bin"}`} {
 		rec := do(t, mux, http.MethodPost, "/api/v1/locations", body)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("body %s => %d, want 400", body, rec.Code)
@@ -833,9 +870,9 @@ func TestUserBranchEndpoints_EmptyListsAreArrays(t *testing.T) {
 func TestListMyBranches_UnauthenticatedReturnsAllActiveBranches(t *testing.T) {
 	repo := newFakeRepo()
 	repo.branches = []Location{
-		{ID: uuid.New(), Type: LocTypeBranch, Code: "VAN", Name: "Vancouver", Active: true, Timezone: "America/Vancouver"},
-		{ID: uuid.New(), Type: LocTypeBranch, Code: "CAL", Name: "Calgary", Active: true},
-		{ID: uuid.New(), Type: LocTypeBranch, Code: "OLD", Name: "Closed", Active: false},
+		{ID: uuid.New(), Type: LocTypeBranch, Code: "VAN", Name: strp("Vancouver"), Active: true, Timezone: strp("America/Vancouver")},
+		{ID: uuid.New(), Type: LocTypeBranch, Code: "CAL", Name: strp("Calgary"), Active: true},
+		{ID: uuid.New(), Type: LocTypeBranch, Code: "OLD", Name: strp("Closed"), Active: false},
 	}
 	userRepo := &fakeUserRepo{branches: []BranchSummary{{Code: "SHOULD-NOT-BE-USED"}}}
 

@@ -9,7 +9,8 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Building2, Plus, Pencil, Archive, Users, X } from 'lucide';
-import { LocationService } from '../../../services/LocationService.ts';
+import { LocationService, locationUpdateFromLocation } from '../../../services/LocationService.ts';
+import { ApiError, apiErrorMessage } from '../../../services/apiError.ts';
 import { branchContext } from '../../../services/BranchContext.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import type { Location } from '../../../types/location.ts';
@@ -17,6 +18,8 @@ import { router } from '../../../lib/router.ts';
 
 interface BranchForm {
   id?: string;
+  /** The revision the edit loaded; the save names it (If-Match). */
+  revision?: number;
   code: string;
   name: string;
   description?: string;
@@ -63,9 +66,10 @@ export class GableAdminBranches extends LitElement {
     this._loading = true;
     this._error = null;
     try {
-      this._branches = await LocationService.listBranches(this._showInactive);
+      // Every branch, paged through the cursor (a dealer has a handful; the helper caps at 2000).
+      this._branches = await LocationService.listAllBranches(this._showInactive);
     } catch (err) {
-      this._error = err instanceof Error ? err.message : 'Failed to load branches';
+      this._error = apiErrorMessage(err, 'Failed to load branches');
     } finally {
       this._loading = false;
     }
@@ -79,6 +83,7 @@ export class GableAdminBranches extends LitElement {
   private _openEdit(b: Location) {
     this._form = {
       id: b.id,
+      revision: b.revision,
       code: b.code,
       name: b.name ?? '',
       description: b.description ?? '',
@@ -88,7 +93,7 @@ export class GableAdminBranches extends LitElement {
       zip: b.zip ?? '',
       phone: b.phone ?? '',
       timezone: b.timezone ?? 'America/New_York',
-      active: b.active ?? true,
+      active: b.active,
     };
     this._editorOpen = true;
   }
@@ -109,23 +114,46 @@ export class GableAdminBranches extends LitElement {
     }
     this._saving = true;
     try {
-      const payload = {
-        code: this._form.code.trim(),
-        name: this._form.name.trim(),
-        description: this._form.description?.trim() || undefined,
-        address: this._form.address?.trim() || undefined,
-        city: this._form.city?.trim() || undefined,
-        state: this._form.state?.trim() || undefined,
-        zip: this._form.zip?.trim() || undefined,
-        phone: this._form.phone?.trim() || undefined,
-        timezone: this._form.timezone?.trim() || undefined,
-        active: this._form.active,
-      };
-      if (this._form.id) {
-        await LocationService.updateBranch(this._form.id, payload);
+      const text = (v: string | undefined) => v?.trim() || null;
+      const f = this._form;
+      if (f.id && f.revision !== undefined) {
+        // The PUT replaces the row: start from the loaded branch so the fields this form does not
+        // show (tax jurisdiction and rate) and the path survive, then overlay the form.
+        const loaded = this._branches.find((b) => b.id === f.id);
+        if (!loaded) throw new Error('That branch is no longer in the list');
+        await LocationService.updateBranch(
+          f.id,
+          {
+            ...locationUpdateFromLocation(loaded),
+            code: f.code.trim(),
+            name: f.name.trim(),
+            description: text(f.description),
+            address: text(f.address),
+            city: text(f.city),
+            state: text(f.state),
+            zip: text(f.zip),
+            phone: text(f.phone),
+            timezone: text(f.timezone),
+            active: f.active,
+          },
+          f.revision,
+        );
         ToastService.show('Branch updated', 'success');
       } else {
-        await LocationService.createBranch(payload);
+        const name = f.name.trim();
+        await LocationService.createBranch({
+          code: f.code.trim(),
+          name,
+          path: name,
+          description: f.description?.trim() || undefined,
+          address: f.address?.trim() || undefined,
+          city: f.city?.trim() || undefined,
+          state: f.state?.trim() || undefined,
+          zip: f.zip?.trim() || undefined,
+          phone: f.phone?.trim() || undefined,
+          timezone: f.timezone?.trim() || undefined,
+          active: f.active,
+        });
         ToastService.show('Branch created', 'success');
       }
       this._editorOpen = false;
@@ -133,27 +161,32 @@ export class GableAdminBranches extends LitElement {
       // Refresh the switcher so the new branch appears immediately.
       await branchContext.refresh();
     } catch (err) {
-      ToastService.show(
-        err instanceof Error ? err.message : 'Failed to save branch',
-        'error',
-      );
+      if (err instanceof ApiError && err.isStaleRevision) {
+        ToastService.show(`${err.message} The branches were reloaded.`, 'error');
+        this._editorOpen = false;
+        await this._load();
+      } else {
+        ToastService.show(apiErrorMessage(err, 'Failed to save branch'), 'error');
+      }
     } finally {
       this._saving = false;
     }
   }
 
   private async _archive(b: Location) {
-    if (b.active === false) return;
+    if (!b.active) return;
     try {
-      await LocationService.archiveBranch(b.id);
+      await LocationService.archiveBranch(b.id, b.revision);
       ToastService.show(`Archived ${b.code}`, 'success');
       await this._load();
       await branchContext.refresh();
     } catch (err) {
-      ToastService.show(
-        err instanceof Error ? err.message : 'Failed to archive branch',
-        'error',
-      );
+      if (err instanceof ApiError && err.isStaleRevision) {
+        ToastService.show(`${err.message} The branches were reloaded.`, 'error');
+        await this._load();
+      } else {
+        ToastService.show(apiErrorMessage(err, 'Failed to archive branch'), 'error');
+      }
     }
   }
 
@@ -229,7 +262,7 @@ export class GableAdminBranches extends LitElement {
                     </td>
                     <td class="px-4 py-3 text-zinc-400 font-mono text-xs">${b.timezone || '—'}</td>
                     <td class="px-4 py-3">
-                      ${b.active === false
+                      ${!b.active
                         ? html`<span class="text-xs px-2 py-0.5 rounded-full bg-zinc-700/40 text-zinc-400">Archived</span>`
                         : html`<span class="text-xs px-2 py-0.5 rounded-full bg-gable-green/15 text-gable-green">Active</span>`}
                     </td>
@@ -245,7 +278,7 @@ export class GableAdminBranches extends LitElement {
                           title="Edit"
                           class="p-1.5 rounded hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
                         >${icon(Pencil, 14)}</button>
-                        ${b.active !== false ? html`
+                        ${b.active ? html`
                           <button
                             @click=${() => this._archive(b)}
                             title="Archive"

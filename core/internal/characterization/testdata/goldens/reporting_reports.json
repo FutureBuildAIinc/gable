@@ -29,13 +29,21 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": -45,
+        "close_balance": -13.58,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+0>",
         "lines": [
           {
-            "balance": -5,
+            "balance": 31.42,
+            "credit": 0,
+            "date": "<day+0>",
+            "debit": 31.42,
+            "description": "Invoice #<id-2>",
+            "type": "INVOICE"
+          },
+          {
+            "balance": 26.42,
             "credit": 5,
             "date": "<day+0>",
             "debit": 0,
@@ -43,7 +51,7 @@
             "type": "REFUND"
           },
           {
-            "balance": -15,
+            "balance": 16.42,
             "credit": 10,
             "date": "<day+0>",
             "debit": 0,
@@ -51,11 +59,11 @@
             "type": "PAYMENT"
           },
           {
-            "balance": -45,
+            "balance": -13.58,
             "credit": 30,
             "date": "<day+0>",
             "debit": 0,
-            "description": "POS return credit #<id-2>",
+            "description": "POS return credit #<id-3>",
             "type": "REFUND"
           }
         ],
@@ -74,12 +82,12 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": -45,
+        "close_balance": -13.58,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+401>",
         "lines": null,
-        "open_balance": -45,
+        "open_balance": -13.58,
         "start_date": "<day+400>"
       }
     }
@@ -99,7 +107,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-4>"
         }
       }
     }

@@ -231,7 +231,7 @@
       "content_type": "application/json",
       "body": [
         {
-          "id": 19,
+          "id": 18,
           "status": "DRAFT"
         },
         {
@@ -239,7 +239,7 @@
           "status": "CONFIRMED"
         },
         {
-          "id": 46,
+          "id": 47,
           "status": "FULFILLED"
         },
         {

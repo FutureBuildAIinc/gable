@@ -20,9 +20,16 @@ type AvalaraConfig struct {
 	LicenseKey  string
 	Environment string // "sandbox" or "production"
 	CompanyCode string
+	// BaseURLOverride, when set, replaces the environment's URL: a self
+	// hosted AvaTax compatible endpoint, and the local stub of the wiring
+	// tests.
+	BaseURLOverride string
 }
 
 func (c AvalaraConfig) BaseURL() string {
+	if c.BaseURLOverride != "" {
+		return c.BaseURLOverride
+	}
 	if c.Environment == "production" {
 		return "https://rest.avatax.com"
 	}

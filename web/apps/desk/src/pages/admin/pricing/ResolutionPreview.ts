@@ -5,7 +5,8 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons';
 import { Search, ArrowRight, CheckCircle, XCircle } from 'lucide';
-import { categoryPricingService } from '../../../services/CategoryPricingService';
+import { categoryPricingService, formatRuleValue } from '../../../services/CategoryPricingService';
+import { apiErrorMessage } from '../../../services/apiError';
 import type { ResolvedCategoryPrice } from '../../../types/category-pricing';
 import type { Product } from '../../../types/product';
 import type { Customer } from '../../../types/customer';
@@ -52,7 +53,7 @@ export class GableResolutionPreview extends LitElement {
       );
       this._result = res;
     } catch (err) {
-      this._error = err instanceof Error ? err.message : 'Resolution failed';
+      this._error = apiErrorMessage(err, 'Resolution failed');
     } finally {
       this._loading = false;
     }
@@ -124,7 +125,7 @@ export class GableResolutionPreview extends LitElement {
               <div class="flex items-center gap-2 text-sm">
                 <span class="text-slate-400">Rule:</span>
                 <span class="text-white font-mono font-medium">
-                  ${this._result.rule.rule_type} ${this._result.rule.rule_value}${this._result.rule.rule_type !== 'FIXED' ? '%' : ''}
+                  ${this._result.rule.rule_type.toUpperCase()} ${formatRuleValue(this._result.rule)}
                 </span>
                 ${icon(ArrowRight, 14, 'text-slate-500')}
                 <span class="text-slate-400">on</span>

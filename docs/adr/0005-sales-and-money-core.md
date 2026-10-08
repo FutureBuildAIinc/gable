@@ -524,6 +524,13 @@ Create: `POST /api/v1/orders`, status `draft`, event `order.created`.
 
 #### 5.4 Allocation, back orders and release on receipt
 
+(As built in C2-2b: the confirm, the release of a hold that was never
+allocated, and the worker's serving of a request share one allocation
+(`allocateLines`): each stocked line `min(available, needed)` in `(product id,
+line id)` order, a kit's components planned together in whole kits from the
+available stock read under the inventory row locks; a cancel, a reopen and a
+close short release what is allocated and zero the back orders.)
+
 Order line quantities hold one invariant for every stocked line (`product`
 with a product, and `component`) once the order has been confirmed:
 
@@ -638,6 +645,16 @@ callers cycle 4 converts.
   rate when set (section 3).
 
 #### 5.6 Fulfilment: the money moment
+
+(As built in C2-2b: a billed extension is the difference of two cumulative
+totals, `CumulativeTotal(after) - CumulativeTotal(before)` over the line's
+price, pair and discount, an amount discount prorated by `qty / ordered` and
+rounded half away from zero once per cumulative figure, so the invoices of a
+line sum to the order line's own total to the cent whatever order and size the
+quantities ship in. The lock at 1a of section 11 is taken before step 1's
+credit re-check. `invoice_lines.price_each`, kept for the readers C2-3
+converts, holds the effective price per sale unit, the line total over the
+quantity.)
 
 `POST /api/v1/orders/{id}/fulfillments`, body `{"revision": n, "lines":
 [{"order_line_id": ..., "quantity": "..."}], "picked_up_by": ...,
@@ -1268,7 +1285,23 @@ The order is by kind, whatever document the path names:
    touches the queue, and delivery completion only inserts);
 
 1. the order row or the counter sale row the act touches (an invoice void
-   locks its order here, before the invoice);
+   locks its order here, before the invoice). The order row lock is `FOR NO
+   KEY UPDATE`: it serializes every act on the order, and it stays
+   compatible with the `FOR KEY SHARE` a foreign key insert takes on the
+   row, so the allocation subscriber's request insert (5.4) never waits
+   behind a confirm;
+
+1a. the customer's credit serialization, taken by the acts that read a
+   customer's credit exposure (the confirm, the hold release and the
+   fulfilment) right after the order row: a transaction scoped advisory lock
+   keyed on the customer (`pg_advisory_xact_lock` over `order-credit:<customer
+   id>`). Without it two concurrent confirms of one customer's orders each read
+   an exposure that does not yet count the other (a draft is not counted) and
+   both pass the check. It is not a row lock, so it adds no edge to the order
+   below: the acts that take it hold their own order row and take inventory
+   (step 6) after it, and the back order worker, which does not read credit,
+   never takes it; the customer row (step 7) is left to the AR core as before,
+   because locking it here would put a step 7 lock before step 6;
 2. payments, in id order;
 3. credit memos, in id order;
 4. invoices, in id order (a credit memo post locks the invoice it names
