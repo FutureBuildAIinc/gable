@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# manifest.yaml, the App Shape manifest for Gable (shape 1, ADR-011).
+# scripts/check-shape.sh validates it in CI ("App Shape check").
+#
+# A runtime or frontend whose directory has not landed yet is marked planned
+# (the top-level `planned:` list for runtimes, `planned: true` on a frontend);
+# the check skips its path while it is marked, and fails a planned entry whose
+# path already exists (remove the mark when the directory lands).
+#
+# Keep this file to the subset the check parses: top-level scalars, flat
+# `[a, b]` lists, one nested `database:` and `observability:` block, and the
+# `frontends:` list of flat entries.
+
+shape: 1
+app: gable
+name: Gable
+runtimes: [core, web, tauri]
+planned: [tauri]   # runtimes not landed yet: the Tauri shell is item R1-9
+
+# One Postgres database per dealer; client data never shares a database.
+tenancy: multi-org
+
+# Extensions the migrations create today. The shape's allowlist (ADR-011
+# section 1) names pgvector, pg_trgm and PostGIS; these three are what the
+# carried schema needs and are recorded here as they are.
+database:
+  extensions: [uuid-ossp, btree_gist, ltree]
+
+observability:
+  service: gable
+
+frontends:
+  - id: front-door
+    name: Front Door
+    path: web/apps/front-door
+    planned: true   # arrives with the web workspace item R1-8
+  - id: desk
+    name: Desk
+    path: web/apps/desk

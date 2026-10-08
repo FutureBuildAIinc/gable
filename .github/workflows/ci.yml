@@ -222,6 +222,20 @@ jobs:
         working-directory: web/apps/desk
         run: npm run build
 
+  # The App Shape conformance check (ADR-011): required paths, manifest fields,
+  # the CLAUDE.md import, JSON validity, no stray root artefacts. Needs only
+  # git and python3, so it runs in seconds and gates every pull request.
+  shape:
+    name: App Shape
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: App Shape check
+        run: bash scripts/check-shape.sh
+
   license:
     name: License (REUSE)
     if: github.event_name != 'schedule'
