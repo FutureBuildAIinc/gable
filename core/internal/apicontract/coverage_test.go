@@ -75,6 +75,10 @@ func TestContractCoversCensus(t *testing.T) {
 			continue
 		}
 		method, pattern, _ := strings.Cut(key, " ")
+		// A wildcard pending entry (*) is satisfied by any operation on that path.
+		if method == "*" && specHasAnyMethod(spec, pattern) {
+			continue
+		}
 		if spec.Has(method, pattern) {
 			problems = append(problems, "pending entry already has an operation; strike the line from api/contract-pending.txt: "+key)
 		}

@@ -6,10 +6,8 @@
 # every money field is float dollars; the lists are bare JSON arrays capped
 # server side (orders at 50, quotes at 100) with no page envelope; a 409
 # refusal carries the standard error envelope plus a hand written reason
-# under error.reason; the 201 and 202 bodies are written after WriteHeader,
-# so the wire answers them as text/plain; charset=utf-8 today (the bodies
-# are JSON and the fragments keep declaring application/json); and someone
-# else's id is always a 404, never a 403, so the API is no existence oracle.
+# under error.reason; and someone else's id is always a 404, never a 403,
+# so the API is no existence oracle.
 paths:
   /api/portal/v1/login:
     post:
@@ -197,6 +195,7 @@ paths:
         is the handler's fixed 500 today.
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -205,11 +204,20 @@ paths:
               $ref: "#/components/schemas/PortalReorderRequest"
       responses:
         "201":
-          description: The new draft's id; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+          description: The new draft's id.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalReorderResponse"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -282,6 +290,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -295,6 +304,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalOrder"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -445,9 +463,7 @@ paths:
         false). A repeated ask supersedes the caller's earlier pending one.
         requested_date must be YYYY-MM-DD, not in the past and at most 365
         days out (violations are 400). A delivered stop or a route already
-        IN_TRANSIT or COMPLETED is a 409 with the refusal envelope. The 202
-        body is written without a Content-Type header today, so the wire
-        says text/plain; charset=utf-8.
+        IN_TRANSIT or COMPLETED is a 409 with the refusal envelope.
       security:
         - PortalSession: []
       parameters:
@@ -457,6 +473,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -470,6 +487,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalDeliveryReschedule"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -648,11 +674,10 @@ paths:
         uom; quantity must be positive; at most 200 lines; violations are
         400 with a message naming the line. A project the caller does not
         own is a 404. Database failures surface as 400 today, because the
-        handler's fallback status for this route is 400. The 201 body is
-        written without a Content-Type header today, so the wire says
-        text/plain; charset=utf-8.
+        handler's fallback status for this route is 400.
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -666,6 +691,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalQuote"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -803,11 +837,10 @@ paths:
       description: >-
         Prices the line through the customer's pricing waterfall before it
         is stored. A non-positive quantity or an unknown product is a 500
-        today (the handler's status is fixed). The 201 body is written
-        without a Content-Type header today, so the wire says text/plain;
-        charset=utf-8.
+        today (the handler's status is fixed).
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -821,6 +854,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalCart"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -842,6 +884,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -855,6 +898,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalCart"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -897,11 +949,10 @@ paths:
         Converts the cart to an order (each line's float unit price is
         rounded to cents for the order module) and clears the cart. An empty
         cart, an unknown project and every order-service failure are 500s
-        today (the handler's status is fixed). The 201 body is written
-        without a Content-Type header today, so the wire says text/plain;
-        charset=utf-8.
+        today (the handler's status is fixed).
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -915,6 +966,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalCheckoutResponse"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -974,10 +1034,10 @@ paths:
       description: >-
         Admin only. Records an invite expiring in seven days; the email is
         logged, not sent. A role outside the three known ones is a 500 today
-        (the handler's status is fixed). The 201 body is written without a
-        Content-Type header today, so the wire says text/plain; charset=utf-8.
+        (the handler's status is fixed).
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -991,6 +1051,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalInvite"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1016,6 +1085,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1025,6 +1095,15 @@ paths:
       responses:
         "200":
           description: Changed; no body.
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1050,6 +1129,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1059,6 +1139,15 @@ paths:
       responses:
         "200":
           description: Changed; no body.
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

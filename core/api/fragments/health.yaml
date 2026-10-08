@@ -3,9 +3,10 @@
 #
 # Health and metrics endpoints, transcribed from cmd/server and
 # internal/app/serve/serve.go as they behave today. All are public
-# (listed in the auth middleware's PublicPaths). The Prometheus
-# /metrics endpoint uses the prometheus text format; the three health
-# routes answer application/json.
+# (listed in the auth middleware's PublicPaths). The three health
+# routes answer application/json. The /metrics endpoint serves the
+# Prometheus text exposition format by default and OpenMetrics on
+# application/openmetrics-text request.
 paths:
   /healthz/live:
     get:
@@ -73,14 +74,16 @@ paths:
       tags: [health]
       summary: Prometheus metrics
       description: >-
-        The Prometheus scrape endpoint. Serves all registered metrics in
-        Prometheus text exposition format (text/plain; charset=utf-8).
-        Public: listed in the auth middleware PublicPaths so the scrape
-        target can reach it without a token.
+        The Prometheus scrape endpoint. By default serves the Prometheus
+        text exposition format (text/plain; version=0.0.4; charset=utf-8).
+        If the request carries an Accept header for application/openmetrics-text
+        the endpoint serves the OpenMetrics format instead. Public: listed
+        in the auth middleware PublicPaths so the scrape target can reach
+        it without a token.
       security: []
       responses:
         "200":
-          description: Prometheus text exposition format.
+          description: Prometheus text exposition format or OpenMetrics format.
           content:
             text/plain:
               schema:

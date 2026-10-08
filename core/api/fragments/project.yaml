@@ -6,11 +6,8 @@
 # session (the portal_token cookie or bearer JWT), not the ERP's. Quirks the
 # transcription preserves: every service failure on the create and update
 # routes is the handler's fixed 500 (an empty name or an invalid status
-# included), only the read answers 404; total_amount on a dashboard item is
-# float dollars and omitempty (absent on delivery items, which carry no
-# money); and the 201 body is written after WriteHeader, so the wire answers
-# it as text/plain; charset=utf-8 today (the body is JSON and the fragment
-# keeps declaring application/json).
+# included), only the read answers 404; and total_amount on a dashboard item
+# is float dollars and omitempty (absent when zero, matching the model).
 paths:
   /api/portal/v1/projects:
     get:
@@ -50,7 +47,7 @@ paths:
               $ref: "#/components/schemas/ProjectCreateRequest"
       responses:
         "201":
-          description: The created project; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+          description: The created project.
           content:
             application/json:
               schema:
@@ -185,7 +182,7 @@ components:
           type: string
         total_amount:
           type: number
-          description: Float dollars; omitted on delivery items, which carry no money column.
+          description: Float dollars; omitted when zero.
         created_at:
           type: string
           format: date-time

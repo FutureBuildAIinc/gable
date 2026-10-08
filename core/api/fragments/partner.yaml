@@ -5,10 +5,9 @@
 # These routes sit behind the ERP's JWT auth and then a second gate that
 # resolves the JWT's email to a customer: an email no customer carries (or an
 # inactive customer) is a 403. The quotes are the ERP's own quote model, the
-# same shape /api/v1/quotes serves, and the list is a bare array, never null.
-# Quirks preserved: the dashboard's money fields are float dollars; every
-# failure on the one-quote read, someone else's quote included, is the
-# handler's fixed 404.
+# same shape /api/v1/quotes serves, and the list can be null. Quirks preserved:
+# the dashboard's money fields are float dollars; a malformed UUID on the
+# one-quote read is a 400; every other failure is a 404.
 paths:
   /api/partner/v1/dashboard:
     get:
@@ -38,14 +37,14 @@ paths:
       operationId: partnerListQuotes
       tags: [partner]
       summary: The partner's quotes
-      description: The customer's quotes in the ERP's own quote shape; a bare array, never null.
+      description: The customer's quotes in the ERP's own quote shape; a bare array, or null when the customer has no quotes.
       responses:
         "200":
-          description: The quotes, a bare array, never null.
+          description: The quotes, a bare array, or null when the customer has no quotes.
           content:
             application/json:
               schema:
-                type: array
+                type: [array, "null"]
                 items:
                   $ref: "#/components/schemas/Quote"
         "401":
@@ -66,7 +65,7 @@ paths:
       description: >-
         The ERP's own quote shape. Every failure, a quote that does not
         exist, one belonging to another customer, and a repository fault,
-        is the handler's fixed 404.
+        is the handler's fixed 404. A malformed UUID is a 400.
       parameters:
         - name: id
           in: path

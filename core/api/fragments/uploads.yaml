@@ -3,13 +3,14 @@
 #
 # The /uploads/ file server, transcribed from internal/app/serve/serve.go as
 # it behaves today. A static file server from the "uploads" directory,
-# protected by the RequireRole middleware (admin, owner, user). The
-# Content-Disposition header is always set to attachment and
-# X-Content-Type-Options to nosniff; the Content-Type is derived from the
-# file extension by go's http.DetectContentType. The pattern in ROUTES.txt
-# is the literal /uploads/; the path after it is passed to the underlying
-# http.FileServer via StripPrefix, so a request to /uploads/pod/photo.jpg
-# serves the file uploads/pod/photo.jpg.
+# protected by RequireRole middleware (admin, owner, user) which reads the
+# portal JWT claims or a machine key from the Authorization: Bearer header.
+# Content-Type is derived from the file extension by go's http.DetectContentType
+# (extension first, then content sniffing); Content-Disposition is always set
+# to attachment and X-Content-Type-Options to nosniff. The pattern in
+# ROUTES.txt is the literal /uploads/ with a wildcard method (*); the mount
+# accepts every HTTP method but only GET (and HEAD) serve files; any other
+# method answers 405 Method Not Allowed from the underlying FileServer.
 paths:
   /uploads/:
     get:
@@ -19,11 +20,14 @@ paths:
       description: >-
         Authenticated access to the dealer file store under the uploads
         directory. The path after /uploads/ is the file path within the
-        uploads directory. Content-Type is derived from the file extension;
-        Content-Disposition is always attachment; X-Content-Type-Options
-        is nosniff. A nonexistent file is a 404; a missing role is a 403.
+        uploads directory. Content-Type is derived from the file extension
+        (go's http.DetectContentType, which checks the extension first and
+        falls back to content sniffing); Content-Disposition is always
+        attachment; X-Content-Type-Options is nosniff. A nonexistent file
+        is a 404.
       security:
-        - RequireRole: [admin, owner, user]
+        - BearerJWT: []
+        - MachineKey: []
       responses:
         "200":
           description: The file bytes; Content-Type is derived from the file extension.
@@ -32,17 +36,22 @@ paths:
               schema:
                 type: string
                 format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
-    RequireRole:
-      type: apiKey
-      in: cookie
-      name: portal_token
+    MachineKey:
+      type: http
+      scheme: bearer
+      bearerFormat: machine-key
       description: >-
-        The portal JWT cookie. Requires one of the roles admin, owner, or
-        user (as set by RequireRole middleware on this route). The same
-        portal_token cookie the portal routes use.
+        A machine key (the sk_live_ shape GenerateKey mints). Validated
+        against the api_keys table; needs scope for the route module,
+        uploads:read for GET and HEAD and uploads:write for other methods.
+        Machine keys are accepted on the same Authorization: Bearer header
+        as the user JWT; the auth layer dispatches by token shape before
+        the JWT parser runs.

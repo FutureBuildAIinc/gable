@@ -1,0 +1,46 @@
+## R1-7c: contract for portal, partner, project, health and uploads routes
+
+### What this PR does
+
+Contracts the routes under:
+- `/api/portal/v1/` - the sovereign dealer portal (contractor-facing API)
+- `/api/partner/v1/` - the ERP partner API (JWT-gated)
+- `/api/portal/v1/projects` - the project module (lives under the portal prefix)
+- `/health`, `/healthz/live`, `/healthz/ready` - health probes
+- `/metrics` - Prometheus scrape endpoint
+- `/uploads/` - authenticated static file server
+
+### Key transcription decisions
+
+**portal**: Every money field is float dollars (Go float64). Lists are bare JSON arrays with no page envelope. The 201 and 202 bodies are written without Content-Type so the wire says text/plain; charset=utf-8 today; fragments keep application/json per the known-deviation note in CONTRACT.md.
+
+**partner**: Dashboard balance_due and credit_limit are float dollars. The one-quote read (GET /api/partner/v1/quotes/{id}) answers a fixed 404 for every failure mode including someone else's quote.
+
+**project**: total_amount on dashboard items is float dollars and omitempty (absent on delivery items). The 201 body also lacks Content-Type.
+
+**health**: Readiness (/healthz/ready) checks the database pool and returns 503 when degraded. The uptime field is a Go time.Duration string.
+
+**uploads**: The /uploads/ GET is described as a single operation; the census records it as * /uploads/ (wildcard, any method). The coverage test now accepts a wildcard census entry satisfied by any concrete method operation on that path.
+
+### Contract coverage
+
+Before: 232 pending, 113 covered
+After: 228 pending, 117 covered
+
+### Generated files
+
+- core/api/openapi.yaml - regenerated (91 to 96 paths)
+- core/api/contract-pending.txt - regenerated
+- web/packages/api-client/src/schema.d.ts - regenerated
+
+### apicontract changes
+
+Added specHasAnyMethod helper and updated TestContractCoversCensus to handle the * wildcard census method used by the /uploads/ mount. This is a one-line semantic fix to the coverage test logic.
+
+### Exit tests
+
+All passed:
+- make contract: drift (assembly + pending), coverage, TypeScript drift, TypeScript typecheck
+- go vet ./...: clean
+- gofmt -l .: clean
+- go test -race ./internal/apicontract/... ./internal/routecensus/... ./internal/characterization/...: all green
