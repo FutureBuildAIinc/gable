@@ -38,8 +38,12 @@ instead of guessing at tables.
 `events_outbox` (migration 089) carries one row per event, written inside the
 mutation's transaction:
 
-- `position BIGINT NOT NULL DEFAULT nextval('events_outbox_position_seq')`,
-  the ordering key. Its guarantee is the subject of section 2.
+- `position BIGINT NOT NULL`, the ordering key, assigned by a `BEFORE
+  INSERT` trigger that first takes the transaction scoped advisory lock and
+  then draws from `events_outbox_position_seq`. There is no column default:
+  the position cannot be drawn before the lock, and any insert (a backfill,
+  a SQL function) keeps the ordering. Its guarantee is the subject of
+  section 2.
 - `event_id UUID NOT NULL UNIQUE`, the logical identity consumers dedup on.
 - `type TEXT NOT NULL`, the dot-delimited event type (`quote.exposure.flagged`,
   later `quote.created` and friends). The type is also the in-process bus
@@ -77,9 +81,10 @@ Two read rules were candidates.
 **A horizon from the oldest in-flight transaction (`pg_snapshot_xmin` with an
 `xid8` column on each row).** The reader takes a snapshot, computes
 `pg_snapshot_xmin`, and reads only rows whose inserting transaction is
-certainly finished (`xid < xmin`, and visible, therefore committed). This is
-necessary but not sufficient, because xid order is begin order, not position
-order, and the failure does not need exotic timing:
+certainly finished (`xid < xmin`, and visible, therefore committed). With a
+cursor on position alone this is necessary but not sufficient, because xid
+order is begin order, not position order, and the failure does not need
+exotic timing:
 
 - T0 begins and writes, taking xid 11.
 - T1 begins and writes, taking xid 12.
@@ -89,11 +94,17 @@ order, and the failure does not need exotic timing:
 - T0's row (xid 11 < 12) passes the filter with position 100; the reader
   advances past 95; T1 commits and its event is skipped forever.
 
-Whatever filters the reader applies, it cannot see the position an in-flight
-transaction already holds, and no bound derivable from xmin closes that hole.
-The horizon rule only works under an additional assumption, that position
-order cannot disagree with commit order, which is precisely the property the
-rule was supposed to provide.
+Ordering and paginating on the `(xid8, position)` pair closes that hole:
+every transaction with an xid below the snapshot's xmin has finished, so a
+reader that serves only rows with `xid < xmin` in `(xid8, position)` order
+and mints its cursor from the last served pair can never skip a row,
+because any row that becomes visible later carries an xid at or above that
+xmin and therefore sorts after everything already served. The rule is
+correct. Its costs are real but different in kind: the feed lags behind the
+oldest in-flight writer (committed rows whose writers began after that
+xmin wait for it, a delay, never a loss), and the cursor becomes a two key
+cursor, a wire change for every consumer. It is the second escape below,
+not the rule shipped.
 
 **Commit-ordered positions: an advisory lock at insert.** `outbox.Write`
 takes `pg_advisory_xact_lock(k)` on a fixed key before the row is inserted,
@@ -125,12 +136,34 @@ transaction. A transaction that writes an event and then lingers blocks every
 other event write for as long as it lingers. Gable's event-writing
 transactions today are short (the exposure scanner wraps each line's writes
 in one small transaction; the service methods are a handful of statements),
-and no code path holds a transaction across user think time. Sites that
-write events should write them late in their transaction. If event volume
-ever makes the single lock a bottleneck, the escape is not a cleverer reader
-(it does not exist, per above) but a commit-ordered log outside the row
-store (logical decoding or a broker); that is a later, listed contract
-change.
+and no code path holds a transaction across user think time.
+
+Two rules follow for every event writer:
+
+- **The event write is the transaction's last statement.** A writer that
+  takes the advisory lock and then updates other rows can deadlock against
+  a second writer holding the lock and updating the same rows in the other
+  order (Postgres detects the cycle after `deadlock_timeout` and aborts one
+  side, burning a position and failing the caller); after the lock, only
+  the insert runs, so the cycle cannot form. Bulk transactions (a catalog
+  import, a batch adjustment, an EDI load) therefore write per-row events
+  at their end, or one summary event, never per-row events as they go:
+  a bulk writer holding the lock through its whole import stalls every
+  event write behind it.
+- **The lock and the position are enforced in the database**, not only in
+  `Write`: migration 089 gives `events_outbox` no position default and a
+  `BEFORE INSERT` trigger that takes the advisory lock and assigns the
+  position, so an insert that bypasses `Write` (a backfill, a SQL function)
+  keeps the ordering instead of silently breaking it.
+
+If event volume ever makes the single lock a bottleneck, the escapes are
+named, in order of increasing change: a `DEFERRABLE INITIALLY DEFERRED`
+constraint trigger that takes the lock and assigns the position at commit
+(no wire change, and it removes the insert-time hold), the xid8 horizon
+with its two key cursor (a cursor version bump on the read API), and
+logical decoding or a broker (a commit-ordered log outside the row store,
+an operations change). Each is a later, listed contract change; none is
+needed at Gable's scale.
 
 One rule for every reader, in one place: the drain (`pkg/outbox` drain
 runner) and the HTTP read API (`GET /api/v1/events`) both page with
@@ -156,27 +189,64 @@ pretend it happened silently.
 `pkg/outbox.DrainRunner` is a poller with `Start` and `Stop`, started from
 the server for now (item R1-4 gives the `worker` role its own jobs, and
 moving it there changes only the wiring). Each registered subscriber, a
-(durable name, subject pattern) pair mirroring its `pkg/eventbus`
-subscription, is drained per tick in one short transaction:
+(durable name, subject pattern, handler) triple mirroring its `pkg/eventbus`
+subscription shape, is drained per tick in one short transaction:
 
-1. lock the subscriber's cursor row `FOR UPDATE SKIP LOCKED` (a second drain
-   instance simply skips the busy subscriber this tick);
-2. read a window of rows past the cursor in position order;
-3. publish each row whose type matches the pattern to the in-process bus
-   (`Publish(ctx, row.type, row.data)`), which fans out to the registered
-   handlers with their queues, panic recovery and drop accounting;
-4. advance the cursor to the highest position in the window, matched or not,
-   and commit.
+1. `Start` creates every registered subscriber's cursor row exactly once
+   (`INSERT ... ON CONFLICT DO NOTHING`) before the first pass. A newly
+   registered subscriber starts at the feed's current maximum position: the
+   outbox is a replay window, not a ledger, so a new consumer receives what
+   commits after it registered; one that wants the history opts into replay
+   and starts at 0.
+2. the pass locks the subscriber's cursor row `FOR UPDATE SKIP LOCKED`. No
+   row under that lock means another drain instance (a rolling deploy, a
+   second replica, the worker beside serve) holds this subscriber: the tick
+   skips it. Because the rows are created at `Start`, "no row" can never be
+   misread as "new subscriber, drain from position 0", which would replay
+   the whole outbox to a subscriber that already consumed it.
+3. the pass reads one window of rows past the cursor in position order and
+   delivers each row whose type matches the pattern to the subscriber's
+   handler synchronously, in order, carrying the outbox `event_id` as the
+   event id on the bus envelope (`eventbus.NewEventWithID`), so a replay of
+   a row presents itself as the same logical event downstream.
+4. the cursor advances past a row only when its handler returned nil
+   (non-matching rows advance it too), and the first error stops that
+   subscriber's pass: the cursor stays before the failed row and the
+   attempt is counted on the cursor row. The next ticks retry it; after 10
+   consecutive failures of the same row the row is parked
+   (`event_subscriber_parked`, with its event id and type for an operator
+   to inspect and replay by hand), logged, and the cursor moves on, so one
+   poison event cannot stall a subscriber forever. One window runs per
+   tick, so a backlog larger than the batch drains across ticks instead of
+   in one unbounded pass.
 
-Publishing happens before the cursor advances, so a crash between the two
-republishes the window rather than losing it: delivery to in-process
-subscribers is at least once across replays, and subscribers that must not
-act twice dedup on `event_id` (the exposure notifier already does). The
-exposure notifier itself is unchanged; the scanner and service that used to
-publish to the bus directly now write the outbox row inside their mutation's
-transaction instead, and the drain hands it to the bus, so the lumber price
-exposure emails still send, now from committed rows rather than from
-whatever the process happened to keep in memory.
+Delivery is at least once: a crash between a handler returning nil and the
+pass committing replays the window rather than losing it, and subscribers
+that must not act twice dedup on the `event_id` the mutation minted. The
+exposure notifier dedups in process on that id; its dedup is deliberately
+not durable in v1, so a restart during a replay can send a duplicate email.
+That is accepted for v1 (an operator-facing annoyance, not a correctness
+failure); a durable dedup table is the escape if it ever bites.
+
+The handler runs inside the pass's transaction with that transaction's
+context, so its reads and writes go through the transaction (the database
+seam resolves it) and the transaction never reaches for a second pool
+connection. The cost is stated plainly: the cursor row stays locked for the
+window's deliveries, so handlers must not block for long. `Stop` never
+cancels a pass mid-transaction (an aborted pass would repeat its
+deliveries after a restart); it finishes the in-flight window on a detached
+context and the loop checks the stop signal between passes.
+
+The in-process bus no longer sits on the delivery path: nothing publishes
+exposure events to it any more, so the drain calls the registered handlers
+directly. The bus's envelope (`eventbus.Event`) and wildcard subject rules
+remain the shared vocabulary between the drain and its subscribers, so a
+future broker-backed delivery swaps the drain's internals, not every
+consumer. The exposure notifier itself is unchanged apart from its
+registration; the scanner and service that used to publish to the bus
+directly now write the outbox row inside their mutation's transaction
+instead, so the lumber price exposure emails send from committed rows
+rather than from whatever the process happened to keep in memory.
 
 ### 5. The read API
 
@@ -215,14 +285,33 @@ rows.
 
 ## Alternatives considered
 
-**The reader-side xmin horizon** is recorded in section 2 with the
-interleaving that defeats it; it is the rule this ADR exists to refuse, and
-it would have passed every test that does not run two contending writers.
+**The reader-side xid8 horizon** is recorded in section 2 with the
+interleaving that defeats its position-cursor form and the `(xid8,
+position)` pair that fixes it. It is a real escape, not a false lead: it
+was refused for v1 because its feed lags behind the oldest in-flight
+writer and its cursor is a two key cursor (a wire change for every
+consumer), not because it is unimplementable. It is the second named
+escape above.
 
-**A second, commit-ordered position assigned after commit** (a NULL position
-filled in by a later pass) merely moves the problem: the filling pass runs
-in a transaction too, and a reader must again decide whether a NULL-position
-row will someday sort before a filled one.
+**A deferred constraint trigger assigning the position at commit.** A
+`DEFERRABLE INITIALLY DEFERRED` constraint trigger on `events_outbox` can
+take the advisory lock and draw the position when the transaction commits,
+rather than at insert: writers no longer hold the lock while the rest of
+their transaction runs, which also removes the deadlock the last-statement
+rule guards against, and position order stays commit order because the
+lock is still taken before the position and released only at commit. It
+keeps the same table and the same wire. It was deferred with the other
+escapes because the trigger moves a correctness-critical step into a
+constraint whose firing order against other deferred triggers is easy to
+get wrong, and the measured insert cost of the plain lock is far below
+Gable's volume; it is the first named escape above, and the honest record
+is that it dominates the shipped rule on throughput and loses on
+explicitness.
+
+**A second, commit-ordered position assigned after commit** (a NULL
+position filled in by a later pass) merely moves the problem: the filling
+pass runs in a transaction too, and a reader must again decide whether a
+NULL-position row will someday sort before a filled one.
 
 **Logical decoding or a broker** gives a true commit log without the insert
 lock, and is the right answer at a scale Gable has not reached; it changes
