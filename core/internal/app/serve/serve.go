@@ -113,7 +113,7 @@ func (v machineKeyValidator) ValidateKey(ctx context.Context, rawKey string) (mi
 		}
 		return middleware.KeyPrincipal{}, err
 	}
-	return middleware.KeyPrincipal{ID: k.ID, Scopes: k.Scopes}, nil
+	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
 }
 
 // Run starts the HTTP API server and blocks until SIGINT or SIGTERM, then
@@ -187,7 +187,10 @@ func Run() {
 	// so a key grants the same reach in dev as in production and a keyed
 	// integration is developed against the dev stack without a JWKS. The
 	// service is shared with the tech admin handler wired further down.
-	techAdminSvc := techadmin.NewService(techadmin.NewRepository(db))
+	techAdminSvc := techadmin.NewService(techadmin.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).WithTxRunner(db).
+		WithAuditLog(auditLog).
+		WithSettingsDefaults(cfg.OpenRouterAPIKey, cfg.OpenRouterBaseURL, cfg.ORSAPIKey)
 	machineKeyAuth := middleware.NewMachineKeyAuth(
 		machineKeyValidator{svc: techAdminSvc},
 		auditLog,
@@ -688,10 +691,11 @@ func Run() {
 
 	// Tech Admin Module (the service was built at startup, shared with the
 	// machine-key validator)
+	// The AI stack keeps its own key stores (aiKeyStore and friends above):
+	// they read the same system_settings rows this module writes and carry
+	// the environment fallbacks; a saved setting reaches them within their
+	// 30 second cache TTL.
 	techAdminHandler := techadmin.NewHandler(techAdminSvc)
-	techAdminHandler.WithAIKeyStore(aiKeyStore)
-	techAdminHandler.WithAIBaseURLStore(aiBaseURLStore)
-	techAdminHandler.WithORSKeyStore(orsKeyStore)
 	techAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Events feed: the outbox read API (item R1-12), the one cursor-paginated
