@@ -95,41 +95,40 @@ func TestParseQuantityBound(t *testing.T) {
 
 // RULE (ADR 0001 §7a): signs carry one meaning. A quantity is negative only
 // on a return or credit line; a unit price is never negative. Converting
-// modules enforce it from their validators through this helper, and both
-// offences on one line land in one collected 400.
+// modules enforce it from their validators through this helper, which
+// collects the offences beside the line's other field errors in one pass
+// (ADR 0001 §4), each named by the line's JSON path.
 func TestCheckLineSign(t *testing.T) {
-	if err := CheckLineSign(Quantity(10000), Price(15000), false); err != nil {
+	clean := &Validator{}
+	CheckLineSign(clean, "lines[0]", Quantity(10000), Price(15000), false)
+	CheckLineSign(clean, "lines[0]", Quantity(-10000), Price(15000), true)
+	CheckLineSign(clean, "lines[0]", Quantity(0), Price(0), false)
+	if err := clean.Err(); err != nil {
 		t.Errorf("an ordinary line refused: %v", err)
 	}
-	if err := CheckLineSign(Quantity(-10000), Price(15000), true); err != nil {
-		t.Errorf("a credit line's negative quantity refused: %v", err)
-	}
-	if err := CheckLineSign(Quantity(0), Price(0), false); err != nil {
-		t.Errorf("zeros refused: %v", err)
-	}
 
-	signErr := func(t *testing.T, err error, wantFields ...string) {
-		t.Helper()
-		e, ok := err.(*Error)
-		if !ok {
-			t.Fatalf("err is %T, want *Error", err)
-		}
-		if e.Status != 400 || e.Code != CodeValidationFailed {
-			t.Errorf("status/code = %d/%q, want 400 validation_failed", e.Status, e.Code)
-		}
-		if len(e.Details) != len(wantFields) {
-			t.Fatalf("details = %+v, want the fields %v", e.Details, wantFields)
-		}
-		for i, field := range wantFields {
-			if e.Details[i].Field != field {
-				t.Errorf("details[%d].Field = %q, want %q", i, e.Details[i].Field, field)
-			}
+	v := &Validator{}
+	CheckLineSign(v, "lines[2]", Quantity(-10000), Price(15000), false)
+	CheckLineSign(v, "lines[2]", Quantity(10000), Price(-15000), false)
+	e, ok := v.Err().(*Error)
+	if !ok {
+		t.Fatalf("Err() is %T, want *Error", v.Err())
+	}
+	if e.Status != 400 || e.Code != CodeValidationFailed {
+		t.Errorf("status/code = %d/%q, want 400 validation_failed", e.Status, e.Code)
+	}
+	want := []FieldError{
+		{Field: "lines[2].quantity", Message: "a negative quantity belongs to a return or credit line"},
+		{Field: "lines[2].unit_price_ten_thousandths", Message: "a unit price is never negative"},
+	}
+	if len(e.Details) != len(want) {
+		t.Fatalf("details = %+v, want %+v", e.Details, want)
+	}
+	for i, w := range want {
+		if e.Details[i] != w {
+			t.Errorf("details[%d] = %+v, want %+v", i, e.Details[i], w)
 		}
 	}
-	signErr(t, CheckLineSign(Quantity(-10000), Price(15000), false), "quantity")
-	signErr(t, CheckLineSign(Quantity(10000), Price(-15000), false), "unit_price_ten_thousandths")
-	signErr(t, CheckLineSign(Quantity(-10000), Price(-15000), false),
-		"quantity", "unit_price_ten_thousandths")
 }
 
 // RULE: the database form is the fixed four-digit decimal the NUMERIC(12,4)

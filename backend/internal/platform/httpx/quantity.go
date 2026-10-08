@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/big"
-	"net/http"
 	"strconv"
 	"strings"
 )
@@ -158,21 +157,13 @@ func Extend(qty, uomQty, priceUomQty Quantity, price Price) (Cents, error) {
 // negative only on a return or credit line, and a unit price is never
 // negative. The rule itself belongs to the converting module's validator,
 // which knows the line's kind; this helper is the one place the check is
-// written. Both offences on one line come back as a single collected 400
-// naming the standard field names, ready for WriteError.
-func CheckLineSign(qty Quantity, price Price, returnOrCredit bool) *Error {
-	var details []FieldError
-	if qty < 0 && !returnOrCredit {
-		details = append(details, FieldError{Field: "quantity",
-			Message: "a negative quantity belongs to a return or credit line"})
-	}
-	if price < 0 {
-		details = append(details, FieldError{Field: "unit_price_ten_thousandths",
-			Message: "a unit price is never negative"})
-	}
-	if len(details) == 0 {
-		return nil
-	}
-	return &Error{Status: http.StatusBadRequest, Code: CodeValidationFailed,
-		Message: "the line's signs are not valid", Details: details}
+// written. path is the line's JSON path prefix ("lines[2]"), so the offences
+// collect into the request's one 400 beside the line's other field errors
+// (ADR 0001 §4), named lines[2].quantity and
+// lines[2].unit_price_ten_thousandths.
+func CheckLineSign(v *Validator, path string, qty Quantity, price Price, returnOrCredit bool) {
+	v.Check(qty >= 0 || returnOrCredit, path+".quantity",
+		"a negative quantity belongs to a return or credit line")
+	v.Check(price >= 0, path+".unit_price_ten_thousandths",
+		"a unit price is never negative")
 }
