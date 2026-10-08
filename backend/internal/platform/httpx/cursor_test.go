@@ -141,6 +141,38 @@ func TestMintCursorValidatesItsInputs(t *testing.T) {
 	}
 }
 
+// RULE: a key part is valid UTF-8 carrying no control characters of either
+// bank. JSON encoding rewrites invalid UTF-8 into replacement characters, so
+// a part like that would come back from decode as a different keyset value
+// than the handler seeked with; C1 controls are valid UTF-8 but no more
+// acceptable in a sort key than C0 ones.
+func TestKeyPartsAreUTF8WithoutControls(t *testing.T) {
+	if _, err := MintCursor(testScope, "caf"+"\xe9"); err == nil {
+		t.Error("invalid UTF-8 key part minted")
+	}
+	if _, err := MintCursor(testScope, "a"+"\u0085"+"b"); err == nil {
+		t.Error("C1 control in key part minted")
+	}
+	b64 := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
+	c1 := `{"v":1,"o":"` + testScope + `","k":["a` + "\u0085" + `b"]}`
+	if _, err := DecodeCursor(b64(c1), testScope); err == nil {
+		t.Error("C1 control in key part decoded")
+	}
+
+	// Printable multi-byte characters are welcome and round trip.
+	raw, err := MintCursor(testScope, "日本語", "café")
+	if err != nil {
+		t.Fatalf("multi-byte key parts did not mint: %v", err)
+	}
+	key, err := DecodeCursor(raw, testScope)
+	if err != nil {
+		t.Fatalf("multi-byte key parts did not decode: %v", err)
+	}
+	if len(key) != 2 || key[0] != "日本語" || key[1] != "café" {
+		t.Errorf("key = %q, want the minted parts", key)
+	}
+}
+
 // RULE: the cursor carries nothing up its sleeve: minting the same scope and
 // key twice yields the same token.
 func TestCursorIsDeterministic(t *testing.T) {

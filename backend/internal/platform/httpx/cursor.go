@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"unicode/utf8"
 )
 
 // Page limits (ADR 0001 §2): the default page size, and the bound a client
@@ -39,15 +40,21 @@ type cursorPayload struct {
 }
 
 // validateKeyPart applies the per-part shape rules shared by minting and
-// decoding: a part is a non-empty, bounded, printable string with no
-// control characters. Control characters are refused so a cursor part can
-// never smuggle structure into a log line or a debug dump.
+// decoding: a part is non-empty, bounded, valid UTF-8, and carries no
+// control characters, neither the C0 bank nor the C1 one. Invalid UTF-8 is
+// refused because JSON encoding would rewrite it into replacement
+// characters and hand decode a different value than mint was given;
+// controls are refused so a cursor part can never smuggle structure into a
+// log line or a debug dump.
 func validateKeyPart(part string) bool {
 	if part == "" || len(part) > maxCursorKeyPartBytes {
 		return false
 	}
-	for i := 0; i < len(part); i++ {
-		if part[i] < 0x20 || part[i] == 0x7f {
+	if !utf8.ValidString(part) {
+		return false
+	}
+	for _, r := range part {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return false
 		}
 	}
