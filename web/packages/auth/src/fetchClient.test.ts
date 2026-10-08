@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fetchWithAuth, SESSION_EXPIRED_EVENT } from './fetchClient'
+import { authCustody } from './custody'
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -52,6 +53,8 @@ beforeEach(() => {
   fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
   vi.stubGlobal('fetch', fetchMock)
   localStorage.clear()
+  sessionStorage.clear()
+  authCustody.signOut()
   history.replaceState(null, '', '/login')
 })
 
@@ -196,6 +199,39 @@ describe('fetchWithAuth — HTTP error handling', () => {
 
     expect(heard).not.toHaveBeenCalled()
     window.removeEventListener(SESSION_EXPIRED_EVENT, heard)
+  })
+})
+
+describe('fetchWithAuth — custody precedence', () => {
+  /** A structurally valid, unexpired JWT for custody sign-in. */
+  function b64url(s: string): string {
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+  const token = [
+    b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })),
+    b64url(JSON.stringify({ sub: 'u1', email: 'door@gable.test', exp: Math.floor(Date.now() / 1000) + 3600 })),
+    'sig',
+  ].join('.')
+
+  it('prefers the in-memory custody token over the legacy localStorage one', async () => {
+    localStorage.setItem('token', 'legacy-out-of-band')
+    authCustody.signInWithToken(token)
+    await fetchWithAuth('/api/v1/orders')
+    expect(sentHeaders().get('Authorization')).toBe(`Bearer ${token}`)
+  })
+
+  it('falls back to the legacy localStorage token when custody is empty', async () => {
+    localStorage.setItem('token', 'legacy-out-of-band')
+    await fetchWithAuth('/api/v1/orders')
+    expect(sentHeaders().get('Authorization')).toBe('Bearer legacy-out-of-band')
+  })
+
+  it('a 401 clears custody along with the legacy artifacts', async () => {
+    authCustody.signInWithToken(token)
+    fetchMock.mockResolvedValue(new Response('', { status: 401 }))
+    await expect(fetchWithAuth('/api/v1/orders', { retries: 0 })).rejects.toThrow('Session expired')
+    expect(authCustody.session).toBeNull()
+    expect(sessionStorage.getItem('gable.auth.session.v1')).toBeNull()
   })
 })
 

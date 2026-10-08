@@ -1,0 +1,22 @@
+{
+  "name": "@gable/auth",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "jsdom": "^29.0.2",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "license": "LicenseRef-OpenLBM-Surface-1.0"
+}
