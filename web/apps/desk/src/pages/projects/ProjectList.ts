@@ -106,8 +106,9 @@ export class ProjectList extends LitElement {
                         <div class="p-4">
                             <form @submit=${(e: Event) => this._handleCreateProject(e)} class="flex gap-3 items-end">
                                 <div class="flex-1">
-                                    <label class="block text-sm font-medium text-zinc-300 mb-1">Project Name</label>
+                                    <label for="new-project-name" class="block text-sm font-medium text-zinc-300 mb-1">Project Name</label>
                                     <input
+                                        id="new-project-name"
                                         type="text"
                                         required
                                         .value=${this.newProjectName}

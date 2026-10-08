@@ -76,8 +76,9 @@ export class GableLogActivityModal extends LitElement {
             </div>
 
             <div class="mb-4">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Date & Time</label>
+              <label for="log-activity-date" class="block text-sm font-medium text-gray-700 mb-1">Date & Time</label>
               <input
+                id="log-activity-date"
                 type="datetime-local"
                 required
                 .value=${this._activityDate}
@@ -87,8 +88,9 @@ export class GableLogActivityModal extends LitElement {
             </div>
 
             <div class="mb-4">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Contact (Optional)</label>
+              <label for="log-activity-contact" class="block text-sm font-medium text-gray-700 mb-1">Contact (Optional)</label>
               <select
+                id="log-activity-contact"
                 .value=${this._contactId}
                 @change=${(e: Event) => this._contactId = (e.target as HTMLSelectElement).value}
                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
@@ -101,8 +103,9 @@ export class GableLogActivityModal extends LitElement {
             </div>
 
             <div class="mb-6">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Description / Notes</label>
+              <label for="log-activity-description" class="block text-sm font-medium text-gray-700 mb-1">Description / Notes</label>
               <textarea
+                id="log-activity-description"
                 required
                 rows="4"
                 .value=${this._description}
