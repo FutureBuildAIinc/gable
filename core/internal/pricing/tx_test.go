@@ -77,7 +77,7 @@ func TestBulkUpsert_FailingStatementRollsTheBatchBack(t *testing.T) {
 	broken.Tier = "SILVER"
 	broken.CategoryID = uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff") // no such category
 
-	if err := svc.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{good, broken}); err == nil {
+	if err := svc.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{good, broken}, nil); err == nil {
 		t.Fatal("the batch with a foreign key violation succeeded")
 	}
 	var n int
@@ -150,7 +150,7 @@ func TestBulkUpsert_SaturationNeedsNoSecondConnection(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if err := svc.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{rules[i]}); err != nil {
+			if err := svc.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{rules[i]}, nil); err != nil {
 				errs <- err
 			}
 		}(i)
@@ -244,7 +244,7 @@ func TestRuleWrites_FailingAuditRollsTheWriteBack(t *testing.T) {
 
 	// bulk upsert and bulk delete
 	a, b := newTierRule(catID, "TXC", 5), newTierRule(catID, "TXD", 6)
-	if err := bad.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{a, b}); err == nil {
+	if err := bad.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{a, b}, nil); err == nil {
 		t.Fatal("bulk upsert with a failing audit write succeeded")
 	}
 	if ruleCount(t, db, a.ID)+ruleCount(t, db, b.ID) != 0 {

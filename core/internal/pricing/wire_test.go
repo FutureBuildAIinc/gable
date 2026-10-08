@@ -197,6 +197,15 @@ func TestCalculateRejectsBadInputs(t *testing.T) {
 		}
 	}
 
+	// A missing customer_id or product_id is a 400 naming it, not a 404.
+	miss := f.do("GET", "/api/v1/pricing/calculate", nil)
+	if miss.status != http.StatusBadRequest {
+		t.Fatalf("no customer_id or product_id: %d, want 400", miss.status)
+	}
+	if got := detailFields(miss); !got["customer_id"] || !got["product_id"] {
+		t.Fatalf("details do not name both: %s", miss.raw)
+	}
+
 	if res := f.do("GET", base+"&verbose=1", nil); res.status != http.StatusBadRequest {
 		t.Fatalf("unknown parameter: status = %d, want 400", res.status)
 	}

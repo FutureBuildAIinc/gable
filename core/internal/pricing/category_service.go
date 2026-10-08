@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 
@@ -303,21 +304,44 @@ func (s *CategoryPricingService) ListAuditEntries(ctx context.Context, ruleID uu
 
 // BulkUpsertRules creates or updates many rules, and writes one audit entry
 // per rule, in one transaction: a rule that cannot be written, or an audit
-// entry that cannot, refuses the whole batch.
-func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []CategoryPricingRule) error {
+// entry that cannot, refuses the whole batch. An element that replaces a rule
+// (it names an id that exists) must carry the revision it read, checked under
+// the row's lock, and may not change the rule's scope (the target and the
+// category are fixed at create, as on the single update). The rows are locked
+// in id order, so two batches naming the same rules never wait on each other
+// in opposite orders.
+func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []CategoryPricingRule, pres []Precondition) error {
 	return s.inTx(ctx, func(ctx context.Context) error {
-		existing := make(map[uuid.UUID]*CategoryPricingRule)
-		for _, r := range rules {
-			if r.ID == uuid.Nil {
-				continue
+		order := make([]int, 0, len(rules))
+		for i := range rules {
+			if rules[i].ID != uuid.Nil {
+				order = append(order, i)
 			}
-			old, err := s.catRepo.LockCategoryRule(ctx, r.ID)
+		}
+		sort.Slice(order, func(a, b int) bool { return rules[order[a]].ID.String() < rules[order[b]].ID.String() })
+		existing := make(map[uuid.UUID]*CategoryPricingRule)
+		for _, i := range order {
+			old, err := s.catRepo.LockCategoryRule(ctx, rules[i].ID)
 			if err != nil {
 				return err
 			}
-			if old != nil {
-				existing[r.ID] = old
+			if old == nil {
+				continue
 			}
+			var pre Precondition
+			if i < len(pres) {
+				pre = pres[i]
+			}
+			if err := httpx.CheckRevision(old.Revision, pre.IfMatch, pre.Revision); err != nil {
+				return err
+			}
+			r := &rules[i]
+			if r.TargetType != old.TargetType || r.Tier != old.Tier || r.CategoryID != old.CategoryID ||
+				(r.CustomerID == nil) != (old.CustomerID == nil) || (r.CustomerID != nil && *r.CustomerID != *old.CustomerID) {
+				return httpx.BadRequest("a rule's target and category are fixed at create",
+					httpx.FieldError{Field: "id", Message: "the element changes the scope of the rule it replaces"})
+			}
+			existing[r.ID] = old
 		}
 		if err := s.catRepo.BulkUpsertRules(ctx, rules); err != nil {
 			return err

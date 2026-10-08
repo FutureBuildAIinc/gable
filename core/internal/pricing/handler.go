@@ -97,9 +97,13 @@ func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
 	var customerID, productID uuid.UUID
 	if vals := q["customer_id"]; len(vals) > 0 {
 		customerID, _ = v.UUID("customer_id", &vals[0], true)
+	} else {
+		v.Check(false, "customer_id", "is required")
 	}
 	if vals := q["product_id"]; len(vals) > 0 {
 		productID, _ = v.UUID("product_id", &vals[0], true)
+	} else {
+		v.Check(false, "product_id", "is required")
 	}
 
 	quantity := httpx.Quantity(10_000) // 1.0000

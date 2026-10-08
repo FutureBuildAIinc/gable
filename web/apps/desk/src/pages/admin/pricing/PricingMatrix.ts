@@ -213,7 +213,7 @@ export class GablePricingMatrix extends LitElement {
       const direct = this._matrix.cells.find(c => c.category_id === catId && c.tier === tier && !c.inherited)?.rule;
       rules.push({
         ...parsed.values,
-        ...(direct?.id ? { id: direct.id } : {}),
+        ...(direct?.id ? { id: direct.id, revision: direct.revision } : {}),
         target_type: 'tier',
         tier,
         category_id: catId,

@@ -220,12 +220,22 @@
       "path": "/api/v1/pricing/calculate"
     },
     "response": {
-      "status": 404,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "not_found",
-          "message": "no such customer"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "customer_id",
+              "message": "is required"
+            },
+            {
+              "field": "product_id",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-10>"

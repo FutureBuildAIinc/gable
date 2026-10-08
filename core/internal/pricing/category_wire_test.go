@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -315,10 +316,30 @@ func TestCategoryRuleBulk(t *testing.T) {
 	rule := f.tierRule(cat, "WIREBULK", nil)
 	id := rule.body["id"].(string)
 
-	res := f.do("POST", "/api/v1/pricing/category-rules/bulk", []map[string]any{
-		{"id": id, "target_type": "tier", "tier": "WIREBULK", "category_id": cat, "rule_type": "markup", "value_pct": "20"},
+	el := func(extra map[string]any) []map[string]any {
+		e := map[string]any{"id": id, "target_type": "tier", "tier": "WIREBULK", "category_id": cat, "rule_type": "markup", "value_pct": "20"}
+		for k, v := range extra {
+			e[k] = v
+		}
+		return []map[string]any{e}
+	}
+	bulk := func(body any) resp {
+		return f.do("POST", "/api/v1/pricing/category-rules/bulk", body, "Idempotency-Key", uuid.NewString())
+	}
+	// An element that replaces a rule names the revision it read.
+	if res := bulk(el(nil)); res.status != http.StatusPreconditionRequired {
+		t.Fatalf("replace without a revision: %d %s, want 428", res.status, res.raw)
+	}
+	if res := bulk(el(map[string]any{"revision": 7})); res.status != http.StatusConflict || errCode(res) != "stale_revision" {
+		t.Fatalf("replace at a stale revision: %d %s, want 409 stale_revision", res.status, res.raw)
+	}
+	if res := bulk(el(map[string]any{"revision": 1, "tier": "SOMEOTHER"})); res.status != http.StatusBadRequest {
+		t.Fatalf("replace that changes the target: %d %s, want 400", res.status, res.raw)
+	}
+	res := bulk([]map[string]any{
+		el(map[string]any{"revision": 1})[0],
 		{"target_type": "tier", "tier": "WIREBULK2", "category_id": cat, "rule_type": "margin", "value_pct": "22"},
-	}, "Idempotency-Key", uuid.NewString())
+	})
 	if res.status != http.StatusOK || res.body["count"] != json.Number("2") {
 		t.Fatalf("bulk: %d %s", res.status, res.raw)
 	}
@@ -326,6 +347,34 @@ func TestCategoryRuleBulk(t *testing.T) {
 	items := got.body["items"].([]any)
 	if len(items) != 1 || items[0].(map[string]any)["value_pct"] != "20" || items[0].(map[string]any)["revision"] != json.Number("2") {
 		t.Fatalf("the element with an id did not replace its rule at the next revision: %s", got.raw)
+	}
+	// Two batches naming the same rules in opposite orders lock in one order
+	// and never deadlock.
+	other := f.tierRule(cat, "WIREBULK3", nil).body["id"].(string)
+	pair := func(first, second string, r1, r2 int) []map[string]any {
+		return []map[string]any{
+			{"id": first, "target_type": "tier", "tier": "WIREBULK", "category_id": cat, "rule_type": "markup", "value_pct": "21", "revision": r1},
+			{"id": second, "target_type": "tier", "tier": "WIREBULK3", "category_id": cat, "rule_type": "markup", "value_pct": "21", "revision": r2},
+		}
+	}
+	// (id and tier pairs must agree; build the two orders with matching tiers)
+	ab := pair(id, other, 2, 1)
+	ba := []map[string]any{ab[1], ab[0]}
+	var wg sync.WaitGroup
+	statuses := make(chan int, 2)
+	for _, body := range [][]map[string]any{ab, ba} {
+		wg.Add(1)
+		go func(b []map[string]any) {
+			defer wg.Done()
+			statuses <- bulk(b).status
+		}(body)
+	}
+	wg.Wait()
+	close(statuses)
+	for st := range statuses {
+		if st != http.StatusOK && st != http.StatusConflict {
+			t.Errorf("opposite order batches: %d, want 200 or 409 (never a deadlock 500)", st)
+		}
 	}
 	if res := f.do("POST", "/api/v1/pricing/category-rules/bulk", []map[string]any{}, "Idempotency-Key", uuid.NewString()); res.status != http.StatusBadRequest {
 		t.Fatalf("empty batch: %d, want 400", res.status)

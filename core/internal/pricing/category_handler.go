@@ -315,6 +315,13 @@ type categoryRuleWriteRequest struct {
 	categoryRuleValues
 }
 
+// categoryRuleBulkRequest is one element of the bulk body: a create body that
+// may carry the id of the rule it replaces and then the revision it read.
+type categoryRuleBulkRequest struct {
+	categoryRuleWriteRequest
+	Revision *int64 `json:"revision"`
+}
+
 // categoryRuleUpdateRequest is the update body: the values and the
 // revision. The target (account or tier, customer, category) is fixed at
 // create, and a body that names one is a 400 naming it.
@@ -579,7 +586,7 @@ func (h *CategoryHandler) HandleGetRuleAudit(w http.ResponseWriter, r *http.Requ
 // --- Bulk Operations ---
 
 func (h *CategoryHandler) HandleBulkUpsertRules(w http.ResponseWriter, r *http.Request) {
-	var reqs []categoryRuleWriteRequest
+	var reqs []categoryRuleBulkRequest
 	if err := httpx.DecodeJSON(r, &reqs); err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -596,14 +603,17 @@ func (h *CategoryHandler) HandleBulkUpsertRules(w http.ResponseWriter, r *http.R
 	}
 	v := &httpx.Validator{}
 	rules := make([]CategoryPricingRule, len(reqs))
+	pres := make([]Precondition, len(reqs))
 	for i := range reqs {
 		rules[i] = reqs[i].parse(v)
+		pres[i] = Precondition{Revision: reqs[i].Revision}
+		v.Check(reqs[i].Revision == nil || rules[i].ID != uuid.Nil, "revision", "a revision belongs to an element that names the id of the rule it replaces")
 	}
 	if err := v.Err(); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if err := h.service.BulkUpsertRules(r.Context(), rules); err != nil {
+	if err := h.service.BulkUpsertRules(r.Context(), rules, pres); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}

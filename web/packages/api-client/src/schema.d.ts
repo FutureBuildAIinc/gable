@@ -4152,7 +4152,7 @@ export interface paths {
         put?: never;
         /**
          * Bulk upsert category pricing rules
-         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The body is a JSON array of 1 to 500 rules, each validated as on single create; an element that carries an id replaces the rule with that id. Any failure refuses the whole batch, which is written with its audit entries in one transaction.
+         * @description Registered only when CATEGORY_PRICING_ENABLED=true. Guarded admin or owner. The body is a JSON array of 1 to 500 rules, each validated as on single create; an element that carries an id replaces the rule with that id at its revision. Any failure refuses the whole batch, which is written with its audit entries in one transaction.
          */
         post: operations["pricingCategoryRuleBulkUpsert"];
         /**
@@ -9955,10 +9955,12 @@ export interface components {
             /** Format: uuid */
             category_id: string;
         };
-        /** @description One element of the bulk body; an id replaces the rule that has it. */
+        /** @description One element of the bulk body; an id replaces the rule that has it, at the revision the element names (required with an id: 428 without, 409 when stale) and without changing the rule's scope. */
         PricingCategoryRuleBulkItem: components["schemas"]["PricingCategoryRuleCreateRequest"] & {
             /** Format: uuid */
             id?: string;
+            /** Format: int64 */
+            revision?: number;
         };
         /** @description The update body: the values and the revision. A target field (target_type, customer_id, tier, category_id) is a 400. */
         PricingCategoryRuleUpdateRequest: components["schemas"]["PricingCategoryRuleValues"] & {
