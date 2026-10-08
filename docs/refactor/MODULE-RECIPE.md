@@ -126,6 +126,14 @@ after merging `refactor/v1`; another item may take yours) and a down file in
    maximum, then the DEFAULT, NOT NULL and the unique constraint. The DEFAULT
    is for raw SQL writers elsewhere (the portal's insert, the seed); the Go
    create path mints through its transaction.
+
+   If the table already has a number column (orders, invoices and customers
+   do, under their own names and formats), ADR 0001 section 8 applies before
+   anything is added: adopt it as the wire's `number` (map the column in the
+   repository, keep its existing values and format, put the sequence behind
+   its DEFAULT so new rows continue from the maximum) or list the collision in
+   `CONTRACT-CHANGES.md` with what the old format becomes. Never add a second
+   number column beside an existing one.
 4. Widen every unit price column the module exposes as
    `_ten_thousandths` that is still scale 2 (step 2b). Quotes needed none.
 5. Add what the wire needs that the table lacks: the conversion pair and
@@ -183,6 +191,13 @@ Map foreign key violations to a 400 naming the request field
   after it, inside the same transaction. A joined select cannot lock an outer
   joined row, so lock first, read second.
 - Every write that changes the document moves `revision = revision + 1`.
+- The branch wall (`middleware.BranchIDForQuery(ctx)`, a nil result meaning no
+  wall) applies to EVERY read and every lock, not only the list: the get, the
+  lock, the count, the per-customer list, the file or attachment download and
+  any statement a transition runs before it writes. A route that reads a
+  document by id without the wall is a cross branch leak (the quote file route
+  lacked it until R1-15's fix). Test it: a second branch's request for the
+  first branch's id is a 404 on every route.
 
 ## 7. Service
 
@@ -217,7 +232,17 @@ The precondition is `If-Match` plus the body revision, handed to the service,
 which refuses a write with neither (428).
 
 Register the handler in `serve.go` with the outbox writer and the database as
-transaction runner.
+transaction runner, and register its routes with `scoped(...)`, the role guard
+composed with the branch middleware (`serve.go`; quotes: `scoped("admin",
+"owner", "sales")`). A machine key reaches the module through its scopes (ADR
+0002): `<module>:read` for GET and HEAD and `<module>:write` for every other
+method, the module being the first path segment under `/api/v1/`, so a new
+route must sit under the module's own segment to inherit the right scope. A
+key without the scope is a 403 `forbidden` and the refusal writes an
+`audit_log` row attributed to the key. The module's exit test names this: a key
+holding only `<module>:read` reads a document (200), is refused a write with
+403, and the audit row exists (the `machine_key` golden group pins the pattern;
+a wire test of the module's own proves its routes carry the scope).
 
 ## 9. Other writers and readers of the module's tables
 
@@ -225,8 +250,25 @@ Grep for them (step 0). For each: raw INSERTs rely on the column DEFAULTs and
 should write the creation event in their own transaction (the portal's quote
 request does, through an optional `EventRecorder`); other modules that update
 the table's content (the exposure escalation rewrites prices) bump the
-revision; readers of the old float or uppercase columns keep working because
-the database vocabulary does not change, only the wire.
+revision; readers of columns whose NAME and TYPE are unchanged keep working, but a
+reader of a column whose MEANING changed does not. The quote lines' pair is the
+lesson: `price_uom_qty / uom_qty` changed what `quantity x unit_price` means,
+and the exposure scanner, the portal's quote read and the integration seam's
+accept-and-convert all kept multiplying the old way until the review found
+them. For every column the migration adds or reinterprets, grep every reader
+(`grep -rn "<column>\|<table>" core`, including SQL strings) and either apply
+the new meaning there with a test (an MBF line priced per 187.5 pieces is the
+check) or make it refuse what it cannot carry.
+
+A helper route that feeds an unconverted neighbour (quotes' convert hands the
+order payload to the orders route, which takes whole cents per sale unit and no
+pair) REFUSES what the neighbour cannot carry rather than rounding it: a quote
+with a line whose pair is not 1 to 1, or whose `price_uom` differs from `uom`,
+is a 409 `invalid_state_transition` with a `line_not_convertible` blocker
+naming `lines[i]`. The payload is built inside the transition's transaction,
+before the status changes, so a refusal leaves the document as it was. The
+neighbour's own converting module lifts the refusal (here R2-1). The same
+rule binds the frozen integration seam that does the same job.
 
 ## 10. The contract
 
@@ -324,5 +366,10 @@ Then commit per step when green, push, and open the pull request into
 | A list the partner surface serves | Stays a bare array of the new shape until that module converts |
 | The unconverted neighbour's vocabulary on the converted wire | Mapped to the wire's casing on the converted module (the quote's `exposure_state`), the neighbour's own routes unchanged |
 | The router's own 404 and 405 | Not converted here; they keep net/http's plain text |
-| `ETag` and the generated client | The client does not surface response headers; the body carries `revision` for clients that need it |
-| A convert-style helper route | Takes the same revision precondition as any transition |
+| `ETag` and the generated client | The client does not surface response headers; the body carries `revision` for clients that need it, and a convert body carries it too |
+| The idempotent replay's `ETag` | A replayed create returns the stored body and status but not the `ETag` header; the body's `revision` is the source (hardening list) |
+| A convert-style helper route | Takes the same revision precondition as any transition, builds its payload inside the transition's transaction, and returns the document's revision (body and `ETag`) |
+| A helper route whose neighbour cannot carry a line | 409 `invalid_state_transition` with a `line_not_convertible` blocker naming `lines[i]`, until the neighbour converts (convert: a pair that is not 1 to 1, or `price_uom` different from `uom`) |
+| A client sending a revision on create | 400 naming `revision`: a create has no revision to precondition on |
+| A PUT carrying a field it does not apply | 400 naming the field (`source`, `margin_total_cents`, `original_file`, `original_filename`, `original_content_type`, `parse_map`, `branch_id`), never a silent drop |
+| `price_uom` vocabulary | `^[A-Z]{1,6}$`: not limited to the sale unit enum (a price per M or per CWT is real), but a code, never free text |
