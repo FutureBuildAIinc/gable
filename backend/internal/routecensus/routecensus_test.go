@@ -58,6 +58,36 @@ func TestRoutesFileMatchesSources(t *testing.T) {
 	t.Fatal(b.String())
 }
 
+// collectFixture runs the census over one fixture module under testdata.
+// The real census walk skips testdata directories, so the fixtures never
+// pollute api/ROUTES.txt.
+func collectFixture(t *testing.T, name string) Result {
+	t.Helper()
+	result, err := Collect(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatalf("collect fixture %s: %v", name, err)
+	}
+	return result
+}
+
+// TestGatedRouterOutsidePkgAppsIsCounted pins the fix for the review's F1:
+// only the pkg/apps forwarders may skip their calls, and a call inside them
+// whose pattern resolves is a real route. A type named gatedRouter anywhere
+// else must not hide its registrations.
+func TestGatedRouterOutsidePkgAppsIsCounted(t *testing.T) {
+	result := collectFixture(t, "gatedrouter")
+	if err := result.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if len(result.Routes) != 1 {
+		t.Fatalf("want 1 route, got %d: %+v", len(result.Routes), result.Routes)
+	}
+	r := result.Routes[0]
+	if r.Method != "GET" || r.Pattern != "/yy/hidden" || r.Module != "internal/yy" {
+		t.Fatalf("wrong route: %+v", r)
+	}
+}
+
 // diffRoutes compares two rendered censuses by route key and returns one
 // human line per added and removed route.
 func diffRoutes(oldRender, newRender string) (added, removed []string) {

@@ -76,13 +76,21 @@ type Result struct {
 	// portal login limiter does) are one route and appear once in Routes.
 	Duplicates []string
 	Unresolved []Unresolved
+	// Restricted lists registration constructs the census refuses: they
+	// rewrite the paths routes are served under, so the census would list
+	// the routes they carry under the wrong path. See allowMounts.
+	Restricted []Unresolved
 }
 
-// Validate reports duplicates and unresolved registrations as an error.
+// Validate reports duplicates, unresolved and restricted registrations as
+// an error.
 func (r *Result) Validate() error {
 	var problems []string
 	for _, u := range r.Unresolved {
 		problems = append(problems, "unresolved registration: "+u.String())
+	}
+	for _, u := range r.Restricted {
+		problems = append(problems, "restricted registration: "+u.String())
 	}
 	for _, d := range r.Duplicates {
 		problems = append(problems, "duplicate registration: "+d)
@@ -365,12 +373,19 @@ func Collect(moduleRoot string) (Result, error) {
 		return evalPkgConst(fu.relDir, name)
 	}
 
-	// Calls inside gatedRouter forwarding methods are skipped: they forward
-	// a caller-supplied pattern to the real router (pkg/apps/apps.go), and
-	// are delegation, not registration. Every other Handle/HandleFunc call
-	// whose pattern does not resolve becomes an Unresolved.
+	// Calls inside the gatedRouter forwarding methods of pkg/apps are
+	// skipped when their pattern does not resolve: they forward a
+	// caller-supplied pattern to the real router, so the registration
+	// happened at the caller's site, not here. A call inside them whose
+	// pattern does resolve is a real registration and is counted. The skip
+	// is scoped to pkg/apps: a type named gatedRouter anywhere else gets no
+	// such courtesy. Every other Handle/HandleFunc call whose pattern does
+	// not resolve becomes an Unresolved.
 	gatedCalls := map[ast.Node]bool{}
 	for _, fu := range fileUnits {
+		if fu.relDir != "pkg/apps" {
+			continue
+		}
 		for _, decl := range fu.file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
 			if !ok || !isGatedRouterMethod(fd) {
@@ -405,6 +420,19 @@ func Collect(moduleRoot string) (Result, error) {
 			if callee != "Handle" && callee != "HandleFunc" {
 				return true
 			}
+			enclosing := enclosingFunc(fu.file, call)
+			if gatedCalls[call] {
+				// Forwarder traffic from the pkg/apps gatedRouter methods:
+				// the pattern comes from the caller and cannot resolve, so
+				// the registration is not here. A call whose pattern does
+				// resolve is a real registration and falls through.
+				if len(call.Args) != 2 {
+					return true
+				}
+				if _, resolvable := eval(fu, enclosing, call.Args[0]); !resolvable {
+					return true
+				}
+			}
 			if len(call.Args) < 2 {
 				result.Unresolved = append(result.Unresolved, Unresolved{
 					File:   fu.relPath,
@@ -414,7 +442,6 @@ func Collect(moduleRoot string) (Result, error) {
 				})
 				return true
 			}
-			enclosing := enclosingFunc(fu.file, call)
 			pattern, ok := eval(fu, enclosing, call.Args[0])
 			if !ok {
 				result.Unresolved = append(result.Unresolved, Unresolved{
