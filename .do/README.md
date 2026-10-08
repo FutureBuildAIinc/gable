@@ -29,7 +29,7 @@ git push -> DO App Platform pulls branch
             |- builds core/Dockerfile  -> the one `core` binary
             |                                 (alpine, port 8080)
             |
-            |- builds web/apps/desk/Dockerfile      -> nginx + Vite SPA bundle
+            |- builds web/Dockerfile ->  nginx + both Vite bundles (door and desk)
             |                                 (VITE_API_URL baked at build time)
             |
             |- deploys backend + frontend services + the worker
