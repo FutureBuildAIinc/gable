@@ -161,11 +161,14 @@ Every error response, from every route, is:
   handler message but writes only `genericMessage(code)` into the body: the
   client sees "Bad Request" while the specific cause ("line 1: uom is
   required") goes only to the server log. That drop is what this rule fixes.
-- `details`, when present, carries one entry per offending field: `field` is
-  the field's path (for body fields, its JSON path; for query parameters, the
-  parameter name; for the cursor, `cursor`), `message` says what is wrong
-  with it. `details` is omitted (or empty) when the error is not about
-  fields.
+- `details`, when present, carries one entry per reason. Most entries are
+  about a field: `field` is the field's path (for body fields, its JSON
+  path; for query parameters, the parameter name; for the cursor,
+  `cursor`) and `message` says what is wrong with it. An entry may instead
+  be a blocker, a business reason the request failed that belongs to no
+  one field (a credit hold, a linked document): it carries `code` and
+  `message` with no `field`. `details` is omitted (or empty) when the
+  error is about neither.
 - `meta.request_id` is the request id assigned by the request id middleware
   (the same value the `X-Request-ID` response header carries), so a client
   can quote one identifier in a support conversation for any response, good
@@ -181,9 +184,25 @@ The code table:
 | 401 | `unauthorized` | no or invalid credentials |
 | 403 | `forbidden` | credentials lack the scope or role the route requires |
 | 404 | `not_found` | the addressed resource does not exist (or is not visible to this caller) |
-| 409 | `conflict` | the request conflicts with current state: a stale revision, a duplicate unique value, an idempotency key reuse with a different body |
+| 405 | `method_not_allowed` | the method is not supported on the route |
+| 409 | `stale_revision` | the write was built on a revision the document has moved past (section 11) |
+| 409 | `duplicate` | a unique value the request would create already exists; `details` may carry blockers naming it |
+| 409 | `idempotency_in_progress` | the same idempotency key is still executing its first request (section 9) |
+| 409 | `invalid_state_transition` | the lifecycle transition is not allowed from the current state; `details` may carry blockers |
+| 409 | `conflict` | a conflict no finer code above names (kept as the fallback; converting modules use the finer codes) |
+| 412 | `precondition_failed` | a precondition header failed for a reason no finer code names |
+| 413 | `payload_too_large` | the request body is past the route's size bound |
+| 415 | `unsupported_media_type` | the body's content type is not one the route consumes |
+| 422 | `idempotency_key_reused` | the key was stored against a different request fingerprint (section 9) |
+| 428 | `precondition_required` | the write needs `If-Match` or a body revision and carries neither (section 11) |
 | 429 | `rate_limited` | too many requests |
 | 500 | `internal_error` | an unexpected server fault |
+| 503 | `unavailable` | the service or a dependency it needs is down, retry later |
+
+Errors written by middleware (auth, rate limit, idempotency, the router's
+404 and 405, panic recovery) use this envelope too. Each such middleware
+converts onto it in the item that owns it (R1-11, R1-13, R1-14), and each
+conversion is a row in `docs/refactor/CONTRACT-CHANGES.md`.
 
 One carve-out keeps the message rule safe: for status 500 the body's
 `message` is the fixed string "internal error" and `details` is omitted. A
