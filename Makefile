@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-.PHONY: help up down smoke logs ps pg-shell migrate seed reset-db \
+.PHONY: help up db down smoke logs ps pg-shell migrate seed reset-db \
         build vet test test-short cover \
         contract contract-go contract-ts \
         fe-install fe-typecheck fe-lint fe-test fe-cover fe-build \
@@ -18,6 +18,7 @@ help:
 	@echo ""
 	@echo "  Infra"
 	@echo "    up down logs ps pg-shell     the local stack (docker compose)"
+	@echo "    db                           Postgres alone, for running core from source"
 	@echo "    smoke                        the exit test's step 3 against the running stack"
 	@echo "    migrate seed reset-db        database lifecycle"
 	@echo "                                 (seed needs DEMO_SEED=1 — see the Makefile)"
@@ -45,6 +46,10 @@ help:
 # healthy. http://127.0.0.1:$${GABLE_WEB_PORT:-8080}
 up:
 	COMPOSE_PARALLEL_LIMIT=1 docker compose up -d --build --wait --wait-timeout 600
+
+# Postgres alone (localhost:5434), for running core from source.
+db:
+	docker compose up -d --wait postgres
 
 # Stop and remove the containers AND their volumes (the Postgres data).
 down:

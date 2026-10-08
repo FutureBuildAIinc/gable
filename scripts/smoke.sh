@@ -57,7 +57,7 @@ else:
   }
 fi
 
-# count_events_of_type <type> walks the events feed from its start.
+# psql_q runs one query inside the Postgres container.
 psql_q() { docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -At -c "$1"; }
 
 # --- the web tier -----------------------------------------------------------
@@ -82,11 +82,11 @@ pass "the desk opens at /home"
 
 # --- a quote through the API ------------------------------------------------
 
-first_id() { # path -> id of the first row (bare array or enveloped)
+first_id() { # path -> id of the first row (bare array, items or data envelope)
   curl -fsS "$BASE$1" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-rows = d if isinstance(d, list) else d.get("data", [])
+rows = d if isinstance(d, list) else d.get("items") or d.get("data") or []
 print(rows[0]["id"])'
 }
 BRANCH=$(first_id /api/v1/branches)
@@ -128,16 +128,25 @@ assert all(isinstance(v, int) and not isinstance(v, bool) for v in vals), vals
 PY
 pass "a created quote has number $number, status '$status' and integer _cents money"
 
-code=$(curl -sS -o "$TMP/list.json" -w '%{http_code}' "$BASE/api/v1/quotes?limit=50")
+code=$(curl -sS -o "$TMP/list.json" -w '%{http_code}' "$BASE/api/v1/quotes?limit=1")
 [ "$code" = 200 ] || fail "list quotes is 200" "got $code"
-python3 - "$TMP/list.json" "$QID" <<'PY' || fail "the quote appears in the cursor envelope"
-import json, sys
-d = json.load(open(sys.argv[1]))
-assert isinstance(d.get("data"), list), "no data array"
-assert "next_cursor" in d, "no next_cursor"
-assert any(q["id"] == sys.argv[2] for q in d["data"]), "quote not listed"
+python3 - "$BASE" "$QID" <<'PY' || fail "the quote appears in the cursor envelope"
+import json, sys, urllib.request
+base, qid = sys.argv[1], sys.argv[2]
+cursor, pages, found = None, 0, False
+while True:
+    url = base + "/api/v1/quotes?limit=100" + ("&cursor=" + cursor if cursor else "")
+    d = json.load(urllib.request.urlopen(url))
+    assert isinstance(d.get("items"), list), "no items array"
+    assert "next_cursor" in d, "no next_cursor"
+    pages += 1
+    found = found or any(q["id"] == qid for q in d["items"])
+    cursor = d["next_cursor"]
+    if found or not cursor:
+        break
+assert found, "quote not listed after %d pages" % pages
 PY
-pass "the quote is listed in the cursor envelope (data, next_cursor)"
+pass "the quote is listed in the cursor envelope (items, next_cursor)"
 
 code=$(curl -sS -o "$TMP/open.html" -w '%{http_code}' "$BASE/quotes/$QID")
 [ "$code" = 200 ] && grep -q '/assets/' "$TMP/open.html" || fail "/quotes/{id} opens the desk directly" "status $code"
@@ -181,10 +190,10 @@ cursor, count = "", 0
 while True:
     url = base + "/api/v1/events?limit=200" + ("&cursor=" + cursor if cursor else "")
     d = json.load(urllib.request.urlopen(url))
-    for e in d["data"]:
+    for e in d["items"]:
         if e["type"] == "quote.created" and e["entity"]["id"] == qid:
             count += 1
-    if cursor == d["next_cursor"] or not d["data"]:
+    if cursor == d["next_cursor"] or not d["items"]:
         cursor = d["next_cursor"]
         break
     cursor = d["next_cursor"]
@@ -196,7 +205,7 @@ read -r seen cursor < <(walk_feed)
 [ "$seen" = 1 ] || fail "quote.created is read exactly once from the start of the feed" "read $seen times"
 pass "quote.created for the quote is read exactly once walking GET /api/v1/events?cursor= from its start"
 after=$(curl -fsS "$BASE/api/v1/events?limit=200&cursor=$cursor")
-[ "$(json '.data | length' <<< "$after")" = 0 ] || fail "reading again from the returned cursor yields nothing new" "$after"
+[ "$(json '.items | length' <<< "$after")" = 0 ] || fail "reading again from the returned cursor yields nothing new" "$after"
 pass "reading again from the returned cursor yields nothing new"
 
 # --- a scoped machine key -----------------------------------------------------
