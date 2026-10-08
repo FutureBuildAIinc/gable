@@ -62,7 +62,6 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
-	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
@@ -648,7 +647,11 @@ func Run() {
 	deliverySvc.WithNotifier(&deliveryNotifierAdapter{notifier: deliveryNotifier})
 
 	// Wire invoice service for auto-invoicing on delivery POD
-	deliverySvc.WithInvoiceService(&invoiceServiceAdapter{invoiceSvc: invoiceSvc, orderSvc: orderSvc})
+	// Delivery completion queues the order's fulfilment request in the
+	// transaction that writes the delivered status; the worker bills it (ADR
+	// 0005 5.5). A pickup order is never routed.
+	deliverySvc.WithFulfilment(orderSvc, orderSvc)
+	deliverySvc.WithTxRunner(db)
 
 	// Millwork App (converted — reference conversion #1)
 	// One app, two backend modules: millwork (option catalogs) + configurator
@@ -1178,67 +1181,6 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
-}
-
-// invoiceServiceAdapter bridges invoice.Service to delivery.InvoiceServiceInterface.
-type invoiceServiceAdapter struct {
-	invoiceSvc *invoice.Service
-	orderSvc   *order.Service
-}
-
-func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uuid.UUID) error {
-	// Double-invoice guard: if the order was already invoiced (the normal path
-	// invoices it at fulfilment), do NOT create a second invoice on delivery.
-	// AR is summed from invoices, so a duplicate would double-bill the customer.
-	if exists, err := a.invoiceSvc.ExistsInvoiceForOrder(ctx, orderID); err != nil {
-		return fmt.Errorf("check existing invoice: %w", err)
-	} else if exists {
-		return nil
-	}
-
-	ord, err := a.orderSvc.GetOrder(ctx, orderID)
-	if err != nil {
-		return fmt.Errorf("get order for invoice: %w", err)
-	}
-
-	// Build the invoice from the order's lines. The invoice module still
-	// holds whole cents per sale unit, so a line whose conversion pair is not
-	// 1 to 1 cannot be handed over without rounding its money away: the
-	// adapter refuses it (the recipe's rule for a helper feeding an
-	// unconverted neighbour) until the fulfilment route replaces this path
-	// (ADR 0005 5.5, C2-2b).
-	var lines []invoice.InvoiceLine
-	for i := range ord.Lines {
-		ol := &ord.Lines[i]
-		if ol.LineType == salesdoc.LineText || ol.LineType == salesdoc.LineCharge {
-			continue
-		}
-		if ol.UOMQty == nil || ol.PriceUOMQty == nil || *ol.UOMQty != salesdoc.One || *ol.PriceUOMQty != salesdoc.One {
-			return fmt.Errorf("order %s has a line priced per %s: the delivery invoice path cannot carry a conversion pair until the fulfilment route lands",
-				orderID, derefString(ol.PriceUOM))
-		}
-		if ol.ProductID == nil || ol.Quantity == nil || ol.UnitPrice == nil || ol.LineTotal == nil {
-			continue
-		}
-		lines = append(lines, invoice.InvoiceLine{
-			ProductID: *ol.ProductID,
-			Quantity:  float64(*ol.Quantity) / 10000,
-			PriceEach: int64(math.Round(float64(*ol.UnitPrice) / 100)),
-		})
-	}
-
-	inv := &invoice.Invoice{
-		CustomerID: ord.CustomerID,
-		OrderID:    ord.ID,
-		BranchID:   ord.BranchID, // invoice + tax rate come from the order's branch
-		Lines:      lines,
-	}
-
-	if err := a.invoiceSvc.CreateInvoice(ctx, inv); err != nil {
-		return err
-	}
-	// Book a delivery-created invoice to the GL + AR subledger too.
-	return a.invoiceSvc.PostInvoiceToLedger(ctx, inv)
 }
 
 // autoPOAdapter bridges purchase_order.Service to quote.AutoPOService.

@@ -67,7 +67,8 @@ func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 // orders mounts the order routes: the create takes branch_id from its body,
 // so it is held to the caller's branch context (ADR 0007 section 2.3).
 func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
-	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"),
+		w.scoped("admin", "owner", "finance", "warehouse"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

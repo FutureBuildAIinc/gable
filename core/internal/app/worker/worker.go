@@ -18,8 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/pkg/audit"
@@ -120,8 +123,12 @@ func Run() {
 	// whose subscriber fills it, never in serve.
 	allocation := newQueueRunner("order-allocation", orderSvc.ServeAllocationRequest, logger)
 	allocation.Start()
+	// The fulfilment requests of completed deliveries (ADR 0005 5.5), oldest
+	// first; a failure is counted on the request and parks it after ten.
+	fulfilment := newQueueRunner("order-fulfilment", orderSvc.ServeFulfilmentRequest, logger)
+	fulfilment.Start()
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,order-allocation")
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,order-allocation,order-fulfilment")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -131,6 +138,7 @@ func Run() {
 	// batch (or drain window) finishes before step 2 closes it.
 	logger.Info("Shutdown step 1/2: stopping the order queue jobs...")
 	allocation.Stop()
+	fulfilment.Stop()
 	logger.Info("Shutdown step 1/2: stopping outbox purge...")
 	purge.Stop()
 	logger.Info("Shutdown step 1/2: outbox purge stopped")
@@ -174,7 +182,17 @@ func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
 		WithAuditLog(audit.NewLogger(db)).
-		WithInventory(inventory.NewService(inventory.NewRepository(db)))
+		WithInventory(inventory.NewService(inventory.NewRepository(db))).
+		WithInvoices(newInvoiceService(db))
+}
+
+// newInvoiceService builds the invoice service the fulfilment worker writes
+// through: the real GL and account ledger, the audit log.
+func newInvoiceService(db *database.DB) *invoice.Service {
+	logger := slog.Default()
+	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
+	return invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(account.NewRepository(db), db, logger), db).
+		WithAuditLog(audit.NewLogger(db))
 }
 
 // newOutboxPurge builds the retention job from the configured age in days.

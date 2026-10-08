@@ -42,10 +42,16 @@ func (f *fixture) withMoney() func(*order.Service) *order.Service {
 type failOn struct {
 	inner order.EventRecorder
 	typ   string
+	// onFail runs inside the failing act's transaction, just before the error:
+	// the test reads there what the act had written so far.
+	onFail func(ctx context.Context)
 }
 
 func (f failOn) Write(ctx context.Context, ev outbox.Event) error {
 	if ev.Type == f.typ {
+		if f.onFail != nil {
+			f.onFail(ctx)
+		}
 		return errors.New("outbox insert failed")
 	}
 	return f.inner.Write(ctx, ev)
@@ -240,8 +246,14 @@ func TestFailingEventWriteRollsTheFulfilmentBack(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
+	var writtenInvoice string
+	var entriesInside int
 	f.serveWith(f.withStock(), f.withMoney(), func(s *order.Service) *order.Service {
-		return s.WithOutbox(failOn{inner: outbox.NewWriter(db, ""), typ: "order.fulfilled"})
+		return s.WithOutbox(failOn{inner: outbox.NewWriter(db, ""), typ: "order.fulfilled", onFail: func(ctx context.Context) {
+			ex := db.GetExecutor(ctx)
+			_ = ex.QueryRow(ctx, `SELECT id::text FROM invoices ORDER BY created_at DESC LIMIT 1`).Scan(&writtenInvoice)
+			_ = ex.QueryRow(ctx, `SELECT count(*) FROM gl_journal_entries WHERE source_ref_id = $1::uuid`, writtenInvoice).Scan(&entriesInside)
+		}})
 	})
 	f.cleanMoney()
 	f.stock(f.productID, "10")
@@ -260,9 +272,12 @@ func TestFailingEventWriteRollsTheFulfilmentBack(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM invoices WHERE order_id = $1`, id).Scan(&n); err != nil || n != 0 {
 		t.Errorf("%d invoices survived the rollback (%v)", n, err)
 	}
-	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM gl_journal_entries e JOIN gl_journal_lines l ON l.journal_entry_id = e.id
-		JOIN gl_accounts a ON a.id = l.account_id WHERE a.code = '5010' AND e.memo LIKE 'Invoice %' AND e.created_at > now() - interval '1 minute' AND e.source_ref_id NOT IN (SELECT id FROM invoices)`).Scan(&n); err != nil || n != 0 {
-		t.Errorf("%d orphan COGS entries survived the rollback (%v)", n, err)
+	// Inside the act the entry existed; after the rollback it is gone with the invoice.
+	if entriesInside != 1 {
+		t.Errorf("%d entries inside the act before the failure, want 1 (the test would prove nothing)", entriesInside)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM gl_journal_entries WHERE source_ref_id = $1::uuid`, writtenInvoice).Scan(&n); err != nil || n != 0 {
+		t.Errorf("%d journal entries survived the rollback (%v)", n, err)
 	}
 	if got := f.inventoryOf(f.productID); got != "10.0000/10.0000" {
 		t.Errorf("inventory = %s, want 10/10 (allocated, not shipped)", got)
@@ -513,4 +528,3 @@ func (f *fixture) lineID(orderID string) string {
 	}
 	return id
 }
-

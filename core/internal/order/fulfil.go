@@ -344,16 +344,36 @@ func (s *Service) Fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 	if pre != nil && pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
 	}
-	if s.invoices == nil {
-		return nil, errors.New("the invoice writer is not wired")
-	}
 	priced, err := s.prepareFulfilTax(ctx, id, req)
 	if err != nil {
 		return nil, err
 	}
+	return s.fulfil(ctx, id, pre, req, priced, nil)
+}
 
+// errRequestGone is the claim's answer when another worker holds the request
+// or it is already gone: the serve skips it without a failure.
+var errRequestGone = errors.New("order: the fulfilment request is gone")
+
+// fulfil is the fulfilment's transaction. claim, when set, runs first inside
+// it: the queue worker takes its request row there (lock order step 0, before
+// the order row).
+func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, req FulfilRequest, priced *providerTax,
+	claim func(ctx context.Context) (bool, error)) (*Fulfilment, error) {
+	if s.invoices == nil {
+		return nil, errors.New("the invoice writer is not wired")
+	}
 	var out *Fulfilment
-	err = s.inTx(ctx, func(ctx context.Context) error {
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		if claim != nil {
+			ok, err := claim(ctx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errRequestGone
+			}
+		}
 		if err := s.repo.LockOrder(ctx, id); err != nil {
 			return notFound(err)
 		}
@@ -370,6 +390,10 @@ func (s *Service) Fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			if err := pre.check(cur.Revision); err != nil {
 				return err
 			}
+		}
+		if cur.Status == StatusFulfilled && req.InProcess {
+			// the desk (or the migration) already billed everything
+			return nothingToFulfil()
 		}
 		if cur.Status != StatusConfirmed && cur.Status != StatusBackordered {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot fulfil an order in %s", cur.Status.Status()))

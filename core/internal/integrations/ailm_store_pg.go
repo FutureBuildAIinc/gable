@@ -337,6 +337,10 @@ func (s *pgAILMStore) ListOrders(ctx context.Context, date, status string) ([]In
 	return out, nil
 }
 
+// ErrPickupOrder is the refusal of a stop for a will-call order: the customer
+// collects it at the branch, so it is never routed.
+var ErrPickupOrder = errors.New("a pickup order is never routed")
+
 // ReplaceDeliveryRoute writes an approved plan onto the dispatch board in one
 // transaction: it removes any not-yet-dispatched route for the same
 // (vehicle_id, scheduled_date), inserts the new route plus its stops, and
@@ -400,6 +404,11 @@ func (s *pgAILMStore) ReplaceDeliveryRoute(ctx context.Context, req DeliveryRout
 		orderID, err := uuid.Parse(stop.OrderID)
 		if err != nil {
 			return nil, fmt.Errorf("parse order_id %q: %w", stop.OrderID, err)
+		}
+		// A pickup (will-call) order is never routed (ADR 0005 5.5).
+		var deliveryType string
+		if err := tx.QueryRow(ctx, `SELECT delivery_type FROM orders WHERE id = $1`, orderID).Scan(&deliveryType); err == nil && deliveryType == "PICKUP" {
+			return nil, fmt.Errorf("%w: order %s", ErrPickupOrder, stop.OrderID)
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO deliveries (route_id, order_id, stop_sequence, status, latitude, longitude)

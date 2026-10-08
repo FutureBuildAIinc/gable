@@ -94,6 +94,16 @@ type Repository interface {
 	ClaimAllocationRequest(ctx context.Context) (uuid.UUID, bool, error)
 	DeleteAllocationRequest(ctx context.Context, orderID uuid.UUID) error
 
+	// The fulfilment request queue (ADR 0005 5.5).
+	InsertFulfillmentRequest(ctx context.Context, deliveryID, orderID uuid.UUID) error
+	NextFulfillmentRequest(ctx context.Context) (*FulfillmentRequest, error)
+	ClaimFulfillmentRequest(ctx context.Context, deliveryID uuid.UUID) (bool, error)
+	DeleteFulfillmentRequest(ctx context.Context, deliveryID uuid.UUID) error
+	RecordFulfillmentFailure(ctx context.Context, deliveryID uuid.UUID, lastError string, maxAttempts int) (parked bool, err error)
+	ListFulfillmentRequests(ctx context.Context, f RequestFilter) ([]FulfillmentRequest, error)
+	RetryFulfillmentRequest(ctx context.Context, deliveryID uuid.UUID) (orderID uuid.UUID, found bool, err error)
+	DeliveryRequestOrder(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error)
+
 	// Fulfilment (ADR 0005 5.6).
 	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
 	UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error)
@@ -1140,4 +1150,168 @@ func (r *PostgresRepository) SpecialOrderUnitCost(ctx context.Context, orderLine
 		return 0, false, fmt.Errorf("failed to read the special order cost: %w", err)
 	}
 	return httpx.Price(*cost), true, nil
+}
+
+// FulfillmentRequest is a row of order_fulfillment_requests (ADR 0005 5.5):
+// a completed delivery waiting to be billed.
+type FulfillmentRequest struct {
+	DeliveryID uuid.UUID        `json:"delivery_id"`
+	OrderID    uuid.UUID        `json:"order_id"`
+	Position   int64            `json:"position"`
+	Attempts   int              `json:"attempts"`
+	LastError  *string          `json:"last_error"`
+	ParkedAt   *httpx.Timestamp `json:"parked_at"`
+	CreatedAt  httpx.Timestamp  `json:"created_at"`
+}
+
+// RequestFilter is the request list's filters and keyset position.
+type RequestFilter struct {
+	Parked        *bool
+	OrderID       *uuid.UUID
+	AfterPosition *int64
+	Limit         int
+}
+
+// maxFulfilmentAttempts is how many failed attempts park a request.
+const maxFulfilmentAttempts = 10
+
+func (r *PostgresRepository) InsertFulfillmentRequest(ctx context.Context, deliveryID, orderID uuid.UUID) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO order_fulfillment_requests (delivery_id, order_id) VALUES ($1, $2) ON CONFLICT (delivery_id) DO NOTHING`,
+		deliveryID, orderID); err != nil {
+		return fmt.Errorf("failed to queue the fulfilment request: %w", err)
+	}
+	return nil
+}
+
+const requestColumns = `delivery_id, order_id, position, attempts, last_error, parked_at, created_at`
+
+func scanRequest(row pgx.Row) (*FulfillmentRequest, error) {
+	var q FulfillmentRequest
+	var parked *time.Time
+	if err := row.Scan(&q.DeliveryID, &q.OrderID, &q.Position, &q.Attempts, &q.LastError, &parked, &q.CreatedAt.Time); err != nil {
+		return nil, err
+	}
+	if parked != nil {
+		ts := httpx.TimestampOf(*parked)
+		q.ParkedAt = &ts
+	}
+	return &q, nil
+}
+
+// NextFulfillmentRequest peeks the lowest position request that is not parked,
+// without locking it: the worker prices the tax with the provider between this
+// read and the claim, and a provider call never holds a lock.
+func (r *PostgresRepository) NextFulfillmentRequest(ctx context.Context) (*FulfillmentRequest, error) {
+	q, err := scanRequest(r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT `+requestColumns+` FROM order_fulfillment_requests WHERE parked_at IS NULL ORDER BY position LIMIT 1`))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the next fulfilment request: %w", err)
+	}
+	return q, nil
+}
+
+// ClaimFulfillmentRequest takes the named request FOR UPDATE SKIP LOCKED
+// (lock order step 0); false when another worker holds it or it is gone or
+// parked.
+func (r *PostgresRepository) ClaimFulfillmentRequest(ctx context.Context, deliveryID uuid.UUID) (bool, error) {
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT delivery_id FROM order_fulfillment_requests WHERE delivery_id = $1 AND parked_at IS NULL FOR UPDATE SKIP LOCKED`,
+		deliveryID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to claim the fulfilment request: %w", err)
+	}
+	return true, nil
+}
+
+func (r *PostgresRepository) DeleteFulfillmentRequest(ctx context.Context, deliveryID uuid.UUID) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM order_fulfillment_requests WHERE delivery_id = $1`, deliveryID); err != nil {
+		return fmt.Errorf("failed to delete the fulfilment request: %w", err)
+	}
+	return nil
+}
+
+// RecordFulfillmentFailure counts a failed attempt and keeps its error; the
+// attempt that reaches maxAttempts parks the request. It answers whether this
+// call parked it.
+func (r *PostgresRepository) RecordFulfillmentFailure(ctx context.Context, deliveryID uuid.UUID, lastError string, maxAttempts int) (bool, error) {
+	var parked bool
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		UPDATE order_fulfillment_requests
+		SET attempts = attempts + 1, last_error = $2,
+		    parked_at = CASE WHEN attempts + 1 >= $3 THEN clock_timestamp() ELSE parked_at END
+		WHERE delivery_id = $1 AND parked_at IS NULL
+		RETURNING parked_at IS NOT NULL`, deliveryID, lastError, maxAttempts).Scan(&parked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to record the fulfilment failure: %w", err)
+	}
+	return parked, nil
+}
+
+// ListFulfillmentRequests lists requests by position, inside the caller's
+// branch wall (the order's branch).
+func (r *PostgresRepository) ListFulfillmentRequests(ctx context.Context, f RequestFilter) ([]FulfillmentRequest, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT q.delivery_id, q.order_id, q.position, q.attempts, q.last_error, q.parked_at, q.created_at
+		FROM order_fulfillment_requests q JOIN orders o ON o.id = q.order_id
+		WHERE ($1::uuid IS NULL OR o.branch_id = $1)
+		  AND ($2::bool IS NULL OR (q.parked_at IS NOT NULL) = $2)
+		  AND ($3::uuid IS NULL OR q.order_id = $3)
+		  AND ($4::bigint IS NULL OR q.position > $4)
+		ORDER BY q.position LIMIT $5`,
+		middleware.BranchIDForQuery(ctx), f.Parked, f.OrderID, f.AfterPosition, f.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list the fulfilment requests: %w", err)
+	}
+	defer rows.Close()
+	out := []FulfillmentRequest{}
+	for rows.Next() {
+		q, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *q)
+	}
+	return out, rows.Err()
+}
+
+// RetryFulfillmentRequest clears parked_at and attempts; found is false when
+// there is no such request in the caller's branch wall.
+func (r *PostgresRepository) RetryFulfillmentRequest(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error) {
+	var orderID uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		UPDATE order_fulfillment_requests q SET parked_at = NULL, attempts = 0
+		FROM orders o
+		WHERE q.delivery_id = $1 AND o.id = q.order_id AND ($2::uuid IS NULL OR o.branch_id = $2)
+		RETURNING q.order_id`, deliveryID, middleware.BranchIDForQuery(ctx)).Scan(&orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("failed to retry the fulfilment request: %w", err)
+	}
+	return orderID, true, nil
+}
+
+// DeliveryRequestOrder answers the order of a queued request.
+func (r *PostgresRepository) DeliveryRequestOrder(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error) {
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT order_id FROM order_fulfillment_requests WHERE delivery_id = $1`, deliveryID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("failed to read the fulfilment request: %w", err)
+	}
+	return id, true, nil
 }
