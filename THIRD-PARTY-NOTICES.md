@@ -84,6 +84,7 @@ Apache-2.0 dependencies in this project include (Go) `MicahParks/keyfunc`,
 | github.com/richardlehane/mscfb | Apache-2.0 |
 | github.com/richardlehane/msoleps | Apache-2.0 |
 | github.com/rivo/uniseg | MIT |
+| github.com/santhosh-tekuri/jsonschema/v6 | BSD-3-Clause |
 | github.com/tiendc/go-deepcopy | MIT |
 | github.com/xuri/efp | BSD-3-Clause |
 | github.com/xuri/nfp | BSD-3-Clause |
