@@ -1,0 +1,448 @@
+[
+  {
+    "name": "ap.aging",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/aging"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "current": 10000,
+          "past_30": 29029,
+          "past_60": 31031,
+          "past_90": 152152,
+          "total": 222212,
+          "vendor_id": "<id-1>",
+          "vendor_name": "BC Roofing Wholesale"
+        }
+      ]
+    }
+  },
+  {
+    "name": "reports.ar_aging",
+    "mask_customer_identity": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/ar-aging"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "as_of_date": "<day+0>",
+        "buckets": [
+          {
+            "current": 22377.6,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 22377.6
+          },
+          {
+            "current": 2900.29,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 3100.31,
+            "days_61_90": 6100.61,
+            "over_90": 9100.91,
+            "total": 21202.12
+          },
+          {
+            "current": 12109.05,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 12109.05
+          },
+          {
+            "current": 7931.32,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 3788.46,
+            "total": 11719.78
+          },
+          {
+            "current": 4717.65,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 6718.49,
+            "total": 11436.14
+          },
+          {
+            "current": 8799.59,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 8799.59
+          },
+          {
+            "current": 0,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 6272.95,
+            "over_90": 0,
+            "total": 6272.95
+          },
+          {
+            "current": 0,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 5894.12,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 5894.12
+          },
+          {
+            "current": 30.8,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 30.8
+          }
+        ],
+        "grand_total": 99842.15,
+        "total_31_60": 8994.43,
+        "total_61_90": 12373.56,
+        "total_current": 58866.3,
+        "total_over_90": 19607.86
+      }
+    }
+  },
+  {
+    "name": "reports.sales_summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/sales-summary"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "end_date": "<day+0>",
+        "invoice_count": 11,
+        "outstanding_ar": 23324.14,
+        "start_date": "<day-30>",
+        "total_collected": 308657,
+        "total_invoiced": 76390.52
+      }
+    }
+  },
+  {
+    "name": "dashboard.summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/dashboard/summary"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active_orders": 21,
+        "outstanding_ar": 9984215,
+        "outstanding_ar_count": 15,
+        "pending_dispatch": 28,
+        "today_revenue": 30623276,
+        "today_revenue_change": 303070.7355707356
+      }
+    }
+  },
+  {
+    "name": "dashboard.revenue_trend",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/dashboard/revenue-trend"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "date": "<day-6>",
+          "revenue": 60606
+        },
+        {
+          "date": "<day-2>",
+          "revenue": 20202
+        },
+        {
+          "date": "<day-1>",
+          "revenue": 10101
+        },
+        {
+          "date": "<day+0>",
+          "revenue": 30623276
+        }
+      ]
+    }
+  },
+  {
+    "name": "dashboard.top_customers",
+    "mask_customer_identity": true,
+    "mask_order_count": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/dashboard/top-customers"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "customer_id": "<customer>",
+          "customer_name": "<customer>",
+          "order_count": "<orders>",
+          "total_revenue": 2483210
+        },
+        {
+          "customer_id": "<customer>",
+          "customer_name": "<customer>",
+          "order_count": "<orders>",
+          "total_revenue": 1443590
+        },
+        {
+          "customer_id": "<customer>",
+          "customer_name": "<customer>",
+          "order_count": "<orders>",
+          "total_revenue": 1086982
+        },
+        {
+          "customer_id": "<customer>",
+          "customer_name": "<customer>",
+          "order_count": "<orders>",
+          "total_revenue": 906156
+        },
+        {
+          "customer_id": "<customer>",
+          "customer_name": "<customer>",
+          "order_count": "<orders>",
+          "total_revenue": 476177
+        }
+      ]
+    }
+  },
+  {
+    "name": "dashboard.order_activity",
+    "mask_customer_identity": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/dashboard/order-activity"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "recent_orders": [
+          {
+            "created_at": "<ts+0d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-2>",
+            "status": "CONFIRMED",
+            "total_amount": 6600
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-3>",
+            "status": "CANCELLED",
+            "total_amount": 550
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-4>",
+            "status": "FULFILLED",
+            "total_amount": 2750
+          },
+          {
+            "created_at": "<ts-1d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-5>",
+            "status": "DRAFT",
+            "total_amount": 1022502
+          },
+          {
+            "created_at": "<ts-2d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-6>",
+            "status": "FULFILLED",
+            "total_amount": 1820808
+          },
+          {
+            "created_at": "<ts-2d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-7>",
+            "status": "CONFIRMED",
+            "total_amount": 341800
+          },
+          {
+            "created_at": "<ts-2d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-8>",
+            "status": "CONFIRMED",
+            "total_amount": 348500
+          },
+          {
+            "created_at": "<ts-2d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-9>",
+            "status": "CONFIRMED",
+            "total_amount": 169450
+          },
+          {
+            "created_at": "<ts-2d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-10>",
+            "status": "CONFIRMED",
+            "total_amount": 186600
+          },
+          {
+            "created_at": "<ts-2d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-11>",
+            "status": "CONFIRMED",
+            "total_amount": 219400
+          }
+        ],
+        "status_breakdown": {
+          "CANCELLED": 3,
+          "CONFIRMED": 15,
+          "DRAFT": 4,
+          "FULFILLED": 9
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.trial_balance",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/trial-balance"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "account_code": "1010",
+          "account_id": "<id-12>",
+          "account_name": "Cash",
+          "account_type": "ASSET",
+          "credit": 0,
+          "debit": 35000
+        },
+        {
+          "account_code": "1020",
+          "account_id": "<id-13>",
+          "account_name": "Accounts Receivable",
+          "account_type": "ASSET",
+          "credit": 0,
+          "debit": 3080
+        },
+        {
+          "account_code": "2200",
+          "account_id": "<id-14>",
+          "account_name": "Customer Deposits",
+          "account_type": "LIABILITY",
+          "credit": 25000,
+          "debit": 0
+        },
+        {
+          "account_code": "4010",
+          "account_id": "<id-15>",
+          "account_name": "Sales Revenue",
+          "account_type": "REVENUE",
+          "credit": 13080,
+          "debit": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "gl.profit_and_loss",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/profit-and-loss?start=<day-30>&end=<day+0>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "cogs": [],
+        "end_date": "<day+0>",
+        "expenses": [],
+        "gross_profit": 13080,
+        "net_income": 13080,
+        "revenue": [
+          {
+            "account_code": "4010",
+            "account_id": "<id-15>",
+            "account_name": "Sales Revenue",
+            "amount": 13080
+          }
+        ],
+        "start_date": "<day-30>",
+        "total_cogs": 0,
+        "total_expenses": 0,
+        "total_revenue": 13080
+      }
+    }
+  },
+  {
+    "name": "gl.balance_sheet",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/balance-sheet"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "as_of_date": "<day+0>",
+        "assets": [
+          {
+            "account_code": "1010",
+            "account_id": "<id-12>",
+            "account_name": "Cash",
+            "amount": 35000
+          },
+          {
+            "account_code": "1020",
+            "account_id": "<id-13>",
+            "account_name": "Accounts Receivable",
+            "amount": 3080
+          }
+        ],
+        "equity": [],
+        "liabilities": [
+          {
+            "account_code": "2200",
+            "account_id": "<id-14>",
+            "account_name": "Customer Deposits",
+            "amount": 25000
+          }
+        ],
+        "retained_earnings": 13080,
+        "total_assets": 38080,
+        "total_equity": 13080,
+        "total_liabilities": 25000
+      }
+    }
+  }
+]

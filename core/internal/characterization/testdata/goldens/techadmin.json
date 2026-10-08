@@ -1,0 +1,45 @@
+[
+  {
+    "name": "techadmin.keys.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/keys"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": null
+    }
+  },
+  {
+    "name": "techadmin.key.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/keys",
+      "body": {
+        "name": "golden-key",
+        "scopes": [
+          "quotes:read"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "api_key": "<api-key>",
+        "key": {
+          "created_at": "<ts+0d>",
+          "id": "<id-1>",
+          "last_used_at": null,
+          "name": "golden-key",
+          "prefix": "<api-key>",
+          "revoked_at": null,
+          "scopes": [
+            "quotes:read"
+          ]
+        }
+      }
+    }
+  }
+]

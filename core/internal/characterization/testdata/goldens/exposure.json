@@ -1,0 +1,164 @@
+[
+  {
+    "name": "exposure.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-1>/exposure"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "events": [],
+        "exposure_dollars": 0,
+        "exposure_state": "OK",
+        "indexes": [],
+        "last_checked_at": "<ts+0d>",
+        "quote_id": "<id-1>",
+        "required_action": ""
+      }
+    }
+  },
+  {
+    "name": "exposure.request_ack",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-1>/exposure/request-ack"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "event_id": "<id-2>",
+        "salesperson_notified": true
+      }
+    }
+  },
+  {
+    "name": "exposure.get_after_request_ack",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-1>/exposure"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "events": [
+          {
+            "actor_role": "owner",
+            "actor_user_id": "dev",
+            "created_at": "<ts+0d>",
+            "event_type": "ACK_REQUESTED",
+            "id": "<id-2>",
+            "idempotency_key": "<idem-key>",
+            "quote_id": "<id-1>"
+          }
+        ],
+        "exposure_dollars": 0,
+        "exposure_state": "OK",
+        "indexes": [],
+        "last_checked_at": "<ts+0d>",
+        "quote_id": "<id-1>",
+        "required_action": ""
+      }
+    }
+  },
+  {
+    "name": "exposure.acknowledge.already_cleared",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-1>/exposure/acknowledge",
+      "body": {
+        "method": "EMAIL",
+        "notes": "customer confirmed over email"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "CONFLICT",
+          "message": "Conflict"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "exposure.override.already_cleared",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-1>/exposure/override",
+      "body": {
+        "notes": "golden characterisation override"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "CONFLICT",
+          "message": "Conflict"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "exposure.escalate_now",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-1>/exposure/escalate-now"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "exposure.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/exposure?owner=all"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "total": 0
+      }
+    }
+  },
+  {
+    "name": "exposure.list.summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/exposure?owner=all&summary=true"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "count": 0,
+        "total_dollars": 0
+      }
+    }
+  }
+]
