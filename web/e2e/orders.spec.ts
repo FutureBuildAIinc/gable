@@ -120,7 +120,7 @@ test.describe('Order flow on the new contract', () => {
     expect(Number.isInteger(after.subtotal_cents)).toBe(true);
   });
 
-  test('the list is the cursor envelope, newest first, and the filter is a server-side one', async ({ page, request }) => {
+  test('the list is the cursor envelope, newest first, and the filter is a server-side one', async ({ page }) => {
     await signIn(page, 'Playwright Orders List');
     await page.goto('/orders');
     const list = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/orders');
