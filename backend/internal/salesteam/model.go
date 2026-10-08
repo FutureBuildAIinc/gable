@@ -14,7 +14,7 @@ type SalesPerson struct {
 	Name      string    `json:"name"`
 	Email     string    `json:"email"`
 	Phone     string    `json:"phone"`
-	Role      string    `json:"title"`
+	Role      string    `json:"role"`
 	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
