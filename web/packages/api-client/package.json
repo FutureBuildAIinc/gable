@@ -1,0 +1,24 @@
+{
+  "name": "@gable/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed client for the Gable API, generated from core/api/openapi.yaml. The desk wires it in R1-8; until then it ships types and a thin fetch client only.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "generate": "openapi-typescript ../../../core/api/openapi.yaml -o src/schema.d.ts",
+    "drift": "openapi-typescript ../../../core/api/openapi.yaml --check -o src/schema.d.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

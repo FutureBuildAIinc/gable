@@ -1,0 +1,268 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The invoice module, transcribed from internal/invoice/handler.go and
+# model.go as they behave today: cents money, an UPPERCASE status
+# vocabulary, due_date and paid_at always present and null while unset,
+# and credit memo lists as a bare nullable array.
+paths:
+  /api/v1/invoices:
+    get:
+      operationId: invoiceList
+      tags: [invoice]
+      summary: List invoices
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of invoices.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/invoices/{id}:
+    get:
+      operationId: invoiceGet
+      tags: [invoice]
+      summary: Get one invoice with lines
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The invoice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/invoices/{id}/credit-memo:
+    post:
+      operationId: invoiceCreateCreditMemo
+      tags: [invoice]
+      summary: Create and apply a credit memo against an invoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditMemoCreateRequest"
+      responses:
+        "201":
+          description: The created credit memo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditMemo"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/credit-memos/{customerId}:
+    get:
+      operationId: invoiceListCreditMemos
+      tags: [invoice]
+      summary: List a customer's credit memos
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The credit memos, a bare array that is null when the customer has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditMemoList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    InvoiceStatus:
+      type: string
+      enum: [UNPAID, PARTIAL, PAID, VOID, OVERDUE]
+    PaymentTerms:
+      type: string
+      enum: [COD, DUE_ON_RECEIPT, NET30, NET60, NET90]
+    Invoice:
+      type: object
+      required: [id, branch_id, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount, payment_terms, due_date, paid_at, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/InvoiceStatus"
+        subtotal:
+          type: integer
+          format: int64
+          description: Cents.
+        tax_rate:
+          type: number
+          description: "A fraction such as 0.0825 for 8.25 percent."
+        tax_amount:
+          type: integer
+          format: int64
+          description: Cents.
+        total_amount:
+          type: integer
+          format: int64
+          description: Cents, subtotal plus tax.
+        payment_terms:
+          $ref: "#/components/schemas/PaymentTerms"
+        due_date:
+          type: [string, "null"]
+          format: date-time
+          description: Null while the terms set no date.
+        paid_at:
+          type: [string, "null"]
+          format: date-time
+          description: Null until a payment completes the invoice.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceLine"
+    InvoiceLine:
+      type: object
+      required: [id, invoice_id, product_id, quantity, price_each, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        product_sku:
+          type: string
+        product_name:
+          type: string
+        quantity:
+          type: number
+        price_each:
+          type: integer
+          format: int64
+          description: Cents.
+        created_at:
+          type: string
+          format: date-time
+    InvoicePage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invoice"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    CreditMemo:
+      type: object
+      required: [id, customer_id, amount, reason, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPLIED, VOID]
+        created_at:
+          type: string
+          format: date-time
+        applied_at:
+          type: string
+          format: date-time
+    CreditMemoCreateRequest:
+      type: object
+      required: [amount_cents, reason]
+      properties:
+        amount_cents:
+          type: integer
+          format: int64
+          description: Cents; must be positive.
+        reason:
+          type: string
+    CreditMemoList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/CreditMemo"

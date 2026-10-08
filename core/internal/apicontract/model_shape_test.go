@@ -1,0 +1,198 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package apicontract
+
+import (
+	"os"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/integrations"
+	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/routecensus"
+	"gopkg.in/yaml.v3"
+)
+
+// modelBoundSchemas ties every fragment schema the server ENCODES to the Go
+// struct it is encoded from: response bodies and echoed request bodies. The
+// table deliberately leaves request-only DTOs out: their json tags say what
+// the server reads, not what it writes, and required on a request schema is
+// a client obligation the Go tags cannot express.
+var modelBoundSchemas = []struct {
+	Schema string
+	Model  any
+}{
+	// quote
+	{"Quote", quote.Quote{}},
+	{"QuoteLine", quote.QuoteLine{}},
+	{"QuoteAnalytics", quote.QuoteAnalytics{}},
+	{"QuoteAnalyticsTrend", quote.QuoteAnalyticsTrend{}},
+	// customer
+	{"Customer", customer.Customer{}},
+	{"PriceLevel", customer.PriceLevel{}},
+	{"EscalationPolicy", customer.EscalationPolicy{}},
+	{"Contact", customer.Contact{}},
+	// order
+	{"Order", order.Order{}},
+	{"OrderLine", order.OrderLine{}},
+	// invoice
+	{"Invoice", invoice.Invoice{}},
+	{"InvoiceLine", invoice.InvoiceLine{}},
+	{"CreditMemo", invoice.CreditMemo{}},
+	// payment
+	{"Payment", payment.Payment{}},
+	{"Refund", payment.Refund{}},
+	{"PaymentIntentResponse", payment.PaymentIntentResponse{}},
+	// product
+	{"Product", product.Product{}},
+	{"Geometry", product.Geometry{}},
+	{"ReorderAlert", product.ReorderAlert{}},
+	{"ProductLeadTimeUpdate", product.LeadTimeRequest{}},
+	// location
+	{"Location", location.Location{}},
+	{"BranchSummary", location.BranchSummary{}},
+	{"UserLocation", location.UserLocation{}},
+	// integration (AI_LM)
+	{"IntegrationVehicle", integrations.VehicleResponse{}},
+	{"IntegrationDriver", integrations.DriverResponse{}},
+	{"IntegrationLocation", integrations.LocationResponse{}},
+	{"IntegrationProduct", integrations.ProductResponse{}},
+	{"IntegrationOrderLine", integrations.IntegrationOrderLine{}},
+	{"IntegrationOrder", integrations.IntegrationOrderResponse{}},
+	{"IntegrationDeliveryRouteResponse", integrations.DeliveryRouteResponse{}},
+	{"IntegrationValidateStaffResponse", integrations.ValidateStaffResponse{}},
+}
+
+// TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md
+// states, so it is enforced and not remembered: encoding/json writes a field
+// without omitempty on every response (a nil pointer as null), and omits a
+// field with omitempty whenever it is empty. So, per mapped schema:
+//
+//   - every json tag without omitempty must be listed in required,
+//   - every json tag with omitempty must not be,
+//   - every pointer (or in-band nullable SQL type) without omitempty, which
+//     is serialized as null today, must carry the null leg in its type.
+//
+// A pointer WITH omitempty is never serialized as null (it is absent), and
+// the fragments keep some of those nullable where a published seam has
+// always sent optional-or-null shapes, so no rule pins their null leg here.
+func TestSchemasMatchModelJsonTags(t *testing.T) {
+	root, err := routecensus.FindModuleRoot(".")
+	if err != nil {
+		t.Fatalf("find module root: %v", err)
+	}
+	raw, err := os.ReadFile(root + "/api/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read contract: %v", err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Required   []string `yaml:"required"`
+				Properties map[string]struct {
+					Type any `yaml:"type"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse contract: %v", err)
+	}
+
+	var problems []string
+	for _, bound := range modelBoundSchemas {
+		schema, ok := doc.Components.Schemas[bound.Schema]
+		if !ok {
+			problems = append(problems, bound.Schema+": no such schema in the assembled document")
+			continue
+		}
+		required := map[string]bool{}
+		for _, name := range schema.Required {
+			required[name] = true
+		}
+		model := reflect.TypeOf(bound.Model)
+		for i := 0; i < model.NumField(); i++ {
+			f := model.Field(i)
+			name, opts := parseJSONTag(f)
+			if name == "" {
+				continue
+			}
+			where := bound.Schema + "." + name
+			prop, ok := schema.Properties[name]
+			if !ok {
+				problems = append(problems, where+": the model serializes this field but the schema has no property for it")
+				continue
+			}
+			omitempty := opts["omitempty"]
+			if !omitempty && !required[name] {
+				problems = append(problems, where+": serialized on every response (no omitempty) but missing from required")
+			}
+			if omitempty && required[name] {
+				problems = append(problems, where+": omitted when empty (omitempty) but listed in required")
+			}
+			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type) {
+				problems = append(problems, where+": a nil pointer serializes as null today but the type carries no null leg")
+			}
+		}
+	}
+
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		t.Fatalf("model bound schemas drifted from their Go models with %d problem(s):\n\t%s",
+			len(problems), strings.Join(problems, "\n\t"))
+	}
+}
+
+// parseJSONTag returns the wire name of the field ("" when the field is not
+// serialized) and its options.
+func parseJSONTag(f reflect.StructField) (string, map[string]bool) {
+	tag := f.Tag.Get("json")
+	if tag == "" {
+		return f.Name, map[string]bool{}
+	}
+	parts := strings.Split(tag, ",")
+	name := parts[0]
+	if name == "-" {
+		return "", nil
+	}
+	opts := map[string]bool{}
+	for _, opt := range parts[1:] {
+		opts[opt] = true
+	}
+	return name, opts
+}
+
+// isNullableGoType reports whether a nil value of the type is serialized as
+// null: pointers, and the in-band nullable database/sql and pgtype types
+// should one appear in a mapped model.
+func isNullableGoType(t reflect.Type) bool {
+	if t.Kind() == reflect.Pointer {
+		return true
+	}
+	s := t.String()
+	return strings.HasPrefix(s, "sql.Null") || strings.HasPrefix(s, "pgtype.")
+}
+
+// carriesNullLeg reports whether an OpenAPI type, a string or a list of
+// types, includes "null".
+func carriesNullLeg(typ any) bool {
+	list, ok := typ.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range list {
+		if s, ok := item.(string); ok && s == "null" {
+			return true
+		}
+	}
+	return false
+}

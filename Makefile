@@ -3,6 +3,7 @@
 
 .PHONY: help up down logs ps pg-shell migrate seed reset-db \
         build vet test test-short cover \
+        contract contract-go contract-ts \
         fe-install fe-typecheck fe-lint fe-test fe-cover fe-build \
         license-check vuln \
         preflight preflight-backend preflight-frontend
@@ -28,6 +29,7 @@ help:
 	@echo ""
 	@echo "  Individual gates"
 	@echo "    build vet test test-short cover"
+	@echo "    contract                     API contract drift gates (R1-7)"
 	@echo "    fe-install fe-typecheck fe-lint fe-test fe-cover fe-build"
 	@echo ""
 	@echo "  Advisory (not a merge gate)"
@@ -109,6 +111,22 @@ cover:
 	cd core && go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	cd core && go tool cover -func=coverage.out | tail -n 1
 	@echo "HTML report: cd core && go tool cover -html=coverage.out"
+
+# ---------------------------------------------------------------------------
+# API contract gates (R1-7; see docs/refactor/CONTRACT.md)
+# ---------------------------------------------------------------------------
+# `make contract` is the one command every module coder runs after editing a
+# fragment: the assembly and pending drift checks, then the generated
+# TypeScript's drift and type checks. CI runs the same gates through the two
+# halves because its backend and frontend jobs carry different toolchains:
+# contract-go in the backend job, contract-ts in the frontend job.
+contract: contract-go contract-ts
+
+contract-go:
+	cd core && go run ./api/tools/merge -check && go run ./cmd/pending
+
+contract-ts:
+	cd web/packages/api-client && npm ci && npm run drift && npm run typecheck
 
 # ---------------------------------------------------------------------------
 # Frontend gates (the `frontend` job in ci.yml)
