@@ -6,12 +6,42 @@ package pricing
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
+
+// Test helpers for the exact fields: a plain decimal float is the scale 4
+// value these fixtures mean, parsed the way the wire would parse it.
+func qtyOf(f float64) httpx.Quantity {
+	q, err := httpx.ParseQuantity(strconv.FormatFloat(f, 'f', -1, 64))
+	if err != nil {
+		panic(err)
+	}
+	return q
+}
+
+func pctQtyPtr(f float64) *httpx.Quantity {
+	q := qtyOf(f)
+	return &q
+}
+
+func priceOf(f float64) httpx.Price {
+	p, err := httpx.ParsePrice(strconv.FormatFloat(f, 'f', -1, 64))
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
+func pricePtrOf(f float64) *httpx.Price {
+	p := priceOf(f)
+	return &p
+}
 
 type MockRepository struct {
 	contracts map[string]CustomerContract
@@ -66,7 +96,7 @@ func (m *MockRepository) CreateContract(ctx context.Context, c *CustomerContract
 	return nil
 }
 
-func (m *MockRepository) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity float64) ([]PricingRule, error) {
+func (m *MockRepository) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity httpx.Quantity) ([]PricingRule, error) {
 	var out []PricingRule
 	for _, r := range m.rules {
 		if !r.IsActive {
@@ -99,9 +129,9 @@ func (m *MockRepository) GetMatchingRules(ctx context.Context, productID uuid.UU
 	return out, nil
 }
 
-func (m *MockRepository) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]float64, error) {
-	seen := map[float64]bool{}
-	out := make([]float64, 0)
+func (m *MockRepository) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]httpx.Quantity, error) {
+	seen := map[httpx.Quantity]bool{}
+	out := make([]httpx.Quantity, 0)
 	for _, r := range m.rules {
 		if !r.IsActive || r.RuleType != RuleTypeQuantityBreak || r.MinQuantity <= 1 {
 			continue
@@ -121,7 +151,7 @@ func (m *MockRepository) ListBreakQuantities(ctx context.Context, productID uuid
 		seen[r.MinQuantity] = true
 		out = append(out, r.MinQuantity)
 	}
-	sort.Float64s(out)
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out, nil
 }
 
@@ -131,6 +161,14 @@ func (m *MockRepository) CreateRule(ctx context.Context, r *PricingRule) error {
 
 func (m *MockRepository) ListRules(ctx context.Context) ([]PricingRule, error) {
 	return nil, nil
+}
+
+func (m *MockRepository) ListRulesPage(ctx context.Context, after *RuleCursor, limit int) ([]PricingRule, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) CountRules(ctx context.Context) (int64, error) {
+	return 0, nil
 }
 
 func TestCalculatePrice(t *testing.T) {
@@ -180,7 +218,7 @@ func TestCalculatePrice(t *testing.T) {
 
 	// Case 3: Contract Price
 	t.Run("Contract Price", func(t *testing.T) {
-		contractPrice := 5.00
+		contractPrice := priceOf(5.00)
 		repo.contracts[custID.String()+":"+prodID.String()] = CustomerContract{
 			CustomerID:    custID,
 			ProductID:     prodID,
@@ -193,8 +231,8 @@ func TestCalculatePrice(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != contractPrice {
-			t.Errorf("expected %.2f, got %.2f", contractPrice, res.FinalPrice)
+		if res.FinalPrice != float64(contractPrice)/10_000 {
+			t.Errorf("expected %.2f, got %.2f", float64(contractPrice)/10_000, res.FinalPrice)
 		}
 		if res.Source != "CONTRACT" {
 			t.Errorf("expected CONTRACT source, got %s", res.Source)

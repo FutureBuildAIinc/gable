@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,10 +17,12 @@ import (
 type Repository interface {
 	GetContract(ctx context.Context, customerID, productID uuid.UUID) (*CustomerContract, error)
 	CreateContract(ctx context.Context, c *CustomerContract) error
-	GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity float64) ([]PricingRule, error)
-	ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]float64, error)
+	GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity httpx.Quantity) ([]PricingRule, error)
+	ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]httpx.Quantity, error)
 	CreateRule(ctx context.Context, r *PricingRule) error
 	ListRules(ctx context.Context) ([]PricingRule, error)
+	ListRulesPage(ctx context.Context, after *RuleCursor, limit int) ([]PricingRule, error)
+	CountRules(ctx context.Context) (int64, error)
 }
 
 type PostgresRepository struct {
@@ -30,15 +33,28 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// scanPrice reads a NUMERIC(12,4) column as its exact scale 4 value; the
+// scan never goes through float64 (ADR 0001 section 7).
+func scanPrice(dest *httpx.Price, s string) error {
+	p, err := httpx.ParsePrice(s)
+	if err != nil {
+		return err
+	}
+	*dest = p
+	return nil
+}
+
 func (r *PostgresRepository) GetContract(ctx context.Context, customerID, productID uuid.UUID) (*CustomerContract, error) {
 	query := `
-		SELECT id, customer_id, product_id, contract_price, created_at, updated_at
+		SELECT id, customer_id, product_id, contract_price::text, created_at, updated_at
 		FROM customer_contracts
 		WHERE customer_id = $1 AND product_id = $2`
 
 	var c CustomerContract
+	var price string
+	var created, updated time.Time
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, customerID, productID).Scan(
-		&c.ID, &c.CustomerID, &c.ProductID, &c.ContractPrice, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.CustomerID, &c.ProductID, &price, &created, &updated,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -46,6 +62,11 @@ func (r *PostgresRepository) GetContract(ctx context.Context, customerID, produc
 		}
 		return nil, fmt.Errorf("failed to get contract: %w", err)
 	}
+	if err := scanPrice(&c.ContractPrice, price); err != nil {
+		return nil, fmt.Errorf("failed to read contract price: %w", err)
+	}
+	c.CreatedAt = httpx.TimestampOf(created)
+	c.UpdatedAt = httpx.TimestampOf(updated)
 	return &c, nil
 }
 
@@ -54,17 +75,17 @@ func (r *PostgresRepository) CreateContract(ctx context.Context, c *CustomerCont
 		c.ID = uuid.New()
 	}
 	now := time.Now()
-	c.CreatedAt = now
-	c.UpdatedAt = now
+	c.CreatedAt = httpx.TimestampOf(now)
+	c.UpdatedAt = httpx.TimestampOf(now)
 
 	query := `
 		INSERT INTO customer_contracts (id, customer_id, product_id, contract_price, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4::numeric, $5, $6)
 		ON CONFLICT (customer_id, product_id) DO UPDATE
 		SET contract_price = EXCLUDED.contract_price, updated_at = EXCLUDED.updated_at`
 
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		c.ID, c.CustomerID, c.ProductID, c.ContractPrice, c.CreatedAt, c.UpdatedAt,
+		c.ID, c.CustomerID, c.ProductID, c.ContractPrice.DecimalString(), c.CreatedAt.Time, c.UpdatedAt.Time,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create contract: %w", err)
@@ -125,7 +146,64 @@ const categoryScopePredicate = `(
 			)
 		)`
 
-func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity float64) ([]PricingRule, error) {
+// ruleColumns reads every column the PricingRule wire type carries, with the
+// scaled columns read as text so the scan is exact.
+const ruleColumns = `id, name, rule_type, product_id, customer_id, job_id, COALESCE(category, ''),
+			fixed_price::text, discount_pct::text, markup_pct::text,
+			min_quantity::text, max_quantity::text, margin_floor_pct::text,
+			starts_at, expires_at, is_active, priority, revision, created_at, updated_at`
+
+func scanRule(scanner interface{ Scan(dest ...any) error }) (PricingRule, error) {
+	var rule PricingRule
+	var fixed, discount, markup, minQty, maxQty, floor *string
+	var starts, expires *time.Time
+	var created, updated time.Time
+	if err := scanner.Scan(
+		&rule.ID, &rule.Name, &rule.RuleType, &rule.ProductID, &rule.CustomerID, &rule.JobID, &rule.Category,
+		&fixed, &discount, &markup, &minQty, &maxQty, &floor,
+		&starts, &expires, &rule.IsActive, &rule.Priority, &rule.Revision, &created, &updated,
+	); err != nil {
+		return PricingRule{}, err
+	}
+	var err error
+	if fixed != nil {
+		rule.FixedPrice = new(httpx.Price)
+		err = scanPrice(rule.FixedPrice, *fixed)
+	}
+	if err == nil && discount != nil {
+		rule.DiscountPct = new(httpx.Quantity)
+		*rule.DiscountPct, err = httpx.ParseQuantity(*discount)
+	}
+	if err == nil && markup != nil {
+		rule.MarkupPct = new(httpx.Quantity)
+		*rule.MarkupPct, err = httpx.ParseQuantity(*markup)
+	}
+	if err == nil {
+		var q httpx.Quantity
+		if minQty != nil {
+			q, err = httpx.ParseQuantity(*minQty)
+		}
+		rule.MinQuantity = q
+	}
+	if err == nil && maxQty != nil {
+		rule.MaxQuantity = new(httpx.Quantity)
+		*rule.MaxQuantity, err = httpx.ParseQuantity(*maxQty)
+	}
+	if err == nil && floor != nil {
+		rule.MarginFloorPct = new(httpx.Quantity)
+		*rule.MarginFloorPct, err = httpx.ParseQuantity(*floor)
+	}
+	if err != nil {
+		return PricingRule{}, fmt.Errorf("failed to read pricing rule columns: %w", err)
+	}
+	rule.StartsAt = httpx.PtrTimestamp(starts)
+	rule.ExpiresAt = httpx.PtrTimestamp(expires)
+	rule.CreatedAt = httpx.TimestampOf(created)
+	rule.UpdatedAt = httpx.TimestampOf(updated)
+	return rule, nil
+}
+
+func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID, jobID *uuid.UUID, quantity httpx.Quantity) ([]PricingRule, error) {
 	// COALESCE on category: the column is nullable but PricingRule.Category is
 	// a plain string, and pgx refuses to scan NULL into one. Without this, a
 	// single rule row with a NULL category makes the whole query fail — and
@@ -134,23 +212,21 @@ func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uui
 	// system for every product. NULL and '' both mean "not category-scoped",
 	// which is what the model already treats "" as.
 	query := `
-		SELECT id, name, rule_type, product_id, customer_id, job_id, COALESCE(category, ''),
-			fixed_price, discount_pct, markup_pct, min_quantity, max_quantity,
-			margin_floor_pct, starts_at, expires_at, is_active, priority, created_at, updated_at
+		SELECT ` + ruleColumns + `
 		FROM pricing_rules
 		WHERE is_active = true
 			AND (product_id IS NULL OR product_id = $1)
 			AND (customer_id IS NULL OR customer_id = $2)
 			AND (job_id IS NULL OR job_id = $3)
-			AND min_quantity <= $4
-			AND (max_quantity IS NULL OR max_quantity >= $4)
+			AND min_quantity <= $4::numeric
+			AND (max_quantity IS NULL OR max_quantity >= $4::numeric)
 			AND (starts_at IS NULL OR starts_at <= NOW())
 			AND (expires_at IS NULL OR expires_at > NOW())
 			AND ` + categoryScopePredicate + `
 		ORDER BY priority DESC, rule_type ASC
 	`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID, customerID, jobID, quantity)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID, customerID, jobID, quantity.DecimalString())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get matching rules: %w", err)
 	}
@@ -158,12 +234,8 @@ func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uui
 
 	var rules []PricingRule
 	for rows.Next() {
-		var rule PricingRule
-		if err := rows.Scan(
-			&rule.ID, &rule.Name, &rule.RuleType, &rule.ProductID, &rule.CustomerID, &rule.JobID, &rule.Category,
-			&rule.FixedPrice, &rule.DiscountPct, &rule.MarkupPct, &rule.MinQuantity, &rule.MaxQuantity,
-			&rule.MarginFloorPct, &rule.StartsAt, &rule.ExpiresAt, &rule.IsActive, &rule.Priority, &rule.CreatedAt, &rule.UpdatedAt,
-		); err != nil {
+		rule, err := scanRule(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan pricing rule: %w", err)
 		}
 		rules = append(rules, rule)
@@ -189,9 +261,9 @@ func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uui
 // NOTHING` leaves behind on a table with no unique constraint (see the note in
 // cmd/seed/main.go's pricing-rules block); a contractor should see one rung per
 // threshold, not fifty.
-func (r *PostgresRepository) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]float64, error) {
+func (r *PostgresRepository) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]httpx.Quantity, error) {
 	query := `
-		SELECT DISTINCT min_quantity::float8
+		SELECT DISTINCT min_quantity::text
 		FROM pricing_rules
 		WHERE is_active = true
 			AND rule_type = 'QUANTITY_BREAK'
@@ -210,11 +282,15 @@ func (r *PostgresRepository) ListBreakQuantities(ctx context.Context, productID 
 	}
 	defer rows.Close()
 
-	quantities := make([]float64, 0)
+	quantities := make([]httpx.Quantity, 0)
 	for rows.Next() {
-		var q float64
-		if err := rows.Scan(&q); err != nil {
+		var s string
+		if err := rows.Scan(&s); err != nil {
 			return nil, fmt.Errorf("failed to scan break quantity: %w", err)
+		}
+		q, err := httpx.ParseQuantity(s)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read break quantity: %w", err)
 		}
 		quantities = append(quantities, q)
 	}
@@ -229,20 +305,22 @@ func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) 
 		rule.ID = uuid.New()
 	}
 	now := time.Now()
-	rule.CreatedAt = now
-	rule.UpdatedAt = now
+	rule.CreatedAt = httpx.TimestampOf(now)
+	rule.UpdatedAt = httpx.TimestampOf(now)
 
 	query := `
 		INSERT INTO pricing_rules (id, name, rule_type, product_id, customer_id, job_id, category,
 			fixed_price, discount_pct, markup_pct, min_quantity, max_quantity,
-			margin_floor_pct, starts_at, expires_at, is_active, priority, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			margin_floor_pct, starts_at, expires_at, is_active, priority, revision, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10::numeric,
+			$11::numeric, $12::numeric, $13::numeric, $14, $15, $16, $17, $18, $19, $20)
 	`
 
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		rule.ID, rule.Name, rule.RuleType, rule.ProductID, rule.CustomerID, rule.JobID, rule.Category,
-		rule.FixedPrice, rule.DiscountPct, rule.MarkupPct, rule.MinQuantity, rule.MaxQuantity,
-		rule.MarginFloorPct, rule.StartsAt, rule.ExpiresAt, rule.IsActive, rule.Priority, rule.CreatedAt, rule.UpdatedAt,
+		priceString(rule.FixedPrice), quantityString(rule.DiscountPct), quantityString(rule.MarkupPct),
+		rule.MinQuantity.DecimalString(), quantityString(rule.MaxQuantity), quantityString(rule.MarginFloorPct),
+		timeOf(rule.StartsAt), timeOf(rule.ExpiresAt), rule.IsActive, rule.Priority, rule.Revision, rule.CreatedAt.Time, rule.UpdatedAt.Time,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create pricing rule: %w", err)
@@ -250,14 +328,26 @@ func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) 
 	return nil
 }
 
+func priceString(p *httpx.Price) any {
+	if p == nil {
+		return nil
+	}
+	return p.DecimalString()
+}
+
+func quantityString(q *httpx.Quantity) any {
+	if q == nil {
+		return nil
+	}
+	return q.DecimalString()
+}
+
 func (r *PostgresRepository) ListRules(ctx context.Context) ([]PricingRule, error) {
 	// COALESCE on category for the same reason GetMatchingRules does it: the
 	// column is nullable, PricingRule.Category is not, and a NULL row would
 	// fail the scan and blank the whole rules screen.
 	query := `
-		SELECT id, name, rule_type, product_id, customer_id, job_id, COALESCE(category, ''),
-			fixed_price, discount_pct, markup_pct, min_quantity, max_quantity,
-			margin_floor_pct, starts_at, expires_at, is_active, priority, created_at, updated_at
+		SELECT ` + ruleColumns + `
 		FROM pricing_rules
 		ORDER BY priority DESC, created_at DESC
 	`
@@ -270,15 +360,60 @@ func (r *PostgresRepository) ListRules(ctx context.Context) ([]PricingRule, erro
 
 	var rules []PricingRule
 	for rows.Next() {
-		var rule PricingRule
-		if err := rows.Scan(
-			&rule.ID, &rule.Name, &rule.RuleType, &rule.ProductID, &rule.CustomerID, &rule.JobID, &rule.Category,
-			&rule.FixedPrice, &rule.DiscountPct, &rule.MarkupPct, &rule.MinQuantity, &rule.MaxQuantity,
-			&rule.MarginFloorPct, &rule.StartsAt, &rule.ExpiresAt, &rule.IsActive, &rule.Priority, &rule.CreatedAt, &rule.UpdatedAt,
-		); err != nil {
+		rule, err := scanRule(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan pricing rule: %w", err)
 		}
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+// RuleCursor is the keyset position of a rules list page: created_at, id.
+type RuleCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+// ListRulesPage is the rules list's keyset query: `created_at DESC, id DESC`,
+// the ordering the C3-1 migration built its index on. after is nil for the
+// first page; the caller asks for limit+1 rows and reads whether another page
+// exists.
+func (r *PostgresRepository) ListRulesPage(ctx context.Context, after *RuleCursor, limit int) ([]PricingRule, error) {
+	query := `SELECT ` + ruleColumns + ` FROM pricing_rules`
+	args := []any{}
+	if after != nil {
+		query += ` WHERE (created_at, id) < ($1, $2)`
+		args = append(args, after.CreatedAt, after.ID)
+	}
+	query += ` ORDER BY created_at DESC, id DESC`
+	args = append(args, limit)
+	query += fmt.Sprintf(` LIMIT $%d`, len(args))
+
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pricing rules: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []PricingRule
+	for rows.Next() {
+		rule, err := scanRule(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan pricing rule: %w", err)
+		}
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pricing rule rows error: %w", err)
+	}
+	return rules, nil
+}
+
+func (r *PostgresRepository) CountRules(ctx context.Context) (int64, error) {
+	var total int64
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT COUNT(*) FROM pricing_rules`).Scan(&total); err != nil {
+		return 0, fmt.Errorf("failed to count pricing rules: %w", err)
+	}
+	return total, nil
 }

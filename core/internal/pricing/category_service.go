@@ -6,7 +6,8 @@ package pricing
 import (
 	"context"
 	"fmt"
-	"math"
+	"math/big"
+	"strings"
 
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -96,29 +97,37 @@ func (s *CategoryPricingService) ResolveEffectivePrice(
 	}, nil
 }
 
-// ApplyRule calculates the effective price based on rule type.
+// ApplyRule calculates the effective price based on rule type, in exact
+// rational arithmetic (ADR 0006 R3); the one scale 4 rounding happens where
+// the engine returns the price (R4.2), never inside a step.
 //   - MARKDOWN: basePrice * (1 - value/100)
-//   - MARKUP:   costPrice * (1 + value/100)
-//   - FIXED:    value (absolute price)
-//   - MARGIN:   costPrice / (1 - value/100)
-func (s *CategoryPricingService) ApplyRule(rule *CategoryPricingRule, basePrice float64, costPrice float64) float64 {
+//   - MARKUP:   costPrice * (1 + value/100), or on the base price when
+//     there is no cost to read (a cost of zero)
+//   - FIXED:    value (absolute price, exact)
+//   - MARGIN:   costPrice / (1 - value/100); a margin of 100 or more, or a
+//     zero cost, answers the base price unchanged
+func (s *CategoryPricingService) ApplyRule(rule *CategoryPricingRule, basePrice *big.Rat, costPrice *big.Rat) *big.Rat {
 	if rule == nil {
+		return basePrice
+	}
+	value := rule.ValueRat()
+	if value == nil {
 		return basePrice
 	}
 
 	switch rule.RuleType {
 	case CategoryRuleMarkdown:
-		return math.Round(basePrice*(1-rule.RuleValue/100)*100) / 100
+		return applyMarkdown(basePrice, value)
 	case CategoryRuleMarkup:
-		if costPrice > 0 {
-			return math.Round(costPrice*(1+rule.RuleValue/100)*100) / 100
+		if costPrice.Sign() > 0 {
+			return applyMarkupPercent(costPrice, value)
 		}
-		return math.Round(basePrice*(1+rule.RuleValue/100)*100) / 100
+		return applyMarkupPercent(basePrice, value)
 	case CategoryRuleFixed:
-		return rule.RuleValue
+		return value
 	case CategoryRuleMargin:
-		if costPrice > 0 && rule.RuleValue < 100 {
-			return math.Round(costPrice/(1-rule.RuleValue/100)*100) / 100
+		if costPrice.Sign() > 0 && value.Cmp(big.NewRat(100, 1)) < 0 {
+			return new(big.Rat).Quo(costPrice, new(big.Rat).Sub(big.NewRat(1, 1), new(big.Rat).Quo(value, big.NewRat(100, 1))))
 		}
 		return basePrice
 	default:
@@ -289,13 +298,18 @@ func getPerformedBy(ctx context.Context) string {
 
 func ruleToMap(r *CategoryPricingRule) map[string]any {
 	m := map[string]any{
-		"rule_type":  string(r.RuleType),
-		"rule_value": r.RuleValue,
+		"rule_type":  strings.ToLower(string(r.RuleType)),
 		"is_active":  r.IsActive,
 		"priority":   r.Priority,
 	}
+	if r.ValuePrice != nil {
+		m["value_ten_thousandths"] = int64(*r.ValuePrice)
+	}
+	if r.ValuePct != nil {
+		m["value_pct"] = r.ValuePct.WireString()
+	}
 	if r.MarginFloorPct != nil {
-		m["margin_floor_pct"] = *r.MarginFloorPct
+		m["margin_floor_pct"] = r.MarginFloorPct.WireString()
 	}
 	if r.Tier != "" {
 		m["tier"] = r.Tier
