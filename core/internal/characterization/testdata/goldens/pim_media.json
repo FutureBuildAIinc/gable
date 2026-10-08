@@ -1,0 +1,505 @@
+[
+  {
+    "name": "pim.detail",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>/detail"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "average_unit_cost": 3.5,
+        "base_price": 5.5,
+        "collateral": [],
+        "commission_rate": 0,
+        "content": {
+          "attributes": {},
+          "created_at": "<ts+0d>",
+          "id": "<id-2>",
+          "last_gen_at": null,
+          "last_gen_model": "",
+          "last_gen_prompt": "",
+          "long_description": "",
+          "marketing_copy": "",
+          "product_id": "<id-1>",
+          "seo_description": "",
+          "seo_keywords": [],
+          "seo_slug": "",
+          "seo_title": "Golden SPF stud",
+          "short_description": "Golden 2x4 premium stud",
+          "updated_at": "<ts+0d>"
+        },
+        "created_at": "<ts+0d>",
+        "description": "2x4x8 SPF Premium",
+        "id": "<id-1>",
+        "media": [],
+        "reorder_point": 200,
+        "reorder_qty": 500,
+        "sku": "LUM-248-PREM",
+        "target_margin": 0,
+        "total_allocated": 12,
+        "total_quantity": 426,
+        "uom_primary": "PCS",
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": "Gable Lumber & Supply",
+        "weight_lbs": 9
+      }
+    }
+  },
+  {
+    "name": "pim.detail.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-3>/detail"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.detail.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/not-a-uuid/detail"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.media.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>/pim/media"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "pim.collateral.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>/pim/collateral"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "pim.media.list.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/not-a-uuid/pim/media"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.collateral.list.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/not-a-uuid/pim/collateral"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.descriptions",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/descriptions",
+      "body": {
+        "audience": "contractors",
+        "tone": "professional"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.seo",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/seo",
+      "body": {
+        "target_keywords": [
+          "lumber",
+          "stud"
+        ]
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.image",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/image",
+      "body": {
+        "prompt": "golden stud",
+        "style": "photographic"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.collateral",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/collateral",
+      "body": {
+        "audience": "contractors",
+        "tone": "professional",
+        "type": "spec_sheet"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.descriptions.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/descriptions",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.seo.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/seo",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.image.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/image",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.collateral.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/<id-1>/pim/generate/collateral",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.generate.descriptions.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products/not-a-uuid/pim/generate/descriptions",
+      "body": {}
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.media.list_after_generate",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>/pim/media"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "pim.collateral.list_after_generate",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>/pim/collateral"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "pim.media.delete.unknown",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/products/<id-1>/pim/media/<id-3>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "pim.media.delete.bad_id",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/products/<id-1>/pim/media/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.media.primary.unknown",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/pim/media/<id-3>/primary"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "pim.media.primary.bad_media_id",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/pim/media/not-a-uuid/primary"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.media.primary.bad_product_id",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/not-a-uuid/pim/media/<id-3>/primary"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pim.collateral.delete.unknown",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/products/<id-1>/pim/collateral/<id-3>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "pim.collateral.delete.bad_id",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/products/<id-1>/pim/collateral/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  }
+]

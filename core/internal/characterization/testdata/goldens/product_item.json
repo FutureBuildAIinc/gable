@@ -1,0 +1,414 @@
+[
+  {
+    "name": "product.a.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products",
+      "body": {
+        "base_price": 3.75,
+        "description": "Golden item stud",
+        "reorder_point": 5000,
+        "reorder_qty": 100,
+        "sku": "GOLD-A-STUD",
+        "uom_primary": "PCS"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "average_unit_cost": 0,
+        "base_price": 3.75,
+        "commission_rate": 0,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
+        "geometry_source": null,
+        "height_in": null,
+        "id": "<id-1>",
+        "length_in": null,
+        "reorder_point": 5000,
+        "reorder_qty": 100,
+        "sku": "GOLD-A-STUD",
+        "stackable": null,
+        "target_margin": 0,
+        "total_allocated": 0,
+        "total_quantity": 0,
+        "uom_primary": "PCS",
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
+        "width_in": null
+      }
+    }
+  },
+  {
+    "name": "product.reorder_alerts",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/reorder-alerts"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "current_stock": 535,
+          "deficit": 465,
+          "description": "2 X 4 RL #3 SPF",
+          "product_id": "<id-2>",
+          "reorder_point": 1000,
+          "reorder_qty": 5000,
+          "sku": "LUMB24RLN3",
+          "vendor": "Gable Lumber & Supply",
+          "vendor_id": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "product.dimensions.set",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/dimensions",
+      "body": {
+        "height_in": 1.5,
+        "length_in": 96,
+        "stackable": true,
+        "width_in": 3.5
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "geometry_source": "parametric",
+        "height_in": 1.5,
+        "length_in": 96,
+        "stackable": true,
+        "width_in": 3.5
+      }
+    }
+  },
+  {
+    "name": "product.dimensions.set_source",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/dimensions",
+      "body": {
+        "geometry_source": "mesh",
+        "length_in": 96
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "geometry_source": "mesh",
+        "height_in": null,
+        "length_in": 96,
+        "stackable": null,
+        "width_in": null
+      }
+    }
+  },
+  {
+    "name": "product.dimensions.clear",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/dimensions",
+      "body": {}
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "geometry_source": null,
+        "height_in": null,
+        "length_in": null,
+        "stackable": null,
+        "width_in": null
+      }
+    }
+  },
+  {
+    "name": "product.dimensions.bad_body",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/dimensions",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.dimensions.bad_id",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/not-a-uuid/dimensions",
+      "body": {
+        "length_in": 1
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.dimensions.not_found",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-5>/dimensions",
+      "body": {
+        "length_in": 1
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "product.lead_time.set",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/lead-time",
+      "body": {
+        "lead_time_days": 9
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "lead_time_days": 9
+      }
+    }
+  },
+  {
+    "name": "product.lead_time.clear",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/lead-time",
+      "body": {
+        "lead_time_days": null
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "lead_time_days": null
+      }
+    }
+  },
+  {
+    "name": "product.lead_time.negative",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/lead-time",
+      "body": {
+        "lead_time_days": -3
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.lead_time.bad_body",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/lead-time",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.lead_time.bad_id",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/not-a-uuid/lead-time",
+      "body": {
+        "lead_time_days": 1
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.margins.set",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/margins",
+      "body": {
+        "commission_rate": 3.25,
+        "target_margin": 22.5
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "product.margins.bad_body",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-1>/margins",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.margins.bad_id",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/not-a-uuid/margins",
+      "body": {
+        "target_margin": 1
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.margins.not_found",
+    "request": {
+      "method": "PATCH",
+      "path": "/api/v1/products/<id-5>/margins",
+      "body": {
+        "commission_rate": 1,
+        "target_margin": 1
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "product.get.after_patches",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "average_unit_cost": 0,
+        "base_price": 3.75,
+        "commission_rate": 3.25,
+        "created_at": "<ts+0d>",
+        "description": "Golden item stud",
+        "geometry_source": null,
+        "height_in": null,
+        "id": "<id-1>",
+        "length_in": null,
+        "reorder_point": 0,
+        "reorder_qty": 0,
+        "sku": "GOLD-A-STUD",
+        "stackable": null,
+        "target_margin": 22.5,
+        "total_allocated": 0,
+        "total_quantity": 0,
+        "uom_primary": "PCS",
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
+        "width_in": null
+      }
+    }
+  }
+]

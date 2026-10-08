@@ -1,0 +1,302 @@
+[
+  {
+    "name": "crm.a.activity.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-1>/activities",
+      "body": {
+        "activity_date": "<ts+0d>",
+        "activity_type": "CALL",
+        "description": "golden item call"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "activity_date": "<ts+0d>",
+        "activity_type": "CALL",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "description": "golden item call",
+        "id": "<id-2>",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "crm.activity.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/activities/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "activity_date": "<ts+0d>",
+        "activity_type": "CALL",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "description": "golden item call",
+        "id": "<id-2>",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "crm.activity.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/activities/<id-3>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/activities/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/activities/<id-2>",
+      "body": {
+        "activity_date": "<ts+1d>",
+        "activity_type": "MEETING",
+        "customer_id": "<id-1>",
+        "description": "golden item meeting"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "activity_date": "<ts+1d>",
+        "activity_type": "MEETING",
+        "created_at": "<ts-106751d>",
+        "customer_id": "<id-1>",
+        "description": "golden item meeting",
+        "id": "<id-2>",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "crm.activity.get.after_update",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/activities/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "activity_date": "<ts+1d>",
+        "activity_type": "MEETING",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "description": "golden item meeting",
+        "id": "<id-2>",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "crm.activity.update.bad_type",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/activities/<id-2>",
+      "body": {
+        "activity_type": "SMOKE_SIGNAL",
+        "description": "x"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/activities/<id-2>",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/activities/not-a-uuid",
+      "body": {
+        "activity_type": "NOTE",
+        "description": "x"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.update.not_found",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/activities/<id-3>",
+      "body": {
+        "activity_date": "<ts+0d>",
+        "activity_type": "NOTE",
+        "customer_id": "<id-1>",
+        "description": "ghost"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/activities/<id-2>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "crm.activity.delete.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/activities/<id-2>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.delete.bad_id",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/activities/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.get.after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/activities/<id-2>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  }
+]

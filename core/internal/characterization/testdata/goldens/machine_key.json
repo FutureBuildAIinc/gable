@@ -1,0 +1,179 @@
+[
+  {
+    "name": "machine_key.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/keys",
+      "body": {
+        "name": "golden-scoped-key",
+        "scopes": [
+          "quotes:read"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "api_key": "<api-key>",
+        "key": {
+          "created_at": "<ts+0d>",
+          "id": "<id-1>",
+          "last_used_at": null,
+          "name": "golden-scoped-key",
+          "prefix": "<api-key>",
+          "revoked_at": null,
+          "scopes": [
+            "quotes:read"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.read_quote",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-2>",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "accepted_at": "<ts+0d>",
+        "branch_id": "<id-3>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-4>",
+        "customer_name": "Kelbrook Construction",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_last_checked_at": "<ts+0d>",
+        "exposure_state": "OK",
+        "freight_amount": 0,
+        "id": "<id-2>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-5>",
+            "line_total": 110,
+            "product_id": "<id-6>",
+            "quantity": 20,
+            "quote_id": "<id-2>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "sent_at": "<ts+0d>",
+        "source": "manual",
+        "state": "ACCEPTED",
+        "total_amount": 110,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "machine_key.write_quote_refused",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/quotes/<id-2>/state",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      },
+      "body": {
+        "state": "DRAFT"
+      }
+    },
+    "response": {
+      "status": 403,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message": "machine key lacks required scope quotes:write"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.refusal_audit_row",
+    "request": {
+      "method": "SQL",
+      "path": "SELECT action, entity_type, entity_id::text AS entity_id, actor_kind, actor_id, user_id, changes FROM audit_log WHERE entity_type = 'api_key' AND entity_id = '<id-1>'::uuid ORDER BY created_at, id"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "action": "key.scope_refused",
+          "actor_id": "<id-1>",
+          "actor_kind": "key",
+          "changes": {
+            "method": "PUT",
+            "path": "/api/v1/quotes/<id-2>/state",
+            "scope": "quotes:write"
+          },
+          "entity_id": "<id-1>",
+          "entity_type": "api_key",
+          "user_id": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "machine_key.user_only_refused",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/keys",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      }
+    },
+    "response": {
+      "status": 403,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message": "key management requires a user"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.unknown_key",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-2>",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      }
+    },
+    "response": {
+      "status": 401,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unauthorized",
+          "message": "invalid machine key"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  }
+]

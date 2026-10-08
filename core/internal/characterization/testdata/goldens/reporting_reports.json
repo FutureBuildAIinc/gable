@@ -1,0 +1,115 @@
+[
+  {
+    "name": "reporting.daily_till",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/daily-till?date=<day+0>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "by_method": {
+          "CASH": 10,
+          "CHECK": 306222.76
+        },
+        "date": "<day+0>",
+        "total_collected": 306232.76,
+        "transaction_count": 37
+      }
+    }
+  },
+  {
+    "name": "reporting.customer_statement",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/customer-statement/<id-1>?start=<day-30>&end=<day+0>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "close_balance": -14.2,
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "end_date": "<day+0>",
+        "lines": [
+          {
+            "balance": 30.8,
+            "credit": 0,
+            "date": "<day+0>",
+            "debit": 30.8,
+            "description": "Invoice #<id-2>",
+            "type": "INVOICE"
+          },
+          {
+            "balance": 25.8,
+            "credit": 5,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "Credit Memo: golden characterisation",
+            "type": "REFUND"
+          },
+          {
+            "balance": 15.8,
+            "credit": 10,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "Payment GOLD-PAY-1",
+            "type": "PAYMENT"
+          },
+          {
+            "balance": -14.2,
+            "credit": 30,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "POS return credit #<id-3>",
+            "type": "REFUND"
+          }
+        ],
+        "open_balance": 0,
+        "start_date": "<day-30>"
+      }
+    }
+  },
+  {
+    "name": "reporting.customer_statement.empty_window",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/customer-statement/<id-1>?start=<day+400>&end=<day+401>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "close_balance": -14.2,
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "end_date": "<day+401>",
+        "lines": null,
+        "open_balance": -14.2,
+        "start_date": "<day+400>"
+      }
+    }
+  },
+  {
+    "name": "reporting.customer_statement.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reports/customer-statement/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  }
+]

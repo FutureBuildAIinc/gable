@@ -600,7 +600,8 @@ components:
           type: number
         source:
           type: string
-          enum: [manual, ai]
+          description: How the quote came to be; portal is a quote the dealer portal customer requested.
+          enum: [manual, ai, portal]
         original_filename:
           type: string
         original_content_type:

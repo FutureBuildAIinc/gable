@@ -9637,8 +9637,11 @@ export interface components {
             vehicle_id?: string;
             vehicle_name?: string;
             margin_total: number;
-            /** @enum {string} */
-            source: "manual" | "ai";
+            /**
+             * @description How the quote came to be; portal is a quote the dealer portal customer requested.
+             * @enum {string}
+             */
+            source: "manual" | "ai" | "portal";
             original_filename?: string;
             original_content_type?: string;
             /** @description The AI parse mapping, arbitrary JSON. */
@@ -11440,7 +11443,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["HandlerUnauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -21197,7 +21200,15 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description The file does not exist. The file server answers with net/http's own plain text body, not the standard error envelope. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
         };
     };
     vendorList: {

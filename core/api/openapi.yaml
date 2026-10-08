@@ -862,7 +862,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/HandlerUnauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
@@ -10896,7 +10896,12 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: >-
+            The file does not exist. The file server answers with net/http's own plain text body, not the standard error envelope.
+          content:
+            text/plain:
+              schema:
+                type: string
   /api/v1/vendors:
     get:
       operationId: vendorList
@@ -18010,7 +18015,8 @@ components:
           type: number
         source:
           type: string
-          enum: [manual, ai]
+          description: How the quote came to be; portal is a quote the dealer portal customer requested.
+          enum: [manual, ai, portal]
         original_filename:
           type: string
         original_content_type:

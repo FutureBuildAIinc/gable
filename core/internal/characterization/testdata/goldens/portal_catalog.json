@@ -1,0 +1,290 @@
+[
+  {
+    "name": "portal_catalog.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_catalog.categories",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog/categories"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "children": [
+            {
+              "children": [],
+              "depth": 1,
+              "id": "<id-4>",
+              "name": "Framing Lumber",
+              "path": "lumber.framing",
+              "product_count": 0,
+              "slug": "framing_lumber",
+              "sort_order": 1
+            },
+            {
+              "children": [],
+              "depth": 1,
+              "id": "<id-5>",
+              "name": "Sheathing",
+              "path": "lumber.sheathing",
+              "product_count": 0,
+              "slug": "sheathing",
+              "sort_order": 2
+            },
+            {
+              "children": [],
+              "depth": 1,
+              "id": "<id-6>",
+              "name": "Engineered Wood",
+              "path": "lumber.engineered",
+              "product_count": 0,
+              "slug": "engineered_wood",
+              "sort_order": 3
+            }
+          ],
+          "depth": 0,
+          "id": "<id-7>",
+          "name": "Lumber",
+          "path": "lumber",
+          "product_count": 19,
+          "slug": "lumber",
+          "sort_order": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "depth": 1,
+              "id": "<id-8>",
+              "name": "Fasteners",
+              "path": "hardware.fasteners",
+              "product_count": 0,
+              "slug": "fasteners",
+              "sort_order": 1
+            },
+            {
+              "children": [],
+              "depth": 1,
+              "id": "<id-9>",
+              "name": "Connectors",
+              "path": "hardware.connectors",
+              "product_count": 0,
+              "slug": "connectors",
+              "sort_order": 2
+            }
+          ],
+          "depth": 0,
+          "id": "<id-10>",
+          "name": "Hardware",
+          "path": "hardware",
+          "product_count": 8,
+          "slug": "hardware",
+          "sort_order": 2
+        },
+        {
+          "children": [],
+          "depth": 0,
+          "id": "<id-11>",
+          "name": "Roofing",
+          "path": "roofing",
+          "product_count": 13,
+          "slug": "roofing",
+          "sort_order": 3
+        },
+        {
+          "children": [],
+          "depth": 0,
+          "id": "<id-12>",
+          "name": "Insulation",
+          "path": "insulation",
+          "product_count": 3,
+          "slug": "insulation",
+          "sort_order": 4
+        },
+        {
+          "children": [],
+          "depth": 0,
+          "id": "<id-13>",
+          "name": "Concrete",
+          "path": "concrete",
+          "product_count": 0,
+          "slug": "concrete",
+          "sort_order": 5
+        },
+        {
+          "children": [],
+          "depth": 0,
+          "id": "<id-14>",
+          "name": "General",
+          "path": "general",
+          "product_count": 25,
+          "slug": "general",
+          "sort_order": 99
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal_catalog.product",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog/<id-15>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "available": 368,
+        "base_price": 5.5,
+        "category": "Lumber",
+        "category_id": "<id-7>",
+        "category_path": "lumber",
+        "category_slug": "lumber",
+        "customer_price": 4.75,
+        "grade": "",
+        "id": "<id-15>",
+        "image_url": "",
+        "in_stock": true,
+        "lead_time_days": null,
+        "name": "2x4x8 SPF Premium",
+        "price_source": "CONTRACT",
+        "sku": "LUM-248-PREM",
+        "species": "",
+        "uom": "PCS",
+        "upc": "",
+        "vendor": "Gable Lumber & Supply",
+        "volume_breaks": [],
+        "weight_lbs": 9
+      }
+    }
+  },
+  {
+    "name": "portal_catalog.product.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_catalog.product.unknown",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog/<id-17>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_catalog.volume_breaks",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog/<id-15>/volume-breaks"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "portal_catalog.volume_breaks.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog/not-a-uuid/volume-breaks"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_catalog.volume_breaks.unknown",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog/<id-17>/volume-breaks"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  }
+]

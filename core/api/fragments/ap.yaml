@@ -154,7 +154,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/HandlerUnauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":

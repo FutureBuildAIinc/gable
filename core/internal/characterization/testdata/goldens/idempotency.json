@@ -3,6 +3,278 @@
     "name": "idempotency.first",
     "request": {
       "method": "POST",
+      "path": "/api/v1/vendors",
+      "headers": {
+        "Idempotency-Key": "golden-idem-key-1"
+      },
+      "body": {
+        "name": "Golden Idempotent Vendor",
+        "payment_terms": "NET15"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "address_line1": null,
+        "average_lead_time_days": 0,
+        "city": null,
+        "contact_email": null,
+        "created_at": "<ts+0d>",
+        "fill_rate": 0,
+        "id": "<id-1>",
+        "name": "Golden Idempotent Vendor",
+        "payment_terms": "NET15",
+        "phone": null,
+        "state": null,
+        "total_spend_ytd": 0,
+        "updated_at": "<ts+0d>",
+        "zip": null
+      }
+    }
+  },
+  {
+    "name": "idempotency.replay",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/vendors",
+      "headers": {
+        "Idempotency-Key": "golden-idem-key-1"
+      },
+      "body": {
+        "name": "Golden Idempotent Vendor",
+        "payment_terms": "NET15"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "headers": {
+        "Idempotency-Replayed": "true"
+      },
+      "body": {
+        "address_line1": null,
+        "average_lead_time_days": 0,
+        "city": null,
+        "contact_email": null,
+        "created_at": "<ts+0d>",
+        "fill_rate": 0,
+        "id": "<id-1>",
+        "name": "Golden Idempotent Vendor",
+        "payment_terms": "NET15",
+        "phone": null,
+        "state": null,
+        "total_spend_ytd": 0,
+        "updated_at": "<ts+0d>",
+        "zip": null
+      }
+    }
+  },
+  {
+    "name": "idempotency.key_reused",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/vendors",
+      "headers": {
+        "Idempotency-Key": "golden-idem-key-1"
+      },
+      "body": {
+        "name": "Golden Other Vendor",
+        "payment_terms": "NET30"
+      }
+    },
+    "response": {
+      "status": 422,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "idempotency_key_reused",
+          "details": [],
+          "message": "This idempotency key was already used with a different request (method, path, query or body differs)"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "idempotency.vendor_count",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/vendors?limit=1"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "address_line1": "200 Shingle Ln",
+          "average_lead_time_days": 7,
+          "city": "Vernon",
+          "contact_email": "contact@bcroofing.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 91,
+          "id": "<id-3>",
+          "name": "BC Roofing Wholesale",
+          "payment_terms": "Net 45",
+          "phone": "250-555-1300",
+          "state": "BC",
+          "total_spend_ytd": 95000,
+          "updated_at": "<ts+0d>",
+          "zip": "V1T 2L8"
+        },
+        {
+          "address_line1": "400 Thermal Ave",
+          "average_lead_time_days": 6,
+          "city": "Vernon",
+          "contact_email": "sales@caribooinsulation.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 93,
+          "id": "<id-4>",
+          "name": "Cariboo Insulation Ltd",
+          "payment_terms": "Net 30",
+          "phone": "250-555-1700",
+          "state": "BC",
+          "total_spend_ytd": 52000,
+          "updated_at": "<ts+0d>",
+          "zip": "V1B 3T6"
+        },
+        {
+          "address_line1": "2450 Enterprise Way",
+          "average_lead_time_days": 3,
+          "city": "Kelowna",
+          "contact_email": "orders@gablelumber.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 97.5,
+          "id": "<id-5>",
+          "name": "Gable Lumber & Supply",
+          "payment_terms": "Net 30",
+          "phone": "250-555-1100",
+          "state": "BC",
+          "total_spend_ytd": 485000,
+          "updated_at": "<ts+0d>",
+          "zip": "V1X 7K2"
+        },
+        {
+          "address_line1": null,
+          "average_lead_time_days": 0,
+          "city": null,
+          "contact_email": null,
+          "created_at": "<ts+0d>",
+          "fill_rate": 0,
+          "id": "<id-1>",
+          "name": "Golden Idempotent Vendor",
+          "payment_terms": "NET15",
+          "phone": null,
+          "state": null,
+          "total_spend_ytd": 0,
+          "updated_at": "<ts+0d>",
+          "zip": null
+        },
+        {
+          "address_line1": null,
+          "average_lead_time_days": 0,
+          "city": null,
+          "contact_email": null,
+          "created_at": "<ts+0d>",
+          "fill_rate": 0,
+          "id": "<id-6>",
+          "name": "Golden Vendor Co",
+          "payment_terms": "NET15",
+          "phone": null,
+          "state": null,
+          "total_spend_ytd": 0,
+          "updated_at": "<ts+0d>",
+          "zip": null
+        },
+        {
+          "address_line1": "75 Cabinet Ct",
+          "average_lead_time_days": 14,
+          "city": "Kelowna",
+          "contact_email": "info@interiormillwork.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 88.5,
+          "id": "<id-7>",
+          "name": "Interior Millwork Co",
+          "payment_terms": "Net 30",
+          "phone": "250-555-1400",
+          "state": "BC",
+          "total_spend_ytd": 72000,
+          "updated_at": "<ts+0d>",
+          "zip": "V1Z 1G2"
+        },
+        {
+          "address_line1": "900 Bolt Blvd",
+          "average_lead_time_days": 4,
+          "city": "Penticton",
+          "contact_email": "orders@mountainfastener.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 96.8,
+          "id": "<id-8>",
+          "name": "Mountain Fastener Supply",
+          "payment_terms": "Net 30",
+          "phone": "250-555-1600",
+          "state": "BC",
+          "total_spend_ytd": 67000,
+          "updated_at": "<ts+0d>",
+          "zip": "V2A 6J9"
+        },
+        {
+          "address_line1": "1500 Fastener Way",
+          "average_lead_time_days": 5,
+          "city": "Kelowna",
+          "contact_email": "sales@okhardware.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 94.2,
+          "id": "<id-9>",
+          "name": "Okanagan Hardware Distribution",
+          "payment_terms": "Net 30",
+          "phone": "250-555-1200",
+          "state": "BC",
+          "total_spend_ytd": 128000,
+          "updated_at": "<ts+0d>",
+          "zip": "V1Y 4R9"
+        },
+        {
+          "address_line1": "1200 Glass Pkwy",
+          "average_lead_time_days": 21,
+          "city": "Surrey",
+          "contact_email": "orders@pacificwindow.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 85,
+          "id": "<id-10>",
+          "name": "Pacific Window & Door",
+          "payment_terms": "2% 10 Net 30",
+          "phone": "604-555-1800",
+          "state": "BC",
+          "total_spend_ytd": 110000,
+          "updated_at": "<ts+0d>",
+          "zip": "V3T 5X8"
+        },
+        {
+          "address_line1": "3200 Aggregate Dr",
+          "average_lead_time_days": 2,
+          "city": "Kelowna",
+          "contact_email": "dispatch@valleyreadymix.ca",
+          "created_at": "<ts+0d>",
+          "fill_rate": 99,
+          "id": "<id-11>",
+          "name": "Valley Ready-Mix Concrete",
+          "payment_terms": "Net 15",
+          "phone": "250-555-1500",
+          "state": "BC",
+          "total_spend_ytd": 45000,
+          "updated_at": "<ts+0d>",
+          "zip": "V1X 4L9"
+        }
+      ]
+    }
+  },
+  {
+    "name": "idempotency.scan_first",
+    "request": {
+      "method": "POST",
       "path": "/api/v1/vision/scan",
       "headers": {
         "Idempotency-Key": "golden-idempotency-key-1"
@@ -25,7 +297,7 @@
     }
   },
   {
-    "name": "idempotency.key_reused",
+    "name": "idempotency.scan_key_reused",
     "request": {
       "method": "POST",
       "path": "/api/v1/vision/scan",
@@ -46,7 +318,7 @@
           "message": "This idempotency key was already used with a different request (method, path, query or body differs)"
         },
         "meta": {
-          "request_id": "<id-1>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -78,7 +350,7 @@
           "message": "Idempotency-Key must be 1 to 255 printable ASCII characters"
         },
         "meta": {
-          "request_id": "<id-2>"
+          "request_id": "<id-13>"
         }
       }
     }

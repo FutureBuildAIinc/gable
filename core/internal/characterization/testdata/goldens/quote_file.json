@@ -1,0 +1,136 @@
+[
+  {
+    "name": "quote.a.create_with_file",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes",
+      "body": {
+        "branch_id": "<id-1>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "lines": [
+          {
+            "description": "2x4x8 SPF Premium",
+            "product_id": "<id-3>",
+            "quantity": 2,
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "original_file": "R29sZGVuIGZpbGU=",
+        "original_filename": "golden-quote.txt"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-4>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-5>",
+            "line_total": 11,
+            "product_id": "<id-3>",
+            "quantity": 2,
+            "quote_id": "<id-4>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "original_filename": "golden-quote.txt",
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 11,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "quote.file.download",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-4>/file"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": "Golden file"
+      }
+    }
+  },
+  {
+    "name": "quote.file.none_stored",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-6>/file"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "quote.file.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-8>/file"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "quote.file.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/not-a-uuid/file"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  }
+]

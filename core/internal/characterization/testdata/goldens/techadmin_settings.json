@@ -1,0 +1,297 @@
+[
+  {
+    "name": "techadmin.ai.get_initial",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/ai"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "configured": false,
+        "source": "none"
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.save.missing_key",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/ai",
+      "body": {
+        "api_key": ""
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.save.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/ai",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.save.bad_base_url",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/ai",
+      "body": {
+        "api_key": "golden-placeholder-value",
+        "base_url": "ftp://not-allowed.invalid"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.get_after_bad_base_url",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/ai"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "configured": false,
+        "source": "none"
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.save",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/ai",
+      "body": {
+        "api_key": "golden-placeholder-value"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "saved"
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.get_saved",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/ai"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "configured": true,
+        "key_hint": "golden-pla...alue",
+        "source": "admin"
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/settings/ai"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.get_after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/ai"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "configured": false,
+        "source": "none"
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.delete.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/settings/ai"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "techadmin.routing.get_initial",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/routing"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "configured": false,
+        "source": "none"
+      }
+    }
+  },
+  {
+    "name": "techadmin.routing.save.missing_key",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/routing",
+      "body": {
+        "api_key": ""
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.routing.save.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/routing",
+      "body": "nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.routing.save",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/routing",
+      "body": {
+        "api_key": "golden-placeholder-routing"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "saved"
+      }
+    }
+  },
+  {
+    "name": "techadmin.routing.get_saved",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/routing"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "configured": true,
+        "key_hint": "golden-pla...ting",
+        "source": "admin"
+      }
+    }
+  },
+  {
+    "name": "techadmin.routing.delete",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/settings/routing"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "techadmin.routing.get_after_delete",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/routing"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "configured": false,
+        "source": "none"
+      }
+    }
+  }
+]

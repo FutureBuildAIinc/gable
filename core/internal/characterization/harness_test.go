@@ -52,6 +52,9 @@ type harness struct {
 	vars        map[string]string // substitution table: {name} in paths/bodies/headers
 	reqCount    int
 	backendRoot string
+	dbURL       string // the throwaway database, for steps' setup hooks
+	buildDir    string // holds the one core binary and the server logs
+	servers     int    // servers started so far, for unique log names
 }
 
 // goldensDBURL is the throwaway database this binary's harness runs against,
@@ -254,8 +257,8 @@ func newHarness(t *testing.T, freshURL string) *harness {
 
 	vars := seedVars(t, freshURL)
 
-	h := &harness{t: t, vars: vars, backendRoot: backendRoot}
-	h.startServer(t, freshURL, buildDir)
+	h := &harness{t: t, vars: vars, backendRoot: backendRoot, dbURL: freshURL, buildDir: buildDir}
+	h.startServer(t, freshURL, buildDir, nil)
 	return h
 }
 
@@ -322,7 +325,7 @@ func run(t *testing.T, dir string, env []string, name string, stdin string, args
 // production entry point rather than reconstructing the handler in
 // process. The subprocess gets its own process group and is stopped by
 // that group number, even on failure.
-func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
+func (h *harness) startServer(t *testing.T, dbURL, buildDir string, extraEnv map[string]string) {
 	t.Helper()
 
 	port, err := freePort()
@@ -331,7 +334,8 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 	}
 
 	srvDir := t.TempDir()
-	logPath := filepath.Join(buildDir, "server.log")
+	h.servers++
+	logPath := filepath.Join(buildDir, fmt.Sprintf("server-%d.log", h.servers))
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		t.Fatalf("create server log: %v", err)
@@ -339,7 +343,7 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 
 	cmd := exec.Command(filepath.Join(buildDir, "core"), "serve")
 	cmd.Dir = srvDir
-	cmd.Env = subprocessEnv(map[string]string{
+	env := map[string]string{
 		"PORT":           strconv.Itoa(port),
 		"DATABASE_URL":   dbURL,
 		"AUTH_MODE":      "dev",
@@ -349,7 +353,11 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 		// The harness client is the loopback peer and rotates
 		// X-Forwarded-For (see do()), so loopback is its trusted proxy.
 		"TRUSTED_PROXIES": "127.0.0.1/32,::1/128",
-	})
+	}
+	for k, v := range extraEnv {
+		env[k] = v
+	}
+	cmd.Env = subprocessEnv(env)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = serverProcAttr()
@@ -496,7 +504,11 @@ type capturedRequest struct {
 type capturedResponse struct {
 	Status      int    `json:"status"`
 	ContentType string `json:"content_type"`
-	Body        any    `json:"body"`
+	// Headers holds only the response headers a step asked to pin through
+	// stepDef.captureHeaders (for example Idempotency-Replayed); every other
+	// header stays unrecorded.
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    any               `json:"body"`
 }
 
 type capturedStep struct {
@@ -525,22 +537,42 @@ type capturedStep struct {
 	// segment's count - the revenue sequence and row order are stable, that
 	// one count is not. Recorded in the golden, like the other mask flags.
 	MaskOrderCount bool `json:"mask_order_count,omitempty"`
-	// MaskFields names response keys whose values are replaced with
-	// "<masked>" before comparison, wherever they sit in the body. Used on the
-	// events feed, whose exposure event payloads carry two values that vary
-	// per run: quote_short_id (the first characters of a random uuid) and
-	// salesperson_name (a name drawn at seed time). Nothing else is masked;
-	// customer_name is a constant empty string in these payloads and stays
-	// pinned. Recorded in the golden, like the other mask flags.
-	MaskFields []string         `json:"mask_fields,omitempty"`
-	Request    capturedRequest  `json:"request"`
-	Response   capturedResponse `json:"response"`
+	// MaskFields, when set, replaces every value under each named key (at any
+	// depth) with the given placeholder before comparison. Used where one
+	// field is derived from a per-run id or from the calendar (a mock
+	// geocoder's coordinates, a random upload file name, a fiscal period's
+	// year); everything else on the step stays pinned. Recorded in the
+	// golden, like the other mask flags.
+	MaskFields map[string]any `json:"mask_fields,omitempty"`
+	// MaskMockGeo, when true, replaces a latitude or longitude value with the
+	// demo anchor's coordinate when it lies inside the band the mock geocoder
+	// can produce (it derives them from two bytes of the order uuid, which is
+	// random per run). A null coordinate, or one outside the band, stays
+	// as it is, so a delivery that lost its coordinates or got a wrong one
+	// still changes the golden. Recorded in the golden, like the other masks.
+	MaskMockGeo bool `json:"mask_mock_geo,omitempty"`
+	// MaskBody, when true, records the whole response body as the placeholder
+	// "<body>": only the status and content type are pinned. For a read whose
+	// body is drawn from the seed inside map iteration and so differs per run,
+	// where the route still needs a step. The conformance test checks such a
+	// step's status and content type against the contract and skips its body.
+	MaskBody bool             `json:"mask_body,omitempty"`
+	Request  capturedRequest  `json:"request"`
+	Response capturedResponse `json:"response"`
 }
 
 // doStep executes one scenario step: substitute {vars}, send, capture the
 // exchange verbatim, and extract response values into {vars} for later steps.
 func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 	t.Helper()
+
+	if s.setup != nil {
+		s.setup(t, h)
+	}
+
+	if s.sql != "" {
+		return h.doSQLStep(t, s)
+	}
 
 	path := h.subst(s.path)
 	if !strings.HasPrefix(path, "/") {
@@ -629,6 +661,14 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		ContentType: resp.Header.Get("Content-Type"),
 		Body:        captureBody(resp.Header.Get("Content-Type"), raw),
 	}
+	for _, name := range s.captureHeaders {
+		if v := resp.Header.Get(name); v != "" {
+			if step.Response.Headers == nil {
+				step.Response.Headers = map[string]string{}
+			}
+			step.Response.Headers[name] = v
+		}
+	}
 	step.SortPrimaryArray = s.sortPrimaryArray
 	step.MaskCustomerIdentity = s.maskCustomerIdentity
 	if s.maskCustomerIdentity {
@@ -638,9 +678,19 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 	if s.maskOrderCount {
 		maskField(step.Response.Body, "order_count", "<orders>")
 	}
-	step.MaskFields = s.maskFields
-	for _, key := range s.maskFields {
-		maskField(step.Response.Body, key, "<masked>")
+	if len(s.maskFields) > 0 {
+		step.MaskFields = s.maskFields
+		for key, ph := range s.maskFields {
+			maskField(step.Response.Body, key, ph)
+		}
+	}
+	step.MaskBody = s.maskBody
+	if s.maskBody {
+		step.Response.Body = "<body>"
+	}
+	step.MaskMockGeo = s.maskMockGeo
+	if s.maskMockGeo {
+		maskMockGeo(step.Response.Body)
 	}
 	if s.sortPrimaryArray {
 		switch body := step.Response.Body.(type) {
@@ -693,6 +743,15 @@ func captureBody(contentType string, raw []byte) any {
 // runGroup executes a group's steps in order and returns the raw transcript.
 func (h *harness) runGroup(t *testing.T, g groupDef) []capturedStep {
 	t.Helper()
+	if len(g.serverEnv) > 0 {
+		// A group that needs the server configured differently (a feature
+		// flag) runs against its own server process on the same database,
+		// stopped when the group's subtest ends; the main server and its
+		// cookie jar are put back afterwards.
+		baseURL, client, cmd, logf := h.baseURL, h.client, h.serverCmd, h.serverLog
+		h.startServer(t, h.dbURL, h.buildDir, g.serverEnv)
+		defer func() { h.baseURL, h.client, h.serverCmd, h.serverLog = baseURL, client, cmd, logf }()
+	}
 	steps := make([]capturedStep, 0, len(g.steps))
 	for _, s := range g.steps {
 		steps = append(steps, h.doStep(t, s))
@@ -769,7 +828,7 @@ var customerIdentityFields = map[string]bool{
 // maskField rewrites every value under the named key, in place, to ph. It is
 // the per-step mechanism behind MaskOrderCount; MaskCustomerIdentity has its
 // own walker because it masks a set of keys.
-func maskField(v any, key, ph string) {
+func maskField(v any, key string, ph any) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, vv := range x {
@@ -782,6 +841,44 @@ func maskField(v any, key, ph string) {
 	case []any:
 		for _, vv := range x {
 			maskField(vv, key, ph)
+		}
+	}
+}
+
+// Mock geocoder band (delivery.mockGeocode): the demo anchor plus an offset of
+// (byte - 128) / 1000 degrees per axis, so within 0.128 of it.
+const (
+	mockGeoAnchorLat = 49.888
+	mockGeoAnchorLng = -119.496
+	mockGeoBand      = 0.1285
+)
+
+// maskMockGeo rewrites, in place, every latitude and longitude number that
+// lies in the mock geocoder's band to the anchor coordinate. Anything else
+// under those keys (null, a number outside the band) is left alone.
+func maskMockGeo(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, vv := range x {
+			var anchor float64
+			switch k {
+			case "latitude":
+				anchor = mockGeoAnchorLat
+			case "longitude":
+				anchor = mockGeoAnchorLng
+			default:
+				maskMockGeo(vv)
+				continue
+			}
+			if n, ok := vv.(json.Number); ok {
+				if f, err := n.Float64(); err == nil && f > anchor-mockGeoBand && f < anchor+mockGeoBand {
+					x[k] = json.Number(strconv.FormatFloat(anchor, 'f', -1, 64))
+				}
+			}
+		}
+	case []any:
+		for _, vv := range x {
+			maskMockGeo(vv)
 		}
 	}
 }
@@ -919,4 +1016,85 @@ func multipartWriter(buf *bytes.Buffer, m *multipartDef) *multipart.Writer {
 		panic(err)
 	}
 	return w
+}
+
+// doSQLStep runs a read-only probe query against the throwaway database and
+// records its rows as the step's response. It exists for the effects no route
+// exposes (an audit row a refused request left): the golden then pins the row
+// itself. The query is harness input with {vars} substituted, never request
+// data. Columns that hold JSON decode to JSON, everything else records as the
+// driver returns it (cast to text in the query for ids and times).
+func (h *harness) doSQLStep(t *testing.T, s stepDef) capturedStep {
+	t.Helper()
+	query := h.subst(s.sql)
+	db, err := sql.Open("pgx", h.dbURL)
+	if err != nil {
+		t.Fatalf("step %s: open db: %v", s.name, err)
+	}
+	defer db.Close()
+	out, err := runSQLProbe(db, query)
+	if err != nil {
+		t.Fatalf("step %s: probe query: %v", s.name, err)
+	}
+	t.Logf("step %s: SQL probe -> %d rows", s.name, len(out))
+	return capturedStep{
+		Name:     s.name,
+		Request:  capturedRequest{Method: "SQL", Path: strings.Join(strings.Fields(query), " ")},
+		Response: capturedResponse{Status: http.StatusOK, ContentType: "application/x-sql-rows", Body: out},
+	}
+}
+
+// runSQLProbe runs one query inside a read only transaction that is always
+// rolled back, so a probe can never change the database it observes: a write
+// is refused by Postgres ("cannot execute ... in a read-only transaction").
+func runSQLProbe(db *sql.DB, query string) ([]any, error) {
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin read-only tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("columns: %w", err)
+	}
+	out := []any{}
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		row := map[string]any{}
+		for i, c := range cols {
+			switch v := vals[i].(type) {
+			case []byte:
+				var doc any
+				dec := json.NewDecoder(bytes.NewReader(v))
+				dec.UseNumber()
+				if err := dec.Decode(&doc); err == nil {
+					row[c] = doc
+				} else {
+					row[c] = string(v)
+				}
+			case time.Time:
+				row[c] = v.UTC().Format(time.RFC3339Nano)
+			default:
+				row[c] = v
+			}
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
+	return out, nil
 }

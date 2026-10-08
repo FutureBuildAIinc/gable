@@ -1,0 +1,118 @@
+[
+  {
+    "name": "payment.card.no_gateway",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/card",
+      "body": {
+        "amount": 100,
+        "invoice_id": "<id-1>",
+        "token_id": "tok_golden"
+      }
+    },
+    "response": {
+      "status": 402,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "PAYMENT_REQUIRED",
+          "message": "Payment Required"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.card.missing_token",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/card",
+      "body": {
+        "amount": 100,
+        "invoice_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.card.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/card",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.refund.no_gateway",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/refund",
+      "body": {
+        "amount": 100,
+        "payment_id": "<id-5>",
+        "reason": "golden refund"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.refund.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/refund",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  }
+]

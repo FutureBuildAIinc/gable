@@ -45,5 +45,11 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: >-
+            The file does not exist. The file server answers with net/http's
+            own plain text body, not the standard error envelope.
+          content:
+            text/plain:
+              schema:
+                type: string
 components: {}

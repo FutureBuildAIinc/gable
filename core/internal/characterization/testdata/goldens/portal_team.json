@@ -1,0 +1,365 @@
+[
+  {
+    "name": "portal_team.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.users",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/users"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal_team.invites.empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/invites"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "portal_team.invite",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/invites",
+      "body": {
+        "email": "golden.buyer@example.com",
+        "role": "Buyer"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts-106751d>",
+        "customer_id": "<id-2>",
+        "email": "golden.buyer@example.com",
+        "expires_at": "<ts+7d>",
+        "id": "<id-4>",
+        "role": "Buyer"
+      }
+    }
+  },
+  {
+    "name": "portal_team.invite.bad_role",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/invites",
+      "body": {
+        "email": "golden.bad@example.com",
+        "role": "Owner"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.invite.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/invites",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.invites",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/invites"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "golden.buyer@example.com",
+          "expires_at": "<ts+7d>",
+          "id": "<id-4>",
+          "role": "Buyer"
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal_team.role",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-3>/role",
+      "body": {
+        "role": "Admin"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_team.role.bad_role",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-3>/role",
+      "body": {
+        "role": "Owner"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.role.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/not-a-uuid/role",
+      "body": {
+        "role": "Admin"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.role.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-3>/role",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.role.unknown",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-10>/role",
+      "body": {
+        "role": "Admin"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_team.status",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-3>/status",
+      "body": {
+        "status": "Active"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_team.status.bad_status",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-3>/status",
+      "body": {
+        "status": "Frozen"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.status.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/not-a-uuid/status",
+      "body": {
+        "status": "Active"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.status.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-3>/status",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_team.status.unknown",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/users/<id-10>/status",
+      "body": {
+        "status": "Active"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  }
+]
