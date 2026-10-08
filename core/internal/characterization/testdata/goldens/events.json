@@ -1,0 +1,131 @@
+[
+  {
+    "name": "events.fixture_quote_exposure",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-1>/exposure"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "events": [],
+        "exposure_dollars": 0,
+        "exposure_state": "ACK_REQUIRED",
+        "indexes": [],
+        "last_checked_at": null,
+        "quote_id": "<id-1>",
+        "required_action": "ACKNOWLEDGE"
+      }
+    }
+  },
+  {
+    "name": "events.acknowledge",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-1>/exposure/acknowledge",
+      "body": {
+        "method": "EMAIL",
+        "notes": "customer confirmed over email"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "event_id": "<id-2>",
+        "new_exposure_state": "ACKNOWLEDGED",
+        "quote_id": "<id-1>"
+      }
+    }
+  },
+  {
+    "name": "events.list_acknowledged",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=quote.exposure.acknowledged"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "customer_id": "<id-3>",
+              "customer_name": "",
+              "event_type": "ACKNOWLEDGED",
+              "quote_id": "<id-1>",
+              "quote_short_id": "<short-id>",
+              "salesperson_id": "<id-4>",
+              "salesperson_name": "Priya Brar"
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "quote"
+            },
+            "event_id": "<id-5>",
+            "org": "default",
+            "type": "quote.exposure.acknowledged"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": "eyJ2IjoxLCJvIjoiZXZlbnRzLnBvc2l0aW9uIiwiayI6WyIyIl19"
+      }
+    }
+  },
+  {
+    "name": "events.list_unknown_type",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=Not.A.Type"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "types",
+              "message": "must be a comma separated list of dot-delimited lowercase event types, each name once"
+            }
+          ],
+          "message": "types carries an unsupported or repeated name"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "events.list_unknown_param",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?bogus=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "bogus",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  }
+]
