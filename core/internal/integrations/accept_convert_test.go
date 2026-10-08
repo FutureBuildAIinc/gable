@@ -36,6 +36,12 @@ func TestAcceptAndConvert_ConvertsThePairAndConfirms(t *testing.T) {
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, productID, "SEAM-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
+	// A migrated, unseeded database has no branch tax rate; the convert's
+	// order needs one.
+	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
+		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
+		t.Fatalf("seed branch rate: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
@@ -113,6 +119,12 @@ func TestAcceptAndConvert_RefusesANonStockUnit(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, productID, "SEAM-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
+	}
+	// A migrated, unseeded database has no branch tax rate; the convert's
+	// order needs one.
+	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
+		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
+		t.Fatalf("seed branch rate: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE customer_id = $1)`, customerID)

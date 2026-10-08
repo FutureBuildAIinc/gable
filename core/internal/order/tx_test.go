@@ -66,6 +66,12 @@ func seedForTx(t *testing.T, db *dbHandle) (customerID, productID uuid.UUID) {
 		VALUES ($1, $2, 'Tx stud', 'EA', 5)`, productID, "TXO-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
+	// A migrated, unseeded database has no branch tax rate; the resolver
+	// refuses an order without one, so the fixtures set it.
+	if _, err := db.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
+		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
+		t.Fatalf("seed branch rate: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = db.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
 		_, _ = db.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
