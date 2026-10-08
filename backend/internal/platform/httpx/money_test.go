@@ -215,3 +215,44 @@ func TestMoneyOnTheWireIsNeverFloat(t *testing.T) {
 		t.Errorf("decoded = %+v", p)
 	}
 }
+
+// RULE (ADR 0001 §7): money and quantity fields are required unless the
+// contract documents them optional, so null is not zero: JSON null does not
+// decode into the value types. A field that really is optional is the
+// pointer type, decided field by field, and decodes null to nil.
+func TestNullIsNotZero(t *testing.T) {
+	type required struct {
+		TotalCents Cents    `json:"total_cents"`
+		UnitPrice  Price    `json:"unit_price_ten_thousandths"`
+		Qty        Quantity `json:"quantity"`
+	}
+	for _, bad := range []string{
+		`{"total_cents":null}`,
+		`{"unit_price_ten_thousandths":null}`,
+		`{"quantity":null}`,
+	} {
+		var r required
+		if err := json.Unmarshal([]byte(bad), &r); err == nil {
+			t.Errorf("decoded %s without error; null in a required money or quantity field must not decode", bad)
+		}
+	}
+
+	type optional struct {
+		DiscountCents *Cents    `json:"discount_cents"`
+		Qty           *Quantity `json:"quantity"`
+	}
+	var nils optional
+	if err := json.Unmarshal([]byte(`{"discount_cents":null,"quantity":null}`), &nils); err != nil {
+		t.Fatalf("null into the optional pointer fields: %v", err)
+	}
+	if nils.DiscountCents != nil || nils.Qty != nil {
+		t.Errorf("optional fields = %+v, want nil", nils)
+	}
+	var vals optional
+	if err := json.Unmarshal([]byte(`{"discount_cents":125,"quantity":"1.5"}`), &vals); err != nil {
+		t.Fatalf("values into the optional pointer fields: %v", err)
+	}
+	if vals.DiscountCents == nil || *vals.DiscountCents != 125 || vals.Qty == nil || *vals.Qty != 15000 {
+		t.Errorf("optional fields = %+v, want the sent values", vals)
+	}
+}

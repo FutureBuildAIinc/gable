@@ -4,6 +4,8 @@
 package httpx
 
 import (
+	"bytes"
+	"encoding/json"
 	"math"
 )
 
@@ -19,10 +21,30 @@ const PriceScale = 4
 // with a fraction does not decode into it.
 type Cents int64
 
+// UnmarshalJSON keeps the value type required: JSON null is an error, not a
+// silent zero, because a missing amount and a zero amount are different
+// facts (ADR 0001 §7). A field the contract documents optional uses the
+// *Cents pointer type, where null decodes to nil.
+func (c *Cents) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		return errNullIsNotZero
+	}
+	return json.Unmarshal(data, (*int64)(c))
+}
+
 // Price is a unit price at fixed scale 4, in ten-thousandths of the major
 // unit: int64 on the wire, field name carrying the suffix
 // _ten_thousandths. Price(13725) is a unit price of 1.3725.
 type Price int64
+
+// UnmarshalJSON keeps the value type required, like Cents: null is an
+// error, not a silent zero; an optional price field is the *Price pointer.
+func (p *Price) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		return errNullIsNotZero
+	}
+	return json.Unmarshal(data, (*int64)(p))
+}
 
 // DecimalString renders the cents amount as the fixed two-digit decimal a
 // DECIMAL column takes: Cents(1234) is "12.34". Exact; never float.
@@ -159,9 +181,10 @@ type parseError string
 func (e parseError) Error() string { return string(e) }
 
 const (
-	errNotADecimal parseError = "not a plain decimal number"
-	errBeyondScale parseError = "carries precision beyond the fixed scale"
-	errOverflow    parseError = "beyond the range of a 64-bit integer at this scale"
+	errNotADecimal   parseError = "not a plain decimal number"
+	errBeyondScale   parseError = "carries precision beyond the fixed scale"
+	errOverflow      parseError = "beyond the range of a 64-bit integer at this scale"
+	errNullIsNotZero parseError = "the field is required and null is not zero; a field documented optional is the pointer type"
 )
 
 // ParseCents parses a database decimal string into Cents exactly. The

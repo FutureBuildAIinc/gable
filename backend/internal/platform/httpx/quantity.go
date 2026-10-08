@@ -61,9 +61,14 @@ func (q Quantity) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON reads the wire form: a JSON string holding a plain decimal
-// with at most four fraction digits. A JSON number, an empty string, an
-// exponent, or precision beyond the scale is an error.
+// with at most four fraction digits. A JSON number, JSON null, an empty
+// string, an exponent, or precision beyond the scale is an error; null is
+// an error like it is for the money types (an optional quantity field is
+// the *Quantity pointer).
 func (q *Quantity) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		return errNullIsNotZero
+	}
 	var s string
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
