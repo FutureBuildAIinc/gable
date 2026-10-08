@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -30,6 +31,12 @@ const (
 // How long a completed response stays replayable. Matches the 24h TTL of the
 // in-memory store this file replaced.
 const idempotencyRetention = 24 * time.Hour
+
+// idempotencyMaxStoredBody caps what a stored response body may weigh. A
+// larger 2xx/3xx is served to its caller in full but not stored (the claim is
+// released and the drop logged): the table is a replay cache, not a blob
+// store, and a retry re-running the handler is safe, unlike a missing replay.
+const idempotencyMaxStoredBody = 1 << 20 // 1 MiB
 
 // idempotencyResponseWriter wraps http.ResponseWriter to capture the response.
 type idempotencyResponseWriter struct {
@@ -204,6 +211,12 @@ func idempotencyLayer(db *database.DB, principalOf func(*http.Request) string, s
 				next.ServeHTTP(w, r)
 				return
 			}
+			if !validIdempotencyKey(clientKey) {
+				respondIdempotencyError(w, r, http.StatusBadRequest, codeValidationFailed,
+					IdempotencyHeader+" must be 1 to 255 printable ASCII characters",
+					idempotencyErrorDetail{Field: IdempotencyHeader, Message: "must be 1 to 255 printable ASCII characters"})
+				return
+			}
 
 			principal := principalOf(r)
 			if principal == "" {
@@ -215,11 +228,17 @@ func idempotencyLayer(db *database.DB, principalOf func(*http.Request) string, s
 			// be read here and handed to the handler unchanged.
 			body, err := readRequestBody(r)
 			if err != nil {
-				// The size limit MaxRequestSize enforces around this
-				// middleware is the usual cause; anything else is a client
-				// that could not be read at all.
-				respondIdempotencyError(w, r, http.StatusRequestEntityTooLarge, codeRequestTooLarge,
-					"Request body exceeds the size limit")
+				// The request size limit (MaxBytesReader) is the 413; any
+				// other read failure is the client's (a dropped connection,
+				// a malformed body) and answers 400.
+				var maxBytes *http.MaxBytesError
+				if errors.As(err, &maxBytes) {
+					respondIdempotencyError(w, r, http.StatusRequestEntityTooLarge, codeRequestTooLarge,
+						"Request body exceeds the size limit")
+				} else {
+					respondIdempotencyError(w, r, http.StatusBadRequest, codeBadRequest,
+						"The request body could not be read")
+				}
 				return
 			}
 			fingerprint := requestFingerprint(r.Method, r.URL.Path, canonicalQuery(r.URL.Query()), body)
@@ -274,7 +293,17 @@ func idempotencyLayer(db *database.DB, principalOf func(*http.Request) string, s
 			// complete would leave the claim 409ing until its lease lapses.
 			bctx := context.WithoutCancel(r.Context())
 			if crw.status >= 200 && crw.status < 400 {
-				if cerr := store.complete(bctx, principal, clientKey, claimID, crw.status,
+				if crw.body.Len() > idempotencyMaxStoredBody {
+					// Served in full to this caller, but never stored: the
+					// retry re-runs the handler rather than the table holding
+					// an unbounded body.
+					slog.Warn("idempotency: response body over the stored cap; served, released, not stored",
+						"key", clientKey, "principal", principal, "status", crw.status,
+						"bytes", crw.body.Len(), "cap", idempotencyMaxStoredBody)
+					if rerr := store.release(bctx, principal, clientKey, claimID); rerr != nil {
+						logIdempotencyError("release after oversized response", clientKey, rerr)
+					}
+				} else if cerr := store.complete(bctx, principal, clientKey, claimID, crw.status,
 					crw.Header().Get("Content-Type"), crw.Header().Get("Location"), crw.body.Bytes(),
 					time.Now().Add(idempotencyRetention)); cerr != nil {
 					logIdempotencyError("store response", clientKey, cerr)
@@ -306,6 +335,21 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	return body, nil
+}
+
+// validIdempotencyKey accepts 1 to 255 printable ASCII characters (0x20
+// through 0x7e). The key is an opaque client-chosen token, but it becomes a
+// table value and a log field, so it must be bounded and printable.
+func validIdempotencyKey(key string) bool {
+	if len(key) < 1 || len(key) > 255 {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] < 0x20 || key[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // replayStoredResponse answers with the stored response and marks the replay.
