@@ -93,6 +93,13 @@ type Repository interface {
 	QueueAllocationRequests(ctx context.Context, branchID uuid.UUID, productIDs []uuid.UUID) (int, error)
 	ClaimAllocationRequest(ctx context.Context) (uuid.UUID, bool, error)
 	DeleteAllocationRequest(ctx context.Context, orderID uuid.UUID) error
+
+	// Fulfilment (ADR 0005 5.6).
+	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
+	UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error)
+	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
+	DeliveryOrderID(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error)
+	SpecialOrderUnitCost(ctx context.Context, orderLineID uuid.UUID) (httpx.Price, bool, error)
 	OrderExistsForQuote(ctx context.Context, quoteID uuid.UUID) (bool, error)
 }
 
@@ -1059,4 +1066,78 @@ func (r *PostgresRepository) DeleteAllocationRequest(ctx context.Context, orderI
 		return fmt.Errorf("failed to delete the allocation request: %w", err)
 	}
 	return nil
+}
+
+// LockCustomerCredit serializes the acts that read one customer's credit
+// exposure (a confirm, a release, a fulfilment) with a transaction scoped
+// advisory lock keyed on the customer, taken right after the order row. It is
+// not a row lock, so it adds no edge to the lock order of ADR 0005 section 11:
+// the only acts that take it are those three, and each takes inventory rows in
+// the one order after it.
+func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, customerID.String()); err != nil {
+		return fmt.Errorf("failed to serialize the customer's credit acts: %w", err)
+	}
+	return nil
+}
+
+// UnbilledRemainderCents is the order's total less the totals of its invoices
+// not in void, clamped at zero (ADR 0005 5.3).
+func (r *PostgresRepository) UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error) {
+	var n int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT COALESCE(GREATEST(
+			ROUND(o.total_amount * 100)::bigint
+			- COALESCE((SELECT SUM(ROUND(i.total_amount * 100)::bigint) FROM invoices i
+			            WHERE i.order_id = o.id AND i.status <> 'VOID'), 0), 0), 0)
+		FROM orders o WHERE o.id = $1`, orderID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read the unbilled remainder: %w", err)
+	}
+	return n, nil
+}
+
+// BranchLocalDate is the branch's local calendar date at the instant (the
+// business date of ADR 0005 section 8.1).
+func (r *PostgresRepository) BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error) {
+	var d time.Time
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT ($1::timestamptz AT TIME ZONE COALESCE((SELECT timezone FROM locations WHERE id = $2), 'UTC'))::date`,
+		at, branchID).Scan(&d)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read the branch's date: %w", err)
+	}
+	return d, nil
+}
+
+// DeliveryOrderID answers the order a delivery belongs to.
+func (r *PostgresRepository) DeliveryOrderID(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error) {
+	var orderID *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT order_id FROM deliveries WHERE id = $1`, deliveryID).Scan(&orderID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && orderID == nil) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("failed to read the delivery: %w", err)
+	}
+	return *orderID, true, nil
+}
+
+// SpecialOrderUnitCost is the unit cost of the received purchase order line
+// linked to an order line (ADR 0005 8.4), as a scale 4 price; false when none
+// is received yet.
+func (r *PostgresRepository) SpecialOrderUnitCost(ctx context.Context, orderLineID uuid.UUID) (httpx.Price, bool, error) {
+	var cost *int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT ROUND(cost * 10000)::bigint FROM purchase_order_lines
+		WHERE linked_so_line_id = $1 AND COALESCE(qty_received, 0) > 0
+		ORDER BY created_at, id LIMIT 1`, orderLineID).Scan(&cost)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cost == nil) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to read the special order cost: %w", err)
+	}
+	return httpx.Price(*cost), true, nil
 }

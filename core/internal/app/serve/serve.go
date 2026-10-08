@@ -438,7 +438,9 @@ func Run() {
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
 		WithAuditLog(auditLog).
-		WithPriceEngine(&priceEngineAdapter{pricing: pricingSvc, customers: customerSvc})
+		WithPriceEngine(&priceEngineAdapter{pricing: pricingSvc, customers: customerSvc}).
+		WithInventory(inventorySvc).
+		WithInvoices(invoiceSvc)
 	wall.orders(mux, orderSvc)
 	// The charge code master (ADR 0005 section 2.5), contract born.
 	chargecode.NewHandler(chargecode.NewService(chargecode.NewRepository(db))).

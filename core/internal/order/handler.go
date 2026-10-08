@@ -41,6 +41,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PUT /api/v1/orders/{id}", guard(h.HandleUpdateOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/transitions", guard(h.HandleTransition))
 	mux.HandleFunc("POST /api/v1/orders/{id}/allocate", guard(h.HandleAllocate))
+	mux.HandleFunc("POST /api/v1/orders/{id}/fulfillments", guard(h.HandleFulfil))
 	mux.HandleFunc("GET /api/v1/orders/{id}/exposure-gate", guard(h.HandleExposureGate))
 	mux.HandleFunc("POST /api/v1/orders/{id}/exposure-override", guard(h.HandleExposureOverride))
 }
@@ -461,4 +462,76 @@ func (h *Handler) HandleAllocate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOrder(w, http.StatusOK, o)
+}
+
+// FulfilBody is the body of POST /orders/{id}/fulfillments (ADR 0005 5.6).
+type FulfilBody struct {
+	Revision   json.RawMessage `json:"revision"`
+	Lines      []FulfilEntry   `json:"lines"`
+	PickedUpBy *string         `json:"picked_up_by"`
+	DeliveryID *string         `json:"delivery_id"`
+}
+
+// FulfilEntry names one order line and the quantity to bill.
+type FulfilEntry struct {
+	OrderLineID *string         `json:"order_line_id"`
+	Quantity    json.RawMessage `json:"quantity"`
+}
+
+// HandleFulfil bills the allocated quantities: 201 with the updated order (its
+// new revision in the body and the ETag) and Location naming the invoice.
+func (h *Handler) HandleFulfil(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var body FulfilBody
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	v := &httpx.Validator{}
+	var revision *int64
+	if n, ok := v.Int("revision", body.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		revision = &n
+	}
+	req := FulfilRequest{Actor: actor(r)}
+	for i, e := range body.Lines {
+		path := fmt.Sprintf("lines[%d]", i)
+		var entry FulfilLineRequest
+		if lineID, ok := v.UUID(path+".order_line_id", e.OrderLineID, true); ok {
+			entry.OrderLineID = lineID
+		}
+		if q, ok := v.Quantity(path+".quantity", e.Quantity, true); ok {
+			entry.Quantity = q
+		}
+		req.Lines = append(req.Lines, entry)
+	}
+	if body.Lines != nil && len(body.Lines) == 0 {
+		v.Check(false, "lines", "must name at least one line, or be left out to fulfil everything allocated")
+	}
+	if body.PickedUpBy != nil {
+		req.PickedUpBy = *body.PickedUpBy
+	}
+	if id, ok := v.UUID("delivery_id", body.DeliveryID, false); ok {
+		req.DeliveryID = &id
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	pre := Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}
+	res, err := h.service.Fulfil(r.Context(), id, &pre, req)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/invoices/"+res.InvoiceID.String())
+	writeOrder(w, http.StatusCreated, res.Order)
 }

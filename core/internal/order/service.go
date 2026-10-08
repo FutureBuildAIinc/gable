@@ -92,6 +92,7 @@ type Service struct {
 	tax       TaxProvider
 	exposure  ExposureGate
 	inventory Inventory
+	invoices  InvoiceWriter
 	overrider ExposureOverrider
 	audit     *audit.Logger
 	logger    *slog.Logger
