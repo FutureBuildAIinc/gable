@@ -1390,6 +1390,59 @@ func TestIdempotencyScheduler_EnabledByDefault(t *testing.T) {
 	}
 }
 
+// Stop must cancel the purge job's context, so a batch still running at
+// shutdown stops before step 4 closes the database pool underneath it, and
+// must wait for the cron engine to drain rather than returning while a job
+// is still in flight (P2-3).
+func TestIdempotencyScheduler_StopCancelsJobContext(t *testing.T) {
+	s := newIdempotencySchedulerWithSettings(nil, &fakeIdempotencySettings{values: map[string]string{}})
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start(): %v", err)
+	}
+	if s.jobCtx == nil || s.jobCtx.Err() != nil {
+		t.Fatalf("job context must be live while the scheduler runs")
+	}
+	s.Stop()
+	if s.jobCtx.Err() == nil {
+		t.Fatalf("Stop must cancel the job context so an in-flight purge stops before the pool closes")
+	}
+	s.Stop() // safe to call twice
+}
+
+// A cancelled job context deletes nothing: the purge loop stops at the first
+// cancelled batch rather than running on against a pool shutdown is about to
+// close.
+func TestIdempotencyScheduler_PurgeStopsOnCancellation(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+
+	key := newKey()
+	_, err := db.Pool.Exec(ctx,
+		`INSERT INTO idempotency_keys (principal, key, fingerprint, claim_id, state, expires_at)
+		 VALUES ('purge-test', $1, 'fp', $2, 'complete', now() - interval '1 hour')`,
+		key, uuid.NewString())
+	if err != nil {
+		t.Fatalf("seed expired row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM idempotency_keys WHERE principal = 'purge-test' AND key = $1`, key)
+	})
+
+	s := newIdempotencySchedulerWithSettings(db, &fakeIdempotencySettings{values: map[string]string{}})
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	s.runPurge(cancelled)
+
+	var left int
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM idempotency_keys WHERE principal = 'purge-test' AND key = $1`, key).Scan(&left); err != nil {
+		t.Fatalf("count after cancelled purge: %v", err)
+	}
+	if left != 1 {
+		t.Fatalf("rows after a cancelled purge = %d, want 1 (a cancelled job deletes nothing)", left)
+	}
+}
+
 func TestIdempotencyScheduler_OptOutAndBadCron(t *testing.T) {
 	s := newIdempotencySchedulerWithSettings(nil, &fakeIdempotencySettings{values: map[string]string{
 		settingIdempotencyPurgeEnabled: "false",
