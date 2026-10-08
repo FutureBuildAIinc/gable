@@ -16,17 +16,26 @@ info:
 security:
   - BearerJWT: []
 tags:
+  - name: a2a
   - name: accounts
   - name: activities
+  - name: admin
+  - name: apps
+  - name: configurator
   - name: customer
+  - name: dashboard
   - name: delivery
   - name: deposits
+  - name: documents
+  - name: governance
   - name: health
   - name: integration
   - name: inventory
   - name: invoice
   - name: location
+  - name: millwork
   - name: order
+  - name: parsing
   - name: partner
   - name: payment
   - name: portal
@@ -34,10 +43,97 @@ tags:
   - name: product
   - name: project
   - name: quote
+  - name: reporting
   - name: sales-team
   - name: uploads
   - name: vendors
+  - name: vision
 paths:
+  /api/v1/a2a/purchase-order:
+    post:
+      operationId: a2aPurchaseOrderReceive
+      tags: [a2a]
+      summary: Receive a signed create_purchase_order event from FB Brain
+      description: >-
+        Order of checks, exactly as the receiver runs them. (1) The body is read up to 1 MiB; anything beyond that is silently truncated, which makes the signature fail. (2) X-JWS-Signature must be present, else 401. (3) X-Idempotency-Key must be present, else 400. (4) The signature must be a compact detached JWS (RS256 only) that verifies over the raw request body with Brain's RSA public key, else 401 "invalid JWS signature". (5) The key is looked up in the a2a_inbound_po_log table; a key already logged is a 409 DUPLICATE (the receiver's own check, in addition to the global idempotency layer). (6) The body must be JSON, else 400. (7) An event_type other than create_purchase_order is acknowledged with 200 {"status": "ignored"} and nothing is created. (8) payload must decode into the purchase order payload and its vendor_id must be a UUID, else 400. The purchase order is created through the purchase order service with source A2A, stamped with the branch from the brain_inbound_branch_id system setting (falling back to default_branch_id); a failure is a 500. On success the webhook is logged against the idempotency key (a failure to log is only logged, the answer stays 201) and the answer is 201 {"status":"created","po_id"}. The key is recorded only after a successful creation, so a failed attempt can be retried with the same key. The global idempotency layer (the Idempotency-Key or X-Idempotency-Key header) only claims requests that carry an identifiable principal; this route has no JWT, so outside AUTH_MODE=dev the global layer passes it through uncached, and under AUTH_MODE=dev it claims under the dev principal and may answer 409 (in progress) or 422 (key reused with a different body) in the standard envelope. There is no role guard and no JWT.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: X-JWS-Signature
+          in: header
+          required: true
+          description: >-
+            A compact detached JWS (header..signature, empty payload segment) signed RS256 over the exact request body bytes, verifiable with the configured Brain public key. A missing header is a 401, an unparseable or non verifying signature is a 401.
+          schema:
+            type: string
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          description: >-
+            The receiver's own duplicate key, checked against the a2a_inbound_po_log table. The same header name is also read by the global idempotency layer as an alias of Idempotency-Key. A missing header is a 400 (after the signature header check, before the signature verification).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: >-
+          The signed body; the signature covers these exact bytes, so a re-serialization breaks it.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/A2aInboundPOWebhook"
+      responses:
+        "200":
+          description: The event type is not create_purchase_order; acknowledged and ignored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aIgnoredResponse"
+        "201":
+          description: The purchase order was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aCreatedResponse"
+        "400":
+          description: >-
+            VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body not JSON, payload not a purchase order payload, or vendor_id not a UUID. The global idempotency layer can also answer 400 in the standard envelope under AUTH_MODE=dev.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/A2aError"
+                  - $ref: "#/components/schemas/Error"
+        "401":
+          description: >-
+            UNAUTHORIZED: missing X-JWS-Signature header, or a signature that does not parse or verify against Brain's public key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aError"
+        "404":
+          description: >-
+            The route is not mounted (FB Brain disabled or no loadable public key): the mux's own plain text 404, not an error envelope.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "409":
+          description: >-
+            DUPLICATE: the X-Idempotency-Key was already processed (the receiver's body), or, under AUTH_MODE=dev only, the global layer's in progress claim in the standard envelope.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/A2aError"
+                  - $ref: "#/components/schemas/Error"
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500":
+          description: >-
+            INTERNAL_ERROR: the idempotency lookup failed or the purchase order could not be created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aError"
   /api/v1/accounts/{id}:
     get:
       operationId: accountSummary
@@ -195,6 +291,656 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/admin/keys:
+    get:
+      operationId: adminListKeys
+      tags: [admin]
+      summary: List machine API keys
+      description: >-
+        Admin or owner only. Newest first, revoked keys included. Not paginated. Answers null, not an empty array, when there are no keys. Only the 12 character prefix identifies a key; the secret is never retrievable.
+      responses:
+        "200":
+          description: Every key, or null when none exist.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/TechAdminKey"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: adminCreateKey
+      tags: [admin]
+      summary: Create a machine API key
+      description: >-
+        Admin or owner only. The raw key (sk_live_ followed by 43 URL safe base64 characters) is returned here and nowhere else; only its salted Argon2 hash is stored. Success is a 200, not a 201. Neither name nor scopes is validated; omitted scopes are stored as null.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TechAdminCreateKeyRequest"
+      responses:
+        "200":
+          description: The new key record and the raw key, shown once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechAdminCreateKeyResponse"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/keys/{id}:
+    delete:
+      operationId: adminRevokeKey
+      tags: [admin]
+      summary: Revoke a machine API key
+      description: >-
+        Admin or owner only. Sets revoked_at; the row is kept. Unknown ids and already revoked keys are a 204 too (an UPDATE that matches nothing is not an error). A malformed id the database refuses is a 500. DELETE is outside the idempotency layer.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Revoked; no body.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/settings/ai:
+    get:
+      operationId: adminGetAISettings
+      tags: [admin]
+      summary: Show the OpenRouter key status
+      description: >-
+        Admin or owner only. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and is absent when no key is configured. base_url is present only when an admin override is stored, never for the environment or built in default.
+      responses:
+        "200":
+          description: The key status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechAdminSettingsStatus"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      operationId: adminSaveAISettings
+      tags: [admin]
+      summary: Save the OpenRouter key and base URL
+      description: >-
+        Admin or owner only. The key is stored and never echoed back. base_url absent or null leaves the stored override alone; an empty string clears the override; any other value must be an absolute https URL (plain http only for loopback hosts) or the call is a 400 and nothing, key included, is saved. A key is required. A 500 also answers when the key store is not wired.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TechAdminSaveAISettingsRequest"
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechAdminSaveResult"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      operationId: adminDeleteAISettings
+      tags: [admin]
+      summary: Remove the stored OpenRouter key and base URL override
+      description: >-
+        Admin or owner only. Deletes the admin stored key and the base URL override together, so both revert to the environment or default. DELETE is outside the idempotency layer.
+      responses:
+        "204":
+          description: Removed; no body.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/settings/routing:
+    get:
+      operationId: adminGetRoutingSettings
+      tags: [admin]
+      summary: Show the OpenRouteService key status
+      description: >-
+        Admin or owner only. Same shape and masking as the AI settings, key only: key_hint is the first 10 and last 4 characters (four asterisks for a key of 12 characters or fewer), and base_url is never present.
+      responses:
+        "200":
+          description: The key status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechAdminSettingsStatus"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      operationId: adminSaveRoutingSettings
+      tags: [admin]
+      summary: Save the OpenRouteService key
+      description: >-
+        Admin or owner only. The key is stored and never echoed back. A key is required (400). A 500 also answers when the key store is not wired.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TechAdminSaveRoutingSettingsRequest"
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechAdminSaveResult"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      operationId: adminDeleteRoutingSettings
+      tags: [admin]
+      summary: Remove the stored OpenRouteService key
+      description: >-
+        Admin or owner only. Deletes the admin stored key so the environment value, if any, applies again. DELETE is outside the idempotency layer.
+      responses:
+        "204":
+          description: Removed; no body.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/modules:
+    get:
+      operationId: adminListModules
+      tags: [admin]
+      summary: List the integration modules and their global flag
+      description: >-
+        Admin or owner only. A fixed catalog (today only ai_lm); enabled is true only when the modules.<id>.enabled setting is exactly true.
+      responses:
+        "200":
+          description: The modules. Never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StaffModule"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/modules/{id}:
+    put:
+      operationId: adminSetModuleEnabled
+      tags: [admin]
+      summary: Switch an integration module on or off globally
+      description: >-
+        Admin or owner only. Writes the modules.<id>.enabled setting for any id, known or not, and revokes access for every staff member at once when switched off without deleting grants. The id is not checked against the catalog. The response echoes the id and the new flag with an empty name.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffSetModuleEnabledRequest"
+      responses:
+        "200":
+          description: The module with its new flag; name is always the empty string here.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffModule"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/staff:
+    get:
+      operationId: adminListStaff
+      tags: [admin]
+      summary: List the staff roster
+      description: >-
+        Admin or owner only. Ordered by full name, with each member's raw module grants. Not paginated. Never null.
+      responses:
+        "200":
+          description: The roster.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StaffMember"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: adminCreateStaff
+      tags: [admin]
+      summary: Add a staff member
+      description: >-
+        Admin or owner only. Email and full_name are required (400 when empty). Role defaults to staff and active to true. A duplicate email the database refuses surfaces as a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffCreateRequest"
+      responses:
+        "201":
+          description: The created member, with an empty modules array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/staff/{id}:
+    get:
+      operationId: adminGetStaff
+      tags: [admin]
+      summary: Get a staff member
+      description: Admin or owner only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The member with its raw module grants.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    put:
+      operationId: adminUpdateStaff
+      tags: [admin]
+      summary: Update a staff member
+      description: >-
+        Admin or owner only. A partial update: absent or null fields are left unchanged (a null staff_no cannot clear the stored value). An empty body returns the current record, or 404 when the id is unknown.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffUpdateRequest"
+      responses:
+        "200":
+          description: The updated member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/staff/{id}/modules:
+    post:
+      operationId: adminGrantStaffModule
+      tags: [admin]
+      summary: Grant a module to a staff member
+      description: >-
+        Admin or owner only. Idempotent at the database (a repeat grant is a no-op) and audit logged. The module id is not checked against the catalog. An unknown staff id is refused by the database and is a 500. When the re-read of the member fails after the grant, the answer is still 200 with the bare status object granted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffGrantModuleRequest"
+      responses:
+        "200":
+          description: The member with its grants, or the bare status object.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/StaffMember"
+                  - $ref: "#/components/schemas/StaffModuleStatus"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/staff/{id}/modules/{module_id}:
+    delete:
+      operationId: adminRevokeStaffModule
+      tags: [admin]
+      summary: Revoke a module from a staff member
+      description: >-
+        Admin or owner only. Idempotent and audit logged; an unknown staff id or a grant that does not exist still succeeds, with the bare status object revoked (the re-read finds no member). DELETE is outside the idempotency layer.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: module_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The member with its remaining grants, or the bare status object.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/StaffMember"
+                  - $ref: "#/components/schemas/StaffModuleStatus"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/admin/exposure-scan:
+    post:
+      operationId: adminExposureScan
+      tags: [admin]
+      summary: Run the price exposure safety net scan now
+      description: >-
+        The route guard admits admin, owner and sales; the handler then refuses all but admin and owner with a 403, judging by the first role of the token (the role claim, else the first of the roles array). In dev auth mode the caller is treated as owner. The body is ignored and optional. The scan runs synchronously to completion.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The scan finished.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminExposureScanResult"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/apps:
+    get:
+      operationId: appsList
+      tags: [apps]
+      summary: List the app catalog with live enablement
+      description: >-
+        Any authenticated role (the web client builds its navigation from it); no role guard. The catalog is the union of the compiled in manifests and orphaned database rows, sorted by category then name. An empty catalog on a fresh database triggers one self heal sync, so the list is never null.
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppsList"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/apps/{key}/enable:
+    post:
+      operationId: appsEnable
+      tags: [apps]
+      summary: Enable an app
+      description: >-
+        Admin or owner only (a 403 for any other role). Every app the target depends on must be enabled, except core dependencies which are always treated as enabled; otherwise the answer is a 409 with the blockers. Answers the full catalog after the change. Enabling an already enabled app succeeds again.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The catalog after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppsList"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: >-
+            The key names no compiled in manifest, or the manifest has no registry row. The standard error envelope with the generic text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: >-
+            Either a disabled dependency blocks the enable (the hand written app_dependency_conflict body with the blockers), or the idempotency layer reports an in progress claim (the standard envelope).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsDependencyConflictError"
+                  - $ref: "#/components/schemas/Error"
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/apps/{key}/disable:
+    post:
+      operationId: appsDisable
+      tags: [apps]
+      summary: Disable an app
+      description: >-
+        Admin or owner only (a 403 for any other role). A core app cannot be disabled (409 app_core), and an app that another enabled app depends on cannot be disabled (409 app_dependency_conflict with the dependents as blockers). Disabled apps do not block. Answers the full catalog after the change. The effect on the app's routes follows within the gate cache window.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The catalog after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppsList"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: >-
+            The key names no compiled in manifest, or the manifest has no registry row. The standard error envelope with the generic text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: >-
+            A core app (app_core), a dependent enabled app (app_dependency_conflict), or an idempotency in progress claim (the standard envelope).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsCoreConflictError"
+                  - $ref: "#/components/schemas/AppsDependencyConflictError"
+                  - $ref: "#/components/schemas/Error"
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/configurator/rules:
+    get:
+      operationId: configuratorListRules
+      tags: [configurator]
+      summary: List every configurator rule
+      description: Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+      responses:
+        "200":
+          description: The full rule set.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfiguratorRule"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/configurator/options:
+    get:
+      operationId: configuratorListOptions
+      tags: [configurator]
+      summary: List the allowed values of one attribute
+      description: >-
+        Admin, owner or sales. Every query parameter other than attribute_type is read as a current selection (attribute type to chosen value, first value wins), for example attribute_type=Grade&Species=SYP. With no selections, or when no rule matches them, the static defaults for the attribute are answered (an empty array for an unknown attribute). Otherwise the order of the options is unspecified.
+      parameters:
+        - name: attribute_type
+          in: query
+          required: true
+          description: The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The values with their allowed flag. Never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfiguratorAvailableOption"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/configurator/presets:
+    get:
+      operationId: configuratorListPresets
+      tags: [configurator]
+      summary: List the active presets
+      description: Admin, owner or sales. Active presets only, ordered by name. Never null.
+      parameters:
+        - name: product_type
+          in: query
+          required: false
+          description: Exact match on the preset's product type; absent or empty lists all.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The presets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfiguratorPreset"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/configurator/validate:
+    post:
+      operationId: configuratorValidate
+      tags: [configurator]
+      summary: Validate a set of selections against the rules
+      description: >-
+        Admin, owner or sales. The body is capped at 64 KiB; an oversized or malformed body is a 400, as is an empty selections map. A rule conflict is a 200 with valid false and the conflicts listed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfiguratorValidateRequest"
+      responses:
+        "200":
+          description: The verdict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfiguratorValidateResponse"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/configurator/build-sku:
+    post:
+      operationId: configuratorBuildSku
+      tags: [configurator]
+      summary: Build a non stock SKU from selections
+      description: >-
+        Admin, owner or sales. The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict, and any other service failure including a database fault, answers 400 (never 500). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfiguratorBuildSKURequest"
+      responses:
+        "200":
+          description: The generated SKU and description.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfiguratorBuildSKUResponse"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
   /api/v1/customers:
     get:
       operationId: customerList
@@ -599,6 +1345,129 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PriceLevelList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/summary:
+    get:
+      operationId: dashboardSummary
+      tags: [dashboard]
+      summary: The dashboard KPIs
+      description: >-
+        Roles admin, owner, finance, scoped to the X-Branch-Id branch (all branches for an admin with no header). A failure is a 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The KPIs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/inventory-alerts:
+    get:
+      operationId: dashboardInventoryAlerts
+      tags: [dashboard]
+      summary: Products at or below their reorder point
+      description: >-
+        Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The alerts, an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardInventoryAlert"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/top-customers:
+    get:
+      operationId: dashboardTopCustomers
+      tags: [dashboard]
+      summary: The top five customers by invoiced revenue in the last 30 days
+      description: Roles admin, owner, finance, branch scoped. Customers with no invoiced revenue are left out.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ranked customers, an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardTopCustomer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/order-activity:
+    get:
+      operationId: dashboardOrderActivity
+      tags: [dashboard]
+      summary: The ten newest orders and the 30 day status breakdown
+      description: Roles admin, owner, finance, branch scoped. An order with no customer shows Walk-In as its customer name.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The activity feed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardOrderActivity"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/revenue-trend:
+    get:
+      operationId: dashboardRevenueTrend
+      tags: [dashboard]
+      summary: Daily collected revenue for the last seven days
+      description: Roles admin, owner, finance, branch scoped. Oldest day first; a day with no payments is absent, not zero.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The points, an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardRevenueTrendPoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1508,6 +2377,192 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/documents/print/invoice/{id}:
+    get:
+      operationId: documentsPrintInvoice
+      tags: [documents]
+      summary: Print an invoice as PDF
+      description: >-
+        Renders the invoice and its customer to a PDF and answers the bytes inline (Content-Type application/pdf, Content-Disposition "inline; filename=invoice.pdf"). Requires one of the roles admin, owner, sales or finance. A path id that is not a UUID is a 400; an unknown invoice or an unknown customer on the invoice is a 404 (any lookup error maps to 404); a PDF generation failure is a 500.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The invoice id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=invoice.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/documents/print/pickticket/{id}:
+    get:
+      operationId: documentsPrintPickticket
+      tags: [documents]
+      summary: Print an order pick ticket as PDF
+      description: >-
+        Renders the order and its customer to a pick ticket PDF and answers the bytes inline (Content-Type application/pdf, Content-Disposition "inline; filename=pickticket.pdf"). Requires one of the roles admin, owner, sales or finance. A path id that is not a UUID is a 400; an unknown order or an unknown customer on the order is a 404 (any lookup error maps to 404); a PDF generation failure is a 500.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The order id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The pick ticket as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=pickticket.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/governance/rfcs:
+    get:
+      operationId: governanceListRfcs
+      tags: [governance]
+      summary: List RFCs
+      description: >-
+        Admin or owner only. Newest first. Not paginated. Answers null, not an empty array, when there are no RFCs.
+      responses:
+        "200":
+          description: Every RFC, or null when none exist.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/GovernanceRFC"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: governanceCreateRfc
+      tags: [governance]
+      summary: Draft an RFC
+      description: >-
+        Admin or owner only. The content is expanded from a fixed Markdown template (no model is called). The new RFC is always status draft. The request keys are the Go field names matched case insensitively; the snake_case spelling of ProblemStatement, ProposedSolution and AuthorID is ignored without an error.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceCreateRFCRequest"
+      responses:
+        "201":
+          description: The drafted RFC.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceRFC"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/governance/rfcs/{id}:
+    get:
+      operationId: governanceGetRfc
+      tags: [governance]
+      summary: Get an RFC
+      description: >-
+        Admin or owner only. Any lookup failure, including a database fault, answers 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The RFC.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceRFC"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: >-
+            The RFC does not exist (or the lookup failed), or the governance app is disabled (the app_disabled body). The standard envelope in the first case.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/AppsDisabledError"
+        "500": {$ref: "#/components/responses/InternalError"}
+    put:
+      operationId: governanceUpdateRfc
+      tags: [governance]
+      summary: Replace an RFC's editable fields
+      description: >-
+        Admin or owner only. A full overwrite: title, status, problem statement, proposed solution and content are all set from the body, so an omitted key blanks the stored value. Status is not validated by the handler; a value outside the database's allowed set surfaces as a 500. An unknown id is a 500, not a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceUpdateRFCRequest"
+      responses:
+        "200":
+          description: The updated RFC.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceRFC"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /healthz/live:
     get:
       operationId: healthLive
@@ -2596,6 +3651,62 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/millwork/options:
+    get:
+      operationId: millworkListOptions
+      tags: [millwork]
+      summary: List the options of a category
+      description: >-
+        Admin, owner or sales. Ordered by name. Not paginated. Answers null, not an empty array, when the category has no options.
+      parameters:
+        - name: category
+          in: query
+          required: true
+          description: Exact match on the category column. An empty or missing value is a 400.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The options, or null when none match.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/MillworkOption"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: millworkCreateOption
+      tags: [millwork]
+      summary: Create an option
+      description: >-
+        Admin, owner or sales. No field is validated by the handler; a value the table refuses (a category over 50 characters, a name over 100) surfaces as a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MillworkCreateOptionRequest"
+      responses:
+        "201":
+          description: The created option.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkOption"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/AppDisabled"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/orders:
     get:
       operationId: orderList
@@ -2849,6 +3960,42 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/parsing/upload:
+    post:
+      operationId: parsingUpload
+      tags: [parsing]
+      summary: Parse a material list upload into catalog matched items
+      description: >-
+        Accepts multipart/form-data with one file field named file: an image, a PDF, a CSV or an xlsx spreadsheet (a name ending .xlsx or .xls whose sniffed type is octet-stream or zip is treated as a spreadsheet and converted to tab separated text before extraction; an unreadable spreadsheet is a 400). The whole request body is capped at 10 MiB by the server's request size middleware and the file read at 10 MiB; a body over the cap, an unparseable form or a missing file field is a 400. Requires the role admin, owner or sales. Extracted lines are matched against the whole product catalog. When the AI extractor is unavailable (OPENROUTER_API_KEY unset, the default, or the call failed) the response is still 200 but items is a fixed demo list, not the file's contents, and synthetic is true with synthetic_reason filled. source_image is always a base64 data URI of the real upload. A catalog or extraction failure is a 500.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The material list file (image, PDF, CSV or xlsx), at most 10 MiB.
+      responses:
+        "200":
+          description: The matched items, or a synthetic demo list when extraction is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParsingParseResponse"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /api/partner/v1/dashboard:
     get:
       operationId: partnerDashboard
@@ -5980,6 +7127,510 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/reporting/builder/preview:
+    post:
+      operationId: reportingBuilderPreview
+      tags: [reporting]
+      summary: Run an ad hoc report definition and return the rows
+      description: >-
+        Roles admin, owner, finance. Builds a parameterised query from the definition over one of the entities invoices, orders or inventory and returns at most 1000 rows. A body that is not JSON is a 400. An unknown entity_type, a column, filter or grouping field outside the entity's whitelist, an unsupported aggregation or operator, an empty column list, or a database error are all 500 today. Filter operators are =, !=, >, <, >=, <= and LIKE (matched case insensitively as a contains); aggregations are SUM, COUNT, AVG, MIN and MAX.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingBuilderRequest"
+      responses:
+        "200":
+          description: The rows, or null when the query matched nothing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingRows"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/builder/export:
+    post:
+      operationId: reportingBuilderExport
+      tags: [reporting]
+      summary: Run an ad hoc report definition and download it as CSV or XLSX
+      description: >-
+        Roles admin, owner, finance. Runs the same query as the preview, then renders the rows with the requested columns. The query runs before the format is checked, so an unsupported format is a 400 only when the query itself succeeds; a failing query is a 500 whatever the format. The CSV header row uses each column's label (the field when the label is empty). The attachment file name is fixed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingBuilderExportRequest"
+      responses:
+        "200":
+          description: The rendered report, chosen by the request's format.
+          headers:
+            Content-Disposition:
+              description: 'attachment; filename="report.csv" or attachment; filename="report.xlsx".'
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/export/{entity}:
+    get:
+      operationId: reportingBiEntityExport
+      tags: [reporting]
+      summary: Dump every whitelisted column of an entity as JSON for BI tools
+      description: >-
+        Roles admin, owner only. A SELECT of every whitelisted column of the entity with the builder's 1000 row cap, as JSON (not a file). The key order of each row is not stable. An entity outside invoices, orders and inventory is a 400.
+      parameters:
+        - name: entity
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [invoices, orders, inventory]
+      responses:
+        "200":
+          description: The rows, or null when the entity has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingRows"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/save:
+    post:
+      operationId: reportingSaveReport
+      tags: [reporting]
+      summary: Save a report definition
+      description: >-
+        Roles admin, owner, finance. Answers 200 (not 201) with the stored report. The id and timestamps in the body are ignored; created_by is taken from the token subject when that is a UUID and is the empty string otherwise. A missing definition_json, a name over 128 characters or a database error is a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingSavedReportInput"
+      responses:
+        "200":
+          description: The saved report as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingSavedReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/saved:
+    get:
+      operationId: reportingListSavedReports
+      tags: [reporting]
+      summary: List saved reports
+      description: Roles admin, owner, finance. Newest first, unpaged. A bare array that is null when none exist.
+      responses:
+        "200":
+          description: The saved reports.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/ReportingSavedReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/saved/{id}:
+    get:
+      operationId: reportingGetSavedReport
+      tags: [reporting]
+      summary: Get one saved report
+      description: >-
+        Roles admin, owner, finance. The id is not validated as a UUID; a malformed id and an id that does not exist are both a 500 today, never a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The saved report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingSavedReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: reportingUpdateSavedReport
+      tags: [reporting]
+      summary: Replace a saved report's name, description, entity and definition
+      description: >-
+        Roles admin, owner, finance. Answers 200 with an empty body (the updated report is not returned). Only name, description, entity_type and definition_json are written. An id that does not exist or is not a UUID is a 500, never a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingSavedReportInput"
+      responses:
+        "200":
+          description: Updated; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: reportingDeleteSavedReport
+      tags: [reporting]
+      summary: Delete a saved report
+      description: >-
+        Roles admin, owner, finance. Not covered by the idempotency layer. Deleting an id that does not exist is still a 204. A report that a schedule still references fails the foreign key and is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted; no body.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/saved/{id}/run:
+    post:
+      operationId: reportingRunSavedReport
+      tags: [reporting]
+      summary: Run a saved report now and return its rows
+      description: >-
+        Roles admin, owner, finance. Any failure to load the saved report (not found or a malformed id) is a 404. A stored definition that cannot be parsed, or a query that fails, is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The rows; an empty array (never null) when nothing matched.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReportingRow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/schedules:
+    get:
+      operationId: reportingListSchedules
+      tags: [reporting]
+      summary: List report schedules and say whether schedules run
+      description: Roles admin, owner, finance. Newest first, unpaged. The schedules array is never null.
+      responses:
+        "200":
+          description: The schedules with the execution disclosure block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingScheduleList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: reportingCreateSchedule
+      tags: [reporting]
+      summary: Schedule a saved report for emailed delivery
+      description: >-
+        Roles admin, owner, finance. report_id, cron_expression and at least one recipient are required (400 otherwise). format defaults to CSV and is case insensitive; anything outside CSV, XLSX and PDF is a 400. The cron expression is six fields with seconds first; a five field expression is a 400. The status in the request is ignored: the row is ACTIVE when a scheduler is attached (the shipped server) and STORED otherwise. A report_id that is not a saved report violates the foreign key and is a 500, as is a scheduler that cannot register the row (the row stays saved).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingScheduleCreate"
+      responses:
+        "201":
+          description: The stored schedule with the execution disclosure block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/schedules/{id}:
+    delete:
+      operationId: reportingDeleteSchedule
+      tags: [reporting]
+      summary: Delete a report schedule
+      description: >-
+        Roles admin, owner, finance. Not covered by the idempotency layer. Deletes the row, then unregisters the cron entry. An id that does not exist is still a 204; a malformed id is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted; no body.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/daily-till:
+    get:
+      operationId: reportsDailyTill
+      tags: [reporting]
+      summary: Payments collected on one day, by method
+      description: >-
+        Roles admin, owner, finance. The date defaults to today in the server's time zone. A date that is not YYYY-MM-DD is a 500. The report is cached for 60 seconds per date.
+      parameters:
+        - name: date
+          in: query
+          description: The day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The day's collections.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingDailyTill"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/sales-summary:
+    get:
+      operationId: reportsSalesSummary
+      tags: [reporting]
+      summary: Invoiced, collected and outstanding totals for a period
+      description: >-
+        Roles admin, owner, finance. start defaults to 30 days ago and end to now; end is inclusive of its whole day. A date that is not YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
+      parameters:
+        - name: start
+          in: query
+          description: First day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          description: Last day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The period totals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingSalesSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/ar-aging:
+    get:
+      operationId: reportsArAging
+      tags: [reporting]
+      summary: Open invoice totals by customer and age bucket
+      description: >-
+        Roles admin, owner, finance. Invoices in UNPAID, PARTIAL or OVERDUE status, aged from the due date (the creation date when there is none), largest customer first. Cached for 60 seconds. buckets is null when there are no open invoices.
+      responses:
+        "200":
+          description: The aging report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingArAging"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/customer-statement/{id}:
+    get:
+      operationId: reportsCustomerStatement
+      tags: [reporting]
+      summary: A customer's ledger lines and balances for a period
+      description: >-
+        Roles admin, owner, finance. An id that is not a UUID is a 400. start defaults to one month ago and end to now (inclusive of its whole day); a date that is not YYYY-MM-DD is a 500. A customer that does not exist is not an error: the name is empty and the lines are null. The balances are customer_transactions cents divided by 100 as float dollars. Not cached.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: start
+          in: query
+          description: First day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          description: Last day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The statement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingCustomerStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/exposure:
+    get:
+      operationId: reportsExposure
+      tags: [reporting]
+      summary: Portfolio rollup of open lumber index exposure
+      description: >-
+        Roles admin, owner, sales (registered by internal/pricing). A caller with the sales role and a UUID subject sees only the customers that salesperson owns, and then by_salesperson is empty; every other caller sees the whole portfolio. Only quotes in SENT or ACCEPTED state whose exposure state is not OK count. by_customer is capped at 50 rows. summary=true trims the body to the three totals. The ExposureRow schema of the quote fragment is not used by this route.
+      parameters:
+        - name: summary
+          in: query
+          description: When exactly "true", only the three totals are returned.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The full portfolio, or only the totals when summary=true.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/ReportsExposurePortfolio"
+                  - $ref: "#/components/schemas/ReportsExposureTotals"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/sales-team:
     get:
       operationId: salesTeamList
@@ -6139,6 +7790,35 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/vision/scan:
+    post:
+      operationId: visionScan
+      tags: [vision]
+      summary: Compare blueprint text against configurator selections
+      description: >-
+        Takes simulated blueprint text (a JSON string, not an image) and the user's configurator selections, extracts cross section, length, stud length, spacing, species and treatment with regular expressions, and reports mismatches against the selections. The body is capped at 1 MiB; an undecodable or oversize body, or an empty blueprint_text, is a 400. Requires the role admin or owner. The response is always 200 with mismatches an empty array (never null) when nothing disagrees.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisionBlueprintScanRequest"
+      responses:
+        "200":
+          description: The extracted dimensions and any mismatches.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionBlueprintScanResponse"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
 components:
   securitySchemes:
     BearerJWT:
@@ -6267,6 +7947,13 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/IntegrationError"
+    AppDisabled:
+      description: >-
+        The route belongs to an app that is disabled on this instance. Written by the registry gate before the handler or its role guard runs, in a hand written body with no meta block. Applies to every route of a non core app (millwork and configurator under the millwork key, governance).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppsDisabledError"
     IntegrationBadRequest:
       description: The body or a parameter is malformed.
       content:
@@ -6361,6 +8048,90 @@ components:
             last_checked_at:
               type: [string, "null"]
               format: date-time
+    A2aInboundPOWebhook:
+      type: object
+      description: >-
+        Go type purchase_order.InboundPOWebhook (github.com/gablelbm/gable/internal/purchase_order), the A2A webhook envelope. No field is validated at this level except that the body is JSON; for event_type create_purchase_order the payload must decode as purchase_order.A2APurchaseOrderPayload (vendor_id, lines, requested_by, project_id, rfq_ref) and vendor_id must be a UUID. Only vendor_id and the line product_id, description, quantity and cost are used to create the order; the other fields are logged or ignored.
+      properties:
+        event_type:
+          type: string
+          description: Only create_purchase_order is processed; any other value is acknowledged and ignored.
+        payload:
+          type: object
+          description: >-
+            For create_purchase_order, purchase_order.A2APurchaseOrderPayload.
+          properties:
+            vendor_id:
+              type: string
+              format: uuid
+            lines:
+              type: array
+              items:
+                $ref: "#/components/schemas/A2aPurchaseOrderLine"
+            requested_by:
+              type: string
+            project_id:
+              type: string
+            rfq_ref:
+              type: string
+        trace_id:
+          type: string
+        idempotency_key:
+          type: string
+          description: Carried in the envelope and ignored; the X-Idempotency-Key header is what the receiver uses.
+        timestamp:
+          type: string
+        iss:
+          type: string
+    A2aPurchaseOrderLine:
+      type: object
+      description: >-
+        Go type purchase_order.A2APurchaseOrderLine (github.com/gablelbm/gable/internal/purchase_order). quantity is a unit quantity and cost a per unit cost in float dollars.
+      properties:
+        product_id:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: number
+        cost:
+          type: number
+    A2aCreatedResponse:
+      type: object
+      description: >-
+        Inline map in ReceiveWebhook with the keys status (created) and po_id.
+      required: [status, po_id]
+      properties:
+        status:
+          type: string
+          enum: [created]
+        po_id:
+          type: string
+          format: uuid
+    A2aIgnoredResponse:
+      type: object
+      description: >-
+        Inline map in ReceiveWebhook with the single key status (ignored).
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ignored]
+    A2aError:
+      type: object
+      description: >-
+        The receiver's own error body (writeError in a2a_receiver.go): code and message only, no meta object.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [VALIDATION_ERROR, UNAUTHORIZED, DUPLICATE, INTERNAL_ERROR]
+            message:
+              type: string
     AccountSummary:
       type: object
       required:
@@ -6490,6 +8261,408 @@ components:
         activity_date:
           type: string
           format: date-time
+    TechAdminKey:
+      type: object
+      required: [id, name, prefix, scopes, created_at, last_used_at, revoked_at]
+      description: >-
+        Go type techadmin.APIKey. The hash field is tagged out of the JSON and never serialized. prefix is the first 12 characters of the raw key (sk_live_ plus four).
+      properties:
+        id:
+          type: string
+          description: A database UUID rendered as text.
+        name:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          type: [array, "null"]
+          items:
+            type: string
+          description: Null when the key was created without scopes.
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+    TechAdminCreateKeyRequest:
+      type: object
+      description: Go type techadmin.CreateKeyRequest. Nothing is validated.
+      properties:
+        name:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+    TechAdminCreateKeyResponse:
+      type: object
+      required: [api_key, key]
+      description: Go type techadmin.CreateKeyResponse.
+      properties:
+        api_key:
+          type: string
+          description: The raw secret key, returned this once and never retrievable again.
+        key:
+          oneOf:
+            - $ref: "#/components/schemas/TechAdminKey"
+            - type: "null"
+    TechAdminSettingsStatus:
+      type: object
+      required: [configured, source]
+      description: >-
+        Go type techadmin.AISettingsResponse, used by both the AI and routing settings. The key itself is never present. key_hint and base_url are omitted when empty.
+      properties:
+        configured:
+          type: boolean
+        source:
+          type: string
+          enum: [admin, env, none]
+          description: admin when a database override holds the key, env when only the environment does, none when unset.
+        key_hint:
+          type: string
+          description: First 10 and last 4 characters of the key joined by three dots, or four asterisks for a key of 12 characters or fewer.
+        base_url:
+          type: string
+          description: The admin override of the OpenRouter base URL; AI settings only.
+    TechAdminSaveAISettingsRequest:
+      type: object
+      required: [api_key]
+      description: The anonymous request struct of SaveAISettings.
+      properties:
+        api_key:
+          type: string
+          minLength: 1
+          description: The OpenRouter key. Never returned by any route.
+        base_url:
+          type: [string, "null"]
+          description: Absent or null leaves the override as is; empty clears it; otherwise an absolute https URL (http only for loopback hosts).
+    TechAdminSaveRoutingSettingsRequest:
+      type: object
+      required: [api_key]
+      description: The anonymous request struct of SaveRoutingSettings.
+      properties:
+        api_key:
+          type: string
+          minLength: 1
+          description: The OpenRouteService key. Never returned by any route.
+    TechAdminSaveResult:
+      type: object
+      required: [status]
+      description: The map literal both save routes answer.
+      properties:
+        status:
+          type: string
+          enum: [saved]
+    StaffMember:
+      type: object
+      required: [id, email, full_name, role, active, created_at, updated_at, modules]
+      description: >-
+        Go type staff.Staff. staff_no is a pointer with omitempty, absent when unset. modules is the raw set of granted module ids, not filtered by the global enable flag.
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        full_name:
+          type: string
+        staff_no:
+          type: string
+        role:
+          type: string
+          description: A free text label, default staff; it does not govern module access.
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        modules:
+          type: array
+          items:
+            type: string
+    StaffCreateRequest:
+      type: object
+      required: [email, full_name]
+      description: Go type staff.CreateStaffInput. Empty email or full_name is a 400.
+      properties:
+        email:
+          type: string
+          minLength: 1
+        full_name:
+          type: string
+          minLength: 1
+        staff_no:
+          type: [string, "null"]
+        role:
+          type: string
+          description: Defaults to staff when empty.
+        active:
+          type: [boolean, "null"]
+          description: Defaults to true when absent or null.
+    StaffUpdateRequest:
+      type: object
+      description: Go type staff.UpdateStaffInput. Absent or null means leave unchanged.
+      properties:
+        email:
+          type: [string, "null"]
+        full_name:
+          type: [string, "null"]
+        staff_no:
+          type: [string, "null"]
+        role:
+          type: [string, "null"]
+        active:
+          type: [boolean, "null"]
+    StaffGrantModuleRequest:
+      type: object
+      required: [module_id]
+      description: The unexported grantModuleRequest struct. An empty module_id is a 400.
+      properties:
+        module_id:
+          type: string
+          minLength: 1
+    StaffModuleStatus:
+      type: object
+      required: [status]
+      description: The bare map literal answered when the member re-read fails after a grant or revoke.
+      properties:
+        status:
+          type: string
+          enum: [granted, revoked]
+    StaffModule:
+      type: object
+      required: [id, name, enabled]
+      description: Go type staff.Module.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        enabled:
+          type: boolean
+    StaffSetModuleEnabledRequest:
+      type: object
+      description: The unexported setModuleEnabledRequest struct. An absent flag means false.
+      properties:
+        enabled:
+          type: boolean
+    AdminExposureScanResult:
+      type: object
+      required: [ok]
+      description: The map literal HandleAdminScan answers.
+      properties:
+        ok:
+          type: boolean
+    AppsManifestStatus:
+      type: object
+      required: [key, name, summary, category, core, depends_on, enabled]
+      description: >-
+        One catalog entry (Go type apps.Status, which embeds apps.Manifest). orphaned is present, and true, only for registry rows with no compiled in manifest; it is omitted otherwise.
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        category:
+          type: string
+        core:
+          type: boolean
+          description: Core apps cannot be disabled.
+        depends_on:
+          type: array
+          items:
+            type: string
+          description: App keys that must be enabled for this app to be enabled.
+        enabled:
+          type: boolean
+        orphaned:
+          type: boolean
+    AppsList:
+      type: object
+      required: [apps]
+      description: The envelope every apps route answers (a map literal in the handler).
+      properties:
+        apps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppsManifestStatus"
+    AppsDisabledError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [app_disabled]
+            message:
+              type: string
+    AppsCoreConflictError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [app_core]
+            message:
+              type: string
+              description: The specific text, for example core apps cannot be disabled followed by the quoted key.
+    AppsDependencyConflictError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, blockers]
+          properties:
+            code:
+              type: string
+              enum: [app_dependency_conflict]
+            message:
+              type: string
+            blockers:
+              type: array
+              items:
+                type: string
+              description: Sorted keys of the disabled dependencies (on enable) or the enabled dependents (on disable).
+    ConfiguratorRule:
+      type: object
+      required: [id, attribute_type, attribute_value, depends_on_type, depends_on_value, is_allowed, created_at, updated_at]
+      description: >-
+        Go type configurator.ConfiguratorRule. error_message is a pointer with omitempty, so it is absent when the database value is null.
+      properties:
+        id:
+          type: string
+          format: uuid
+        attribute_type:
+          type: string
+        attribute_value:
+          type: string
+        depends_on_type:
+          type: string
+        depends_on_value:
+          type: string
+        is_allowed:
+          type: boolean
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ConfiguratorPreset:
+      type: object
+      required: [id, name, product_type, config, is_active, created_at, updated_at]
+      description: >-
+        Go type configurator.ConfiguratorPreset. config is a Go byte slice, so it serializes as a base64 string of the stored JSON text, not as a JSON object. description is a pointer with omitempty, absent when null.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        product_type:
+          type: string
+        config:
+          type: [string, "null"]
+          contentEncoding: base64
+          contentMediaType: application/json
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ConfiguratorAvailableOption:
+      type: object
+      required: [value, allowed]
+      description: Go type configurator.AvailableOption. message is omitted when empty.
+      properties:
+        value:
+          type: string
+        allowed:
+          type: boolean
+        message:
+          type: string
+          description: Why the value is disallowed.
+    ConfiguratorValidateRequest:
+      type: object
+      required: [selections]
+      description: Go type configurator.ValidateConfigRequest. An empty map is a 400.
+      properties:
+        selections:
+          type: object
+          additionalProperties:
+            type: string
+          description: Attribute type to chosen value, for example Species to SYP.
+    ConfiguratorValidationConflict:
+      type: object
+      required: [attribute_type, attribute_value, depends_on_type, depends_on_value, message]
+      description: Go type configurator.ValidationConflict.
+      properties:
+        attribute_type:
+          type: string
+        attribute_value:
+          type: string
+        depends_on_type:
+          type: string
+        depends_on_value:
+          type: string
+        message:
+          type: string
+    ConfiguratorValidateResponse:
+      type: object
+      required: [valid]
+      description: Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none.
+      properties:
+        valid:
+          type: boolean
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConfiguratorValidationConflict"
+    ConfiguratorBuildSKURequest:
+      type: object
+      required: [product_type, selections]
+      description: Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400.
+      properties:
+        product_type:
+          type: string
+          description: Lumber, Door, Trim or Panel map to LBR, DR, TRM and PNL; any other value is upper cased and cut to three characters.
+        selections:
+          type: object
+          additionalProperties:
+            type: string
+    ConfiguratorBuildSKUResponse:
+      type: object
+      required: [sku, description]
+      description: Go type configurator.BuildSKUResponse.
+      properties:
+        sku:
+          type: string
+        description:
+          type: string
     Customer:
       type: object
       required: [id, primary_branch_id, name, account_number, tier, credit_limit, balance_due, is_active, created_at, updated_at]
@@ -6654,6 +8827,113 @@ components:
         activity_date:
           type: string
           format: date-time
+    DashboardSummary:
+      type: object
+      description: dashboard.DashboardSummary. Money is int64 cents.
+      required: [today_revenue, today_revenue_change, active_orders, pending_dispatch, outstanding_ar, outstanding_ar_count]
+      properties:
+        today_revenue:
+          type: integer
+          format: int64
+          description: Cents collected today.
+        today_revenue_change:
+          type: number
+          description: Percentage change against yesterday; 0 when yesterday collected nothing.
+        active_orders:
+          type: integer
+        pending_dispatch:
+          type: integer
+        outstanding_ar:
+          type: integer
+          format: int64
+          description: Cents.
+        outstanding_ar_count:
+          type: integer
+    DashboardInventoryAlert:
+      type: object
+      description: dashboard.InventoryAlert.
+      required: [product_id, sku, name, current_qty, reorder_qty, alert_type]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+          description: The product description column.
+        current_qty:
+          type: integer
+        reorder_qty:
+          type: integer
+        alert_type:
+          type: string
+          enum: [LOW_STOCK, OUT_OF_STOCK]
+        location_id:
+          type: string
+          format: uuid
+          description: Absent when the product has no inventory row.
+    DashboardTopCustomer:
+      type: object
+      description: dashboard.TopCustomer. Money is int64 cents.
+      required: [customer_id, customer_name, total_revenue, order_count]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        total_revenue:
+          type: integer
+          format: int64
+          description: Cents.
+        order_count:
+          type: integer
+    DashboardRecentOrder:
+      type: object
+      description: dashboard.RecentOrder. total_amount is int64 cents.
+      required: [order_id, customer_name, total_amount, status, created_at]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        total_amount:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    DashboardOrderActivity:
+      type: object
+      description: dashboard.OrderActivity.
+      required: [recent_orders, status_breakdown]
+      properties:
+        recent_orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRecentOrder"
+        status_breakdown:
+          type: object
+          description: Order count per status over the last 30 days.
+          additionalProperties:
+            type: integer
+    DashboardRevenueTrendPoint:
+      type: object
+      description: dashboard.RevenueTrendPoint. revenue is int64 cents.
+      required: [date, revenue]
+      properties:
+        date:
+          type: string
+          format: date
+        revenue:
+          type: integer
+          format: int64
+          description: Cents.
     DeliveryVehicle:
       type: object
       description: Transcribed from delivery.Vehicle. The expiry and service dates are stored as dates and serialized as date-times.
@@ -7503,6 +9783,65 @@ components:
         invoice_id:
           type: string
           format: uuid
+    GovernanceRFC:
+      type: object
+      required: [id, title, status, problem_statement, proposed_solution, content, author_id, created_at, updated_at]
+      description: Go type governance.RFC.
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+          enum: [draft, review, approved, rejected]
+        problem_statement:
+          type: string
+        proposed_solution:
+          type: string
+        content:
+          type: string
+          description: Markdown.
+        author_id:
+          type: [string, "null"]
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GovernanceCreateRFCRequest:
+      type: object
+      description: >-
+        Go type governance.CreateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored.
+      properties:
+        Title:
+          type: string
+        ProblemStatement:
+          type: string
+        ProposedSolution:
+          type: string
+        AuthorID:
+          type: [string, "null"]
+          format: uuid
+    GovernanceUpdateRFCRequest:
+      type: object
+      description: >-
+        Go type governance.UpdateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored. Every field is written, so an omitted key becomes the empty string.
+      properties:
+        Title:
+          type: string
+        Status:
+          type: string
+          description: Stored as sent; the handler does not check it against the status vocabulary (draft, review, approved, rejected).
+        ProblemStatement:
+          type: string
+        ProposedSolution:
+          type: string
+        Content:
+          type: string
     HealthReadyOK:
       type: object
       required: [status, uptime, checks]
@@ -8270,6 +10609,42 @@ components:
       type: [array, "null"]
       items:
         type: string
+    MillworkOption:
+      type: object
+      required: [id, category, name, price_adjustment, attributes, created_at, updated_at]
+      description: Go type millwork.MillworkOption.
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+        name:
+          type: string
+        price_adjustment:
+          type: number
+          description: Float dollars today.
+        attributes:
+          description: Any JSON value stored as sent (an object in practice); null when the create request omitted it.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MillworkCreateOptionRequest:
+      type: object
+      description: Go type millwork.CreateOptionRequest.
+      properties:
+        category:
+          type: string
+        name:
+          type: string
+        price_adjustment:
+          type: number
+          description: Float dollars today; absent means 0.
+        attributes:
+          description: Any JSON value; stored as sent. Absent is stored as null.
     OrderStatus:
       type: string
       enum: [DRAFT, CONFIRMED, FULFILLED, CANCELLED, ON_HOLD]
@@ -8444,6 +10819,70 @@ components:
           type: integer
         offset:
           type: integer
+    ParsingParseResponse:
+      type: object
+      description: Go type parsing.ParseResponse (github.com/gablelbm/gable/internal/parsing).
+      required: [items, source_image, parse_time_ms, item_count, synthetic]
+      properties:
+        items:
+          type: [array, "null"]
+          description: Null when no line was extracted (an append built slice).
+          items:
+            $ref: "#/components/schemas/ParsingParsedItem"
+        source_image:
+          type: string
+          description: A data URI, data:<sniffed content type>;base64,<upload bytes>.
+        parse_time_ms:
+          type: integer
+          format: int64
+        item_count:
+          type: integer
+        synthetic:
+          type: boolean
+          description: True when items is the fixed demo list rather than the upload's contents.
+        synthetic_reason:
+          type: string
+          description: Present only when synthetic is true.
+    ParsingParsedItem:
+      type: object
+      description: Go type parsing.ParsedItem (github.com/gablelbm/gable/internal/parsing).
+      required: [raw_text, quantity, uom, confidence, is_special_order]
+      properties:
+        raw_text:
+          type: string
+        matched_product:
+          $ref: "#/components/schemas/ParsingMatchedProduct"
+        quantity:
+          type: number
+        uom:
+          type: string
+        confidence:
+          type: number
+          description: 0.0 to 1.0.
+        is_special_order:
+          type: boolean
+        alternatives:
+          type: array
+          description: Up to three runner up products; absent when none.
+          items:
+            $ref: "#/components/schemas/ParsingMatchedProduct"
+    ParsingMatchedProduct:
+      type: object
+      description: Go type parsing.MatchedProduct (github.com/gablelbm/gable/internal/parsing).
+      required: [product_id, sku, description, uom, base_price]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        uom:
+          type: string
+        base_price:
+          type: number
+          description: Float dollars today.
     PartnerDashboard:
       type: object
       required: [balance_due, credit_limit]
@@ -11152,6 +13591,409 @@ components:
         estimated_new_total:
           type: number
           description: Float dollars.
+    ReportingColumn:
+      type: object
+      description: reporting.ReportColumn (request only). Field must be a whitelisted column of the entity.
+      properties:
+        field:
+          type: string
+        label:
+          type: string
+        aggregation:
+          type: string
+          description: SUM, COUNT, AVG, MIN or MAX, case insensitive; empty for none.
+    ReportingFilter:
+      type: object
+      description: reporting.ReportFilter (request only).
+      properties:
+        field:
+          type: string
+        operator:
+          type: string
+          enum: ["=", "!=", ">", "<", ">=", "<=", LIKE]
+        value:
+          description: Any JSON value, bound as a query parameter.
+    ReportingGrouping:
+      type: object
+      description: reporting.ReportGrouping (request only).
+      properties:
+        field:
+          type: string
+    ReportingDefinition:
+      type: object
+      description: reporting.ReportDefinition (request only).
+      properties:
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingColumn"
+        filters:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingFilter"
+        groupings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingGrouping"
+    ReportingBuilderRequest:
+      type: object
+      description: The anonymous preview request struct.
+      properties:
+        entity_type:
+          type: string
+          enum: [invoices, orders, inventory]
+        definition:
+          $ref: "#/components/schemas/ReportingDefinition"
+    ReportingBuilderExportRequest:
+      type: object
+      description: The anonymous export request struct.
+      properties:
+        entity_type:
+          type: string
+          enum: [invoices, orders, inventory]
+        format:
+          type: string
+          enum: [csv, xlsx]
+          description: Lower case only; anything else is a 400.
+        definition:
+          $ref: "#/components/schemas/ReportingDefinition"
+    ReportingRow:
+      type: object
+      description: >-
+        One result row keyed by the requested field names. Values are whatever pgx decodes: strings, numbers (numeric as a JSON number), booleans, RFC 3339 timestamps, null, and a uuid column as an array of 16 integers.
+      additionalProperties: true
+    ReportingRows:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/ReportingRow"
+    ReportingSavedReportInput:
+      type: object
+      description: >-
+        reporting.SavedReport read as a request. Only name, description, entity_type and definition_json are used.
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        description:
+          type: string
+        entity_type:
+          type: string
+        definition_json:
+          type: object
+          additionalProperties: true
+          description: Required in practice; the column is NOT NULL.
+    ReportingSavedReport:
+      type: object
+      description: reporting.SavedReport. The timestamps are Postgres ::text strings.
+      required: [id, name, description, entity_type, definition_json, created_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        entity_type:
+          type: string
+        definition_json:
+          type: object
+          additionalProperties: true
+        created_by:
+          type: string
+          description: A user UUID, or the empty string when no author is recorded.
+        created_at:
+          type: string
+          description: Postgres timestamptz text, for example 2026-01-02 03:04:05.678+00.
+        updated_at:
+          type: string
+          description: Postgres timestamptz text.
+    ReportingScheduleCreate:
+      type: object
+      description: reporting.ReportSchedule read as a request. status and the timestamps are ignored.
+      required: [report_id, cron_expression, recipients]
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        cron_expression:
+          type: string
+          description: Six fields, seconds first; descriptors such as @daily are accepted.
+        recipients:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        format:
+          type: string
+          description: CSV, XLSX or PDF, case insensitive; empty means CSV.
+    ReportingSchedule:
+      type: object
+      description: reporting.ReportSchedule. The timestamps are Postgres ::text strings.
+      required: [id, report_id, cron_expression, recipients, status, format, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        report_id:
+          type: string
+          format: uuid
+        cron_expression:
+          type: string
+        recipients:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          description: ACTIVE when a scheduler is attached, STORED when none is.
+        format:
+          type: string
+          enum: [CSV, XLSX, PDF]
+        last_run_at:
+          type: string
+          description: Absent until the first run. Postgres timestamptz text.
+        next_run_at:
+          type: string
+          description: Absent until the first run. Postgres timestamptz text.
+        created_at:
+          type: string
+          description: Postgres timestamptz text.
+        updated_at:
+          type: string
+          description: Postgres timestamptz text.
+    ReportingScheduleExecution:
+      type: object
+      description: reporting.ScheduleExecution.
+      required: [enabled, summary, cron_dialect]
+      properties:
+        enabled:
+          type: boolean
+        summary:
+          type: string
+        blockers:
+          type: array
+          items:
+            type: string
+          description: Present only when enabled is false.
+        delivery:
+          type: string
+          description: Present only when enabled is true.
+        cron_dialect:
+          type: string
+    ReportingScheduleResponse:
+      type: object
+      description: reporting.ReportScheduleResponse.
+      required: [schedule, execution]
+      properties:
+        schedule:
+          $ref: "#/components/schemas/ReportingSchedule"
+        execution:
+          $ref: "#/components/schemas/ReportingScheduleExecution"
+    ReportingScheduleList:
+      type: object
+      description: reporting.ReportScheduleListResponse.
+      required: [schedules, execution]
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingSchedule"
+        execution:
+          $ref: "#/components/schemas/ReportingScheduleExecution"
+    ReportingDailyTill:
+      type: object
+      description: reporting.DailyTillReport. Amounts are float dollars.
+      required: [date, total_collected, by_method, transaction_count]
+      properties:
+        date:
+          type: string
+          format: date
+        total_collected:
+          type: number
+        by_method:
+          type: object
+          description: Dollars collected per payment method.
+          additionalProperties:
+            type: number
+        transaction_count:
+          type: integer
+    ReportingSalesSummary:
+      type: object
+      description: reporting.SalesSummaryReport. Amounts are float dollars.
+      required: [start_date, end_date, total_invoiced, total_collected, outstanding_ar, invoice_count]
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        total_invoiced:
+          type: number
+        total_collected:
+          type: number
+        outstanding_ar:
+          type: number
+        invoice_count:
+          type: integer
+    ReportingArAgingBucket:
+      type: object
+      description: reporting.ARAgingBucket. Amounts are float dollars.
+      required: [customer_id, customer_name, current, days_31_60, days_61_90, over_90, total]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+          description: Unknown when the customer row is missing.
+        current:
+          type: number
+          description: 0 to 30 days.
+        days_31_60:
+          type: number
+        days_61_90:
+          type: number
+        over_90:
+          type: number
+        total:
+          type: number
+    ReportingArAging:
+      type: object
+      description: reporting.ARAgingReport. Amounts are float dollars.
+      required: [as_of_date, buckets, total_current, total_31_60, total_61_90, total_over_90, grand_total]
+      properties:
+        as_of_date:
+          type: string
+          format: date
+        buckets:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ReportingArAgingBucket"
+        total_current:
+          type: number
+        total_31_60:
+          type: number
+        total_61_90:
+          type: number
+        total_over_90:
+          type: number
+        grand_total:
+          type: number
+    ReportingStatementLine:
+      type: object
+      description: reporting.StatementLine. Amounts are float dollars (ledger cents divided by 100).
+      required: [date, type, description, debit, credit, balance]
+      properties:
+        date:
+          type: string
+          format: date
+        type:
+          type: string
+        description:
+          type: string
+        debit:
+          type: number
+        credit:
+          type: number
+        balance:
+          type: number
+    ReportingCustomerStatement:
+      type: object
+      description: reporting.CustomerStatement. Balances are float dollars.
+      required: [customer_id, customer_name, start_date, end_date, open_balance, close_balance, lines]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        open_balance:
+          type: number
+        close_balance:
+          type: number
+        lines:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ReportingStatementLine"
+    ReportsExposureCustomerRow:
+      type: object
+      description: pricing.PortfolioCustomerRow. exposure_dollars is float dollars.
+      required: [customer_id, customer_name, quote_count, exposure_dollars, policy, last_activity_at]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        quote_count:
+          type: integer
+        exposure_dollars:
+          type: number
+        top_index_code:
+          type: string
+          description: Absent when no active escalator exists.
+        policy:
+          type: string
+        last_activity_at:
+          type: string
+          format: date-time
+          description: 0001-01-01T00:00:00Z when no quote has been checked.
+    ReportsExposureSalespersonRow:
+      type: object
+      description: pricing.PortfolioSalespersonRow. exposure_dollars is float dollars.
+      required: [salesperson_id, salesperson_name, quote_count, exposure_dollars, flagged_count, ack_required_count]
+      properties:
+        salesperson_id:
+          type: string
+          format: uuid
+        salesperson_name:
+          type: string
+        quote_count:
+          type: integer
+        exposure_dollars:
+          type: number
+        flagged_count:
+          type: integer
+        ack_required_count:
+          type: integer
+    ReportsExposurePortfolio:
+      type: object
+      description: pricing.PortfolioSummary. exposure_dollars is float dollars.
+      required: [total_exposure_dollars, total_quotes, total_customers, by_customer, by_salesperson]
+      properties:
+        total_exposure_dollars:
+          type: number
+        total_quotes:
+          type: integer
+        total_customers:
+          type: integer
+        by_customer:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportsExposureCustomerRow"
+        by_salesperson:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportsExposureSalespersonRow"
+    ReportsExposureTotals:
+      type: object
+      description: The hand built map the handler writes when summary=true.
+      required: [total_exposure_dollars, total_quotes, total_customers]
+      properties:
+        total_exposure_dollars:
+          type: number
+        total_quotes:
+          type: integer
+        total_customers:
+          type: integer
     SalesPerson:
       type: object
       required: [id, name, email, phone, role, is_active, created_at, updated_at]
@@ -11258,4 +14100,54 @@ components:
           type:
             - string
             - 'null'
+    VisionBlueprintScanRequest:
+      type: object
+      description: >-
+        Go type vision.BlueprintScanRequest (github.com/gablelbm/gable/internal/vision). Unknown fields are ignored.
+      required: [blueprint_text]
+      properties:
+        blueprint_text:
+          type: string
+          minLength: 1
+          description: Simulated text extracted from a blueprint PDF; empty is a 400.
+        config_selections:
+          type: [object, "null"]
+          description: >-
+            The configurator choices, keyed by name. The keys the comparison reads are Species, Dimensions (for example "2x6-10") and Treatment. Absent or null skips the mismatch check.
+          additionalProperties:
+            type: string
+    VisionBlueprintScanResponse:
+      type: object
+      description: Go type vision.BlueprintScanResponse (github.com/gablelbm/gable/internal/vision).
+      required: [extracted_dimensions, mismatches, summary]
+      properties:
+        extracted_dimensions:
+          type: object
+          description: >-
+            Zero or more of cross_section ("2x4"), length ("10'"), stud_length ("10'"), spacing ("16\" OC"), species (SYP, Douglas Fir, Cedar, SPF, Hem-Fir) and treatment ("Treatable").
+          additionalProperties:
+            type: string
+        mismatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisionMismatch"
+        summary:
+          type: string
+    VisionMismatch:
+      type: object
+      description: Go type vision.Mismatch (github.com/gablelbm/gable/internal/vision).
+      required: [field, blueprint_value, config_value, severity, message]
+      properties:
+        field:
+          type: string
+          description: Species, Dimensions, Length or Treatment.
+        blueprint_value:
+          type: string
+        config_value:
+          type: string
+        severity:
+          type: string
+          enum: [warning, error]
+        message:
+          type: string
 
