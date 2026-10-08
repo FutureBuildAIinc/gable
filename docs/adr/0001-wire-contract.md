@@ -94,15 +94,27 @@ The cursor is keyset friendly by construction: the handler resumes with a
 filters, which is index friendly and stable under concurrent inserts, unlike
 offsets.
 
+An ordering's columns are NOT NULL and bounded, or the ordering uses a
+surrogate key (for example `created_at, id`): a nullable column and a
+column holding the empty string have no keyset position to mint. Text
+sort keys sort on a bounded projection (the first N characters), so a
+long name or description cannot make a cursor unmintable. The handler
+parses each decoded key part to its column type, and a parse failure is
+a 400 on `cursor`; the package carries the typed decode helpers for the
+two column types orderings actually use, timestamps (RFC 3339 UTC with
+the Z) and UUIDs (canonical lowercase hyphenated).
+
 A cursor that is absent means first page. A cursor that is present but
 broken is a 400, never quietly treated as the first page: the client must be
 told its token is unusable, because silently winding it back to the head of
 the list would hand it a second copy of rows it may already have processed.
 Malformed means:
-not decodable base64url in canonical form, not well-formed JSON of exactly
-the three fields, a version other than 1, a missing or non-matching ordering
-scope, an empty keyset, keyset parts that are empty or carry control
-characters, or a decoded size over the package's bound.
+not decodable base64url in canonical form, not the canonical JSON form of
+exactly the three fields (byte for byte what minting emits: case-variant
+field names, duplicated fields, and trailing bytes are all refused), a
+version other than 1, a missing or non-matching ordering
+scope, an empty keyset, keyset parts that are empty, not valid UTF-8, or
+carry control characters, or a decoded size over the package's bound.
 
 The cursor is strictly validated, not signed. An HMAC was considered and
 rejected for now: it would couple every core instance to a shared secret
@@ -110,7 +122,13 @@ with a rotation story that invalidates in-flight cursors, and it buys little
 here because a forged cursor can only seek within the same ordering scope
 and the same server-side filters; it is a pagination token, not a
 credential. If cursors ever carry more authority than a row position, that
-decision is reopened.
+decision is reopened. Row visibility is never derived from the cursor:
+branch walls, roles, and filters are re-applied from the request on every
+page, which is what makes the unsigned choice safe.
+
+Event consumers persist `GET /events` cursors across deploys, so a format
+version bump on that feed keeps decoding the previous version through the
+transition; the bump itself is a listed contract change.
 
 `limit` is strict too: an integer between 1 and 200, default 50. A malformed
 or out-of-range limit is a 400 naming the field. Quietly clamping a bad
