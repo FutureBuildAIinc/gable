@@ -35,7 +35,7 @@ The docs surface:
 | `docs/production-external-services-roadmap.md` | Self-hosting decisions for AI + routing |
 | `.do/README.md` | Deploy notes for the Digital Ocean examples |
 | `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md` | Contributor templates |
-| `app/README.md` | Frontend-specific notes |
+| `web/apps/desk/README.md` | Frontend-specific notes |
 
 If they don't know where it lives:
 
@@ -55,8 +55,8 @@ Never "fix" a doc by making it read better. Fix it by making it **true**.
 
 ```bash
 make up && make migrate && DEMO_SEED=1 make seed
-cd backend && go run ./cmd/server
-cd app && npm install && npm run dev
+cd core && go run ./cmd/server
+cd web/apps/desk && npm install && npm run dev
 ```
 
 If a documented command fails, that failure *is* the bug and the corrected command is the
@@ -65,24 +65,24 @@ fix. Paste the real error in the PR.
 **If it's a path or filename**, check it exists:
 
 ```bash
-ls backend/internal/order/ app/src/lib/utils.ts docs/architecture.md
+ls core/internal/order/ web/apps/desk/src/lib/utils.ts docs/architecture.md
 ```
 
 **If it's a claim about behaviour**, find it in the code:
 
 ```bash
-grep -rn "AUTH_MODE" backend/internal/config/config.go backend/pkg/middleware/auth.go
-grep -n "formatCents" app/src/lib/utils.ts
-grep -n "DefaultTaxRate" backend/internal/invoice/*.go
+grep -rn "AUTH_MODE" core/internal/config/config.go core/pkg/middleware/auth.go
+grep -n "formatCents" web/apps/desk/src/lib/utils.ts
+grep -n "DefaultTaxRate" core/internal/invoice/*.go
 ```
 
 **If it's a port, a version, or a default**, check the source of truth:
 
-- Postgres port → `docker-compose.yml` and `backend/internal/config/config.go` (it's **5434**
+- Postgres port → `docker-compose.yml` and `core/internal/config/config.go` (it's **5434**
   locally, not 5432)
-- Go version → `backend/go.mod` and `.github/workflows/ci.yml`
+- Go version → `core/go.mod` and `.github/workflows/ci.yml`
 - Node version → `.github/workflows/ci.yml`
-- npm scripts → `app/package.json`
+- npm scripts → `web/apps/desk/package.json`
 - Branch names → `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/ci.yml`
 
 ### Known drift worth checking for
@@ -101,8 +101,8 @@ These are real inconsistencies that a docs contributor can legitimately fix:
   [`community`]". That's stale — but `CLAUDE.md` is a high-traffic file, so fix it in its own
   small PR with the evidence, don't bundle it.
 - **Coverage claims.** Check them against reality rather than repeating them:
-  `find app/src -name '*.test.ts' | wc -l` and, for the backend,
-  `for d in backend/internal/*/; do [ -z "$(ls $d*_test.go 2>/dev/null)" ] && echo "$d"; done`.
+  `find web/apps/desk/src -name '*.test.ts' | wc -l` and, for the backend,
+  `for d in core/internal/*/; do [ -z "$(ls $d*_test.go 2>/dev/null)" ] && echo "$d"; done`.
 - **Gate lists.** Any doc listing the pre-flight commands must match the `Makefile` and
   `.github/workflows/ci.yml`. `make help` prints the current set. Note that `govulncheck` is
   an **advisory** job (`continue-on-error`, plus a nightly run), not a merge gate — a doc

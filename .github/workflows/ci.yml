@@ -65,24 +65,24 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: backend/go.sum
+          cache-dependency-path: core/go.sum
 
       - name: Vet
-        working-directory: backend
+        working-directory: core
         run: go vet ./...
 
       - name: Build
-        working-directory: backend
+        working-directory: core
         run: go build ./...
 
       - name: Migrate test database
-        working-directory: backend
+        working-directory: core
         run: go run ./cmd/migrate
 
       # Coverage is collected here rather than in a separate run so the suite is
       # only executed once. `-covermode=atomic` is required by `-race`.
       - name: Test (with coverage)
-        working-directory: backend
+        working-directory: core
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       # REPORTING ONLY — there is deliberately NO coverage threshold, here or
@@ -92,7 +92,7 @@ jobs:
       # be imposed as a round number.
       - name: Backend coverage summary
         if: always()
-        working-directory: backend
+        working-directory: core
         run: |
           if [ ! -f coverage.out ]; then
             echo "## Backend coverage" >> "$GITHUB_STEP_SUMMARY"
@@ -124,8 +124,8 @@ jobs:
         with:
           name: backend-coverage
           path: |
-            backend/coverage.out
-            backend/coverage-func.txt
+            core/coverage.out
+            core/coverage-func.txt
           if-no-files-found: warn
           retention-days: 14
 
@@ -141,37 +141,37 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: web/apps/desk/package-lock.json
 
       - name: Install dependencies
-        working-directory: app
+        working-directory: web/apps/desk
         run: npm ci
 
       - name: Type check
-        working-directory: app
+        working-directory: web/apps/desk
         run: npx tsc --noEmit
 
       - name: Lint
-        working-directory: app
+        working-directory: web/apps/desk
         run: npm run lint
 
       # Prefers the coverage-instrumented script. The fallback keeps this job
       # green on branches where `test:coverage` has not been added to
-      # app/package.json yet.
+      # web/apps/desk/package.json yet.
       - name: Test (with coverage)
-        working-directory: app
+        working-directory: web/apps/desk
         run: |
           if node -e "const s=require('./package.json').scripts||{};process.exit(s['test:coverage']?0:1)"; then
             npm run test:coverage
           else
-            echo "::warning::app/package.json has no \"test:coverage\" script; running \"npm run test\" without coverage."
+            echo "::warning::web/apps/desk/package.json has no \"test:coverage\" script; running \"npm run test\" without coverage."
             npm run test -- --run
           fi
 
       # REPORTING ONLY — see the note on the backend coverage step. No threshold.
       - name: Frontend coverage summary
         if: always()
-        working-directory: app
+        working-directory: web/apps/desk
         run: |
           {
             echo "## Frontend coverage"
@@ -194,12 +194,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage
-          path: app/coverage
+          path: web/apps/desk/coverage
           if-no-files-found: warn
           retention-days: 14
 
       - name: Build
-        working-directory: app
+        working-directory: web/apps/desk
         run: npm run build
 
   license:
@@ -240,10 +240,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build backend image
-        run: docker build -f backend/Dockerfile .
+        run: docker build -f core/Dockerfile .
 
       - name: Build frontend image
-        run: docker build -f app/Dockerfile .
+        run: docker build -f web/apps/desk/Dockerfile .
 
   # ---------------------------------------------------------------------------
   # Advisory. NOT a merge gate.
@@ -276,14 +276,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: backend/go.sum
+          cache-dependency-path: core/go.sum
 
       - name: Install govulncheck (pinned)
         run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
 
       - name: Run govulncheck
         id: govulncheck
-        working-directory: backend
+        working-directory: core
         run: |
           set +e
           govulncheck ./... > govulncheck.txt 2>&1
@@ -314,6 +314,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: govulncheck-report
-          path: backend/govulncheck.txt
+          path: core/govulncheck.txt
           if-no-files-found: warn
           retention-days: 30

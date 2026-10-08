@@ -9,4 +9,4 @@
 .claude/
 docs/
 **/*.md
-backend/server_bin
+core/server_bin

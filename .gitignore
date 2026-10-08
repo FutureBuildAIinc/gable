@@ -1,6 +1,6 @@
 # Environment files. Only the `.env.example` templates are tracked; copy one to
 # `.env` locally. The frontend works with no `.env` at all — an unset
-# VITE_API_URL routes through the Vite proxy (see app/.env.example).
+# VITE_API_URL routes through the Vite proxy (see web/apps/desk/.env.example).
 **/.env
 **/.env.*
 !**/.env.example
@@ -9,11 +9,11 @@
 docker-compose.override.yml
 
 # Build artifacts
-backend/server
-backend/server_bin
-backend/main
-backend/migrate
-backend/seed
+core/server
+core/server_bin
+core/main
+core/migrate
+core/seed
 *.log
 
 # Stray binary that ended up committed at the repo root — do not re-add.
@@ -41,7 +41,7 @@ node_modules/
 dist/
 
 # Coverage & CI reports. These are produced by `make cover` / `make fe-cover`
-# and by the backend/frontend jobs in .github/workflows/ci.yml, which upload
+# and by the core/frontend jobs in .github/workflows/ci.yml, which upload
 # them as build artifacts. They are never committed.
 coverage.out
 coverage-func.txt

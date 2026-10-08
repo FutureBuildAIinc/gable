@@ -9,12 +9,12 @@ Gable's own source is licensed **per component** under the OpenLBM Standard —
 see [`LICENSE-MAP.md`](./LICENSE-MAP.md) and [`LICENSES/`](./LICENSES/). The
 notices below cover **external** dependencies only.
 
-The lists were generated from `backend/go.mod` / `go list -m all` and
-`app/package.json`. Versions drift over time — regenerate when upgrading:
+The lists were generated from `core/go.mod` / `go list -m all` and
+`web/apps/desk/package.json`. Versions drift over time — regenerate when upgrading:
 
 ```bash
-cd backend && go list -m all           # Go modules
-cat app/package.json                   # npm packages
+cd core && go list -m all           # Go modules
+cat web/apps/desk/package.json                   # npm packages
 ```
 
 ---

@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 
 ## Affected area
 
-Which part of Gable? (e.g. `backend/internal/order`, `app/` POS surface, a
+Which part of Gable? (e.g. `core/internal/order`, `web/apps/desk/` POS surface, a
 migration, the `.do/` deploy examples). Naming the component from
 `LICENSE-MAP.md` helps us route it.
 

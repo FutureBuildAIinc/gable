@@ -28,16 +28,16 @@
 # ---------------------------------------------------------------------------
 # Components (mirrors LICENSE-MAP.md)
 # ---------------------------------------------------------------------------
-/backend/                   @FutureBuildAIinc/backend
-/app/                       @FutureBuildAIinc/frontend
+/core/                       @FutureBuildAIinc/backend
+/web/apps/desk/               @FutureBuildAIinc/frontend
 /docs/                      @FutureBuildAIinc/docs
 
 # The connector seam is the third-party integration boundary and is licensed
 # differently (Connector, not Commons) — changes here need maintainer eyes.
-/backend/pkg/apps/          @FutureBuildAIinc/backend @FutureBuildAIinc/maintainers
+/core/pkg/apps/              @FutureBuildAIinc/backend @FutureBuildAIinc/maintainers
 
 # Database migrations are append-only and irreversible in production.
-/backend/migrations/        @FutureBuildAIinc/backend @FutureBuildAIinc/maintainers
+/core/migrations/            @FutureBuildAIinc/backend @FutureBuildAIinc/maintainers
 
 # ---------------------------------------------------------------------------
 # CI / release plumbing
@@ -46,8 +46,8 @@
 /.do/                       @FutureBuildAIinc/infra
 /docker-compose.yml         @FutureBuildAIinc/infra
 /Makefile                   @FutureBuildAIinc/maintainers
-/backend/Dockerfile         @FutureBuildAIinc/infra
-/app/Dockerfile             @FutureBuildAIinc/infra
+/core/Dockerfile             @FutureBuildAIinc/infra
+/web/apps/desk/Dockerfile     @FutureBuildAIinc/infra
 
 # ---------------------------------------------------------------------------
 # Licensing and legal — maintainer approval always required.
