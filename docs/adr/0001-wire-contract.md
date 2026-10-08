@@ -64,6 +64,13 @@ Every route that returns a collection returns:
   tables a costly one, which is why it is opt-in and not part of every page.
   The count is a snapshot of the moment the count query ran; under concurrent
   writes it can disagree with the pages that follow it.
+- `include` is a comma separated list of names, and `total` is the first of
+  them; later expansions (an inventory rows' product summary, for example)
+  join it as converting modules need them, each name listed in the route's
+  contract. Every list route accepts exactly `cursor`, `limit`, and
+  `include`, so the strict query guard's allowed set is the same three
+  names on every list, and a client never meets a list route that forgets
+  one.
 
 Offset pagination (`offset`, `offset` echoes, bare `data` arrays, `null`
 collections) does not survive module conversion: cursor pagination replaces
@@ -347,20 +354,42 @@ for people, not a counter for audits (the created row's audit trail carries
 its own identifiers). Numbers are unique per entity per database, which is
 the tenancy unit.
 
+An entity may instead declare gapless numbering, minted from a counter row
+locked inside the minting transaction: a rolled back create returns the
+number to the sequence. Whether invoices and credit memos need this is an
+accountant's question, and cycle 2's money design answers it; quotes and
+orders take the gapped sequence.
+
+The number is stored as text with a unique index, because record URLs look
+documents up by number. A module checks for an existing number column
+before minting a new one (`ap_invoices.invoice_number` exists today) and
+either adopts it or lists the collision in `docs/refactor/CONTRACT-CHANGES.md`.
+The backfill, in one migration: number the existing rows in
+`(created_at, id)` order from the sequence's start, then add the
+`UNIQUE NOT NULL` constraint, then `setval` past the maximum it reached.
+The series key is the entity; multi-company (cycle 5) may widen it to
+`(entity, company)`, which is a listed contract change when it happens.
+
 ### 9. Idempotency keys
 
 Every POST that creates or mutates accepts an idempotency key in the
 `Idempotency-Key` header: an opaque string of 1 to 128 characters chosen by
-the client. Scope is the key together with the principal and the route. The
-contract: the first request with a key executes and its response (status and
-body) is stored against that key; a retry with the same key, same route, and
-same body returns the stored response rather than executing again, across
-restarts; the same key with a different body is a 409 `conflict`. The
-canonical header name is `Idempotency-Key`; the existing `X-Idempotency-Key`
-spelling keeps working until the middleware item lands the durable store
-(R1-11), after which the legacy spelling is removed, both steps listed as
-contract changes. Requests without a key are not idempotent by default:
-agents and integrations that retry must send one.
+the client. The stored scope is the principal and the key; the stored
+fingerprint adds the method and the path, and the body is hashed over the
+raw request bytes. The contract: the first request with a key executes and
+its response (status and body) is stored against it; a retry with the same
+key, the same fingerprint, and the same body hash returns the stored
+response rather than executing again, across restarts, for a retention
+window of 24 hours past the stored response; the same key reused against a
+different fingerprint or body is 422 `idempotency_key_reused`; a second
+request with the same key while the first is still executing is 409
+`idempotency_in_progress`. A response of 500 or above is not stored, so a
+retry after a server fault re-executes instead of replaying the fault.
+The canonical header name is `Idempotency-Key`; the existing
+`X-Idempotency-Key` spelling keeps working until the middleware item lands
+the durable store (R1-11), after which the legacy spelling is removed,
+both steps listed as contract changes. Requests without a key are not
+idempotent by default: agents and integrations that retry must send one.
 
 ### 10. The in place rule
 
@@ -381,8 +410,18 @@ that survivable:
 
 Known outside clients (the desk and portal apps in this repository, the
 generated `gable-sdk`, the frozen agentic UI experiment) break knowingly:
-the desk and portal are updated with each module conversion, and the SDK
-regenerates from the contract after the contract item completes.
+the desk and portal (`gable-portal` included once its routes are read) are
+updated with each module conversion. The SDK regenerates once, after
+cycle 5's last module converts, and is unsupported until then: a
+regeneration per module would break it as many times as there are modules.
+
+Before a module converts, its non desk callers are checked, from access
+logs and issued keys: if a caller outside this repository hits the
+module's routes, the conversion is listed and that caller's owner is
+told. The AI load management integration is exempt only so long as it
+calls nothing but `/api/integration/*`; whether the AI load management
+service calls any other route is an open question, held here until it is
+answered from its access logs.
 
 ### 11. Revision concurrency and preconditions
 
@@ -472,15 +511,26 @@ template, then module by module):
    `httpx.WriteList` with `httpx` cursors; its error paths move to
    `httpx.WriteError` with collected `Validator` field errors; its route
    registrations wrap every handler with the strict query parameter guard.
-2. Swap the money fields: floats to `_cents` int64, sub-cent unit prices to
-   `_ten_thousandths`, converting at the database boundary with the
+2. Swap the money fields: floats to `_cents` int64, sub-cent unit prices
+   to `_ten_thousandths`, quantities and conversion factors to the
+   package's `Quantity`, converting at the database boundary with the
    package's decimal string helpers, never through float64.
+2b. Widen to scale 4 every unit price column the module exposes as
+   `_ten_thousandths` that is still scale 2, in the same change: a module
+   may not expose the field against a scale 2 column (section 7).
 3. Add the module's document number sequence migration (a plain numbered
    SQL file creating the sequence, plus a backfill that numbers existing
-   rows from the sequence's start) and mint numbers in the create path.
+   rows in `(created_at, id)` order, adds the unique constraint, and moves
+   `setval` past the maximum) and mint numbers in the create path.
 4. Lowercase and rename lifecycle state to `status` at the handler
    boundary.
-5. Re-record the module's goldens and list every wire diff in
+5. Update every caller: search the desk (`app/`) and the portal for each
+   converted route's callers and update them in the same pull request.
+   The desk's `limit` and `offset` sends become cursor paging; pickers
+   that relied on unpaged lists page or search. A request the strict
+   rules now refuse used to be silently mishandled, and finding every
+   sender is part of the conversion, not a follow up.
+6. Re-record the module's goldens and list every wire diff in
    `docs/refactor/CONTRACT-CHANGES.md` in the same pull request.
 
 Routes under `/api/integration/*` are never touched by these steps.
@@ -496,11 +546,15 @@ Routes under `/api/integration/*` are never touched by these steps.
   being taken knowingly.
 - Every in place conversion breaks that module's existing clients, which is
   why the contract change list, the goldens, and the desk and portal updates
-  ride in the same change; the generated SDK regenerates once, after the
-  contract item.
+  ride in the same change; the generated SDK regenerates once, after cycle
+  5's last module converts, and is unsupported until then.
 - The scale-4 unit price forecloses sub-ten-thousandth pricing on the wire;
   if the domain ever needs finer, that is a new suffix and a listed contract
-  change, decided then.
+  change, decided then. The same holds for conversion factors finer than
+  scale 4: cycle 3's units design works within this wire type or reopens it.
+- The revision precondition breaks every blind write: a client that PUTs
+  without reading first takes a 428 and one extra round trip. That is the
+  point; the desk pays it once per converting module.
 - The unsigned cursor accepts that a hostile client can seek within an
   ordered, filtered list it can already read; it cannot widen what it reads,
   which is why signing was deferred.
