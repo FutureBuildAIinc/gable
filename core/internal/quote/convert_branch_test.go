@@ -12,6 +12,7 @@ package quote_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/order"
@@ -422,5 +423,33 @@ func TestConvert_TaxProviderPath(t *testing.T) {
 	// The retry prices afresh.
 	if _, err := svc.Convert(ctx, q2.ID, quote.Precondition{Revision: &q2.Revision}); err != nil {
 		t.Errorf("retry: %v", err)
+	}
+}
+
+// RULE (ADR 0003 section 3): the convert is one act. When order.created
+// cannot be recorded, the order, the quote's acceptance and the
+// quote.accepted event all roll back: the quote stays a draft on its
+// revision, with no order and no event beyond quote.created.
+func TestConvert_FailedOrderEventRollsBackTheAcceptance(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := branchctx.WithSystem(context.Background())
+	failing := order.NewService(order.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db)
+	svc := quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithOrderCreator(failing)
+
+	q := w.otherBranchQuote(t)
+	if _, err := svc.Convert(ctx, q.ID, quote.Precondition{Revision: &q.Revision}); err == nil {
+		t.Fatal("Convert succeeded though order.created could not be written")
+	}
+	got, err := svc.GetQuote(ctx, q.ID)
+	if err != nil || got.Status != quote.QuoteStateDraft || got.Revision != q.Revision {
+		t.Fatalf("quote after the rollback = %v rev %d (%v), want draft rev %d", got.Status, got.Revision, err, q.Revision)
+	}
+	var orders int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM orders WHERE quote_id = $1`, q.ID).Scan(&orders); err != nil || orders != 0 {
+		t.Errorf("%d orders survived the rolled back convert (%v)", orders, err)
+	}
+	if ev := eventsForEntity(t, db, "quote", q.ID.String()); fmt.Sprint(ev) != "[quote.created]" {
+		t.Errorf("quote events = %v, want only quote.created (quote.accepted rolled back)", ev)
 	}
 }

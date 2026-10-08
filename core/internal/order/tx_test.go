@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -91,6 +92,20 @@ func draftFor(customerID, productID uuid.UUID) *order.Draft {
 	}
 }
 
+// pricedDraftFor is draftFor with a price override and a percent discount, so
+// the line audits (order.line_price_overridden, order.line_discounted) are
+// written inside the transaction under test.
+func pricedDraftFor(customerID, productID uuid.UUID) *order.Draft {
+	d := draftFor(customerID, productID)
+	price := httpx.Price(40000) // the product lists at 5.00, 50000
+	pct := salesdoc.One * 10
+	d.Lines[0].UnitPrice = &price
+	d.Lines[0].OverrideReason = "match a competitor"
+	d.Lines[0].DiscountPercent = &pct
+	d.Lines[0].DiscountReason = "volume"
+	return d
+}
+
 func countRows(t *testing.T, db *dbHandle, sql string, args ...any) int {
 	t.Helper()
 	var n int
@@ -109,26 +124,46 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 	ctx := context.Background()
 
 	// Create.
-	bad := order.NewService(order.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db)
-	if _, err := bad.Create(ctx, draftFor(customerID, productID), "tx"); err == nil {
+	// Every service wires the audit logger, so the "no audit rows survived"
+	// assertions below can fail: the line audits (override, discount) and the
+	// confirm's audit row are written through the transaction, before the
+	// event that fails.
+	auditLog := audit.NewLogger(db)
+	lineAudits := func() int {
+		return countRows(t, &dbHandle{db}, `SELECT count(*) FROM audit_log
+			WHERE action IN ('order.line_price_overridden', 'order.line_discounted') AND changes->>'product_id' = $1`, productID.String())
+	}
+	bad := order.NewService(order.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db).WithAuditLog(auditLog)
+	if _, err := bad.Create(ctx, pricedDraftFor(customerID, productID), "tx"); err == nil {
 		t.Fatal("Create succeeded though its event could not be written")
 	}
 	if n := countRows(t, &dbHandle{db}, `SELECT count(*) FROM orders WHERE customer_id = $1`, customerID); n != 0 {
 		t.Errorf("%d orders survived a rolled back create", n)
 	}
+	if n := lineAudits(); n != 0 {
+		t.Errorf("%d line audit rows survived a rolled back create", n)
+	}
 
-	// The good service for the writes that need a live order.
-	good := order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
-	o, err := good.Create(ctx, draftFor(customerID, productID), "tx")
+	// The good service for the writes that need a live order. Its create
+	// writes the two line audits, the control that shows the assertions
+	// above can fail.
+	good := order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAuditLog(auditLog)
+	o, err := good.Create(ctx, pricedDraftFor(customerID, productID), "tx")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if n := lineAudits(); n != 2 {
+		t.Fatalf("a committed create wrote %d line audit rows, want 2 (override and discount)", n)
+	}
 
 	// Update.
-	badUpdate := order.NewService(order.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db)
+	badUpdate := order.NewService(order.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db).WithAuditLog(auditLog)
 	rev := int64(1)
-	if _, err := badUpdate.Update(ctx, o.ID, draftFor(customerID, productID), order.Precondition{Revision: &rev}, "tx"); err == nil {
+	if _, err := badUpdate.Update(ctx, o.ID, pricedDraftFor(customerID, productID), order.Precondition{Revision: &rev}, "tx"); err == nil {
 		t.Fatal("Update succeeded though its event could not be written")
+	}
+	if n := lineAudits(); n != 2 {
+		t.Errorf("%d line audit rows after a rolled back update, want the create's 2 and none added", n)
 	}
 	var status string
 	var revision int64
@@ -149,7 +184,9 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 	if status != "DRAFT" {
 		t.Errorf("after a rolled back confirm: status=%s, want DRAFT", status)
 	}
-	if n := countRows(t, &dbHandle{db}, `SELECT count(*) FROM audit_log WHERE entity_type = 'order' AND entity_id = $1`, o.ID); n != 0 {
+	// The confirm writes order.confirmed to the audit log before its event;
+	// the create's two line audits are the only rows that may exist.
+	if n := countRows(t, &dbHandle{db}, `SELECT count(*) FROM audit_log WHERE entity_type = 'order' AND entity_id = $1 AND action = 'order.confirmed'`, o.ID); n != 0 {
 		t.Errorf("%d audit rows survived a rolled back confirm", n)
 	}
 
