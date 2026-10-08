@@ -88,6 +88,23 @@ func TestGatedRouterOutsidePkgAppsIsCounted(t *testing.T) {
 	}
 }
 
+// TestGatedForwarderLiteralPatternIsCounted pins the fix for the review's
+// N1: a call inside a pkg/apps gatedRouter forwarder whose pattern is a
+// literal resolves and is counted as a real route. The forwarder skip
+// covers only the forwarded, caller-supplied pattern.
+func TestGatedForwarderLiteralPatternIsCounted(t *testing.T) {
+	result := collectFixture(t, "gatedforwarder")
+	if err := result.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	for _, r := range result.Routes {
+		if r.Method == "GET" && r.Pattern == "/apps/hidden" && r.Module == "pkg/apps" {
+			return
+		}
+	}
+	t.Fatalf("want GET /apps/hidden counted in pkg/apps, got %+v", result.Routes)
+}
+
 // TestHandleFuncMethodValueIsUnresolved pins the fix for the review's F2: a
 // HandleFunc method value bound to a variable is reported as unresolved
 // instead of silently hiding the route.

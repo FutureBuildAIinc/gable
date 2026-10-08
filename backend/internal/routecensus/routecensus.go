@@ -515,9 +515,6 @@ func Collect(moduleRoot string) (Result, error) {
 				})
 				return true
 			}
-			if gatedCalls[call] {
-				return true
-			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok {
 				return true
