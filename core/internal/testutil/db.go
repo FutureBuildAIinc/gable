@@ -74,6 +74,20 @@ func unavailable(t *testing.T, err error) {
 // The returned handle is closed automatically via t.Cleanup.
 func RequireDB(t *testing.T) *database.DB {
 	t.Helper()
+	return requireDB(t, 0)
+}
+
+// RequireDBMaxConns is RequireDB with a caller-chosen pool size. The wire
+// recipe's concurrency proof runs every transaction at pool size 4 with three
+// contenders, so a transaction that reaches for a second pool connection
+// deadlocks the test instead of passing on a roomy pool.
+func RequireDBMaxConns(t *testing.T, maxConns int32) *database.DB {
+	t.Helper()
+	return requireDB(t, maxConns)
+}
+
+func requireDB(t *testing.T, maxConns int32) *database.DB {
+	t.Helper()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -91,6 +105,9 @@ func RequireDB(t *testing.T) *database.DB {
 
 	pc := database.DefaultPoolConfig()
 	poolCfg.MaxConns = pc.MaxConns
+	if maxConns > 0 {
+		poolCfg.MaxConns = maxConns
+	}
 	poolCfg.MinConns = pc.MinConns
 	poolCfg.MaxConnLifetime = pc.MaxConnLifetime
 	poolCfg.MaxConnIdleTime = pc.MaxConnIdleTime
