@@ -86,12 +86,11 @@ func (s *Service) resolveCredit(ctx context.Context, st Store, d *CreditInput, s
 		}
 		cc.source, cc.customerID, cc.branchID, cc.currency = inv, inv.CustomerID, inv.BranchID, inv.Currency
 		cc.shipToID, cc.jobID = inv.ShipToID, inv.JobID
+	} else if stored != nil {
+		cc.customerID = stored.CustomerID
+		cc.branchID, cc.currency = stored.BranchID, stored.Currency
 	} else {
 		cc.customerID = *d.CustomerID
-		if stored != nil {
-			cc.customerID = stored.CustomerID
-			cc.branchID, cc.currency = stored.BranchID, stored.Currency
-		}
 	}
 	facts, err := st.CustomerCreditFacts(ctx, cc.customerID)
 	if err != nil {

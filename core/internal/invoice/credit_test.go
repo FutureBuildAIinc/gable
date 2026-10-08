@@ -544,7 +544,13 @@ func TestCreditMemoWithNoInvoice(t *testing.T) {
 		t.Errorf("invoice_id %v currency %v", r.body["invoice_id"], r.body["currency"])
 	}
 	id := str(t, r.body, "id")
-	if p := f.postCredit(id, 1); p.status != 200 {
+	// an edit need not repeat the customer: it is fixed at create
+	edit := map[string]any{"reason_code": "price_adjustment", "reason": "goodwill, corrected",
+		"lines": []map[string]any{{"line_type": "product", "description": "Freight allowance", "quantity": "-1", "uom": "EA", "unit_price_ten_thousandths": 100000}}}
+	if e := f.do("PUT", "/api/v1/credit-memos/"+id, edit, "If-Match", `"1"`); e.status != 200 || str(t, e.body, "reason") != "goodwill, corrected" || num(t, e.body, "total_cents") != -1089 {
+		t.Fatalf("edit without the customer = %d: %s", e.status, e.raw)
+	}
+	if p := f.postCredit(id, 2); p.status != 200 {
 		t.Fatalf("post = %d: %s", p.status, p.raw)
 	}
 	_, legs := f.entryLegs(id)

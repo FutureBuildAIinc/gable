@@ -127,7 +127,7 @@ func (req *CreditRequest) parse(update bool) (*CreditInput, error) {
 	if id, ok := v.UUID("invoice_id", req.InvoiceID, false); ok {
 		d.InvoiceID = &id
 	}
-	if d.CustomerID == nil && d.InvoiceID == nil && req.CustomerID == nil && req.InvoiceID == nil {
+	if !update && d.CustomerID == nil && d.InvoiceID == nil && req.CustomerID == nil && req.InvoiceID == nil {
 		v.Check(false, "customer_id", "is required when the credit memo names no invoice")
 	}
 	if id, ok := v.UUID("job_id", req.JobID, false); ok {
