@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -65,7 +66,7 @@ func TestHTTPStackRecordsAgentRowWithMarkerAndTool(t *testing.T) {
 	h = authStandIn(h)
 	h = actor.Middleware(h)
 	h = middleware.CORSMiddleware(h)
-	h = middleware.RateLimit(120)(h)
+	h = middleware.RateLimit(120, clientip.Trusted{})(h)
 	h = middleware.Recovery(slog.Default())(h)
 	h = middleware.RequestID(h)
 	h = metrics.HTTPMetrics(h)
