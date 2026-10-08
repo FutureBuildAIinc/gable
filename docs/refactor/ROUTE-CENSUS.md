@@ -27,18 +27,43 @@ the narrative around it.
   in the message. It needs no database and runs under plain
   `go test ./...`.
 
-Three failure modes, all loud:
+Four failure modes, all loud:
 
 1. A registration whose pattern is not a statically resolvable string fails
    the census. A registration style the tool does not understand can never
    silently miss a route; the coder extends the resolver or inlines the
-   pattern.
-2. The same method and pattern registered with two different registrations
-   fails the census. Two different handlers on one pattern cannot both be
-   honoured, and an unconditional double registration panics the ServeMux
-   at boot.
-3. A route added or removed without regenerating `ROUTES.txt` fails the
-   census test, naming the route.
+   pattern. The same holds for a `Handle` or `HandleFunc` method value
+   bound to a variable (`f := mux.HandleFunc`), and for a pattern name the
+   enclosing function binds as a receiver, parameter, named result or
+   variable: the census refuses to guess the value a shadowing binding
+   would carry at run time.
+2. The same method and pattern registered more than once fails the census,
+   unless the registrations sit in the if and else branches of one if/else,
+   the only mutual exclusion the census can see (the portal login limiter
+   is one). Two different registrations of one pattern cannot both be
+   honoured, and an identical pair registered twice outside mutually
+   exclusive branches panics the ServeMux at boot.
+3. A restricted registration fails the census: an `http.NewServeMux`
+   outside `cmd/server`, and a `Handle` whose handler mounts an
+   `http.StripPrefix` or a sub mux. Such a mount rewrites the paths of
+   everything under it, so the census could not list the mounted routes
+   under their real paths. The allow list in
+   `backend/internal/routecensus/routecensus.go` (`allowMounts`) names the
+   mounts the repo has accepted. Today it holds one entry, the `/uploads/`
+   file server of `cmd/server`, which the census lists as its outer route
+   (no method prefix, answering every method); anything else on the list
+   is a deliberate, reviewed extension of it.
+4. A route added or removed without regenerating `ROUTES.txt` fails the
+   census test, naming the route. The diff works on the whole row, so a
+   change in any column, handler included, is reported as the old row
+   removed and the new row added.
+
+The walk applies the go tool's own exclusions: directories with a leading
+dot or underscore, `testdata`, and files whose build constraints exclude
+them under the default build tags are not read. Calls inside the
+`pkg/apps` `gatedRouter` forwarders whose pattern cannot resolve are
+skipped as delegation; a call inside them whose pattern resolves is a
+real registration and is counted.
 
 The file carries no total line: a counted total inside the file would let
 two branches that each add routes merge the same number silently while the
@@ -135,6 +160,13 @@ of operations to describe: every route in it needs exactly one operation.
 ## What the census does not cover
 
 - Routes registered only in test files.
+- Files the go tool does not build: names beginning with a dot or an
+  underscore, files excluded by their build constraints under the default
+  build tags, and directories so named. The census lists what a default
+  build of this module registers.
 - Routes a fork or plugin would register at runtime; the census reads this
   module's sources.
+- The routes an `http.StripPrefix` or sub mux mount carries under their
+  real paths; such mounts fail the census unless they are on the allow
+  list, and a listed mount appears once as its outer route.
 - Non-HTTP surfaces (worker crons, the event bus); they are not routes.
