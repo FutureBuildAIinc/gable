@@ -25,6 +25,9 @@ type Repository interface {
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error
 	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error
+	ListKitComponents(ctx context.Context, kitID uuid.UUID) ([]KitComponent, error)
+	ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, comps []KitComponent) error
+	ProductKitRef(ctx context.Context, id uuid.UUID, sku, description, uom *string, isKit *bool) error
 }
 
 // PostgresRepository implements Repository using pgx
