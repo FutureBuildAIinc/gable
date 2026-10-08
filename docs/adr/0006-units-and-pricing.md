@@ -237,6 +237,7 @@ product's revision (the product converts in C3-1, so it has one). The body:
   "sale_uom": "PCS",
   "price_uom": "MBF",
   "purchase_uom": "MBF",
+  "base_price_ten_thousandths": 5250000,
   "units": [
     {"uom": "PCS", "sell": true,  "purchase": false, "price": true},
     {"uom": "LF",  "sell": true,  "purchase": false, "price": false},
@@ -302,6 +303,30 @@ Refusals beside the field errors (409 `conflict` with a blocker):
 - `unit_in_use`: a row is removed that a `product_prices` row, a contract, a
   pricing rule fixed price or a vendor cost names (the composite FKs make
   the database refuse it too; the service names it first).
+- `price_unit_held`, during the stocking unit hold only (9.1, from
+  C3-2A-units until C3-2B): the stocking unit changes while the product
+  has a nonzero `base_price`, or any `product_prices`, `customer_contracts`
+  or `pricing_rules` row names it (before C3-2A-pricing, a contract or a
+  rule with a fixed price: those rows are implicitly per the stocking unit
+  already, and A2's CHECK drags `price_uom` along with the stocking unit,
+  so the same reinterpretation applies). The unit set service reads the
+  pricing tables for this check; it edits no pricing file. The hold ties every price to the
+  stocking unit, so moving the stocking unit would either leave those rows
+  in the old unit (a contract in PCS on a product now stocked in LF, which
+  the adapters cannot answer and today's callers would replace with the
+  base price) or read the unchanged `base_price` per the new unit (4.00
+  per PCS silently becoming 4.00 per LF). The dealer zeroes the base and
+  removes those rows first, or waits for C3-2B. A product with no price
+  yet changes its stocking unit freely. C3-2B lifts this refusal with the
+  rest of the hold.
+
+`base_price_ten_thousandths` in the PUT body is optional, and required
+whenever the PUT changes `price_uom` (from C3-2B, when the price unit may
+differ from the stocking unit): a PUT that changes the price unit without
+it is a 400 naming `base_price_ten_thousandths`, because the stored value
+is a price per the old unit. The unit and the value change together in the
+one transaction, and the audit row records both, before and after. Sent
+with an unchanged `price_uom` it simply sets the base price.
 
 Changing an existing row's pair is allowed and audited (an `audit_log` row
 with before and after inside the transaction, R1-14): it changes future
@@ -781,6 +806,19 @@ C3-1 converts the existing pricing routes (`/api/v1/pricing/calculate`,
   /pricing/vendor-levels/{id}`.
 - `GET /pricing/vendor-costs` (filters `vendor_id`, `product_id`,
   `branch_id`, `on`), `POST`, `GET`, `PUT /pricing/vendor-costs/{id}`.
+- `GET /pricing/contracts` (filters `customer_id`, `product_id`,
+  `branch_id`), `POST /pricing/contracts` (201, `Location`), `GET`, `PUT`
+  and `DELETE /pricing/contracts/{id}` (the update and the delete at the
+  row's revision). No contract route exists today: the only writer is the
+  seed, through `pricing.Repository.CreateContract`, which no handler
+  calls and whose upsert is `ON CONFLICT (customer_id, product_id)`. P5's
+  unique key (customer, product, branch, NULLS NOT DISTINCT) replaces that
+  key, so the repository's upsert, kept for the seed, becomes `ON CONFLICT
+  ON CONSTRAINT customer_contracts_customer_product_branch_key`; the
+  route's create does not upsert, and a second contract for the same
+  customer, product and branch is a 409 `duplicate` naming the existing
+  row. A contract is deleted outright (it is an agreement, not a
+  document), with an `audit_log` row carrying the deleted values.
 - `GET /pricing/cost?vendor_id&product_id&branch_id&vendor_level_id&on&uom`:
   `ResolveCost` on the wire.
 
@@ -795,6 +833,17 @@ read's `branch_id` pass the payload branch rule of ADR 0007
 grants is refused as that rule says. The rule has to see every row a write
 can change, not only the rows it sends, so:
 
+- **The every branch admission is one check.** A write that reaches every
+  branch (the every branch price list slice, a null `branch_id` on a
+  contract or vendor cost, old or new) is admitted by
+  `middleware.BranchGuard.CheckEveryBranch(ctx)`, a helper C3-2A-pricing
+  adds beside `CheckPayloadBranch`, as its own platform commit with its
+  tests. It admits exactly when the request has no context branch and the
+  caller is an administrator, an unbound caller or a system caller
+  (`branchctx.WithSystem`): the cases in which `CheckPayloadBranch` would
+  admit any branch. An administrator working in a branch context is held
+  to that branch, as `CheckPayloadBranch`'s first rule holds it. No module
+  tests for every branch inline.
 - **The price list PUT is scoped by branch** (chosen over checking every
   row a whole list PUT inserts, changes or removes: a scoped write cannot
   reach a row it was not checked for, and one branch's manager edits one
@@ -803,12 +852,12 @@ can change, not only the rows it sends, so:
   naming it), and the replace is `DELETE ... WHERE product_id = $1 AND
   branch_id IS NOT DISTINCT FROM $2` then the inserts, in one transaction
   under the product row's lock. The every branch slice (no `branch_id`)
-  is admitted only for a caller the rule admits for every branch: an
-  administrator, or an unbound caller with no context branch.
+  is admitted only by `CheckEveryBranch`.
 - **Contracts and vendor costs are written one row at a time** (create,
-  update by id); an update checks the rule on the row's stored `branch_id`
-  and on the new one, and a null `branch_id`, old or new, needs the every
-  branch admission above. Neither has a set replacing route; one added
+  update and delete by id); a create checks the rule on its `branch_id`, an
+  update on the row's stored `branch_id` and on the new one, a delete on
+  the stored one, and a null `branch_id`, old or new, needs
+  `CheckEveryBranch`. Neither has a set replacing route; one added
   later takes the price list's scoping.
 - **Reads apply the branch wall.** `GET /pricing/products/{id}/prices`,
   `GET /pricing/vendor-costs` and the contract reads show the caller's
@@ -833,7 +882,8 @@ none, which skips rungs 1 to 5's branch rows), `job_id`, and answers:
 }
 ```
 
-Events: `price_level.created`, `price_level.updated`,
+Events: `contract.created`, `contract.updated`, `contract.deleted`,
+`price_level.created`, `price_level.updated`,
 `price_profile.created`, `price_profile.updated`, `product.updated` with
 `data.parts: ["prices"]` for a price list write, `vendor_cost.created`,
 `vendor_cost.updated`.
@@ -1013,7 +1063,11 @@ database and to a seeded one, with the backfill tested on rows that exist.
    per product: `uom_primary`, (1, 1), `sell`, `purchase`, `price` all true.
    Add `sale_uom`, `price_uom`, `purchase_uom`, backfilled to `uom_primary`,
    NOT NULL, the deferred composite FKs; the stocking row constraint trigger;
-   the CHECK `price_uom = uom_primary` (3.2, dropped by C3-2B). No unit set row
+   the CHECK `price_uom = uom_primary` (3.2, dropped by C3-2B); a deferred
+   constraint trigger on `products` refusing a change of `uom_primary`
+   while `base_price` is nonzero or a `customer_contracts` row or a
+   `pricing_rules` row with a `fixed_price` names the product (3.2's
+   `price_unit_held`, for raw writes; P5 widens it). No unit set row
    is made from quote lines: R1-15 checked a quote line's pair only for
    being positive, so one careless line (MBF against PCS at 1 and 1) would
    otherwise become the product's conversion and drive stock from then on.
@@ -1089,10 +1143,14 @@ database and to a seeded one, with the backfill tested on rows that exist.
    its price.
 5. **P5, prices.** `product_prices` (empty: there is no branch or level
    price today). A2's CHECK `price_uom = uom_primary` stays, and P5 adds
-   the same hold on every price it creates: a constraint trigger on
-   `product_prices`, `customer_contracts` and `pricing_rules` refusing a
-   `price_uom` other than the product's `uom_primary` (9.1). C3-2B drops
-   the CHECK and the trigger.
+   the same hold on every price it creates: a deferred constraint trigger
+   on `product_prices`, `customer_contracts` and `pricing_rules` refusing a
+   `price_uom` other than the product's `uom_primary`, and the same trigger
+   on `products`, firing when `uom_primary` or `price_uom` changes and
+   refusing the change while any of those rows names the product in
+   another unit, or while `base_price` is nonzero and the stocking unit
+   moves (9.1, 3.2's `price_unit_held`), so a raw write cannot get round
+   the service either. C3-2B drops the CHECK and the trigger.
    `customer_contracts`: rows with a null `customer_id` or `product_id`
    cannot match today's lookup (it filters on both); they move to
    `customer_contracts_orphaned` (same columns) and are reported, then both
@@ -1185,7 +1243,10 @@ in the product's stocking unit: the base (A2's CHECK on
 `products.price_uom`), and every list, level, branch, contract and rule
 fixed price (P5's trigger on `product_prices`, `customer_contracts` and
 `pricing_rules`, plus the service's own check, a 400 naming the field: "a
-price unit other than the stocking unit arrives with C3-2B"). Derived
+price unit other than the stocking unit arrives with C3-2B"). The stocking
+unit itself cannot move under a price: the unit set PUT refuses it with
+`price_unit_held` while the product has a nonzero base or any price row
+(3.2), and the same trigger fires on `products` for raw writes. Derived
 prices follow: a `BASE` level derives from a stocking unit reference, an
 `AVERAGE_COST` level from a cost per stocking unit, and a
 `REPLACEMENT_COST` level reads only a vendor cost whose `purchase_uom` is
@@ -1270,7 +1331,10 @@ their routes, the pre flight report and migration C3-2A-units. Tests:
   bound refused naming the row; the paver's `warnings` entry; the price
   unit CHECK of A2; `stock_unit_in_use` and `unit_in_use`; the trigger's
   three invariants (a random length product stocked in PCS refused, a
-  stocking row without `price` refused); the audit row, the revision and
+  stocking row without `price` refused); a stocking unit change refused
+  with 409 `price_unit_held` while the base is nonzero or a contract names
+  the product, by the PUT and by A2's trigger on a raw update, and
+  admitted for a product with no price; the audit row, the revision and
   concurrency proofs;
 - the catalogue routes: create, deactivate, a locked system row's PUT
   refused naming the field, an inactive unit refused on a new set row and a
@@ -1295,7 +1359,15 @@ code, through the new columns), and migration C3-2A-pricing. Tests:
   back to average cost and a cost basis with no cost falling to rung 5;
 - **the hold:** a product price, a contract and a rule fixed price in a unit
   other than the stocking unit each refused with a 400 naming `price_uom`,
-  through the route and, for a raw insert, by the trigger; a
+  through the route and, for a raw insert, by the trigger; a stocking unit
+  change through the unit set PUT refused with 409 `price_unit_held` while
+  a contract, a list price or a nonzero base exists, and admitted when none
+  does; the same change by a raw `UPDATE products` refused by the trigger;
+  `CheckEveryBranch` admitting an administrator, an unbound caller and a
+  system caller with no context branch and refusing an administrator in a
+  branch context; the contract routes (create, a duplicate refused with
+  409 `duplicate`, update and delete at a revision, each event, the
+  delete's audit row) and the seed's upsert on the new key; a
   `REPLACEMENT_COST` level whose vendor cost is per MBF on a product
   stocked in PCS falling back to average cost; the adapters' assertion
   `ErrPriceUnitNotStock` proved with a fake repository that returns a price
@@ -1352,7 +1424,11 @@ Tests:
 - `price_basis` stored from the engine; an override in another unit refused;
 - the hold lifted: a product priced per MBF and stocked in PCS priced
   through `Resolve` at the counter, in the cart and in the catalogue, and a
-  price in MBF compared to a floor in PCS correctly;
+  price in MBF compared to a floor in PCS correctly; `price_unit_held` gone
+  (a stocking unit change with prices admitted, subject to
+  `stock_unit_in_use`); a unit set PUT changing `price_uom` without
+  `base_price_ten_thousandths` refused naming it, and with it storing both
+  and auditing both;
 - the tally sub tally rule: a fulfilment tally naming a length the line
   lacks, or more pieces than remain unbilled, refused naming
   `lines[i].tally`; the same for a partial credit memo;

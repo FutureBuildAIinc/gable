@@ -23,7 +23,7 @@ record from the moment its item C3-2B lands: the units row of section 1, the
 (it reads on `stock_quantity`, equal to `quantity` on every line cycle 2
 writes), the unit of section 5.6's fulfilment `lines[].quantity` (the
 line's `stock_uom`) with a new optional `lines[].tally` (ADR 0006 section
-4.5), and section 5.8's `unit_not_stock_unit` refusal.
+4.4), and section 5.8's `unit_not_stock_unit` refusal.
 
 The items land in a chain: C2-1 (which may start at once), then C2-2, then
 C2-3, then C2-4, then C2-5. Each item below names what it builds and, where a
