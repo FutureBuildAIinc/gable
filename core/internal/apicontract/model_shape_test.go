@@ -184,7 +184,7 @@ var modelBoundSchemas = []struct {
 	{"PortalInvite", portal.PortalInvite{}},
 	// project (R1-7c)
 	{"Project", project.Project{}},
-	{"ProjectDashboard", project.ProjectDashboardDTO{}},
+	{"ProjectDashboard", project.ProjectDashboard{}},
 	{"ProjectItem", project.ProjectItem{}},
 	// partner (R1-7c)
 	{"PartnerDashboard", partner.DashboardDTO{}},
