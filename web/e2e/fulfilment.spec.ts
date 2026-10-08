@@ -71,13 +71,21 @@ test.describe('Fulfilment and will-call', () => {
     await expect(page.getByTestId('line-stock').first()).toContainText('4 allocated');
     await page.screenshot({ path: path.join(SHOTS_DIR, 'order-allocated.png') });
 
-    // The name is required before the money moves.
+    // Fulfil on a will-call order opens the pickup form under the header; the
+    // header's labels stay on one line and the name is required before the
+    // money moves, its refusal shown beside the field.
     await page.getByRole('button', { name: /Fulfil Order/i }).click();
-    await expect(page.getByText('Enter the name of the person collecting this order')).toBeVisible();
+    const form = page.getByTestId('fulfil-pickup');
+    await expect(form).toBeVisible();
+    await expect(page.getByRole('button', { name: /Fulfil Order/i })).toHaveCSS('white-space', 'nowrap');
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'order-fulfil-pickup-open.png') });
+    await form.getByRole('button', { name: 'Confirm' }).click();
+    await expect(form.getByText('Enter the name of the person collecting this order')).toBeVisible();
 
-    await page.getByLabel('Picked up by').fill('Counter customer');
+    await form.getByLabel('Picked up by').fill('Counter customer');
+    await expect(form.getByText('Enter the name of the person collecting this order')).toHaveCount(0);
     const fulfil = page.waitForResponse((r) => r.url().endsWith(`/api/v1/orders/${order.id}/fulfillments`));
-    await page.getByRole('button', { name: /Fulfil Order/i }).click();
+    await form.getByRole('button', { name: 'Confirm' }).click();
     const fulfilRes = await fulfil;
     expect(fulfilRes.status(), await fulfilRes.text()).toBe(201);
     expect(fulfilRes.request().postDataJSON()).toEqual({ revision: 2, picked_up_by: 'Counter customer' });

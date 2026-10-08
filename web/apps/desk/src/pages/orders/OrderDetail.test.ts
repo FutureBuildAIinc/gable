@@ -11,6 +11,12 @@ import './OrderDetail'
 import type { GableOrderDetail } from './OrderDetail'
 import type { Order } from '../../types/order'
 import { mountAsync, text, jsonResponse } from '../../test/dom'
+import { ToastService } from '../../lib/toast-service.ts'
+
+// the header's Fulfil Order button
+function fulfilButton(el: Element): HTMLButtonElement {
+  return Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Fulfil Order')) as HTMLButtonElement
+}
 
 function order(overrides: Partial<Order> = {}): Order {
   const line = {
@@ -212,12 +218,46 @@ describe('gable-order-detail - the order contract', () => {
   it('offers the fulfilment of a confirmed order; a pickup order names who collected it', async () => {
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
     expect(text(el)).toContain('Fulfil Order')
-    expect(el.querySelector('input[aria-label="Picked up by"]')).not.toBeNull()
+    // the name is asked inside the fulfil action, not in the header row
+    expect(el.querySelector('input[aria-label="Picked up by"]')).toBeNull()
+    fulfilButton(el).click()
+    await el.updateComplete
+    expect(el.querySelector('[data-testid="fulfil-pickup"] input[aria-label="Picked up by"]')).not.toBeNull()
     const delivery = order({ delivery_type: 'delivery' })
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(delivery)))
     const el2 = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: delivery.id })
     expect(text(el2)).toContain('Fulfil Order')
     expect(el2.querySelector('input[aria-label="Picked up by"]')).toBeNull()
+  })
+
+  it('keeps every header button label on one line', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const header = el.querySelector('h1')!.closest('div.border-b')!
+    const buttons = Array.from(header.querySelectorAll('button'))
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const b of buttons) expect(b.className).toContain('whitespace-nowrap')
+  })
+
+  it('shows the missing name beside the field, not as a toast, and Cancel closes the form', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const toasts: string[] = []
+    const onToast = (e: Event) => toasts.push((e as CustomEvent).detail.message)
+    ToastService.addEventListener('toast', onToast)
+    try {
+      fulfilButton(el).click()
+      await el.updateComplete
+      const confirm = Array.from(el.querySelectorAll('[data-testid="fulfil-pickup"] button')).find((b) => b.textContent?.includes('Confirm')) as HTMLButtonElement
+      confirm.click()
+      await el.updateComplete
+      expect(el.querySelector('[data-testid="fulfil-pickup"] [role="alert"]')?.textContent).toContain('Enter the name')
+      expect(toasts).toEqual([])
+      const cancel = Array.from(el.querySelectorAll('[data-testid="fulfil-pickup"] button')).find((b) => b.textContent?.includes('Cancel')) as HTMLButtonElement
+      cancel.click()
+      await el.updateComplete
+      expect(el.querySelector('[data-testid="fulfil-pickup"]')).toBeNull()
+    } finally {
+      ToastService.removeEventListener('toast', onToast)
+    }
   })
 
   it('fulfils through the fulfilments route on the loaded revision, with picked_up_by', async () => {
@@ -236,11 +276,13 @@ describe('gable-order-detail - the order contract', () => {
       return jsonResponse(order())
     }))
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    fulfilButton(el).click()
+    await el.updateComplete
     const input = el.querySelector('input[aria-label="Picked up by"]') as HTMLInputElement
     input.value = 'Counter customer'
     input.dispatchEvent(new Event('input'))
-    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Fulfil Order')) as HTMLButtonElement
-    button.click()
+    const confirm = Array.from(el.querySelectorAll('[data-testid="fulfil-pickup"] button')).find((b) => b.textContent?.includes('Confirm')) as HTMLButtonElement
+    confirm.click()
     await new Promise((r) => setTimeout(r, 20))
     const call = calls.find((c) => c.url.endsWith('/fulfillments'))
     expect(call).toBeTruthy()
