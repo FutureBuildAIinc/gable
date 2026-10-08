@@ -19,12 +19,16 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/pricing"
+	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/eventbus"
@@ -175,15 +179,23 @@ func newOutboxDrain(db *database.DB, logger *slog.Logger, orderSvc *order.Servic
 }
 
 // newOrderService builds the order service the worker's queue jobs and
-// subscriber use: the outbox, the transaction runner, the audit log and the
-// inventory, with no HTTP surface.
+// subscriber use, through the same constructor serve uses (orderwire.New):
+// the outbox, the transaction runner, the audit log, inventory, the invoice
+// writer, the price engine and, with them, the configured tax provider behind
+// the rate resolver and the exposure gate, so the delivery completions this
+// role bills are priced exactly as the desk's fulfilments are.
 func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
-	return order.NewService(order.NewRepository(db)).
-		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db).
-		WithAuditLog(audit.NewLogger(db)).
-		WithInventory(inventory.NewService(inventory.NewRepository(db))).
-		WithInvoices(newInvoiceService(db))
+	return orderwire.New(orderwire.Deps{
+		DB:         db,
+		Config:     cfg,
+		Logger:     slog.Default(),
+		Inventory:  inventory.NewService(inventory.NewRepository(db)),
+		Invoices:   newInvoiceService(db),
+		Pricing:    pricing.NewService(pricing.NewRepository(db)),
+		Customers:  customer.NewService(customer.NewRepository(db)),
+		Escalators: pricing.NewEscalatorRepository(db),
+		QuoteLines: quote.NewRepository(db),
+	})
 }
 
 // newInvoiceService builds the invoice service the fulfilment worker writes

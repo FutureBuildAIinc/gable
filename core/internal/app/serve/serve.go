@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +24,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
@@ -48,12 +48,10 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/notification"
-	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pim"
-	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
@@ -388,7 +386,6 @@ func Run() {
 	productSvc.WithVendorService(vendorSvc)
 
 	// Order Module - injected with InventoryService and InvoiceService
-	orderRepo := order.NewRepository(db)
 	poRepo := purchase_order.NewRepository(db)
 
 	// EDI Module
@@ -432,14 +429,21 @@ func Run() {
 	// The order module on the wire contract (ADR 0005 section 5): every write
 	// one transaction with its order.* outbox event, the payload branch rule,
 	// the pricing engine wrapped at the boundary, and the tax provider behind
-	// the rate resolver.
-	orderSvc := order.NewService(orderRepo).
-		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db).
-		WithAuditLog(auditLog).
-		WithPriceEngine(&priceEngineAdapter{pricing: pricingSvc, customers: customerSvc}).
-		WithInventory(inventorySvc).
-		WithInvoices(invoiceSvc)
+	// the rate resolver. orderwire.New is the one constructor both roles use
+	// (serve and the worker), so the worker that bills delivery completions
+	// carries the same provider and exposure gate wiring.
+	orderSvc := orderwire.New(orderwire.Deps{
+		DB:         db,
+		Config:     cfg,
+		Logger:     logger,
+		AuditLog:   auditLog,
+		Inventory:  inventorySvc,
+		Invoices:   invoiceSvc,
+		Pricing:    pricingSvc,
+		Customers:  customerSvc,
+		Escalators: escalatorRepo,
+		QuoteLines: quoteRepo,
+	})
 	wall.orders(mux, orderSvc)
 	// The charge code master (ADR 0005 section 2.5), contract born.
 	chargecode.NewHandler(chargecode.NewService(chargecode.NewRepository(db))).
@@ -456,24 +460,15 @@ func Run() {
 	wall.documents(mux, docHandler)
 
 	// Sales Tax Module (exemptions + Avalara when configured; wired before
-	// Payment/POS because both consume the tax service).
-	taxExemptionRepo := tax.NewExemptionRepo(db)
-	var avalaraClient *tax.AvalaraClient
+	// Payment/POS because both consume the tax service). The service is built
+	// by the same helper the order wiring uses (orderwire.NewTaxService); the
+	// order service's own provider adapter carries its own instance of it.
 	if cfg.AvalaraAccountID != "" {
-		avalaraClient = tax.NewAvalaraClient(tax.AvalaraConfig{
-			AccountID:   cfg.AvalaraAccountID,
-			LicenseKey:  cfg.AvalaraLicenseKey,
-			Environment: cfg.AvalaraEnvironment,
-			CompanyCode: cfg.AvalaraCompanyCode,
-		}, logger)
 		logger.Info("Avalara AvaTax initialized", "environment", cfg.AvalaraEnvironment)
 	} else {
 		logger.Info("AVALARA_ACCOUNT_ID not set — POS/invoice tax uses the branch default rate (locations.default_tax_rate)")
 	}
-	taxSvc := tax.NewService(taxExemptionRepo, avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
-	// The configured provider path sits behind the order rate resolver
-	// (ADR 0005 section 3).
-	orderSvc.WithTaxProvider(&taxProviderAdapter{svc: taxSvc})
+	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
 	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
@@ -1142,38 +1137,6 @@ func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Hand
 			"request_id", middleware.GetRequestID(r.Context()),
 		)
 	})
-}
-
-// priceEngineAdapter wraps today's pricing engine at the order boundary
-// (ADR 0005 section 1): the engine answers in dollars, and its result is
-// converted to a scale 4 price once, here, never inside the order module.
-type priceEngineAdapter struct {
-	pricing   *pricing.Service
-	customers *customer.Service
-}
-
-func (a *priceEngineAdapter) PriceFor(ctx context.Context, customerID, productID uuid.UUID, basePrice httpx.Price, quantity httpx.Quantity, jobID *uuid.UUID) (httpx.Price, error) {
-	cust, err := a.customers.GetCustomer(ctx, customerID)
-	if err != nil {
-		return 0, fmt.Errorf("price engine: customer: %w", err)
-	}
-	base := float64(basePrice) / 10000
-	cp, err := a.pricing.CalculatePriceWithQty(ctx, cust, productID, base, float64(quantity)/10000, jobID)
-	if err != nil {
-		return 0, fmt.Errorf("price engine: %w", err)
-	}
-	return httpx.Price(int64(math.Round(cp.FinalPrice * 10000))), nil
-}
-
-// taxProviderAdapter is the configured provider path behind the rate
-// resolver (ADR 0005 section 3).
-type taxProviderAdapter struct {
-	svc *tax.Service
-}
-
-func (a *taxProviderAdapter) Configured() bool { return a.svc.ProviderConfigured() }
-func (a *taxProviderAdapter) PreviewTax(ctx context.Context, req *tax.TaxPreviewRequest) (*tax.TaxResult, error) {
-	return a.svc.PreviewTax(ctx, req)
 }
 
 func derefString(s *string) string {

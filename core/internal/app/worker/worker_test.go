@@ -30,7 +30,7 @@ import (
 // configured, the invoice a delivery completion's fulfilment request writes
 // carries the provider's tax (tax_source provider), because the worker builds
 // its order service with the same provider wiring as serve. Against the
-// branch's 8.25 percent rate the provider's 456 cents is unmistakable.
+// branch's 8.25 percent rate the provider's 450 cents is unmistakable.
 func TestWorkerOrderServiceBillsWithTheConfiguredTaxProvider(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
@@ -40,7 +40,7 @@ func TestWorkerOrderServiceBillsWithTheConfiguredTaxProvider(t *testing.T) {
 	// transaction shape; its total tax is what the invoice must carry.
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"code":"wiring-stub","totalAmount":55.00,"totalTax":4.56,"status":"Saved"}`)
+		fmt.Fprint(w, `{"code":"wiring-stub","totalAmount":55.00,"totalTax":4.50,"status":"Saved"}`)
 	}))
 	t.Cleanup(stub.Close)
 
@@ -91,15 +91,15 @@ func TestWorkerOrderServiceBillsWithTheConfiguredTaxProvider(t *testing.T) {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customer)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customer)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, customer)
-	_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, product)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, product)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, customer)
 	})
 
 	q, _ := httpx.ParseQuantity("10")
 	o, err := svc.Create(ctx, &order.Draft{
-		CustomerID:    customer,
-		DeliveryType:  order.DeliveryDelivery,
-		Lines:         []salesdoc.ParsedLine{{LineType: salesdoc.LineProduct, ProductID: &product, Quantity: q}},
+		CustomerID:   customer,
+		DeliveryType: order.DeliveryDelivery,
+		Lines:        []salesdoc.ParsedLine{{LineType: salesdoc.LineProduct, ProductID: &product, Quantity: q}},
 	}, "worker-wiring")
 	if err != nil {
 		t.Fatalf("create order: %v", err)
@@ -130,7 +130,7 @@ func TestWorkerOrderServiceBillsWithTheConfiguredTaxProvider(t *testing.T) {
 	if invoices != 1 {
 		t.Fatalf("%d invoices for the delivered order, want 1", invoices)
 	}
-	if tax != "456/PROVIDER" {
-		t.Errorf("delivery completion invoice tax = %q, want the provider's 456 with tax_source PROVIDER", tax)
+	if tax != "450/PROVIDER" {
+		t.Errorf("delivery completion invoice tax = %q, want the provider's 450 with tax_source PROVIDER", tax)
 	}
 }
