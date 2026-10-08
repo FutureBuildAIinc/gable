@@ -1,0 +1,42 @@
+[
+  {
+    "name": "partner_quotes.list.unauthenticated",
+    "request": {
+      "method": "GET",
+      "path": "/api/partner/v1/quotes"
+    },
+    "response": {
+      "status": 401,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNAUTHORIZED",
+          "message": "Unauthorized"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  },
+  {
+    "name": "partner_quotes.get.unauthenticated",
+    "request": {
+      "method": "GET",
+      "path": "/api/partner/v1/quotes/<id-2>"
+    },
+    "response": {
+      "status": 401,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNAUTHORIZED",
+          "message": "Unauthorized"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  }
+]

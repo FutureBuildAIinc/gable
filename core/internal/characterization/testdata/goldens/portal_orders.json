@@ -1,0 +1,780 @@
+[
+  {
+    "name": "portal_orders.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.project.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/projects",
+      "body": {
+        "name": "Golden Orders Project"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "id": "<id-4>",
+        "name": "Golden Orders Project",
+        "status": "Active",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.add",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/cart/items",
+      "body": {
+        "product_id": "<id-5>",
+        "quantity": 1
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "id": "<id-6>",
+        "item_count": 2,
+        "items": [
+          {
+            "available": 0,
+            "id": "<id-7>",
+            "image_url": "",
+            "line_total": 9.5,
+            "product_id": "<id-8>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2,
+            "unit_price": 4.75
+          },
+          {
+            "available": 0,
+            "id": "<id-9>",
+            "image_url": "",
+            "line_total": 32.3,
+            "product_id": "<id-5>",
+            "product_name": "3/4 Plywood G1S 4x8 (Fir)",
+            "product_sku": "PLY-34-CDX",
+            "quantity": 1,
+            "unit_price": 32.3
+          }
+        ],
+        "subtotal": 41.8
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/cart/items/<id-9>",
+      "body": {
+        "quantity": 3
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/cart/items/not-a-uuid",
+      "body": {
+        "quantity": 3
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/cart/items/<id-9>",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.update.unknown",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/cart/items/<id-13>",
+      "body": {
+        "quantity": 3
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.remove",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/portal/v1/cart/items/<id-9>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "id": "<id-6>",
+        "item_count": 1,
+        "items": [
+          {
+            "available": 0,
+            "id": "<id-7>",
+            "image_url": "",
+            "line_total": 9.5,
+            "product_id": "<id-8>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2,
+            "unit_price": 4.75
+          }
+        ],
+        "subtotal": 9.5
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.remove.bad_id",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/portal/v1/cart/items/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cart.remove.unknown",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/portal/v1/cart/items/<id-13>"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.checkout.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/checkout",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.checkout",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/checkout",
+      "body": {
+        "delivery_method": "PICKUP",
+        "notes": "golden checkout",
+        "payment_method": "ACCOUNT",
+        "project_id": "<id-4>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "message": "Order placed successfully",
+        "order_id": "<id-18>"
+      }
+    }
+  },
+  {
+    "name": "portal_orders.checkout.empty_cart",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/checkout",
+      "body": {
+        "delivery_method": "PICKUP",
+        "payment_method": "ACCOUNT"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.list.by_project",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders?project_id=<id-4>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "id": "<id-18>",
+          "lines": [
+            {
+              "price_each": 4.75,
+              "product_id": "<id-8>",
+              "product_name": "2x4x8 SPF Premium",
+              "product_sku": "LUM-248-PREM",
+              "quantity": 2
+            }
+          ],
+          "project_id": "<id-4>",
+          "project_name": "Golden Orders Project",
+          "status": "DRAFT",
+          "total_amount": 9.5,
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal_orders.list.not_modified",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders?project_id=<id-4>",
+      "headers": {
+        "If-None-Match": "*"
+      }
+    },
+    "response": {
+      "status": 304,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "portal_orders.list.since_future",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders?since=<ts+106751d>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "portal_orders.list.bad_since",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders?since=yesterday"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.list.bad_project",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders?project_id=nope"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders/<id-18>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "id": "<id-18>",
+        "lines": [
+          {
+            "price_each": 4.75,
+            "product_id": "<id-8>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2
+          }
+        ],
+        "project_id": "<id-4>",
+        "project_name": "Golden Orders Project",
+        "status": "DRAFT",
+        "total_amount": 9.5,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_orders.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.get.unknown",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/orders/<id-13>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-23>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.project.detach",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/orders/<id-18>/project",
+      "body": {
+        "project_id": null
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "id": "<id-18>",
+        "lines": [
+          {
+            "price_each": 4.75,
+            "product_id": "<id-8>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2
+          }
+        ],
+        "project_id": null,
+        "project_name": null,
+        "status": "DRAFT",
+        "total_amount": 9.5,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_orders.project.attach",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/orders/<id-18>/project",
+      "body": {
+        "project_id": "<id-4>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "id": "<id-18>",
+        "lines": [
+          {
+            "price_each": 4.75,
+            "product_id": "<id-8>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2
+          }
+        ],
+        "project_id": "<id-4>",
+        "project_name": "Golden Orders Project",
+        "status": "DRAFT",
+        "total_amount": 9.5,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal_orders.project.unknown_project",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/orders/<id-18>/project",
+      "body": {
+        "project_id": "<id-13>"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-24>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.project.unknown_order",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/orders/<id-13>/project",
+      "body": {
+        "project_id": null
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.project.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/orders/not-a-uuid/project",
+      "body": {
+        "project_id": null
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.reorder",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/orders/reorder",
+      "body": {
+        "order_id": "<id-18>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-27>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.reorder.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/orders/reorder",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-28>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.reorder.unknown",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/orders/reorder",
+      "body": {
+        "order_id": "<id-13>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-29>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cancel",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/orders/<id-18>/cancel",
+      "body": {
+        "reason": "golden cancel"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "message": "Order cancelled",
+        "order_id": "<id-18>",
+        "previous_status": "DRAFT",
+        "status": "CANCELLED"
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cancel.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/orders/<id-18>/cancel"
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "ORDER_ALREADY_CANCELLED",
+          "message": "Conflict",
+          "reason": "This order has already been cancelled."
+        },
+        "meta": {
+          "request_id": "<id-30>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cancel.unknown",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/orders/<id-13>/cancel"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-31>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal_orders.cancel.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/orders/not-a-uuid/cancel"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
+      }
+    }
+  }
+]
