@@ -309,19 +309,30 @@ client that expects to cross it carries them as strings.
 
 Line totals, tax amounts, and every other derived amount stay in cents:
 the extension of a line is rounded once, to cents, by the one rule
-section 7a fixes, implemented once in the package, never per module.
+section 7a fixes, implemented once in the package, never per module, and
+its field on the wire is `line_total_cents`, the one name on every
+document line that carries an extension.
 
 ### 7a. Quantities, units and the extension
 
-Quantities and unit conversion factors travel as JSON strings holding a
-plain decimal with at most 4 fraction digits (`"12.5"`, `"1000"`,
-`"0.001"`), parsed with the package's fixed scale helpers, never as JSON
-numbers: a float on either side of a line's arithmetic would make the
-extension unreproducible for clients and agents. The package's `Quantity`
-type is the wire type (parse, database form, and shortest exact string
-form); the factor's own precision is what cycle 3's units design works
-with, and the wire type is fixed now so that design refines values, not
-shapes.
+Quantities and both sides of a conversion pair travel as JSON strings
+holding a plain decimal with at most 4 fraction digits (`"12.5"`,
+`"1000"`, `"0.1875"`), parsed with the package's fixed scale helpers,
+never as JSON numbers: a float on either side of a line's arithmetic
+would make the extension unreproducible for clients and agents. One
+canonical spelling is enforced on the wire, the same posture as `limit`:
+no leading zeros (`"0012"` is a 400) and no negative zero (`"-0"`);
+trailing fraction zeros are the column's own padding and are accepted,
+because the same type reads back what the database sends. A magnitude
+beyond what the quantity columns hold (NUMERIC(12,4), at most
+99999999.9999) is a 400 at the boundary, never a database fault on
+store. Signs carry one meaning: a quantity is negative only on a return
+or credit line, and a unit price is never negative; the converting
+module's validator enforces that through the package's sign helper,
+which knows the line's kind. The package's `Quantity` type is the wire
+type (parse, database form, and shortest exact string form); the pair's
+own precision is what cycle 3's units design works with, and the wire
+type is fixed now so that design refines values, not shapes.
 
 Every quantity carries its unit of measure beside it, in a `uom` field.
 A unit price is per its price unit: where the price unit can differ from
@@ -331,12 +342,23 @@ fasteners per `M` or `CWT`; a price of 3.75 per M is 0.00375 each, which
 no per-each scale 4 field could hold, so the conversion belongs to the
 line, not to the price.
 
-The extension of a line is the quantity converted to the price unit
-(through the factor stored on the line, 1 when the units agree),
-multiplied by the unit price, rounded once, to cents, half away from
-zero. The rounding mode is named here and implemented once in the
-package (`Extend`), exact in big arithmetic until that one rounding;
-no module prices a line any other way.
+The conversion is a pair of quantities, not a factor: the line carries
+`uom_qty` and `price_uom_qty`, meaning `uom_qty` of its `uom` is the same
+goods as `price_uom_qty` of its `price_uom`. Lumber sold by the piece and
+priced per `MBF` carries 187.5 and 1 (187.5 PCS = 1 MBF); fasteners sold
+by the piece and priced per `M` carry 1000 and 1. When the units agree
+the pair is 1 and 1. A single scale 4 factor cannot carry these: 1/187.5
+rounds to 0.0053, and a whole thousand board feet at 500.00 per `MBF`
+would price about 0.6 percent off; the pair holds both sides exactly.
+
+The extension of a line is the quantity multiplied by the unit price and
+by `price_uom_qty`, divided by `uom_qty` (the quantity converted into the
+price unit), rounded once, to cents, half away from zero: 187.5 PCS at
+500.00 per `MBF` is exactly 50000 cents, and one piece of the same
+lumber, 2.6667 cents' worth, rounds to 267 cents. The rounding mode is
+named here and implemented once in the package (`Extend`), exact in big
+arithmetic until that one rounding; no module prices a line any other
+way.
 
 ### 8. Document numbers
 
