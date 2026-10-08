@@ -826,8 +826,10 @@ func main() {
 		finalHandler = authMw.Handler(finalHandler)
 	}
 
-	// Actor identity (agent headers → context for audit attribution). Inside
-	// auth on purpose: it records who acted, it never grants anything.
+	// Actor identity (agent headers → context for audit attribution).
+	// Outside auth on purpose: this middleware wraps auth, so it runs before
+	// it and the context it builds flows through auth to the handler; it
+	// records who acted, it never grants anything.
 	finalHandler = actor.Middleware(finalHandler)
 
 	// CORS — must be outside auth so OPTIONS preflight is handled before auth
