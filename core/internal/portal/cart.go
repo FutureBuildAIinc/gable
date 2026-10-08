@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -147,7 +148,11 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		draft.BranchID = &branch
 	}
 
-	newOrder, err := s.orderSvc.Create(ctx, draft, "portal:customer:"+customerID.String())
+	// The portal is a trusted in process caller naming the customer's own
+	// branch; it carries no branch context of its own, so the payload branch
+	// rule (ADR 0007 2.3) would refuse it. The customer scoping is the
+	// portal's own wall.
+	newOrder, err := s.orderSvc.Create(branchctx.WithSystem(ctx), draft, "portal:customer:"+customerID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}

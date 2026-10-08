@@ -486,6 +486,9 @@ type fakeOrderRepo struct {
 var _ order.Repository = (*fakeOrderRepo)(nil)
 
 func (f *fakeOrderRepo) NextNumber(context.Context) (string, error) { return "SO-000001", nil }
+func (f *fakeOrderRepo) DefaultBranchID(context.Context) (uuid.UUID, error) {
+	return uuid.MustParse("00000000-0000-0000-0000-0000000000b1"), nil
+}
 func (f *fakeOrderRepo) GetOrder(_ context.Context, id uuid.UUID) (*order.Order, error) {
 	o, ok := f.orders[id]
 	if !ok {

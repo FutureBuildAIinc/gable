@@ -759,7 +759,7 @@ func Run() {
 						description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
 						quantity_allocated, quantity_fulfilled)
 					SELECT $1, $2, $3, $4, 'PRODUCT', $5,
-						COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3 * $4, 2), TRUE,
+						COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
 						CASE WHEN $6 = 'CONFIRMED' THEN $3 ELSE 0 END,
 						CASE WHEN $6 = 'FULFILLED' THEN $3 ELSE 0 END
 					FROM products p WHERE p.id = $2`,

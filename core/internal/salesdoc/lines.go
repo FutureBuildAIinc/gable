@@ -149,10 +149,9 @@ type Line struct {
 	// posting reads it (product, kit and non stock lines post to 4010).
 	RevenueAccountCode *string `json:"revenue_account_code"`
 
-	IsSpecialOrder    bool           `json:"is_special_order"`
-	VendorID          *uuid.UUID     `json:"vendor_id"`
-	SpecialOrderCost  *httpx.Price   `json:"special_order_unit_cost_ten_thousandths"`
-	QuantityFulfilled httpx.Quantity `json:"quantity_fulfilled"`
+	IsSpecialOrder   bool         `json:"is_special_order"`
+	VendorID         *uuid.UUID   `json:"vendor_id"`
+	SpecialOrderCost *httpx.Price `json:"special_order_unit_cost_ten_thousandths"`
 
 	CreatedAt httpx.Timestamp `json:"created_at"`
 }

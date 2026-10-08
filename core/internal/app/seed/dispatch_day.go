@@ -555,7 +555,7 @@ func seedDispatchDay(
 			if _, err := db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
 					description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable, quantity_allocated)
 				SELECT $1, $2, $3, $4, 'PRODUCT', $5,
-					COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3 * $4, 2), TRUE, $3
+					COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE, $3
 				FROM products p WHERE p.id = $2`,
 				orderID, pid, ln.Qty, price, lines); err != nil {
 				log.Printf("seedDispatchDay: line %s for %s: %v", ln.SKU, s.Customer, err)

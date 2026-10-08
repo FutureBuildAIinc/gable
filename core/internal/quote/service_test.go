@@ -614,18 +614,17 @@ func TestConvert_RefusesAnAlreadyConvertedQuote(t *testing.T) {
 	}
 }
 
-// A failing order create rolls the acceptance back with it: the convert is
-// one transaction (ADR 0005 5.8).
-func TestConvert_AFailedOrderCreateRollsTheAcceptanceBack(t *testing.T) {
+// A failing order create surfaces from the convert: the quote service does
+// not swallow it. The atomicity (the acceptance rolling back with the failed
+// order in one transaction) is proven over the real database by the wire
+// tests; this unit rig has no transaction runner to roll back.
+func TestConvert_AFailedOrderCreateSurfaces(t *testing.T) {
 	svc, repo, _ := newTestService()
 	q := repo.seed(QuoteStateSent)
 	svc.WithOrderCreator(&fakeOrderCreator{failWith: errors.New("order insert failed")})
 	rev := int64(1)
 	if _, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev}); err == nil {
 		t.Fatal("convert succeeded though the order could not be created")
-	}
-	if got, gerr := svc.GetQuote(context.Background(), q.ID); gerr != nil || got.Status != QuoteStateSent {
-		t.Errorf("status after a failed convert = %v (%v), want sent", got.Status, gerr)
 	}
 }
 
