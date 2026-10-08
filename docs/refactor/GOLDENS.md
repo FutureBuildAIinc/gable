@@ -119,8 +119,10 @@ each dispatch order its own created_at, a few milliseconds after the shared
 midnight so the recorded day offset does not move, in a fixed newest-first
 order (`dispatchRecencyOrder` in `fixtures_clock_test.go`) that reproduces the
 recorded golden byte for byte, and it fails the run if any of the newest 25
-orders ever share a created_at again. The missing tiebreak in the read itself
-is product behaviour and is left as found.
+orders ever share a created_at again. The read itself now breaks ties too (the
+R1-flake row in CONTRACT-CHANGES.md); the pin stays because that tiebreak is the
+order id, which is random per run, so only distinct timestamps keep the golden
+stable.
 
 ### What is normalised, and why
 
