@@ -3,15 +3,13 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { Product, UOM } from '../../types/product';
+import { UOM_OPTIONS } from '../../types/product';
+import type { ProductCreate, UOM } from '../../types/product';
 import type { Vendor } from '../../types/vendor';
 import { fetchWithAuth } from '../../services/fetchClient';
-
-const UOM_OPTIONS: UOM[] = [
-  'PCS', 'EA', 'LF', 'SF', 'BF', 'MBF', 'SQ',
-  'BOX', 'CTN', 'RL', 'GAL', 'LBS',
-  'BAG', 'BUNDLE', 'PAIR', 'SET'
-];
+import { ProductService } from '../../services/product.service';
+import { apiErrorMessage } from '../../services/apiError';
+import { dollarsToTenThousandths } from '../../lib/money';
 
 const NEW_VENDOR_SENTINEL = '__new__';
 
@@ -24,7 +22,8 @@ export class GableAddProductModal extends LitElement {
   @state() private _sku = '';
   @state() private _description = '';
   @state() private _uom: UOM = 'PCS';
-  @state() private _basePrice = 0;
+  // Held as the text the user typed; converted to ten thousandths with string arithmetic on submit.
+  @state() private _basePrice = '0.00';
   @state() private _vendorId = '';
   @state() private _newVendorName = '';
   @state() private _upc = '';
@@ -90,37 +89,43 @@ export class GableAddProductModal extends LitElement {
       : { vendor_id: this._vendorId };
   }
 
+  private _reset() {
+    this._sku = '';
+    this._description = '';
+    this._uom = 'PCS';
+    this._basePrice = '0.00';
+    this._vendorId = '';
+    this._newVendorName = '';
+    this._upc = '';
+    this._error = '';
+  }
+
+  /** Creates the product on the wire (stock_uom, base_price_ten_thousandths) and tells the page; a refusal stays in the form. */
   private async _handleSubmit(e: Event) {
     e.preventDefault();
     this._isSubmitting = true;
     this._error = '';
 
     try {
+      const priceTt = dollarsToTenThousandths(this._basePrice);
+      if (priceTt === null) {
+        throw new Error('Enter the base price in dollars, for example 4.25 (at most four decimal places)');
+      }
       const vendorFields = await this._resolveVendor();
-      const productData: Omit<Product, 'id' | 'created_at' | 'updated_at'> = {
-        sku: this._sku,
-        description: this._description,
-        uom_primary: this._uom,
-        base_price: this._basePrice,
-        upc: this._upc,
-        average_unit_cost: 0,
-        target_margin: 0.30,
-        commission_rate: 0.05,
+      const upc = this._upc.trim();
+      const productData: ProductCreate = {
+        sku: this._sku.trim(),
+        description: this._description.trim(),
+        stock_uom: this._uom,
+        base_price_ten_thousandths: priceTt,
+        ...(upc ? { upc } : {}),
         ...vendorFields,
-      } as Omit<Product, 'id' | 'created_at' | 'updated_at'>;
-
-      this.dispatchEvent(new CustomEvent('save', { detail: productData, bubbles: true, composed: true }));
-
-      // Reset form
-      this._sku = '';
-      this._description = '';
-      this._uom = 'PCS';
-      this._basePrice = 0;
-      this._vendorId = '';
-      this._newVendorName = '';
-      this._upc = '';
+      };
+      const created = await ProductService.createProduct(productData);
+      this._reset();
+      this.dispatchEvent(new CustomEvent('success', { detail: created, bubbles: true, composed: true }));
     } catch (err) {
-      this._error = err instanceof Error ? err.message : 'Failed to save product';
+      this._error = apiErrorMessage(err, 'Failed to save product');
     } finally {
       this._isSubmitting = false;
     }
@@ -142,7 +147,7 @@ export class GableAddProductModal extends LitElement {
           </div>
 
           ${this._error ? html`
-            <div class="mb-4 p-3 bg-red-900/30 border border-red-800 text-red-200 rounded text-sm">
+            <div class="mb-4 p-3 bg-red-900/30 border border-red-800 text-red-200 rounded text-sm whitespace-pre-line" role="alert">
               ${this._error}
             </div>
           ` : nothing}
@@ -227,9 +232,9 @@ export class GableAddProductModal extends LitElement {
               <input
                 type="number"
                 min="0"
-                step="0.01"
-                .value=${String(this._basePrice)}
-                @input=${(e: InputEvent) => this._basePrice = parseFloat((e.target as HTMLInputElement).value)}
+                step="0.0001"
+                .value=${this._basePrice}
+                @input=${(e: InputEvent) => this._basePrice = (e.target as HTMLInputElement).value}
                 class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:border-transparent font-mono"
               />
             </div>

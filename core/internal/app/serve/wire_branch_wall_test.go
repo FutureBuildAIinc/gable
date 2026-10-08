@@ -86,6 +86,12 @@ type wallFixture struct {
 
 func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixture {
 	t.Helper()
+	// Callers take the shared outbox lock before this fixture: the wall's
+	// route calls (a location create, a product write) run through the serve
+	// wiring, which records outbox events, and must not interleave with
+	// another package's feed assertions. The lock cannot live here: a caller
+	// that already holds it (the orders wall) would open a second session and
+	// self-deadlock on the advisory lock.
 	ctx := context.Background()
 	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New(),
 		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
@@ -198,6 +204,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	invSvc := inventory.NewService(inventory.NewRepository(db))
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)), location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
 	wall.inventory(mux, invSvc)
+	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	// The recommendation service is wired as serve wires it (serve.go), so
@@ -306,6 +313,7 @@ func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, bran
 }
 
 func TestBranchWall_ServeWiring(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A, B := f.branchA.String(), f.branchB.String()
@@ -327,7 +335,7 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 		if id, ok := parent.(uuid.UUID); ok {
 			p = fmt.Sprintf("%q", id)
 		}
-		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s}`, typ, uuid.NewString()[:8], p)
+		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s}`, strings.ToLower(typ), uuid.NewString()[:8], p)
 	}
 	const ok = http.StatusOK
 	const no = http.StatusForbidden
@@ -448,6 +456,7 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 // so a bound caller reaches any location (the intended single branch
 // behaviour, not a hole: there is one branch).
 func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, false)
 	body := fmt.Sprintf(`{"product_id":%q,"location_id":%q,"quantity":5,"reason":"t"}`, f.productID, f.yardB)
@@ -512,6 +521,7 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 // methods, the real role guards and the real BranchMiddleware; a route that
 // loses its record check fails here.
 func TestBranchWall_PathIDRecords(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -638,6 +648,7 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 // context branch and a 403 with none (its grants, none granted none), and
 // can read, print and email only its own branch's records.
 func TestBranchWall_DocumentRoutes(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -674,6 +685,7 @@ func TestBranchWall_DocumentRoutes(t *testing.T) {
 // branch or, with none, through its grants; a bound user with no grants reads
 // none; an administrator without a header reads every branch's.
 func TestBranchWall_MatchingExceptions(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -818,11 +830,27 @@ func TestBranchWall_QuoteListGrants(t *testing.T) {
 	}
 }
 
-// The inventory levels list is filtered by the caller's branches like the
-// module's writes: a warehouse user held to branch A reads only branch A's
-// rows, through its context branch or, with none, through its grants; a bound
-// user with no grants reads none; an administrator without a header reads
-// every branch's.
+// invLevelPage is the envelope the inventory levels list answers (ADR 0006
+// 7.2), with the one row shape the wall test reads.
+type invLevelPage struct {
+	Items []struct {
+		LocationID *string `json:"location_id"`
+		Location   string  `json:"location_name"`
+		Available  string  `json:"available"`
+		UOM        string  `json:"uom"`
+		ProductID  string  `json:"product_id"`
+	} `json:"items"`
+	NextCursor *string `json:"next_cursor"`
+	Limit      int     `json:"limit"`
+}
+
+// The inventory levels list is the contract's envelope (ADR 0006 7.2) and is
+// filtered by the caller's branches like the module's writes: a warehouse user
+// held to branch A reads only branch A's rows, through its context branch or,
+// with none, through its grants; a bound user with no grants reads none (an
+// empty page, still the envelope); an administrator without a header reads
+// every branch's. Every row carries `available` and `uom` beside the
+// quantities, in the product's stocking unit.
 func TestBranchWall_InventoryListGrants(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
@@ -836,7 +864,7 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		{f.yardB, "wl-inv-b-" + f.yardB.String()[:8]},
 	} {
 		if _, err := db.Pool.Exec(context.Background(),
-			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, 5)`,
+			`INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, $3, 5, 2)`,
 			f.productID, r.yard, r.name); err != nil {
 			t.Fatalf("seed inventory: %v", err)
 		}
@@ -854,28 +882,64 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		t.Fatalf("seed legacy inventory: %v", err)
 	}
 
+	list := func(role, sub, header string) invLevelPage {
+		t.Helper()
+		status, body := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", role, sub, header)
+		if status != http.StatusOK {
+			t.Fatalf("inventory list as %s/%s: %d %s", role, sub, status, body)
+		}
+		var page invLevelPage
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("inventory list body is not the envelope: %v\n%s", err, body)
+		}
+		if page.Limit == 0 {
+			t.Fatalf("inventory list carries no limit: %s", body)
+		}
+		return page
+	}
+	rowAt := func(page invLevelPage, yard string) bool {
+		for _, it := range page.Items {
+			if it.LocationID != nil && *it.LocationID == yard {
+				if it.Available != "3" || it.UOM != "PCS" || it.ProductID != f.productID.String() {
+					t.Errorf("row at %s carries available %q uom %q product %q, want 3 / PCS / the seeded product",
+						yard, it.Available, it.UOM, it.ProductID)
+				}
+				return true
+			}
+		}
+		return false
+	}
+	legacyIn := func(page invLevelPage) bool {
+		for _, it := range page.Items {
+			if it.LocationID == nil && it.Location == legacyName {
+				return true
+			}
+		}
+		return false
+	}
+
 	for _, c := range []struct {
 		name, role, sub, header string
-		wantA, wantB            bool
-		wantLegacy              bool
+		wantRows                 int
+		wantA, wantB             bool
+		wantLegacy               bool
 	}{
-		{"warehouse, header A", "warehouse", "u-a", A, true, false, false},
-		{"warehouse, no header", "warehouse", "u-a", "", true, false, false},
-		{"warehouse u-none, no header", "warehouse", "u-none", "", false, false, false},
-		{"admin, no header", "admin", "boss", "", true, true, true},
+		{"warehouse, header A", "warehouse", "u-a", A, 1, true, false, false},
+		{"warehouse, no header", "warehouse", "u-a", "", 1, true, false, false},
+		{"warehouse u-none, no header", "warehouse", "u-none", "", 0, false, false, false},
+		{"admin, no header", "admin", "boss", "", 3, true, true, true},
 	} {
-		status, body := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", c.role, c.sub, c.header)
-		if status != http.StatusOK {
-			t.Errorf("inventory list, %s: %d, want 200", c.name, status)
-			continue
+		page := list(c.role, c.sub, c.header)
+		if len(page.Items) != c.wantRows {
+			t.Errorf("inventory list, %s: %d rows, want %d", c.name, len(page.Items), c.wantRows)
 		}
-		if got := strings.Contains(string(body), f.yardA.String()); got != c.wantA {
+		if got := rowAt(page, f.yardA.String()); got != c.wantA {
 			t.Errorf("inventory list, %s: branch A's row present = %v, want %v", c.name, got, c.wantA)
 		}
-		if got := strings.Contains(string(body), f.yardB.String()); got != c.wantB {
+		if got := rowAt(page, f.yardB.String()); got != c.wantB {
 			t.Errorf("inventory list, %s: branch B's row present = %v, want %v", c.name, got, c.wantB)
 		}
-		if got := strings.Contains(string(body), legacyName); got != c.wantLegacy {
+		if got := legacyIn(page); got != c.wantLegacy {
 			t.Errorf("inventory list, %s: legacy row present = %v, want %v", c.name, got, c.wantLegacy)
 		}
 	}
@@ -1096,6 +1160,7 @@ type poRefreshSummary struct {
 // write mode lands the recomputed target on the products row, and an
 // admin's write equals a bound user's write.
 func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
+	testutil.LockOutboxTables(t) // the refresh writes product.updated events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -1238,6 +1303,77 @@ func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
 	if wantPoint, wantQty := 116.0, 330.0; adminPoint != wantPoint || adminQty != wantQty {
 		t.Errorf("refresh write: admin wrote point = %v, qty = %v, want %v, %v (every branch's sales: 90 + 900 = 990 over 90 days)",
 			adminPoint, adminQty, wantPoint, wantQty)
+
+	}
+}
+
+// TestBranchWall_CatalogReads: a product read sums stock over the caller's
+// branches only (ADR 0007 section 2.3, ADR 0006 7.1), and a branch read by id
+// is held to the record rule: a branch the caller may not target is a 403.
+func TestBranchWall_CatalogReads(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A, B := f.branchA.String(), f.branchB.String()
+	for _, r := range []struct {
+		yard           uuid.UUID
+		qty, allocated int
+	}{{f.yardA, 10, 2}, {f.yardB, 100, 5}} {
+		if _, err := db.Pool.Exec(context.Background(),
+			`INSERT INTO inventory (product_id, location, location_id, quantity, allocated) VALUES ($1, 'wl', $2, $3, $4)`,
+			f.productID, r.yard, r.qty, r.allocated); err != nil {
+			t.Fatalf("seed stock: %v", err)
+		}
+	}
+	stock := func(role, sub, header string) [3]string {
+		status, body := f.callBody(t, "GET", "/api/v1/products/"+f.productID.String(), "", role, sub, header)
+		if status != http.StatusOK {
+			t.Fatalf("%s product read: %d %s", role, status, body)
+		}
+		var v struct{ OnHand, Allocated, Available string }
+		var raw map[string]any
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatal(err)
+		}
+		v.OnHand, v.Allocated, v.Available = raw["on_hand"].(string), raw["allocated"].(string), raw["available"].(string)
+		return [3]string{v.OnHand, v.Allocated, v.Available}
+	}
+	if got := stock("warehouse", "u-a", A); got != [3]string{"10", "2", "8"} {
+		t.Errorf("a branch A caller sums %v, want its own stock 10/2/8", got)
+	}
+	if got := stock("warehouse", "u-a", ""); got != [3]string{"10", "2", "8"} {
+		t.Errorf("a bound caller with no header sums %v, want its granted branches 10/2/8", got)
+	}
+	if got := stock("admin", "boss", ""); got != [3]string{"110", "7", "103"} {
+		t.Errorf("an administrator with no header sums %v, want every branch 110/7/103", got)
+	}
+	if got := stock("admin", "boss", B); got != [3]string{"100", "5", "95"} {
+		t.Errorf("an administrator in branch B sums %v, want 100/5/95", got)
+	}
+
+	// A branch read by id stays unwalled, as the branch list is (PR 39's
+	// decision): the desk's Branch Users page reads a branch other than the
+	// one the administrator works in.
+	for _, c := range []struct{ role, sub, header string }{
+		{"admin", "boss", A}, {"admin", "boss", ""}, {"sales", "u-a", A},
+	} {
+		if got := f.call(t, "GET", "/api/v1/branches/"+B, "", c.role, c.sub, c.header); got != http.StatusOK {
+			t.Errorf("%s with header %q reading branch B: %d, want 200", c.role, c.header, got)
+		}
+	}
+
+	// PR 40's kit component routes sit behind the product wall: a header for
+	// a branch the caller is not granted is refused, the caller's own is not.
+	kit := "/api/v1/products/" + f.productID.String() + "/kit-components"
+	if got := f.call(t, "GET", kit, "", "sales", "u-a", B); got != http.StatusForbidden {
+		t.Errorf("kit components under an ungranted branch header: %d, want 403", got)
+	}
+	if got := f.call(t, "GET", kit, "", "sales", "u-a", A); got != http.StatusOK {
+		t.Errorf("kit components under the caller's own branch: %d, want 200", got)
+	}
+	// A branch route refuses a path id that is not a branch.
+	if got := f.call(t, "PUT", "/api/v1/branches/"+f.yardA.String(), `{"code":"x","revision":1}`, "admin", "boss", ""); got != http.StatusNotFound {
+		t.Errorf("branch update of a yard: %d, want 404", got)
 	}
 }
 

@@ -13,6 +13,7 @@ import type {
     UpdateContentRequest,
 } from '../types/pim';
 import { fetchWithAuth } from './fetchClient';
+import { parseApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -23,7 +24,7 @@ const AI_GENERATION_TIMEOUT = 120_000;
 export const PIMService = {
     async getProductDetail(id: string): Promise<ProductDetail> {
         const res = await fetchWithAuth(`${API_URL}/api/v1/products/${id}/detail`);
-        if (!res.ok) throw new Error('Failed to fetch product detail');
+        if (!res.ok) throw await parseApiError(res, 'Failed to fetch product detail');
         return res.json();
     },
 

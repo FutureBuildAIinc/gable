@@ -6,6 +6,7 @@ package parsing
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/google/uuid"
@@ -41,8 +42,8 @@ func (m *mockProductRepo) UpdateAverageCost(ctx context.Context, id uuid.UUID, a
 	return nil
 }
 
-func (m *mockProductRepo) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error {
-	return nil
+func (m *mockProductRepo) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64, revision int64) (int64, error) {
+	return 0, nil
 }
 
 func (m *mockProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
@@ -52,11 +53,17 @@ func (m *mockProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _
 func (m *mockProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }
-func (m *mockProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry) error {
-	return nil
+func (m *mockProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry, _ int64) (int64, error) {
+	return 0, nil
 }
-func (m *mockProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int) error {
-	return nil
+func (m *mockProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {
+	return 0, nil
+}
+func (m *mockProductRepo) ListProductsPage(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]product.Product, error) {
+	return nil, nil
+}
+func (m *mockProductRepo) CountProducts(_ context.Context) (int64, error) {
+	return 0, nil
 }
 
 func (m *mockProductRepo) ListProductsPaginated(_ context.Context, limit, offset int) ([]product.Product, int, error) {

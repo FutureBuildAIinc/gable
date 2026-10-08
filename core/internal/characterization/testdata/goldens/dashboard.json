@@ -14,7 +14,7 @@
           "current_qty": 0,
           "name": "Golden harness stud",
           "product_id": "<id-1>",
-          "reorder_qty": 0,
+          "reorder_qty": 10,
           "sku": "GOLD-HARNESS-2X4"
         },
         {

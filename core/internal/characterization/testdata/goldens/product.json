@@ -9,23 +9,26 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "average_unit_cost": 3.5,
-        "base_price": 5.5,
+        "allocated": "0",
+        "available": "385",
+        "average_unit_cost_ten_thousandths": 35000,
+        "base_price_ten_thousandths": 55000,
         "commission_rate": 0,
         "created_at": "<ts+0d>",
         "description": "2x4x8 SPF Premium",
         "geometry_source": "parametric",
         "height_in": 1.5,
         "id": "<id-1>",
+        "lead_time_days": null,
         "length_in": 96,
-        "reorder_point": 200,
-        "reorder_qty": 500,
+        "on_hand": "385",
+        "reorder_point": "200",
+        "reorder_qty": "500",
+        "revision": 1,
         "sku": "LUM-248-PREM",
         "stackable": true,
+        "stock_uom": "PCS",
         "target_margin": 0,
-        "total_allocated": 0,
-        "total_quantity": 385,
-        "uom_primary": "PCS",
         "upc": null,
         "updated_at": "<ts+0d>",
         "vendor": "Gable Lumber & Supply",
@@ -45,86 +48,94 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "data": [
+        "items": [
           {
-            "average_unit_cost": 15.5,
-            "base_price": 23.25,
+            "allocated": "0",
+            "available": "590",
+            "average_unit_cost_ten_thousandths": 2900,
+            "base_price_ten_thousandths": 4400,
             "commission_rate": 0,
             "created_at": "<ts+0d>",
-            "description": "Flashing J 6 X 6 X 10",
-            "geometry_source": "parametric",
-            "height_in": 6,
+            "description": "2 X 4 RL Utility",
+            "geometry_source": null,
+            "height_in": null,
             "id": "<id-2>",
-            "length_in": 120,
-            "reorder_point": 20,
-            "reorder_qty": 50,
-            "sku": "CORN2006",
-            "stackable": true,
+            "lead_time_days": null,
+            "length_in": null,
+            "on_hand": "590",
+            "reorder_point": "500",
+            "reorder_qty": "2000",
+            "revision": 1,
+            "sku": "LUMBUT24RL",
+            "stackable": null,
+            "stock_uom": "LF",
             "target_margin": 0,
-            "total_allocated": 0,
-            "total_quantity": 303,
-            "uom_primary": "EA",
             "upc": null,
             "updated_at": "<ts+0d>",
             "vendor": "Gable Lumber & Supply",
             "vendor_id": null,
-            "weight_lbs": 3,
-            "width_in": 6
+            "weight_lbs": 0.5,
+            "width_in": null
           },
           {
-            "average_unit_cost": 3.5,
-            "base_price": 5.25,
+            "allocated": "0",
+            "available": "535",
+            "average_unit_cost_ten_thousandths": 3000,
+            "base_price_ten_thousandths": 4600,
             "commission_rate": 0,
             "created_at": "<ts+0d>",
-            "description": "Flashing Z Bar 3/4 X 10'",
-            "geometry_source": "parametric",
-            "height_in": 3,
+            "description": "2 X 4 RL #3 SPF",
+            "geometry_source": null,
+            "height_in": null,
             "id": "<id-3>",
-            "length_in": 120,
-            "reorder_point": 30,
-            "reorder_qty": 60,
-            "sku": "CORN2009",
-            "stackable": true,
+            "lead_time_days": null,
+            "length_in": null,
+            "on_hand": "535",
+            "reorder_point": "1000",
+            "reorder_qty": "5000",
+            "revision": 1,
+            "sku": "LUMB24RLN3",
+            "stackable": null,
+            "stock_uom": "LF",
             "target_margin": 0,
-            "total_allocated": 0,
-            "total_quantity": 966,
-            "uom_primary": "EA",
             "upc": null,
             "updated_at": "<ts+0d>",
             "vendor": "Gable Lumber & Supply",
             "vendor_id": null,
-            "weight_lbs": 1.5,
-            "width_in": 0.75
+            "weight_lbs": 0.5,
+            "width_in": null
           },
           {
-            "average_unit_cost": 5.75,
-            "base_price": 8.65,
+            "allocated": "0",
+            "available": "787",
+            "average_unit_cost_ten_thousandths": 3400,
+            "base_price_ten_thousandths": 5200,
             "commission_rate": 0,
             "created_at": "<ts+0d>",
-            "description": "Silicone Clear Caulk",
+            "description": "1 X 4 RL #3 SPF",
             "geometry_source": null,
             "height_in": null,
             "id": "<id-4>",
+            "lead_time_days": null,
             "length_in": null,
-            "reorder_point": 40,
-            "reorder_qty": 80,
-            "sku": "CORNCLEAR",
+            "on_hand": "787",
+            "reorder_point": "500",
+            "reorder_qty": "2000",
+            "revision": 1,
+            "sku": "LUMB14RLN3+",
             "stackable": null,
+            "stock_uom": "LF",
             "target_margin": 0,
-            "total_allocated": 0,
-            "total_quantity": 404,
-            "uom_primary": "EA",
             "upc": null,
             "updated_at": "<ts+0d>",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Gable Lumber & Supply",
             "vendor_id": null,
-            "weight_lbs": 0.8,
+            "weight_lbs": 0.3,
             "width_in": null
           }
         ],
         "limit": 3,
-        "offset": 0,
-        "total": 68
+        "next_cursor": "<cursor>"
       }
     }
   },
@@ -134,41 +145,253 @@
       "method": "POST",
       "path": "/api/v1/products",
       "body": {
-        "base_price": 4.25,
+        "base_price_ten_thousandths": 42500,
         "description": "Golden harness stud",
-        "reorder_point": 10,
-        "reorder_qty": 50,
+        "reorder_point": "10",
+        "reorder_qty": "50",
         "sku": "GOLD-HARNESS-2X4",
-        "uom_primary": "PCS"
+        "stock_uom": "PCS"
       }
     },
     "response": {
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "average_unit_cost": 0,
-        "base_price": 4.25,
+        "allocated": "0",
+        "available": "0",
+        "average_unit_cost_ten_thousandths": 0,
+        "base_price_ten_thousandths": 42500,
         "commission_rate": 0,
         "created_at": "<ts+0d>",
         "description": "Golden harness stud",
         "geometry_source": null,
         "height_in": null,
         "id": "<id-5>",
+        "lead_time_days": null,
         "length_in": null,
-        "reorder_point": 10,
-        "reorder_qty": 50,
+        "on_hand": "0",
+        "reorder_point": "10",
+        "reorder_qty": "50",
+        "revision": 1,
         "sku": "GOLD-HARNESS-2X4",
         "stackable": null,
+        "stock_uom": "PCS",
         "target_margin": 0,
-        "total_allocated": 0,
-        "total_quantity": 0,
-        "uom_primary": "PCS",
         "upc": null,
         "updated_at": "<ts+0d>",
         "vendor": null,
         "vendor_id": null,
         "weight_lbs": 0,
         "width_in": null
+      }
+    }
+  },
+  {
+    "name": "product.create.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products",
+      "body": {
+        "base_price_ten_thousandths": -1,
+        "reorder_point": "1.00001",
+        "sku": "",
+        "stock_uom": "NOPE"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "sku",
+              "message": "is required"
+            },
+            {
+              "field": "description",
+              "message": "is required"
+            },
+            {
+              "field": "stock_uom",
+              "message": "must be one of the unit codes the catalogue holds"
+            },
+            {
+              "field": "base_price_ten_thousandths",
+              "message": "a unit price is never negative"
+            },
+            {
+              "field": "reorder_point",
+              "message": "must be a decimal string with at most 4 fraction digits: carries precision beyond the fixed scale"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.create.unknown_field",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products",
+      "body": {
+        "description": "x",
+        "sku": "GOLD-X",
+        "stock_uom": "PCS",
+        "uom_primary": "PCS"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "uom_primary",
+              "message": "unknown field"
+            }
+          ],
+          "message": "request body has a field this route does not accept"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.create.duplicate_sku",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products",
+      "body": {
+        "description": "again",
+        "sku": "GOLD-HARNESS-2X4",
+        "stock_uom": "PCS"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "duplicate",
+          "details": [
+            {
+              "field": "sku",
+              "message": "already in use"
+            }
+          ],
+          "message": "a product with this sku already exists"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.list.include_total",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products?limit=1&include=total"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "allocated": "0",
+            "available": "0",
+            "average_unit_cost_ten_thousandths": 0,
+            "base_price_ten_thousandths": 42500,
+            "commission_rate": 0,
+            "created_at": "<ts+0d>",
+            "description": "Golden harness stud",
+            "geometry_source": null,
+            "height_in": null,
+            "id": "<id-5>",
+            "lead_time_days": null,
+            "length_in": null,
+            "on_hand": "0",
+            "reorder_point": "10",
+            "reorder_qty": "50",
+            "revision": 1,
+            "sku": "GOLD-HARNESS-2X4",
+            "stackable": null,
+            "stock_uom": "PCS",
+            "target_margin": 0,
+            "upc": null,
+            "updated_at": "<ts+0d>",
+            "vendor": null,
+            "vendor_id": null,
+            "weight_lbs": 0,
+            "width_in": null
+          }
+        ],
+        "limit": 1,
+        "next_cursor": "<cursor>",
+        "total": 69
+      }
+    }
+  },
+  {
+    "name": "product.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products?offset=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.list.bad_cursor",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products?cursor=garbage"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "cursor",
+              "message": "cursor is malformed"
+            }
+          ],
+          "message": "cursor is malformed"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
       }
     }
   },
@@ -183,11 +406,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -196,18 +425,18 @@
     "name": "product.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/products/<id-7>"
+      "path": "/api/v1/products/<id-12>"
     },
     "response": {
       "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "no such product"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-13>"
         }
       }
     }

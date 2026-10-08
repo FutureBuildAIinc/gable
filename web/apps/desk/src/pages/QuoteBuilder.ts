@@ -110,8 +110,9 @@ export class GableQuoteBuilder extends LitElement {
 
     private async loadProducts() {
         try {
-            const data = await ProductService.getProducts();
-            this.products = data;
+            // The picker filters on the client, so it needs the catalog: every page through the cursor,
+            // capped at LIST_ALL_PRODUCTS_CAP products (2000).
+            this.products = await ProductService.listAllProducts();
         } catch (err) {
             console.error('Failed to load products', err);
         }
@@ -177,7 +178,7 @@ export class GableQuoteBuilder extends LitElement {
             product_id: product.id,
             sku: product.sku,
             description: product.description,
-            uom: uom || product.uom_primary || '',
+            uom: uom || product.stock_uom,
             quantity,
             unit_price_ten_thousandths: unitPriceTenThousandths,
             escalator: defaultEscalator(),

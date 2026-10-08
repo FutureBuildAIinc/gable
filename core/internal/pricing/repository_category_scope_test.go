@@ -5,6 +5,8 @@ package pricing
 
 import (
 	"context"
+
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"strings"
 	"testing"
 
@@ -216,9 +218,9 @@ func TestGetMatchingRules_CategoryScope_Postgres(t *testing.T) {
 	})
 }
 
-func containsQty(qtys []float64, want float64) bool {
+func containsQty(qtys []httpx.Quantity, want float64) bool {
 	for _, q := range qtys {
-		if q == want {
+		if qtyFloat(q) == want {
 			return true
 		}
 	}

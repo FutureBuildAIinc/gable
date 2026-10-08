@@ -36,12 +36,21 @@ async function freshCustomer(request: APIRequestContext) {
 }
 
 // A stocked product with plenty on hand at the default branch and a cost.
+// The product list is the cursor envelope (C3-1): read items, newest first.
 async function stockedProduct(request: APIRequestContext) {
-  const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string; uom_primary: string }[] | { data: { id: string; sku: string; uom_primary: string }[] };
-  const list = Array.isArray(products) ? products : products.data;
-  for (const p of list) {
-    const inv = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { quantity: number; allocated: number }[];
-    if (Array.isArray(inv) && inv.reduce((n, r) => n + (r.quantity - r.allocated), 0) >= 50) return p;
+  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string }[] };
+  // The list is newest first (C3-1); walk it oldest first, the order the
+  // seed inserted its products, so the first match is a product stocked at
+  // the default branch (the availability sum below spans every branch).
+  const seeded = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
+  for (const p of seeded) {
+    // The inventory levels list is the cursor envelope (C3-1b): quantities
+    // are scale 4 decimal strings; available is quantity - allocated.
+    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
+      items: { available: string }[];
+    };
+    const available = page.items.reduce((n, r) => n + (Number(r.available) || 0), 0);
+    if (available >= 50) return p;
   }
   throw new Error('no stocked product in the demo seed');
 }

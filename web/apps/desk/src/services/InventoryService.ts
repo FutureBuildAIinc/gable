@@ -47,10 +47,13 @@ export const InventoryService = {
     },
 
     async getInventoryByProduct(productId: string): Promise<Inventory[]> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/inventory?product_id=${productId}`);
+        // The levels list is the cursor envelope (C3-1b); one product's rows
+        // fit the 200 row cap many times over.
+        const response = await fetchWithAuth(`${API_URL}/api/v1/inventory?product_id=${productId}&limit=200`);
         if (!response.ok) {
             throw new Error('Failed to fetch inventory');
         }
-        return response.json();
+        const page = await response.json() as { items: Inventory[] };
+        return page.items;
     }
 };
