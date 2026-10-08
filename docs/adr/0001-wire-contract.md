@@ -99,17 +99,27 @@ object:
 The cursor is keyset friendly by construction: the handler resumes with a
 `WHERE (sort columns) > (tuple)` style predicate combined with the same
 filters, which is index friendly and stable under concurrent inserts, unlike
-offsets.
+offsets. An ascending ordering resumes with `>`; a descending ordering
+mirrors every comparison to `<`; and an ordering that mixes directions
+(one column ascending, another descending) has no single row comparison,
+so its predicate expands per column, each comparison pointed by its own
+direction, ANDed together.
 
 An ordering's columns are NOT NULL and bounded, or the ordering uses a
 surrogate key (for example `created_at, id`): a nullable column and a
-column holding the empty string have no keyset position to mint. Text
-sort keys sort on a bounded projection (the first N characters), so a
-long name or description cannot make a cursor unmintable. The handler
-parses each decoded key part to its column type, and a parse failure is
-a 400 on `cursor`; the package carries the typed decode helpers for the
-two column types orderings actually use, timestamps (RFC 3339 UTC with
-the Z) and UUIDs (canonical lowercase hyphenated).
+column holding the empty string have no keyset position to mint. A
+converting module whose would-be ordering column is nullable today
+(`quotes.created_at` is) fills the NULLs and sets the column NOT NULL in
+the migration that adopts the ordering, before any ordering or numbering
+backfill reads that column. Text sort keys sort on a bounded projection
+(the first N characters), so a long name or description cannot make a
+cursor unmintable. The handler parses each decoded key part to its column
+type, and a parse failure is a 400 on `cursor`; the package carries the
+typed decode helpers for the two column types orderings actually use,
+timestamps (RFC 3339 UTC with the Z, at the column's full microsecond
+precision: the package's formatter always writes the six fraction
+digits, so a minted cutoff is never earlier than the row it came from)
+and UUIDs (canonical lowercase hyphenated).
 
 A cursor that is absent means first page. A cursor that is present but
 broken is a 400, never quietly treated as the first page: the client must be
