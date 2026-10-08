@@ -532,3 +532,109 @@ func subscriberPositionAttempts(t *testing.T, db *database.DB, subscriber string
 	}
 	return pos, attempts
 }
+
+// A handler whose own SQL fails (SELECT 1/0) returns the error. Postgres
+// aborts the transaction the handler ran on, so unless each delivery runs in
+// a savepoint the cursor update after it fails too, the whole pass rolls
+// back, and nothing is counted or parked: the poison row stalls the
+// subscriber forever (review round 2, P2-A).
+func TestDrain_HandlerDatabaseErrorIsCountedParkedAndSkipped(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := NewWriter(db, "")
+	ctx := context.Background()
+	typ := "test.sp." + uuid.NewString()
+	durable := "drain-sp-poison-" + uuid.NewString()
+
+	rec := &recorder{}
+	var poisonID string
+	d := NewDrainRunner(db, quietLogger())
+	d.maxAttempts = 3
+	d.Subscribe(typ, durable, func(hctx context.Context, e eventbus.Event) error {
+		if e.EventID == poisonID {
+			_, err := db.GetExecutor(hctx).Exec(hctx, `SELECT 1/0`)
+			return err
+		}
+		return rec.handle(hctx, e)
+	})
+	if err := d.ensureCursors(ctx, d.snapshotSubs()); err != nil {
+		t.Fatal(err)
+	}
+	base := subscriberPosition(t, db, durable)
+	poison, good := testEvent(t, typ), testEvent(t, typ)
+	poisonID = poison.ID.String()
+	for _, ev := range []Event{poison, good} {
+		if err := w.Write(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for want := 1; want <= 2; want++ {
+		d.pass(ctx)
+		if pos, att := subscriberPositionAttempts(t, db, durable); pos != base || att != want {
+			t.Fatalf("after failing pass %d: cursor/attempts = %d/%d, want %d/%d", want, pos, att, base, want)
+		}
+	}
+	d.pass(ctx)
+	var parked int
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM event_subscriber_parked WHERE subscriber = $1 AND event_id = $2`,
+		durable, poison.ID).Scan(&parked); err != nil || parked != 1 {
+		t.Fatalf("parked rows for the poison event = %d (err %v), want 1", parked, err)
+	}
+	if got := rec.snapshot(); len(got) != 1 || got[0].eventID != good.ID.String() {
+		t.Fatalf("deliveries after parking = %+v, want only the good row", got)
+	}
+	if pos, att := subscriberPositionAttempts(t, db, durable); pos <= base || att != 0 {
+		t.Errorf("after parking cursor/attempts = %d/%d, want past %d and attempts 0", pos, att, base)
+	}
+}
+
+// A handler that swallows a failed statement (as the exposure notifier's
+// email lookup does) returns nil from an aborted transaction. The delivery
+// must count as failed, and a row delivered earlier in the same window must
+// not deliver again on the next tick.
+func TestDrain_SwallowedDatabaseErrorCountsAsFailedAndDoesNotRedeliverEarlierRows(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := NewWriter(db, "")
+	ctx := context.Background()
+	typ := "test.sp." + uuid.NewString()
+	durable := "drain-sp-swallow-" + uuid.NewString()
+
+	rec := &recorder{}
+	var swallowID string
+	d := NewDrainRunner(db, quietLogger())
+	d.maxAttempts = 3
+	d.Subscribe(typ, durable, func(hctx context.Context, e eventbus.Event) error {
+		if e.EventID == swallowID {
+			_, _ = db.GetExecutor(hctx).Exec(hctx, `SELECT 1/0`)
+			return nil
+		}
+		return rec.handle(hctx, e)
+	})
+	if err := d.ensureCursors(ctx, d.snapshotSubs()); err != nil {
+		t.Fatal(err)
+	}
+	base := subscriberPosition(t, db, durable)
+	first, swallowed, last := testEvent(t, typ), testEvent(t, typ), testEvent(t, typ)
+	swallowID = swallowed.ID.String()
+	for _, ev := range []Event{first, swallowed, last} {
+		if err := w.Write(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	d.pass(ctx)
+	if got := rec.snapshot(); len(got) != 1 || got[0].eventID != first.ID.String() {
+		t.Fatalf("first pass deliveries = %+v, want only the first row", got)
+	}
+	pos, att := subscriberPositionAttempts(t, db, durable)
+	if pos <= base || att != 1 {
+		t.Fatalf("after pass 1 cursor/attempts = %d/%d, want past %d (the first row) and 1 attempt", pos, att, base)
+	}
+	d.pass(ctx)
+	d.pass(ctx)
+	got := rec.snapshot()
+	if len(got) != 2 || got[0].eventID != first.ID.String() || got[1].eventID != last.ID.String() {
+		t.Fatalf("deliveries after the swallowed row parked = %+v, want first then last, each once", got)
+	}
+}

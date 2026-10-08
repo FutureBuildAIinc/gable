@@ -217,7 +217,12 @@ subscription shape, is drained per tick in one short transaction:
    consecutive failures of the same row the row is parked
    (`event_subscriber_parked`, with its event id and type for an operator
    to inspect and replay by hand), logged, and the cursor moves on, so one
-   poison event cannot stall a subscriber forever. One window runs per
+   poison event cannot stall a subscriber forever. Each delivery runs in a
+   savepoint of the pass transaction (`DB.RunInSavepoint`): a handler
+   statement that fails aborts only the savepoint, and a handler that
+   swallows such an error fails at the savepoint's release, so either way
+   the delivery is counted as failed, the rows delivered before it in the
+   window keep their cursor advance, and the pass still commits. One window runs per
    tick, so a backlog larger than the batch drains across ticks instead of
    in one unbounded pass.
 

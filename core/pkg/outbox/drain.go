@@ -346,13 +346,22 @@ func (d *DrainRunner) drainOne(ctx context.Context, sub drainSubscriber) (err er
 // deliver calls the subscriber's handler for one row, synchronously, with
 // the outbox row's event_id as the bus event id (so replays of the same row
 // dedup downstream on the identity the mutation minted) and the row's data
-// as the payload. A panicking handler is recovered and reported as a failed
-// delivery, which counts as an attempt like any other error.
+// as the payload, inside a savepoint that a failed delivery rolls back. A
+// panicking handler is recovered and reported as a failed delivery, which
+// counts as an attempt like any other error.
 func (d *DrainRunner) deliver(ctx context.Context, sub drainSubscriber, r Row) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("outbox drain: handler panicked: %v", p)
 		}
 	}()
-	return sub.handler(ctx, eventbus.NewEventWithID(r.Event.ID.String(), r.Event.Type, r.Event.Data))
+	// The handler runs in a savepoint: a statement of its own that fails
+	// aborts the pass transaction, and without the savepoint the cursor
+	// update after it would fail too, rolling back the attempt count, the
+	// parking and the rows delivered before it. A handler that swallows the
+	// statement error and returns nil fails at RELEASE, so it counts as a
+	// failed delivery as well.
+	return d.db.RunInSavepoint(ctx, func(sctx context.Context) error {
+		return sub.handler(sctx, eventbus.NewEventWithID(r.Event.ID.String(), r.Event.Type, r.Event.Data))
+	})
 }
