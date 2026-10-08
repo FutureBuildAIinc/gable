@@ -300,9 +300,10 @@ length board. Its rules:
   `quantity` from them on every write. It never accepts a quantity that
   disagrees with the tally plus the remainder: that is a 400 naming the
   tally.
-- An act line that moves a tallied row (a receipt, adjustment, transfer,
-  vendor return or count line) carries the pieces by length it moves as
-  rows of ADR 0006's `line_tally_rows`: cycle 4's migration extends that
+- A tallied act line on a random length product (a receipt, adjustment,
+  transfer, vendor return or count line) carries the pieces by length it
+  moves as rows of ADR 0006's `line_tally_rows`; an untallied one carries
+  none and follows the remainder rule below. Cycle 4's migration extends that
   table with one foreign key column per act line table
   (`purchase_receipt_line_id`, `stock_adjustment_line_id`,
   `stock_transfer_line_id`, `vendor_return_line_id`,
@@ -348,6 +349,28 @@ Three cases ADR 0006 leaves to stock:
   policy of 2.7 serves the remainder before the lengths, within one row
   and across the branch's rows, so the length detail on tallied rows
   survives until the amorphous pool is empty.
+
+**The remainder rule, once for every act line.** One rule serves every
+act line on a random length product, whatever the act: a sale, a
+receipt, an adjustment, a transfer, a vendor return or a count line. A
+line may omit its tally. An untallied IN line (a receipt, an adjustment
+in, a transfer in, a count variance up) adds its linear feet to
+`untallied_lf`. An untallied OUT line (an adjustment out, a transfer
+out, a vendor return, a count variance down) draws exactly as an
+untallied sale does, by the cut rule above: the remainder first, then
+whole pieces longest first, then the cut, leaving the remnant as a
+tally row. A tallied line moves the lengths it names. A count line may
+record `counted_quantity` alone, in linear feet: its variance is then an
+untallied line's, to or from the remainder; one that records a
+`counted_tally` names the lengths, and the row's remainder is set to
+the counted quantity less their linear feet. The adjustment (3.3),
+transfer (2.8), count (2.9), receipt (4) and vendor return (7.1)
+sections point here and add nothing of their own. A `DAMAGE` write off
+of 10 LF on a migrated row, all remainder, therefore draws the
+remainder, then whole pieces, then the cut, and never meets
+`tally_unavailable` for lengths the row does not have; a count of a
+legacy row in plain linear feet records `counted_quantity` alone and
+its variance lands on the remainder.
 
 #### 2.5 The stock row
 
@@ -550,6 +573,8 @@ The rules:
 - With `with_allocations`, allocated quantity moves too, and its allocation
   rows move onto the destination row for the same order lines. This is how a
   picked order is staged in a staging bay.
+- A line may name no tally, on either side: the out side draws and the in
+  side lands by 2.4's remainder rule.
 - A transfer posts no journal entry: both sides are `1030` at the same cost.
 
 The old `POST /api/v1/inventory/transfer` and `POST /api/v1/inventory/adjust`
@@ -605,7 +630,10 @@ may have created it), under that row's lock; a found line whose identity
 still names no row counts from 0. The snapshot's `expected_quantity` stays
 for display and blind
 counts, and no post reads it. A blind count hides `expected_quantity` on
-the wire from roles other than `admin` and `owner`.
+the wire from roles other than `admin` and `owner`. A count line on a
+random length product follows 2.4's remainder rule: `counted_quantity`
+alone, in linear feet, or a `counted_tally` with the row's remainder
+set to the counted quantity less its linear feet.
 
 Two refusals at posting, each a 409 naming the line:
 
@@ -718,7 +746,8 @@ Validation, each refusal collected into one 400 with full paths:
 - every line is in one branch;
 - a lot or serial product names `lot_code` or `serial`;
 - a serial line moves exactly 1 or -1;
-- a tallied product names its tally;
+- a tallied product may name its tally; a line that names none follows
+  2.4's remainder rule;
 - `unit_cost_ten_thousandths` is allowed only on `IN` lines and is required
   for `OPENING`.
 
@@ -750,13 +779,14 @@ that is closed fails the act with 409 blocker `period_closed`, as in ADR
 
 | Movement | Act | Source | Debit | Credit |
 |---|---|---|---|---|
-| Stock receipt | receipt (4) | `RECEIPT` | `1030` received value (goods and any freight applied before the receipt, 3.5) | `2040` the goods value; `2045` the freight part, when freight was applied before the receipt |
+| Stock receipt | receipt (4) | `RECEIPT` | `1030` received value (goods and any freight applied before the receipt, 3.5) | `2040` the goods value; `2045` the freight part, when freight was applied before the receipt: the line's freight allocation taken pro rata to the received stocking quantity over the ordered quantity, the receipt that completes the line taking the remainder (3.5) |
 | Non stock or direct ship receipt | receipt | `RECEIPT` | `1030` received value | `2040` the same (relieved to `5010` when the order line is billed, from its linked receipt lines' posted values pro rata to the billed quantity, the last bill taking the remainder: ADR 0005 section 8.4 as amended by this pull request, the same rule the vendor invoice row below applies to `2040`) |
-| Freight applied after the receipt | freight charge applied (3.5) | `FREIGHT` | `1030` the on hand share, folded into the average (3.5); `5050` the sold share | `2045` the freight |
+| Freight applied after the receipt | freight charge applied (3.5) | `FREIGHT` | `1030` the on hand share, folded into the average (3.5), or the whole freight on a receipt line that never entered stock, as part of that line's value (3.5); `5050` the sold share, stocked lines only | `2045` the freight |
+| Purchase order closed short | the `partial` to `closed` transition (6.2) | `FREIGHT` | `5050` each unreceived line's remaining freight, its allocation less the freight its receipts already credited (3.5) | `2045` the same |
 | Adjustment out | adjustment | `ADJUSTMENT` | each line's reason account, its value | `1030` the total |
 | Adjustment in | adjustment | `ADJUSTMENT` | `1030` the total | each line's reason account, its value |
 | Count | count post, through its adjustment | `ADJUSTMENT` | as above, per sign | |
-| Vendor invoice approved, for purchase lines | AP approve (7.4) | `VENDOR_INVOICE` | `2040` relieved from the receipt lines' posted values pro rata to the matched quantity, the last relief taking the remainder (never a scale 4 recompute, which leaves cent residues in `2040`), on values net of any pre receipt freight allocation; `5050` invoiced amount less that (a negative variance credits `5050`); for lines without a purchase line, each line's account, and a carrier's freight line that names its `po_freight_charges` row debits `2045` exactly that charge, relieving the accrual | `2010` total |
+| Vendor invoice approved, for purchase lines | AP approve (7.4) | `VENDOR_INVOICE` | `2040` relieved from the receipt lines' posted values pro rata to the matched quantity, the last relief taking the remainder (never a scale 4 recompute, which leaves cent residues in `2040`), on values net of any pre receipt freight allocation; `5050` invoiced amount less that (a negative variance credits `5050`); for lines without a purchase line, each line's account, and a carrier's freight line that names its `po_freight_charges` row (by `vendor_invoice_lines.po_freight_charge_id`, 7.3) debits `2045` exactly that charge, relieving the accrual | `2010` total |
 | Vendor return shipped | vendor return ship (7.1) | `VENDOR_RETURN` | `2040` for the returned part of its receipt lines not yet invoiced (the vendor will simply invoice less, so the accrual clears now); `1050` the expected credit (quantity x the unit cost on the return line) for the invoiced part | `1030` quantity x average cost; the difference to `5050` |
 | Vendor credit memo posted | credit memo post (7.2) | `VENDOR_CREDIT` | `2010` total | return lines: `1050` the returned value, difference to `5050`; allowance lines: `5050`; charge lines: their account |
 | Transfer, allocation, reassignment | | none | | |
@@ -770,9 +800,15 @@ only on non stock and direct ship lines, whose receipts carry no average,
 and even there the relief is never a recompute of a purchase line's cost:
 such a line's billing relieves `1030` from its linked receipt lines'
 posted values, pro rata to the billed quantity, the last bill taking the
-remainder, because several purchase lines at different costs can fill one
-order line (a single linked cost is undefined among them) and a scale 4
-recompute of any one of them leaves cent residues in `1030`. C2-2b (PR
+remainder, and the base stays exact when receipts arrive after a first
+bill: each bill relieves `unrelieved posted value x billed quantity /
+(received quantity - quantity billed before)`, both quantities read on
+the linked receipt lines at the bill, and the bill that brings billed
+quantity up to received quantity takes the unrelieved remainder. The
+rule is the posted values one because several purchase lines at
+different costs can fill one order line (a single linked cost is
+undefined among them) and a scale 4 recompute of any one of them leaves
+cent residues in `1030`. C2-2b (PR
 43) builds ADR 0005 8.4 ahead of this record's items; its
 `SpecialOrderUnitCost` today takes the first linked received purchase
 line by `(created_at, id)` with `LIMIT 1`, which is undefined as a cost
@@ -807,7 +843,13 @@ maintains it and how:
   is inside the receipt's value and the average, and the receipt's entry
   credits `2045` for the freight part and `2040` for the goods part only,
   so the goods invoice's relief of `2040` (3.4) uses the receipt lines'
-  posted values net of their freight allocations. Freight applied after
+  posted values net of their freight allocations. The freight part of a
+  receipt line is its purchase line's freight allocation
+  (`po_freight_allocations.allocated_cents`, migration 042b) taken pro
+  rata to the received stocking quantity over the ordered quantity, the
+  receipt that completes the line taking the allocation's remainder: the
+  same remainder rule the `2040` relief uses (3.4), so partial receipts
+  never leave cent residues in `2045`. Freight applied after
   the receipt capitalizes the on hand share: freight
   `F` on a receipt of `q` units puts `F x min(Q, q) / q` into `1030` and
   the average, where `Q` is the product's on hand at that moment, folded
@@ -817,7 +859,20 @@ maintains it and how:
   credits `2045`, the freight accrual (3.2), and the carrier's approved
   invoice line names the `po_freight_charges` row and debits `2045` for
   exactly the charge, so the accrual clears and neither `2040` nor `5050`
-  absorbs freight twice. Freight
+  absorbs freight twice. On a receipt line that never entered stock (a
+  non stock or direct ship line) there is no on hand share and the
+  product's stock and average are not read: the whole freight debits
+  `1030` as part of that receipt line's value, which the billing relief
+  of 3.4 then carries to `5010` pro rata with the goods, and no `5050`
+  leg is posted; the credit is `2045` as for any freight, and the
+  carrier's invoice line clears it. A purchase order closed short (6.2)
+  will never receive the rest, so the transition posts each unreceived
+  line's remaining freight, its allocation less the freight its receipts
+  already credited: debit `5050`, credit `2045` (3.4). Receipts and
+  close shorts together credit the whole of every freight allocation,
+  and the carrier's approved invoice line debits the whole charge, so
+  `2045` ends at zero however the order split between its receipts and a
+  close short. Freight
   therefore stays in inventory for lumber, where it is material, without
   rewriting an average that later sales already used. This is a change
   from today; it has a CONTRACT-CHANGES row and costs 2 to 4 dev hour
@@ -904,7 +959,9 @@ Validation:
 - a lot product names `lot_code`;
 - a serial product names exactly `quantity` serials, none already on hand;
 - a bundle line's bundle quantities sum to the line's quantity;
-- a tallied line names its tally, whose quantity equals the line's.
+- a tallied line may name its tally; one that names one has its quantity
+  equal the line's, and one that names none adds its linear feet to the
+  row's untallied remainder (2.4's remainder rule).
 
 One transaction, in section 9's order:
 
@@ -1173,7 +1230,7 @@ currency differs from the approver's limit currency is a 409 blocker
 | `approved` | `sent` | user or key | `vendor_item_unmapped` (EDI only) | render and queue the outbound document (8.6), or record a manual send when `transmit` is `none` | `purchase_order.sent` |
 | `approved`, `sent` with no receipt | `draft` | user | `has_receipts` | reopen; clears the approval; the next send is marked as a replacement | `purchase_order.reopened` |
 | `draft`, `pending_approval`, `approved`, `sent` with no receipt | `cancelled` | user | `has_receipts` | the purchase lines' links end | `purchase_order.cancelled` |
-| `partial` | `closed` | user (`reason` required) | none | close short; the unreceived remainder is closed; linked order lines stay backordered for the desk | `purchase_order.closed_short` |
+| `partial` | `closed` | user (`reason` required) | none | close short; the unreceived remainder is closed; linked order lines stay backordered for the desk; posts 3.4's close short entry in the transition's transaction, the unreceived lines' remaining freight, debit `5050` credit `2045`, so the freight accrual keeps no balance for goods that will never arrive | `purchase_order.closed_short` |
 
 A key is refused the approve edge with 403 `forbidden`, message "an approver
 must be a user". The refusal is served by the route, like ADR 0002's cashier
@@ -1233,7 +1290,7 @@ act's transaction. The purchase order wire carries `approved_by`,
 |---|---|---|---|---|
 | none | `draft` | `POST /api/v1/vendor-returns` | | `vendor_return.created` |
 | `draft` | `draft` | `PUT /api/v1/vendor-returns/{id}` | | `vendor_return.updated` |
-| `draft` | `shipped` | transition | stock leaves from the named identities (`VENDOR_RETURN` moves; available stock only, otherwise a 409 blocker `exceeds_available`); posts 3.4's vendor return entry | `vendor_return.shipped` |
+| `draft` | `shipped` | transition | stock leaves from the named identities (`VENDOR_RETURN` moves; available stock only, otherwise a 409 blocker `exceeds_available`; a line with no tally draws by 2.4's remainder rule); posts 3.4's vendor return entry | `vendor_return.shipped` |
 | `shipped` | `credited` | derived, when posted credit memo return lines cover every line's quantity | | `vendor_return.credited` |
 | `draft` | `cancelled` | transition | | `vendor_return.cancelled` |
 
@@ -1293,8 +1350,12 @@ AP gains `ap_applications`, which is backfilled from
 Matching becomes line keyed and document keyed.
 
 - **Line keys.** `vendor_invoice_lines` gains `purchase_order_line_id NULL`
-  (FK), `product_id NULL`, `position`, and a `unit_price` widened to
-  NUMERIC(12,4). The pairing by list position is removed. A line without a
+  (FK), `product_id NULL`, `position`, a `unit_price` widened to
+  NUMERIC(12,4), and `po_freight_charge_id NULL` (FK `po_freight_charges`),
+  the charge a carrier's freight line names so that its approval debits
+  `2045` exactly that charge (3.4): the column arrives with C4-1b's
+  migration (12) and is written from package C's freight rule on. The
+  pairing by list position is removed. A line without a
   purchase line is a non purchase line and is matched by nothing.
 - **Results.** `ap_match_results` replaces `po_match_results`, whose rows
   migrate. Its columns are `id`, `document_kind CHECK (VENDOR_INVOICE,
@@ -1968,7 +2029,10 @@ package whose planned number is taken takes the next free one).
    - `UNIQUE (vendor_id, invoice_number)` after suffixing duplicates;
    - `amount_open`.
 2. `vendor_invoice_lines`: `position`, `purchase_order_line_id NULL`,
-   `product_id NULL`, `unit_price` widened to NUMERIC(12,4). Existing lines
+   `product_id NULL`, `unit_price` widened to NUMERIC(12,4), and
+   `po_freight_charge_id NULL` (FK `po_freight_charges`, the carrier
+   freight line link of 7.3, written from package C's freight rule on).
+   Existing lines
    are not linked: today's lines have no reliable key to their purchase
    line, and the old positional pairing is exactly the defect.
 3. Keyset indexes on vendor invoices.
@@ -1980,8 +2044,10 @@ A2 is step 6, each with its own migration file and numbers following the
 merge order.*
 
 1. `locations`: uppercase `type`, map unknowns to `BIN` (notice), add the
-   CHECK; add `stockable`; compute `path`; create the three system
-   locations per branch and name them on the branch row.
+   CHECK; add `stockable`; compute `path`, first keeping each location's
+   previous value in `legacy_path` (TEXT NULL), which the down restores;
+   create the three system locations per branch and name them on the
+   branch row.
 2. `inventory` rows with no location: a pre flight report, `core migrate
    -report stock` (ADR 0006 A1's shape, read only), lists every such row
    with its product and quantity and the count per product, so the
@@ -2084,12 +2150,18 @@ stock move exists; it refuses while any lot, serial, bundle or tally row
 exists (A creates those tables empty); the duplicate merge is kept, not
 split, each merged row staying one row with its summed `quantity` and
 `allocated`, valid old shape data, and the down reports the count A
-reported. A2's down deletes every allocation row and drops the table,
+reported. Before dropping the NOT NULL it sets `location_id` back to
+null on every row whose location is a branch's `UNASSIGNED` system
+location (only A's up places rows there, 2.2, and the old counter sells
+from null location rows), and it restores each location's `legacy_path`
+into `path` before dropping the column (a location created after the up
+has none, and keeps its computed path). A2's down deletes every
+allocation row and drops the table,
 keeping the `allocated` and `quantity_allocated` figures the up derived
 (valid old shape values; the parts the up moved to `quantity_backordered`
 stay backordered, where the old shape's allocation serves them). B's down
-refuses while any adjustment reason is in use by an adjustment or count
-that is not cancelled. C's down deletes the receipts its up wrote
+refuses while any adjustment, or any count that is not cancelled, names
+the reason. C's down deletes the receipts its up wrote
 (`note = 'migrated'`), refusing while any other receipt exists, while any
 later row (a vendor return line, a match line) references one of them, or
 while any special order request or `RESERVED` allocation exists; the
@@ -2208,7 +2280,7 @@ and to its tests:
 |---|---|---|
 | **A feed run posts once however often it is replayed** | F | `vendorfeed.TestRunPostsOnceOnReplay`: the same body posted three times, sequentially, answers 201 then 200, 200 with `Feed-Run-Replayed: true`, one run, one stored body, one `vendor_feed.run_received`, and after processing one `vendor_feed.run_posted` and each cost row written once; the same body posted by three concurrent contenders at pool size 4 gives exactly one 201 and one run; the same body posted by the bound key and by a user is one run; a worker crash simulated after chunk 2 of 3 resumes from `processed_through` and the posted row count equals the file's; a file with two bad rows ends `partial`, the good rows posted, the bad rows `rejected` with codes; an unparseable file ends `failed` with nothing posted; a re-export with different bytes and the same rows is a new run whose rows are all `unchanged`; a key bound to feed X posting to feed Y is 403 with `key.feed_refused` |
 | **A PO above a buyer's limit waits for approval** | D | `purchase_order.TestApprovalAboveLimitWaits`: a buyer with a limit of 1,000.00 submits 1,500.00: 200, status `pending_approval`, `submitted` then `approval_requested`, one `SUBMITTED` row with `limit_cents` 100000; the buyer's own approve is 409 `limit_exceeded`; a key's approve is 403; an agent marked session's approve is 403 with `agent.approval_refused`; a manager with a limit of 5,000.00 approves: `approved`, an `APPROVED` row and the audit row; a submission at 800.00 lands `approved` with `AUTO_APPROVED`; a draft edit after a reopen needs approval again; a receipt against `pending_approval` is 409; three concurrent approvers at pool size 4 give one approval; setting a limit by key or by an agent marked session is 403 with the audit row; the limit change writes its audit row; the approvals table refuses `UPDATE` |
-| **Stock moves by bin and lot** | A (with B and C) | `inventory.TestStockMovesByBinAndLot`: a lot product received into bin B1 with lot L1 and into B2 with L2 shows two rows; a transfer of 5 of L1 from B1 to B3 moves exactly that identity (B1 L1 down 5, B3 L1 up 5, two moves under one act id, `inventory.moved`); allocation takes L1 before L2 by expiry, and the fulfilment's moves and the invoice line's `stock` name L1 and B3; a serial sold at the counter must be named, and a second receipt of the same serial is 409 `serial_on_hand`; a bundle transferred whole re-points its row, and a part transfer breaks it; a tallied bundle sold by tally decrements its lengths, and a length it lacks is 409 `tally_unavailable`; an untallied sale of 100 LF against a row of 3 at 16 and 4 at 14 takes the remainder and whole pieces longest first, cuts the last piece, and leaves the remnant as a new length row with the invariant `quantity = tally linear feet + untallied_lf` intact (2.4); a tallied receipt into a row holding an untallied remainder lands beside it; a transfer with `with_allocations` carries the allocation; for every row the quantity equals the sum of moves and the reconciliation read is empty after every test; the single writer gate fails when a test file outside the package writes `inventory` |
+| **Stock moves by bin and lot** | A (with B and C) | `inventory.TestStockMovesByBinAndLot`: a lot product received into bin B1 with lot L1 and into B2 with L2 shows two rows; a transfer of 5 of L1 from B1 to B3 moves exactly that identity (B1 L1 down 5, B3 L1 up 5, two moves under one act id, `inventory.moved`); allocation takes L1 before L2 by expiry, and the fulfilment's moves and the invoice line's `stock` name L1 and B3; a serial sold at the counter must be named, and a second receipt of the same serial is 409 `serial_on_hand`; a bundle transferred whole re-points its row, and a part transfer breaks it; a tallied bundle sold by tally decrements its lengths, and a length it lacks is 409 `tally_unavailable`; an untallied sale of 100 LF against a row of 3 at 16 and 4 at 14 takes the remainder and whole pieces longest first, cuts the last piece, and leaves the remnant as a new length row with the invariant `quantity = tally linear feet + untallied_lf` intact (2.4); a `DAMAGE` write off of 10 LF on a migrated all remainder row draws by the same remainder rule and never meets `tally_unavailable`, and a count of a legacy row in plain linear feet, `counted_quantity` alone, lands its variance on the remainder (2.4); a tallied receipt into a row holding an untallied remainder lands beside it; a transfer with `with_allocations` carries the allocation; for every row the quantity equals the sum of moves and the reconciliation read is empty after every test; the single writer gate fails when a test file outside the package writes `inventory` |
 | **A vendor credit memo matches** | E | `ap.TestVendorCreditMemoMatches`: 10 received at 4.00, 2 returned on a vendor return (`shipped`, `1050` debit 8.00, `1030` credit at average), a credit memo with one `RETURN` line of -2 at 4.00 posts and its match result is `matched`, and the return becomes `credited`; a credit memo crediting 3 against a return of 2 is 409 `exceeds_returned`; an invoice at 4.40 against a purchase line at 4.00 beyond tolerance is `exception`, and a credit memo `ALLOWANCE` of -10 at 0.40 on that invoice line re-runs the match to `matched`; the credit memo applied to an open invoice lowers both `amount_open`s; the credit memo entry balances (`2010` debit, `1050` credit; the `5050` leg is zero at a credit of 4.00 against a return cost of 4.00, and 3.4 omits zero legs); and the P2-7 case: receive 10, return 2 before invoicing, invoice 8, and both `1050` and `2040` end at zero |
 
 The other tests, by package:
@@ -2263,6 +2335,14 @@ The other tests, by package:
     on values net of the freight, and the carrier's approved invoice line
     naming the charge debits `2045` exactly; after both invoices `2040`
     and `2045` end at zero (3.4).
+  - Freight pro rata and close short: a purchase order of two lines with
+    freight allocations receives one line in two partial receipts, each
+    taking its freight part pro rata to the received quantity and the
+    second completing the line with the allocation's remainder (3.5),
+    then closes short with the other line unreceived, which posts that
+    line's remaining freight, debit `5050` credit `2045` (3.4, 6.2); the
+    carrier's approved invoice line for the whole charge then debits
+    `2045`, and `2045` ends at zero.
   - No purchase order line is created from a quote, and none for a priced
     line that is not a special order line (5.1).
   - Receipt against special order linking under concurrency ends without

@@ -32,9 +32,12 @@ stock and moved the average, and the linked received purchase line's cost
 applies only to lines whose receipt never enters stock, a non stock line
 and a direct ship line, whose billing relieves `1030` from the linked
 receipt lines' posted values, pro rata to the billed quantity, the last
-bill taking the remainder (ADR 0008 3.4), never a recompute of one
-purchase line's cost, which is undefined when several purchase lines fill
-one order line and leaves cent residues in `1030`; and the same bullet's
+bill taking the remainder, the base the unrelieved posted value over the
+quantity received but not yet billed, so a receipt that arrives after a
+first bill enters the next bill's base (ADR 0008 3.4), never a recompute
+of one purchase line's cost, which is undefined when several purchase
+lines fill one order line and leaves cent residues in `1030`; and the
+same bullet's
 read of the average becomes
 the product row's share lock from C4-2 (ADR 0008 sections 3.5 and 9 step
 6b), so a sale racing a receipt leaves no residue in `1030`. C2-2b
@@ -1009,10 +1012,14 @@ revenue posts net. Component and text lines post nothing.
   receipt never enters stock, a non stock line and a direct ship line,
   else `costOf`; and on those lines the billing does not recompute the
   purchase line's cost: it relieves `1030` from the linked receipt
-  lines' posted values, pro rata to the billed quantity, the last bill
-  taking the remainder (ADR 0008 3.4; several purchase lines at different
-  costs can fill one order line, where a single linked cost is undefined,
-  and a recompute of one of them leaves cent residues in `1030`);
+  lines' posted values, each bill relieving `unrelieved posted value x
+  billed quantity / (received quantity - quantity billed before)`, the
+  bill that brings billed quantity up to received quantity taking the
+  unrelieved remainder, so a receipt that arrives after a first bill
+  enters the next bill's base (ADR 0008 3.4; several purchase lines at
+  different costs can fill one order line, where a single linked cost is
+  undefined, and a recompute of one of them leaves cent residues in
+  `1030`);
   never the `special_order_cost` estimate, which would
   leave a residue in `1030` against what the receipt cost.
 - `cost = round_half_away(quantity x unit_cost)` per line, in cents, stored
