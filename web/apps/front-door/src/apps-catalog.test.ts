@@ -24,29 +24,29 @@ function app(partial: Partial<AppInfo> & { key: string }): AppInfo {
 
 describe('tilesFor', () => {
   it('pins the desk tile first', () => {
-    const tiles = tilesFor([app({ key: 'quote' })]);
+    const tiles = tilesFor([app({ key: 'quote' })], null);
     expect(tiles[0].key).toBe('desk');
     expect(tiles[0].path).toBe('/home');
   });
 
   it('maps an enabled catalog app to its desk entry', () => {
-    const tiles = tilesFor([app({ key: 'quote', name: 'Quotes', category: 'Sales' })]);
+    const tiles = tilesFor([app({ key: 'quote', name: 'Quotes', category: 'Sales' })], null);
     expect(tiles).toHaveLength(2);
     expect(tiles[1]).toMatchObject({ key: 'quote', name: 'Quotes', path: '/quotes', category: 'Sales' });
   });
 
   it('drops a disabled app', () => {
-    const tiles = tilesFor([app({ key: 'quote', enabled: false })]);
+    const tiles = tilesFor([app({ key: 'quote', enabled: false })], null);
     expect(tiles.map((t) => t.key)).toEqual(['desk']);
   });
 
   it('drops catalog apps the door has no entry for (libraries, service-only)', () => {
-    const tiles = tilesFor([app({ key: 'ai' }), app({ key: 'config' }), app({ key: 'vision' })]);
+    const tiles = tilesFor([app({ key: 'ai' }), app({ key: 'config' }), app({ key: 'vision' })], null);
     expect(tiles.map((t) => t.key)).toEqual(['desk']);
   });
 
   it('keeps catalog order among the mapped tiles', () => {
-    const tiles = tilesFor([app({ key: 'order' }), app({ key: 'inventory' }), app({ key: 'quote' })]);
+    const tiles = tilesFor([app({ key: 'order' }), app({ key: 'inventory' }), app({ key: 'quote' })], null);
     expect(tiles.map((t) => t.key)).toEqual(['desk', 'order', 'inventory', 'quote']);
   });
 
@@ -55,6 +55,62 @@ describe('tilesFor', () => {
       expect(path.startsWith('/')).toBe(true);
       expect(path.includes('?')).toBe(false);
     }
+  });
+});
+
+describe('tilesFor role filter', () => {
+  const catalog = [
+    app({ key: 'quote' }),
+    app({ key: 'inventory' }),
+    app({ key: 'invoice' }),
+    app({ key: 'pos' }),
+    app({ key: 'techadmin' }),
+    app({ key: 'delivery', enabled: false }),
+  ];
+  const keys = (roles: string[] | null) => tilesFor(catalog, roles).map((t) => t.key);
+
+  it('shows the desk tile for any signed in staff role, even one that admits no app', () => {
+    expect(keys(['somebody-else'])).toEqual(['desk']);
+    expect(keys([])).toEqual(['desk']);
+  });
+
+  it('admits a sales role to quotes and invoices only', () => {
+    expect(keys(['sales'])).toEqual(['desk', 'quote', 'invoice']);
+  });
+
+  it('admits warehouse to inventory, cashier to the till, finance to invoices', () => {
+    expect(keys(['warehouse'])).toEqual(['desk', 'inventory']);
+    expect(keys(['cashier'])).toEqual(['desk', 'pos']);
+    expect(keys(['finance'])).toEqual(['desk', 'invoice']);
+  });
+
+  it('admits admin and owner to every enabled app with an entry', () => {
+    const all = ['desk', 'quote', 'inventory', 'invoice', 'pos', 'techadmin'];
+    expect(keys(['admin'])).toEqual(all);
+    expect(keys(['owner'])).toEqual(all);
+  });
+
+  it('unions several roles', () => {
+    expect(keys(['warehouse', 'cashier'])).toEqual(['desk', 'inventory', 'pos']);
+  });
+
+  it('never shows a disabled app, whatever the role', () => {
+    expect(keys(['admin'])).not.toContain('delivery');
+  });
+
+  it('treats a dev session (null roles; the core passes dev through) as unrestricted', () => {
+    expect(keys(null)).toEqual(['desk', 'quote', 'inventory', 'invoice', 'pos', 'techadmin']);
+  });
+
+  it('fails closed for an app the audience table does not name (admin and owner only)', () => {
+    const tiles = tilesFor([app({ key: 'vendor' })], ['sales']);
+    expect(tiles.map((t) => t.key)).toEqual(['desk']);
+  });
+
+  it('lets the catalog name an audience itself, over the door table', () => {
+    const custom = [app({ key: 'quote', roles: ['warehouse'] })];
+    expect(tilesFor(custom, ['warehouse']).map((t) => t.key)).toEqual(['desk', 'quote']);
+    expect(tilesFor(custom, ['sales']).map((t) => t.key)).toEqual(['desk']);
   });
 });
 

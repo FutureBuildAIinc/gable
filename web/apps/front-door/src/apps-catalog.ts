@@ -13,8 +13,8 @@
  * manifest-driven and the tiles follow.
  *
  * The map is deliberately door-owned: the desk keeps its own launcher for
- * its /home grid, and the two surfaces can grow apart (the door will gain
- * role gating from the manifest; the desk's launcher stays in-app nav).
+ * its /home grid, and the two surfaces can grow apart (the door filters its
+ * tiles by the user's roles; the desk's launcher stays in-app nav).
  */
 import { fetchWithAuth } from '@gable/auth';
 
@@ -28,6 +28,8 @@ export interface AppInfo {
   enabled: boolean;
   depends_on: string[] | null;
   orphaned?: boolean;
+  /** Roles that may open the app, when the catalog names them (not yet sent today). */
+  roles?: string[];
 }
 
 /** One tile on the door: the catalog record plus where it opens. */
@@ -86,15 +88,53 @@ export const DESK_HOME_TILE: DoorTile = {
 };
 
 /**
- * The tiles the door shows, in catalog order: the desk tile pinned first,
- * then every ENABLED catalog app that has an entry. Enablement is the
- * backend's answer; the door never gates on roles (the core gates every
- * route; role-shaped tiles arrive with the manifest's frontends list).
+ * Who may open each app: the roles the core's route guards admit
+ * (core/internal/app/serve, middleware.RequireRole), which the catalog does
+ * not carry yet. `admin` and `owner` pass every guard, so they are added in
+ * code rather than repeated. The core stays the authority (it answers 403 to
+ * a role it does not admit); this table only keeps the door from offering a
+ * tile the user cannot use. An app missing here is admin and owner only.
  */
-export function tilesFor(apps: AppInfo[]): DoorTile[] {
+const ALWAYS: readonly string[] = ['admin', 'owner'];
+export const APP_AUDIENCE: Readonly<Record<string, readonly string[]>> = {
+  inventory: ['warehouse'],
+  location: ['warehouse', 'sales'],
+  quote: ['sales'],
+  order: ['sales'],
+  pricing: [],
+  invoice: ['sales', 'finance'],
+  gl: [],
+  purchase_order: ['purchasing'],
+  vendor: ['purchasing'],
+  delivery: ['warehouse', 'driver'],
+  pos: ['cashier'],
+  dashboard: ['finance'],
+  reporting: ['finance'],
+  customer: ['sales'],
+  portal: ['sales'],
+  millwork: ['sales'],
+  governance: [],
+  techadmin: [],
+};
+
+/** Whether `roles` admit `app`. The catalog's own `roles`, when sent, win. */
+function admits(app: AppInfo, roles: readonly string[]): boolean {
+  const allowed = app.roles ?? [...ALWAYS, ...(APP_AUDIENCE[app.key] ?? [])];
+  return roles.some((r) => allowed.includes(r));
+}
+
+/**
+ * The tiles the door shows, in catalog order: the desk tile pinned first
+ * (every signed in staff role gets it), then every ENABLED catalog app that
+ * has an entry and that the user's roles admit. Enablement is the backend's
+ * answer. `roles` is null for a dev session, which carries no roles because
+ * the core passes dev callers through every guard: it sees every tile.
+ */
+export function tilesFor(apps: AppInfo[], roles: readonly string[] | null): DoorTile[] {
   const tiles = apps
     .filter((a) => a.enabled)
     .filter((a) => Object.hasOwn(DESK_ENTRIES, a.key))
+    .filter((a) => roles === null || admits(a, roles))
     .map((a) => ({
       key: a.key,
       name: a.name,

@@ -284,11 +284,12 @@ export class GableFrontDoor extends LitElement {
   }
 
   private _renderTiles(apps: AppInfo[]) {
-    const tiles = tilesFor(apps);
+    // A dev session holds no roles and the core passes it through every guard.
+    const tiles = tilesFor(apps, authCustody.session?.kind === 'dev' ? null : this._roles);
     return html`
       <div class="space-y-4 mb-8">
         <h1 class="text-2xl font-semibold text-white">Good to see you${this._userName ? html`, <span class="text-gable-green">${this._userName}</span>` : nothing}</h1>
-        <p class="text-sm text-zinc-400">Every enabled app on this install. A tile opens the app inside the desk.</p>
+        <p class="text-sm text-zinc-400">The enabled apps your roles admit. A tile opens the app inside the desk.</p>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
         ${tiles.map((tile) => this._renderTile(tile))}
