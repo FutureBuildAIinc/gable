@@ -32,8 +32,16 @@ Four failure modes, all loud:
 1. A registration whose pattern is not a statically resolvable string fails
    the census. A registration style the tool does not understand can never
    silently miss a route; the coder extends the resolver or inlines the
-   pattern. The same holds for a `Handle` or `HandleFunc` method value
-   bound to a variable (`f := mux.HandleFunc`), and for a pattern name the
+   pattern. The same holds for a `Handle` or `HandleFunc` method value:
+   every `Handle` or `HandleFunc` selector that is not the callee of a call
+   is reported as unresolved, in every binding form (`f := mux.HandleFunc`
+   and `var f = mux.HandleFunc`, a package level var, a returned method
+   value, a struct literal field, a method value passed to a helper), and a
+   call through the variable, field or helper registers where the walk
+   cannot see it. The allow list `allowMethodValues` in the same file names
+   the bindings the repo has reviewed as not a router; today it holds one
+   entry, the exposure notifier's `notifier.Handle` event bus subscription
+   in `cmd/server/wire_exposure.go`. The same holds for a pattern name the
    enclosing function binds as a receiver, parameter, named result or
    variable: the census refuses to guess the value a shadowing binding
    would carry at run time.

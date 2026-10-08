@@ -436,6 +436,23 @@ func Collect(moduleRoot string) (Result, error) {
 		}
 	}
 
+	// callCallees holds every selector expression that is the callee of a
+	// call, through parentheses. A Handle or HandleFunc selector anywhere
+	// else is a method value, and a registration made through the value is
+	// invisible to the second pass, so the binding itself is reported as
+	// unresolved unless allowMethodValues holds it.
+	callCallees := map[ast.Node]bool{}
+	for _, fu := range fileUnits {
+		ast.Inspect(fu.file, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok {
+				if sel := parenSelector(call.Fun); sel != nil {
+					callCallees[sel] = true
+				}
+			}
+			return true
+		})
+	}
+
 	// boundSubMuxes holds, per function, the names bound to an
 	// http.NewServeMux or http.StripPrefix result in that function. A
 	// handler argument naming one of them mounts path rewriting.
@@ -481,23 +498,21 @@ func Collect(moduleRoot string) (Result, error) {
 		ast.Inspect(fu.file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
-				// A Handle or HandleFunc method value bound by assignment
-				// (f := mux.HandleFunc) hides every later call through the
-				// variable from this walk, so the binding itself is
-				// reported as unresolved. A method value passed on as an
-				// argument (an event bus handler, a callback) is not a
-				// registration and stays quiet.
-				if as, ok := n.(*ast.AssignStmt); ok {
-					for _, rhs := range as.Rhs {
-						sel := parenSelector(rhs)
-						if sel == nil || !isRouterMethod(sel.Sel.Name) {
-							continue
-						}
+				// A Handle or HandleFunc selector that is not the callee of
+				// a call is a method value, and a registration made through
+				// the value is invisible to this walk. Every binding form
+				// reaches here (assignment or var declaration, package
+				// level var, return, struct literal field, argument), so
+				// the binding itself is reported as unresolved unless
+				// allowMethodValues holds it.
+				if sel, ok := n.(*ast.SelectorExpr); ok && isRouterMethod(sel.Sel.Name) && !callCallees[sel] {
+					key := fu.relPath + " " + exprText(fset, sel.X) + "." + sel.Sel.Name
+					if !allowMethodValues[key] {
 						result.Unresolved = append(result.Unresolved, Unresolved{
 							File:   fu.relPath,
 							Line:   fset.Position(sel.Pos()).Line,
 							Callee: sel.Sel.Name,
-							Detail: "bound to a variable; a registration through the variable is invisible to the census",
+							Detail: "method value not called here; a registration through the value is invisible to the census",
 						})
 					}
 				}
@@ -613,6 +628,18 @@ func Collect(moduleRoot string) (Result, error) {
 // census as restricted.
 var allowMounts = map[string]bool{
 	"cmd/server /uploads/": true, // the uploads file server
+}
+
+// allowMethodValues lists the Handle or HandleFunc method values the repo
+// has accepted, keyed by the file relative to the Go module root and the
+// selector text. A selector that is never the callee of a call binds a
+// method value, and a registration made through the value happens where the
+// census cannot see it, so every such binding fails the census as
+// unresolved; each entry here is a binding the repo has reviewed as not a
+// router. The list is repeated in docs/refactor/ROUTE-CENSUS.md. A binding
+// not on this list fails the census.
+var allowMethodValues = map[string]bool{
+	"cmd/server/wire_exposure.go notifier.Handle": true, // event bus subscriber, not a mux
 }
 
 // httpMethodConsts resolves the net/http method constants a pattern might

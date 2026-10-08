@@ -121,6 +121,34 @@ func TestHandleFuncMethodValueIsUnresolved(t *testing.T) {
 	t.Fatalf("want an unresolved HandleFunc binding in internal/zz/zz.go, got %+v", result.Unresolved)
 }
 
+// TestMethodValueBindingFormsAreUnresolved pins the fix for the review's
+// N2: a Handle or HandleFunc selector that is not the callee of a call is
+// reported as unresolved in every binding form, so a registration through
+// the value cannot slip past silently. The five files carry the five forms
+// the review reproduced: a local var, a package level var, a returned
+// method value, a struct literal field, and a method value handed to a
+// helper that registers through it.
+func TestMethodValueBindingFormsAreUnresolved(t *testing.T) {
+	result := collectFixture(t, "methodvalueforms")
+	if len(result.Routes) != 0 {
+		t.Fatalf("want no routes, got %+v", result.Routes)
+	}
+	flagged := map[string]bool{}
+	for _, u := range result.Unresolved {
+		flagged[u.File] = true
+	}
+	for _, file := range []string{
+		"localvar.go", "pkgvar.go", "returned.go", "structfield.go", "helper.go",
+	} {
+		if !flagged[file] {
+			t.Errorf("no unresolved Handle or HandleFunc binding reported in %s, got %+v", file, result.Unresolved)
+		}
+	}
+	if len(result.Unresolved) != 5 {
+		t.Errorf("want exactly 5 unresolved bindings, one per form, got %d: %+v", len(result.Unresolved), result.Unresolved)
+	}
+}
+
 // TestSubMuxMountsFailUnlessAllowListed pins the fix for the review's F3:
 // an http.NewServeMux outside cmd/server and a StripPrefix mount fail the
 // census, unless the mount is on the allow list (the /uploads/ file
