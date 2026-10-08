@@ -1105,6 +1105,167 @@ func TestIdempotency_ReleaseAfterTakeoverLeavesNewClaim(t *testing.T) {
 	}
 }
 
+// --- portal and integration principals ----------------------------------------
+
+// newPortalClaimsRequest builds a request whose context carries portal claims,
+// the identity the portal auth middleware injects for authenticated portal
+// routes.
+func newPortalClaimsRequest(t *testing.T, method, target, body string, customerID, userID uuid.UUID) *http.Request {
+	t.Helper()
+	r := httptest.NewRequest(method, target, strings.NewReader(body))
+	claims := &PortalClaims{CustomerID: customerID, CustomerUserID: userID}
+	return r.WithContext(context.WithValue(r.Context(), PortalClaimsKey, claims))
+}
+
+// Two portal callers with one key never see each other's response: the
+// portal layer scopes the claim on the customer and user its own auth chain
+// established (P1-3).
+func TestIdempotency_PortalPrincipalScoping(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	c1, u1 := uuid.New(), uuid.New()
+	c2, u2 := uuid.New(), uuid.New()
+	p1 := "portal:" + c1.String() + ":" + u1.String()
+	p2 := "portal:" + c2.String() + ":" + u2.String()
+	deleteKeyRows(t, db, p1, key)
+	deleteKeyRows(t, db, p2, key)
+
+	var calls int32
+	mw := IdempotencyForPortalAuth(db)
+	h := countingHandler(&calls, http.StatusCreated, `{"portal":true}`)
+
+	r1 := newPortalClaimsRequest(t, http.MethodPost, "/api/portal/v1/orders", `{"a":1}`, c1, u1)
+	r1.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, r1); w.Code != http.StatusCreated {
+		t.Fatalf("first portal customer: status = %d, want 201", w.Code)
+	}
+
+	// Same key, same body, different customer: a different claim, never a
+	// replay of the first customer's response.
+	r2 := newPortalClaimsRequest(t, http.MethodPost, "/api/portal/v1/orders", `{"a":1}`, c2, u2)
+	r2.Header.Set(IdempotencyHeader, key)
+	w := serve(t, mw, h, r2)
+	if w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) == "true" {
+		t.Fatalf("second portal customer: status = %d replayed = %q, want its own 201", w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2 (each portal customer runs its own request)", calls)
+	}
+}
+
+// Two integration tenants with one key never see each other's response: the
+// integration layer scopes the claim on the tenant its caller declares
+// (P1-3).
+func TestIdempotency_IntegrationTenantScoping(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	deleteKeyRows(t, db, "tenant:tenant-a", key)
+	deleteKeyRows(t, db, "tenant:tenant-b", key)
+
+	var calls int32
+	mw := IdempotencyForIntegrationAuth(db)
+	h := countingHandler(&calls, http.StatusCreated, `{"integration":true}`)
+
+	r1 := httptest.NewRequest(http.MethodPost, "/api/integration/quotes", strings.NewReader(`{"a":1}`))
+	r1.Header.Set("X-Tenant-ID", "tenant-a")
+	r1.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, r1); w.Code != http.StatusCreated {
+		t.Fatalf("first tenant: status = %d, want 201", w.Code)
+	}
+
+	r2 := httptest.NewRequest(http.MethodPost, "/api/integration/quotes", strings.NewReader(`{"a":1}`))
+	r2.Header.Set("X-Tenant-ID", "tenant-b")
+	r2.Header.Set(IdempotencyHeader, key)
+	w := serve(t, mw, h, r2)
+	if w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) == "true" {
+		t.Fatalf("second tenant: status = %d replayed = %q, want its own 201", w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2 (each tenant runs its own request)", calls)
+	}
+}
+
+// The global layer never covers the portal and integration prefixes: those
+// surfaces carry their own idempotency layer inside their auth chain, so a
+// request there must pass through the global layer unclaimed, whatever
+// identity its context happens to carry.
+func TestIdempotency_GlobalSkipsPortalAndIntegrationPrefixes(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	c1, u1 := uuid.New(), uuid.New()
+	deleteKeyRows(t, db, "portal:"+c1.String()+":"+u1.String(), key)
+	deleteKeyRows(t, db, "tenant:tenant-a", key)
+
+	var calls int32
+	mw := Idempotency(db)
+	h := countingHandler(&calls, http.StatusCreated, `{}`)
+
+	portalReq := newPortalClaimsRequest(t, http.MethodPost, "/api/portal/v1/orders", `{"a":1}`, c1, u1)
+	portalReq.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, portalReq); w.Code != http.StatusCreated {
+		t.Fatalf("portal-prefixed request: status = %d, want pass-through 201", w.Code)
+	}
+
+	integrationReq := httptest.NewRequest(http.MethodPost, "/api/integration/quotes", strings.NewReader(`{"a":1}`))
+	integrationReq.Header.Set("X-Tenant-ID", "tenant-a")
+	integrationReq.Header.Set(IdempotencyHeader, key)
+	if w := serve(t, mw, h, integrationReq); w.Code != http.StatusCreated {
+		t.Fatalf("integration-prefixed request: status = %d, want pass-through 201", w.Code)
+	}
+
+	var rows int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM idempotency_keys WHERE key = $1`, key).Scan(&rows); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("rows claimed by the global layer on owned prefixes = %d, want 0", rows)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2 (both passed through)", calls)
+	}
+}
+
+// A tenantless integration caller has no identity to scope a claim to: under
+// AUTH_MODE=dev it joins the fixed dev principal; outside dev its keyed
+// requests pass through uncached.
+func TestIdempotency_IntegrationTenantlessCallers(t *testing.T) {
+	db := testutil.RequireDB(t)
+
+	t.Setenv("AUTH_MODE", "dev")
+	key := newKey()
+	deleteKeyRows(t, db, "dev", key)
+	var calls int32
+	mw := IdempotencyForIntegrationAuth(db)
+	h := countingHandler(&calls, http.StatusCreated, `{"dev":true}`)
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/integration/quotes", strings.NewReader(`{"a":1}`))
+		r.Header.Set(IdempotencyHeader, key)
+		w := serve(t, mw, h, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("dev tenantless request %d: status = %d, want 201", i, w.Code)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("dev tenantless requests: handler calls = %d, want 1 (the fixed dev principal replays)", calls)
+	}
+
+	t.Setenv("AUTH_MODE", "")
+	anonKey := newKey()
+	var anonCalls int32
+	anonH := countingHandler(&anonCalls, http.StatusCreated, `{"anon":true}`)
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/integration/quotes", strings.NewReader(`{"a":1}`))
+		r.Header.Set(IdempotencyHeader, anonKey)
+		if w := serve(t, mw, anonH, r); w.Code != http.StatusCreated {
+			t.Fatalf("tenantless request %d outside dev: status = %d, want pass-through 201", i, w.Code)
+		}
+	}
+	if anonCalls != 2 {
+		t.Fatalf("tenantless requests outside dev: handler calls = %d, want 2 (no caching without a tenant)", anonCalls)
+	}
+}
+
 // --- retention purge ---------------------------------------------------------
 
 func TestIdempotency_PurgeExpired(t *testing.T) {
