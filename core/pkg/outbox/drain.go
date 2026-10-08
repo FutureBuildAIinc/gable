@@ -6,6 +6,7 @@ package outbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -26,10 +27,13 @@ const (
 
 // drainSubscriber is one registered consumer of the drain: a durable name
 // (its event_subscriber_cursors key) and the subject pattern its events are
-// routed by, mirroring its pkg/eventbus subscription.
+// routed by, mirroring its pkg/eventbus subscription. replay marks a
+// subscriber that opted into the outbox's history rather than starting at
+// the head.
 type drainSubscriber struct {
 	pattern string
 	durable string
+	replay  bool
 }
 
 // DrainRunner republishes committed outbox rows to the in-process event
@@ -69,14 +73,25 @@ func NewDrainRunner(db *database.DB, bus eventbus.Publisher, logger *slog.Logger
 	}
 }
 
-// Subscribe registers one subscriber: its cursor key and the subject
-// pattern its rows are matched by (the bus's own wildcard rules, since a
-// row's type is its subject). Call before Start; a runner drains only what
-// was registered when it started.
+// Subscribe registers one subscriber at the head of the feed: Start creates
+// its cursor row at the feed's current maximum position, so the subscriber
+// receives events committed after it registered. The outbox is a replay
+// window, not a ledger; a consumer that wants the history opts in with
+// SubscribeReplay. Call before Start; a runner drains only what was
+// registered when it started.
 func (d *DrainRunner) Subscribe(pattern, durable string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.subs = append(d.subs, drainSubscriber{pattern: pattern, durable: durable})
+}
+
+// SubscribeReplay registers one subscriber whose cursor starts at 0: the
+// explicit opt-in to the outbox's whole history, not just events committed
+// after registration.
+func (d *DrainRunner) SubscribeReplay(pattern, durable string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.subs = append(d.subs, drainSubscriber{pattern: pattern, durable: durable, replay: true})
 }
 
 // Start begins the poll loop, in its own goroutine, on a context detached
@@ -91,13 +106,63 @@ func (d *DrainRunner) Start(_ context.Context) error {
 		return errDrainStarted
 	}
 	d.started = true
-	ctx, cancel := context.WithCancel(context.Background())
-	d.stop = cancel
+	subs := d.snapshotSubsLocked()
+	d.mu.Unlock()
+
+	// Cursor rows are created once, here, before any pass runs. A drain that
+	// finds no cursor row treats it as busy-or-missing and skips the tick;
+	// without pre-created rows that same state would read as "new
+	// subscriber" and replay the whole outbox from position 0.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := d.ensureCursors(ctx, subs); err != nil {
+		d.mu.Lock()
+		d.started = false
+		d.mu.Unlock()
+		return err
+	}
+
+	runCtx, stop := context.WithCancel(context.Background())
+	d.mu.Lock()
+	d.stop = stop
 	d.done = make(chan struct{})
 	d.mu.Unlock()
 
-	go d.loop(ctx)
+	go d.loop(runCtx)
 	return nil
+}
+
+// ensureCursors creates each subscriber's cursor row exactly once (ON
+// CONFLICT DO NOTHING). A new subscriber starts at the feed's head unless it
+// opted into replay.
+func (d *DrainRunner) ensureCursors(ctx context.Context, subs []drainSubscriber) error {
+	for _, sub := range subs {
+		start := int64(0)
+		if !sub.replay {
+			var err error
+			start, err = headPosition(ctx, d.db.Pool)
+			if err != nil {
+				return fmt.Errorf("outbox drain: read the head position: %w", err)
+			}
+		}
+		if _, err := d.db.Pool.Exec(ctx,
+			`INSERT INTO event_subscriber_cursors (subscriber, position) VALUES ($1, $2)
+			 ON CONFLICT (subscriber) DO NOTHING`, sub.durable, start); err != nil {
+			return fmt.Errorf("outbox drain: create cursor for %s: %w", sub.durable, err)
+		}
+	}
+	return nil
+}
+
+// headPosition is the feed's current maximum position, 0 on an empty table:
+// where a newly registered, non-replay subscriber starts.
+func headPosition(ctx context.Context, ex database.Executor) (int64, error) {
+	var pos int64
+	if err := ex.QueryRow(ctx,
+		`SELECT coalesce(max(position), 0) FROM events_outbox`).Scan(&pos); err != nil {
+		return 0, err
+	}
+	return pos, nil
 }
 
 var errDrainStarted = errors.New("outbox drain: already started")
@@ -135,14 +200,13 @@ func (d *DrainRunner) loop(ctx context.Context) {
 }
 
 // pass runs one drain pass over every registered subscriber. A failing
-// subscriber is logged and does not block the others.
+// subscriber is logged and does not block the others. The stop signal is
+// checked between subscriber passes, so an in-flight pass always finishes.
 func (d *DrainRunner) pass(ctx context.Context) {
-	d.mu.Lock()
-	subs := make([]drainSubscriber, len(d.subs))
-	copy(subs, d.subs)
-	d.mu.Unlock()
-
-	for _, sub := range subs {
+	for _, sub := range d.snapshotSubs() {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := d.drainOne(ctx, sub); err != nil {
 			if ctx.Err() != nil {
 				return
@@ -151,6 +215,18 @@ func (d *DrainRunner) pass(ctx context.Context) {
 				"subscriber", sub.durable, "error", err)
 		}
 	}
+}
+
+func (d *DrainRunner) snapshotSubs() []drainSubscriber {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.snapshotSubsLocked()
+}
+
+func (d *DrainRunner) snapshotSubsLocked() []drainSubscriber {
+	subs := make([]drainSubscriber, len(d.subs))
+	copy(subs, d.subs)
+	return subs
 }
 
 // drainOne drains one subscriber in a single short transaction: lock the
@@ -175,7 +251,14 @@ func (d *DrainRunner) drainOne(ctx context.Context, sub drainSubscriber) (err er
 			sub.durable,
 		).Scan(&after)
 		if errors.Is(err, pgx.ErrNoRows) {
-			after = 0
+			// No row under SKIP LOCKED means another drain instance holds
+			// this subscriber's cursor (a rolling deploy, a second replica,
+			// the worker beside serve), or the row is missing: either way
+			// this tick skips the subscriber. It never means "new
+			// subscriber, start from position 0" - Start creates the cursor
+			// rows, and replaying the outbox to a subscriber that already
+			// consumed it would duplicate every delivery in its history.
+			return nil
 		} else if err != nil {
 			return err
 		}
