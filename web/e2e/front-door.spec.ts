@@ -107,6 +107,31 @@ test.describe('Front door', () => {
     await expect(page.getByRole('button', { name: 'Open Point of Sale' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Open Tech Admin' })).toHaveCount(0);
   });
+
+  test('a token with only the single role claim gets the tiles that role admits', async ({ page }) => {
+    // Core's RequireRole admits the single `role` claim too: an owner token without a roles list
+    // opens every app, so the door must not fall back to the desk tile alone.
+    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const token = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: 'owner-user', email: 'owner@example.test', role: 'owner', exp })}.sig`;
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('gable.auth.session.v1', JSON.stringify({ v: 1, kind: 'token', token: t }));
+    }, token);
+    await page.route('**/api/v1/apps', (route) =>
+      route.fulfill({
+        json: {
+          apps: [
+            { key: 'quote', name: 'Quotes', summary: '', category: 'Sales', core: true, enabled: true, depends_on: [] },
+            { key: 'techadmin', name: 'Tech Admin', summary: '', category: 'Platform', core: true, enabled: true, depends_on: [] },
+          ],
+        },
+      }),
+    );
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Open Gable Desk' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Quotes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Tech Admin' })).toBeVisible();
+  });
 });
 
 test.describe('Desk', () => {

@@ -151,10 +151,18 @@ export class AuthCustody {
     return s.claims.email ?? s.claims.name ?? s.claims.sub ?? null;
   }
 
-  /** The signed-in user's roles from the token claims (empty otherwise). */
+  /**
+   * The signed-in user's roles from the token claims (empty otherwise): the
+   * roles list plus the single role claim, which core's RequireRole admits
+   * too (core/pkg/middleware/auth.go).
+   */
   get roles(): string[] {
     const s = this.session;
-    return s !== null && s.kind === 'token' ? (s.claims.roles ?? []) : [];
+    if (s === null || s.kind !== 'token') return [];
+    const { roles, role } = s.claims;
+    const merged = Array.isArray(roles) ? roles.filter((r) => typeof r === 'string') : [];
+    if (typeof role === 'string' && role !== '' && !merged.includes(role)) merged.push(role);
+    return merged;
   }
 
   /**

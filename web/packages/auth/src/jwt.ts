@@ -18,6 +18,8 @@ export interface GableTokenClaims {
   email?: string;
   name?: string;
   roles?: string[];
+  /** The single role claim (the Brain role: owner or admin) core's RequireRole also admits. */
+  role?: string;
   /** Expiry, seconds since the Unix epoch, as carried in the exp claim. */
   exp?: number;
 }

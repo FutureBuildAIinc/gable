@@ -73,6 +73,20 @@ describe('custody — in-memory rule', () => {
     expect(c.roles).toEqual(['admin', 'sales'])
   })
 
+  it('merges the single role claim into roles (core admits it too)', () => {
+    const only = new AuthCustody(memoryStorage())
+    only.signInWithToken(jwt({ sub: 'u', role: 'owner', exp: FUTURE }))
+    expect(only.roles).toEqual(['owner'])
+
+    const both = new AuthCustody(memoryStorage())
+    both.signInWithToken(jwt({ sub: 'u', role: 'admin', roles: ['sales', 'admin'], exp: FUTURE }))
+    expect(both.roles).toEqual(['sales', 'admin'])
+
+    const junk = new AuthCustody(memoryStorage())
+    junk.signInWithToken(jwt({ sub: 'u', role: 7, roles: 'sales', exp: FUTURE }))
+    expect(junk.roles).toEqual([])
+  })
+
   it('refuses a non-JWT as data', () => {
     const c = new AuthCustody(memoryStorage())
     expect(() => c.signInWithToken('not-a-jwt')).toThrow(InvalidTokenError)
