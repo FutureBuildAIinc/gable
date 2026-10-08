@@ -125,6 +125,7 @@ func maxPosition(t *testing.T, db *database.DB) int64 {
 // A rolled back mutation writes no event, and a committed one writes
 // exactly one: the event is a fact about the mutation and shares its fate.
 func TestWrite_RollbackWritesNothingCommitWritesOne(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -169,6 +170,7 @@ func TestWrite_RollbackWritesNothingCommitWritesOne(t *testing.T) {
 // event's own org wins over the writer's stamp; the stamp fills events
 // that carry none, and a writer with no configured org stamps DefaultOrg.
 func TestWrite_OutsideTransactionWrapsItself(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	stamped := NewWriter(db, "stamp-org")
@@ -222,6 +224,7 @@ func TestWrite_OutsideTransactionWrapsItself(t *testing.T) {
 // Invalid events are refused before any statement runs, so a caller inside
 // a transaction fails its mutation instead of committing a broken event.
 func TestWrite_ValidatesTheEvent(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -248,6 +251,7 @@ func TestWrite_ValidatesTheEvent(t *testing.T) {
 // A committed event is read exactly once by a walk of position cursors, and
 // again only from an earlier cursor: the keyset rule the events API serves.
 func TestListEvents_ReadExactlyOncePerCursorWalk(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -319,6 +323,7 @@ func TestListEvents_ReadExactlyOncePerCursorWalk(t *testing.T) {
 // The type filter admits only the listed types, matching exactly (no
 // wildcard syntax on the read API).
 func TestListEvents_TypeFilter(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -360,6 +365,7 @@ func TestListEvents_TypeFilter(t *testing.T) {
 // without the lock (letting a higher position commit while a lower one is
 // in flight), fails this test.
 func TestWrite_LateCommitIsNeverSkipped(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -485,6 +491,7 @@ func TestWrite_LateCommitIsNeverSkipped(t *testing.T) {
 // whole transaction and never reach for a second, so four connections serve
 // three writers and a reader without deadlock.
 func TestConcurrentWriters_Pool4ThreeContenders(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := requireDBMaxConns(t, 4)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")

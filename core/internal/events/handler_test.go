@@ -26,6 +26,7 @@ import (
 
 func newTestHandler(t *testing.T) (*Handler, *outbox.Writer) {
 	t.Helper()
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	if _, err := db.Pool.Exec(context.Background(),
 		`TRUNCATE events_outbox, event_subscriber_cursors, event_subscriber_parked`); err != nil {

@@ -71,6 +71,7 @@ func quietLogger() *slog.Logger {
 // mechanism that keeps the exposure emails sending once the mutation wrote
 // the outbox row instead of calling the bus.
 func TestDrain_DeliversRowsWithTheirEventIDAndAdvancesCursor(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -154,6 +155,7 @@ func TestDrain_DeliversRowsWithTheirEventIDAndAdvancesCursor(t *testing.T) {
 // ticks, never in one pass that would hold the cursor row and deliver an
 // unbounded window while later rows keep committing.
 func TestDrain_OneWindowPerTick(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -191,6 +193,7 @@ func TestDrain_OneWindowPerTick(t *testing.T) {
 // and the cursor moves on, so one poison event cannot stall the subscriber
 // forever.
 func TestDrain_HandlerErrorStopsPassRetriesThenParks(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -259,6 +262,7 @@ func TestDrain_HandlerErrorStopsPassRetriesThenParks(t *testing.T) {
 // start from position 0" (which would replay the whole outbox to a subscriber
 // that already consumed it - review round 1, P1).
 func TestDrain_HeldCursorRowSkipsTheTick(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -326,6 +330,7 @@ func TestDrain_HeldCursorRowSkipsTheTick(t *testing.T) {
 // events committed after it registered, not the whole outbox. SubscribeReplay
 // is the explicit opt-out that starts at 0.
 func TestDrain_NewSubscriberStartsAtHeadUnlessReplay(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -379,6 +384,7 @@ func TestDrain_NewSubscriberStartsAtHeadUnlessReplay(t *testing.T) {
 // keeps the passes from queueing behind each other's row lock, every event is
 // delivered exactly once, and the cursor lands at the head.
 func TestDrain_Pool4ThreeContenders(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := requireDBMaxConns(t, 4)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -472,6 +478,7 @@ func TestDrain_Pool4ThreeContenders(t *testing.T) {
 // without any test forcing a pass, starting twice is an error, Stop waits
 // for the in-flight pass, and Stop on a never-started runner is a no-op.
 func TestDrain_StartStopLifecycle(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	cleanOutbox(t, db)
 	w := NewWriter(db, "")
@@ -539,6 +546,7 @@ func subscriberPositionAttempts(t *testing.T, db *database.DB, subscriber string
 // back, and nothing is counted or parked: the poison row stalls the
 // subscriber forever (review round 2, P2-A).
 func TestDrain_HandlerDatabaseErrorIsCountedParkedAndSkipped(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	w := NewWriter(db, "")
 	ctx := context.Background()
@@ -594,6 +602,7 @@ func TestDrain_HandlerDatabaseErrorIsCountedParkedAndSkipped(t *testing.T) {
 // must count as failed, and a row delivered earlier in the same window must
 // not deliver again on the next tick.
 func TestDrain_SwallowedDatabaseErrorCountsAsFailedAndDoesNotRedeliverEarlierRows(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	w := NewWriter(db, "")
 	ctx := context.Background()

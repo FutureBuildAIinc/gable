@@ -65,6 +65,7 @@ func (staticChecker) QuoteIDForOrder(context.Context, uuid.UUID) (*uuid.UUID, er
 // 0 and draining again replays the row, and the notifier's dedup on the
 // outbox event_id keeps the count at one (fix round 1, P2-4).
 func TestExposureEmail_EndToEndThroughTheOutboxDrain(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	exec := func(sql string, args ...any) {

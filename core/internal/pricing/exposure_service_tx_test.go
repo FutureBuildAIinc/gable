@@ -98,6 +98,7 @@ func ackRollbackCounts(t *testing.T, db *database.DB, quoteID, escalatorID uuid.
 // no rollup flip, no escalator flip, and the caller sees the error rather
 // than a 500 for an ack that actually committed.
 func TestAcknowledge_FailedOutboxWriteRollsBack(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	quoteID, _, escalatorID := seedAckQuote(t, db)
 	ctx := context.Background()
@@ -131,6 +132,7 @@ func TestAcknowledge_FailedOutboxWriteRollsBack(t *testing.T) {
 
 // The happy path commits all three writes together with the outbox event.
 func TestAcknowledge_CommitsEventAndRollupTogether(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	quoteID, _, escalatorID := seedAckQuote(t, db)
 	ctx := context.Background()
