@@ -50,7 +50,7 @@ route `/api/v1/quotes/{id}` belongs to the module `quotes`. The scope a call
 needs is therefore derivable from the URL alone, no lookup table: GET and
 HEAD need `<module>:read`, every other method needs `<module>:write`.
 
-The vocabulary of modules mirrors the route census (`backend/api/ROUTES.txt`)
+The vocabulary of modules mirrors the route census (`core/api/ROUTES.txt`)
 and a test fails when they disagree in either direction: a route added under
 a segment the vocabulary does not declare has no scope policy and cannot
 merge, and a vocabulary entry no route sits under is a dead name. The test,
