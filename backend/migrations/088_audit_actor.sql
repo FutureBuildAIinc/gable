@@ -14,9 +14,11 @@
 --
 -- Existing rows predate scoped keys (R1-13) and agent traffic. Rows a user
 -- wrote backfill to 'user', with the legacy user_id attribution moved into
--- actor_id; rows with no user at all (system writes) backfill to 'anonymous'
--- with a null actor_id — under the resolution rule, a row with no identity
--- behind it never claims a user.
+-- actor_id. Exactly the rows with a null or empty user_id (no attribution at
+-- all) backfill to 'anonymous' with a null actor_id — under the resolution
+-- rule, a row with no identity behind it never claims a user. Any non-empty
+-- user_id counts as its author, so the pricing scanner's literal 'system'
+-- string backfills as kind 'user' with actor_id 'system', not as anonymous.
 
 ALTER TABLE audit_log ADD COLUMN actor_kind TEXT NOT NULL DEFAULT 'user';
 
