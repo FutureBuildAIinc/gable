@@ -74,8 +74,16 @@ func TestStockRoutes_PayloadLocationBranchRule(t *testing.T) {
 		t.Errorf("admin across branches, any location: %d, want 200", got)
 	}
 
-	move := fmt.Sprintf(`{"product_id":%q,"from_location_id":%q,"to_location_id":%q,"quantity":1,"reason":"t"}`, productID, otherYard, otherYard)
-	if got := post("/api/v1/inventory/transfer", move, bound); got != http.StatusForbidden {
-		t.Errorf("bound caller, foreign transfer: %d, want 403", got)
+	move := func(from, to uuid.UUID) string {
+		return fmt.Sprintf(`{"product_id":%q,"from_location_id":%q,"to_location_id":%q,"quantity":1,"reason":"t"}`, productID, from, to)
+	}
+	for name, body := range map[string]string{
+		"foreign to foreign": move(otherYard, otherYard),
+		"own to foreign":     move(ownYard, otherYard),
+		"foreign to own":     move(otherYard, ownYard),
+	} {
+		if got := post("/api/v1/inventory/transfer", body, bound); got != http.StatusForbidden {
+			t.Errorf("bound caller, transfer %s: %d, want 403", name, got)
+		}
 	}
 }
