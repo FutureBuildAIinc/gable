@@ -140,7 +140,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 		{f.orderA, f.invA, f.branchA}, {f.orderB, f.invB, f.branchB},
 	} {
 		if _, err := db.Pool.Exec(ctx,
-			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount) VALUES ($1, $2, $3, 'CONFIRMED', 10)`,
+			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency) VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`,
 			r.order, f.docCust, r.branch); err != nil {
 			t.Fatalf("seed order: %v", err)
 		}
@@ -186,7 +186,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
 	accountSvc := account.NewService(account.NewRepository(db), db, slog.Default())
 	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db)
-	orderSvc := order.NewService(order.NewRepository(db), inventory.NewService(inventory.NewRepository(db)), nil, customer.NewService(customer.NewRepository(db)), nil, db)
+	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))
 	wall.documents(mux, docHandler)
 	f.srv = httptest.NewServer(asRole(mux))
