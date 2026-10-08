@@ -50,7 +50,7 @@ run:
    runs in its own process group, stopped by that group number even when the
    test fails, and carries `Pdeathsig=SIGKILL` on Linux so a killed test
    process takes the server with it.
-4. **Script.** It replays a fixed, ordered script of 969 steps across 99
+4. **Script.** It replays a fixed, ordered script of 978 steps across 100
    groups (one golden file per group; 202 steps in the first 44 groups, the
    rest added by R1-1b). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
@@ -204,14 +204,16 @@ without a recorded step" at the end of this document, each with its reason.
 ## R1-1b: depth additions
 
 R1-1b added a recorded step for every route in `core/api/ROUTES.txt` but four
-(55 new groups, 767 new steps). The new groups all run after the clock group,
+(56 new groups, 776 new steps). The new groups all run after the clock group,
 so none of their writes can move an earlier golden: the first 44 golden files
 are byte-identical to their R1-1 recording. The harness gained the following,
 each used only where a route needed it.
 
 - **Order and ownership.** The new groups run in this order after
   `clockwindow`: `machine_key`, `events`, `idempotency`, then the R1-1b module
-  groups. They create their own fixtures (customers, vehicles, tills, quotes,
+  groups, then `delivery_delivered` last of all: completing a delivery as
+  DELIVERED invoices its order, and an invoice moves the statement, aging and
+  ledger reads of any group after it. They create their own fixtures (customers, vehicles, tills, quotes,
   ...) for anything destructive; the few that share a seed or earlier fixture
   only read it. The POS groups share register `REG-01` with the `pos` group
   (the API cannot create a register): `pos_till_close` closes its till and
@@ -221,13 +223,17 @@ each used only where a route needed it.
   insert a SENT quote whose exposure rollup is ACK_REQUIRED (mirroring the
   pricing package's own acknowledgement fixture), so a real acknowledgement
   can be recorded.
-- **A step can be a database probe** (`sql` on a step): a read-only query
-  whose rows are the recorded response (request method `SQL`, content type
-  `application/x-sql-rows`). The one use is the `machine_key` audit row: no
-  route reads `audit_log` (the users listing unions only user attributed rows
-  and a key is never a user), so the probe pins the row itself (action,
-  `actor_kind` key, the key as `actor_id`, a null `user_id`, the refused
-  method, path and scope). The conformance test skips probe steps.
+- **A step can be a database probe** (`sql` on a step): a query run in a read
+  only transaction that is always rolled back (a write through it fails, and a
+  test pins that), whose rows are the recorded response (request method `SQL`,
+  content type `application/x-sql-rows`). Two uses. The `machine_key` audit
+  row: no route reads `audit_log` (the users listing unions only user
+  attributed rows and a key is never a user), so the probe pins the row itself
+  (action, `actor_kind` key, the key as `actor_id`, a null `user_id`, the
+  refused method, path and scope). The invoices of the `delivery_delivered`
+  order: no route lists invoices by order, so the probe pins the count before
+  and after a refused completion and the invoice a DELIVERED completion makes.
+  The conformance test skips probe steps.
 - **A step can pin response headers** (`captureHeaders`, recorded under the
   response's `headers`): used for `Idempotency-Replayed` in the `idempotency`
   group. No other header is recorded.
@@ -405,7 +411,7 @@ last).
 | matching | `matching_runs` | GET /api/v1/matching/exceptions; GET /api/v1/matching/results/{po_id}; POST /api/v1/matching/run/{po_id} |
 | bankrecon | `bankrecon_sessions` | POST /api/v1/bankrecon/import, /match, /unmatch; GET/POST /api/v1/bankrecon/sessions; GET /api/v1/bankrecon/sessions/{id}; POST .../{id}/complete |
 | edi | `edi_partner_catalog` | GET /api/v1/edi/partners; PUT/DELETE /api/v1/edi/partners/{id}; GET /api/v1/edi/partners/{id}/catalog; POST .../import-catalog (an X12 832 segment stream carried in a JSON string; raw and CSV uploads are not buildable by the harness) |
-| delivery | `delivery_fleet`, `delivery_routes`, `delivery_deliveries`, `delivery_pod_photo`, `delivery_route_lifecycle` | vehicles and drivers get/put/delete/photo; routes list/create/optimize/reorder/dispatch/complete/deliveries; deliveries create/get/adjust-qty/pod-photo(s)/status (DELIVERED is left out: it would auto-invoice the shared order; PARTIAL and FAILED are recorded) |
+| delivery | `delivery_fleet`, `delivery_routes`, `delivery_deliveries`, `delivery_pod_photo`, `delivery_route_lifecycle`, `delivery_delivered` | vehicles and drivers get/put/delete/photo; routes list/create/optimize/reorder/dispatch/complete/deliveries; deliveries create/get/adjust-qty/pod-photo(s)/status (PARTIAL and FAILED are recorded on the shared order; DELIVERED has its own group, `delivery_delivered`, on an order of its own: a missing proof of delivery is refused with no invoice, then a DELIVERED completion with proof reads back the delivery and the invoice it made) |
 | pos | `pos_transactions`, `pos_sync`, `pos_returns`, `pos_till_close` | products/search; transactions list/get/items POST and DELETE/complete/void; returns list/create/get; sync; till close/report/zreport; zreports |
 | purchase_order | `purchase_order_flow`, `purchase_order_list` | list; recommendations; refresh-reorder-targets; reorder-check; reorder-runs; source-summary; freight GET/POST (the upload refuses with no AI key, so apply is recorded only for an unknown charge); receive; submit |
 | pricing (flag off main) | `pricing_escalation`, `market_index_refresh`, `exposure_admin`, `rebate_programs` | POST /api/v1/pricing/calculate-escalation; GET /api/v1/market-indices/{id}/history; POST .../refresh and /refresh/preview; POST /api/v1/admin/exposure-scan; GET /api/v1/reports/exposure; GET /api/v1/pricing/rebates/programs/{id}, /claims; POST .../claims/calculate |

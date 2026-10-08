@@ -71,6 +71,7 @@ func allGroups() []groupDef {
 		r1bBGroups(),
 		r1bCGroups(),
 		r1bDGroups(),
+		r1bCDeliveredGroups(),
 	)
 }
 

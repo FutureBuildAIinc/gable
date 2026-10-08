@@ -305,8 +305,8 @@ func r1bCMaskedGroups() []groupDef {
 				{name: "delivery.route.dispatch.again", method: "POST", path: "/api/v1/delivery/routes/{c_route}/dispatch"},
 				{name: "delivery.route.dispatch.bad_id", method: "POST", path: "/api/v1/delivery/routes/not-a-uuid/dispatch"},
 				{name: "delivery.route.dispatch.not_found", method: "POST", path: "/api/v1/delivery/routes/" + cMissingID + "/dispatch"},
-				// Delivered is left out on purpose: it would auto-invoice the
-				// shared order. Partial and failed are the other terminal states.
+				// Delivered has its own group (delivery_delivered): it
+				// auto-invoices the order, so it runs on an order of its own.
 				{
 					name: "delivery.delivery.status.partial", method: "PUT", path: "/api/v1/delivery/deliveries/{c_delivery}/status",
 					body: map[string]any{
@@ -646,4 +646,65 @@ func r1bCPurchaseOrderGroups() []groupDef {
 			{name: "purchase_order.source_summary.after_check", method: "GET", path: "/api/v1/purchase-orders/source-summary"},
 		},
 	}}
+}
+
+// r1bCDeliveredGroups runs last of every group (see allGroups): completing a
+// delivery as DELIVERED creates an invoice, and an invoice for any customer
+// moves the statements, aging and ledger reads that groups after it record,
+// so nothing may run after it.
+func r1bCDeliveredGroups() []groupDef {
+	return []groupDef{
+		{
+			// DELIVERED is the one terminal state that bills: completing a
+			// delivery with proof creates the order's invoice. It runs on an
+			// order, route and delivery of its own so the shared order's
+			// invoice (made at fulfilment) is not touched. The refused
+			// attempts first pin the POD check; the success then pins the
+			// status constant, the delivery read back and the invoice made.
+			name: "delivery_delivered",
+			steps: []stepDef{
+				{
+					name: "order.create.c_delivered", method: "POST", path: "/api/v1/orders",
+					body: map[string]any{
+						"customer_id": "{myCustomer}",
+						"lines":       []map[string]any{{"product_id": "{product}", "quantity": 2, "price_each": 550}},
+					},
+					extract: map[string]string{"c_order_dl": "/id"},
+				},
+				{
+					name: "delivery.route.create.c_delivered", method: "POST", path: "/api/v1/delivery/routes",
+					body: map[string]any{
+						"vehicle_id": "{c_vehicle}", "driver_id": "{c_driver}", "scheduled_date": "{today+4}",
+						"notes": "r1b c delivered route",
+					},
+					extract: map[string]string{"c_route_dl": "/id"},
+				},
+				{
+					name: "delivery.delivery.assign.c_delivered", method: "POST", path: "/api/v1/delivery/deliveries", maskFields: geoMask,
+					body: map[string]any{
+						"route_id": "{c_route_dl}", "order_id": "{c_order_dl}", "stop_sequence": 1,
+					},
+					extract: map[string]string{"c_delivery_dl": "/delivery/id"},
+				},
+				{name: "invoice.for_order.before", sql: `SELECT count(*) AS invoices FROM invoices WHERE order_id = '{c_order_dl}'::uuid`},
+				{name: "delivery.delivery.status.delivered_missing_pod", method: "PUT", path: "/api/v1/delivery/deliveries/{c_delivery_dl}/status",
+					body: map[string]any{"status": "DELIVERED"}},
+				{name: "invoice.for_order.after_refusal", sql: `SELECT count(*) AS invoices FROM invoices WHERE order_id = '{c_order_dl}'::uuid`},
+				{
+					name: "delivery.delivery.status.delivered", method: "PUT", path: "/api/v1/delivery/deliveries/{c_delivery_dl}/status",
+					body: map[string]any{
+						"status": "DELIVERED", "pod_proof_url": "/uploads/pod/golden-delivered.png", "pod_signed_by": "R1C Receiver",
+						"signature_data_url": "data:image/png;base64,AAAA",
+					},
+				},
+				{name: "delivery.delivery.get.after_delivered", method: "GET", path: "/api/v1/delivery/deliveries/{c_delivery_dl}", maskFields: geoMask},
+				{
+					name: "invoice.for_order.after_delivered",
+					sql: `SELECT status, total_amount::text AS total_amount, tax_amount::text AS tax_amount,
+					             (SELECT count(*) FROM invoice_lines l WHERE l.invoice_id = i.id) AS lines
+					      FROM invoices i WHERE order_id = '{c_order_dl}'::uuid ORDER BY created_at, id`,
+				},
+			},
+		},
+	}
 }
