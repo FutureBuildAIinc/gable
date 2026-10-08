@@ -291,11 +291,53 @@ rest of the admin reads. It is role gated `admin, owner`, the narrowest gate
 the admin reads use (the tech admin and GL surfaces), stated here and in
 `docs/refactor/CONTRACT-CHANGES.md`.
 
-Retention: the outbox is a replay window, not a ledger; the exposure ledger
-and each module's own tables remain the record. A retention job (purging
-rows past the oldest cursor by an operator-set window) belongs to the
-`worker` role's job set in R1-4, not to this item; nothing here deletes
-rows.
+Retention is section 6.
+
+### 6. Retention
+
+The outbox is a replay window, not a ledger; the exposure ledger and each
+module's own tables remain the record. The `worker` role runs a purge job
+(`pkg/outbox.PurgeRunner`, started in `internal/app/worker` beside the drain,
+never by `serve`) that deletes aged rows in batches. The age is
+`OUTBOX_RETENTION_DAYS` (default 14; zero or negative turns the purge off),
+the pass runs on an hourly ticker with an immediate first pass at start, and
+`Stop` ends the loop and waits for the batch in flight before the pool
+closes.
+
+A row is deleted only when all three hold:
+
+- its event time `at` is older than the retention age;
+- its position is at or below the lowest `event_subscriber_cursors` position.
+  A cursor holds the position its subscriber has delivered or parked
+  through, so every row past the lowest cursor is a row some drain still owes
+  a subscriber and is kept however old it is. A lagging or stalled subscriber
+  therefore holds the purge back: the table grows until it catches up, which is
+  the safe side, and an operator who retires a subscriber for good deletes its
+  cursor row. With no registered subscriber nothing is owed and age alone
+  decides;
+- no `event_subscriber_parked` entry names its position. A parked row's cursor
+  has moved on, so the cursor floor does not protect it; the purge excludes
+  it instead, and the event stays until an operator resolves the entry by
+  deleting it (after replaying or discarding it by hand), after which it
+  ages out like any other row.
+
+Each batch is one statement, `DELETE ... WHERE position IN (SELECT ... FOR
+UPDATE SKIP LOCKED LIMIT n)`, that reads the cursor floor in the same
+statement. No transaction is opened, so there is no second pool connection to
+wait on, and two purges (a rolling deploy) take disjoint batches. Cursors only
+move forward, so a floor read a moment stale is only more conservative. The
+purge never touches the cursors, and the drain and the feed page by keyset on
+position, so deleting rows behind them changes nothing they read.
+
+The one outside effect: an outside consumer of `GET /api/v1/events` that falls
+further behind than the retention age finds the oldest events gone and
+resumes from the oldest retained one. The age is the consumer's replay window.
+
+The same holds inside the process. A subscriber that normally starts at the
+head never needs rows older than its cursor, and a replay subscriber
+(`SubscribeReplay`, cursor at 0) can replay only what is still retained, not
+the full history: replay is bounded by the retention age, and once a row has
+aged out and the other cursors have passed it, no registration brings it back.
 
 ## Alternatives considered
 

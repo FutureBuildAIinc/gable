@@ -975,6 +975,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the event feed
+         * @description Events in commit order, paged by cursor. Role gated admin and owner; a machine key holding the events:read scope also reaches the feed (the role guard passes any key that clears the scope check). The feed is not branch scoped. Query parameters are exactly cursor, limit, types and include: any other name is a 400 unsupported_query_parameter, and a repeated include is a 400.
+         */
+        get: operations["eventsList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/gl/accounts": {
         parameters: {
             query?: never;
@@ -4632,6 +4652,25 @@ export interface components {
                 request_id: string;
             };
         };
+        /** @description The ADR 0001 section 3 error envelope, written by internal/platform/httpx.WriteError. Converted modules answer with it; routes not yet converted keep the Error envelope above. code is a stable lowercase snake_case machine code, message the handler's own message (the fixed string "internal error" on a 500), details one entry per reason (omitted when empty). */
+        WireError: {
+            error: {
+                /** @enum {string} */
+                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
+                message: string;
+                details?: components["schemas"]["WireErrorDetail"][];
+            };
+            meta: {
+                /** @description The request id, equal to the X-Request-ID response header. */
+                request_id: string;
+            };
+        };
+        /** @description One reason. A field entry names the field (a body JSON path, a query parameter name, or cursor); a blocker carries code and no field. */
+        WireErrorDetail: {
+            field?: string;
+            message: string;
+            code?: string;
+        };
         /** @description The integration seam's own error body, a bare message string. */
         IntegrationError: {
             error: string;
@@ -5540,6 +5579,39 @@ export interface components {
             pack_qty: number;
             /** Format: date-time */
             synced_at: string;
+        };
+        /** @description The ADR 0001 list envelope with the feed's exception: next_cursor is always a string, the last served position or the request's cursor echoed back when the page is empty, so a poller keeps its place. */
+        EventPage: {
+            items: components["schemas"]["Event"][];
+            next_cursor: string;
+            limit: number;
+            /**
+             * Format: int64
+             * @description Present only under include=total.
+             */
+            total?: number;
+        };
+        Event: {
+            /** Format: uuid */
+            event_id: string;
+            /** @description Dot-delimited lowercase event type. */
+            type: string;
+            org: string;
+            /** Format: uuid */
+            branch_id: string | null;
+            entity: components["schemas"]["EventEntity"];
+            /** @description The event's summary payload, any JSON value (an object in practice). */
+            data: unknown;
+            /**
+             * Format: date-time
+             * @description RFC 3339 UTC at microsecond precision.
+             */
+            at: string;
+        };
+        EventEntity: {
+            kind: string;
+            /** Format: uuid */
+            id: string;
         };
         /** @description One chart of accounts row (gl.GLAccount). balance is int64 cents (debit minus credit of posted lines). */
         GlAccount: {
@@ -8553,22 +8625,31 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description No or invalid credentials. */
+        /** @description No or invalid credentials. The auth layer (pkg/middleware respondAuthError) answers every route with the ADR 0001 error envelope, code unauthorized. */
         Unauthorized: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["WireError"];
             };
         };
-        /** @description The caller's roles do not include one the route requires. */
+        /** @description No or invalid credentials on a route whose handler also checks the claims itself. The auth layer answers with the ADR 0001 envelope; a handler reached without claims (AUTH_MODE=dev mounts no auth layer) answers with the legacy Error envelope. */
+        HandlerUnauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"] | components["schemas"]["Error"];
+            };
+        };
+        /** @description The caller's roles, or a machine key's scopes, do not include one the route requires. The role guard and the machine key check answer every route with the ADR 0001 error envelope, code forbidden. */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["WireError"];
             };
         };
         /** @description The addressed resource does not exist. */
@@ -8596,6 +8677,24 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The request cannot be consumed or fails validation. The body is the ADR 0001 error envelope: lowercase code, the handler's own message in full, one details entry per offending field or blocker. */
+        WireBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description An unexpected server fault in the ADR 0001 error envelope. The message is always the fixed string "internal error" and details is omitted. */
+        WireInternalError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
             };
         };
         /** @description The card charge or its persistence failed. */
@@ -10848,6 +10947,39 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    eventsList: {
+        parameters: {
+            query?: {
+                /** @description The opaque next_cursor of an earlier page (ordering scope events.position). Absent means the first page; present but malformed is a 400 naming cursor. */
+                cursor?: string;
+                /** @description Page size, 1 to 200. Malformed or out of range is a 400 naming limit. */
+                limit?: number;
+                /** @description Exact event types, comma separated and repeatable, each name once and dot-delimited lowercase (quote.exposure.flagged). A name that is malformed or repeated is a 400 validation_failed naming types; a filter matching nothing is an empty page. */
+                types?: string;
+                /** @description Comma separated expansions; only total is known. total adds the count of matching events. */
+                include?: "total";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of events, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventPage"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
     glAccountList: {
         parameters: {
             query?: never;
@@ -12811,7 +12943,7 @@ export interface operations {
                     "application/json": components["schemas"]["PartnerDashboard"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["HandlerUnauthorized"];
             /** @description The caller's email resolves to no customer, or to an inactive one; the standard error envelope. */
             403: {
                 headers: {
@@ -12842,7 +12974,7 @@ export interface operations {
                     "application/json": components["schemas"]["Quote"][] | null;
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["HandlerUnauthorized"];
             /** @description The caller's email resolves to no customer, or to an inactive one; the standard error envelope. */
             403: {
                 headers: {
@@ -12876,7 +13008,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            401: components["responses"]["HandlerUnauthorized"];
             /** @description The caller's email resolves to no customer, or to an inactive one; the standard error envelope. */
             403: {
                 headers: {

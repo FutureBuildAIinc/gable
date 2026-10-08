@@ -27,7 +27,7 @@ and from the code the goldens pin.
 | Path | What it is |
 |---|---|
 | `core/api/fragments/*.yaml` | One fragment per module. Top-level keys are exactly `paths` and `components`. Underscore prefixed files carry shared components only. |
-| `core/api/fragments/_shared.yaml` | The shared fragment: security schemes, the limit and offset parameters, the branch and idempotency headers, the standard error envelope, the integration error body, the exposure 409 payload. |
+| `core/api/fragments/_shared.yaml` | The shared fragment: security schemes, the limit and offset parameters, the branch and idempotency headers, the standard error envelope and the ADR 0001 lowercase error envelope (`WireError`), the integration error body, the exposure 409 payload. |
 | `core/api/openapi.yaml` | The assembled document. Generated; never edited by hand. |
 | `core/api/ROUTES.txt` | The route census (R1-2): every route the sources register. The truth the coverage gate counts against. |
 | `core/api/contract-pending.txt` | Routes still without an operation. Generated; shrinks as fragments land, and only shrinks. |
@@ -230,6 +230,7 @@ Fragments done (the pattern the rest copy):
 | partner | `partner.yaml` | 3 |
 | health and metrics | `health.yaml` | 4 |
 | uploads | `uploads.yaml` | 1 |
+| events (R1-12b) | `events.yaml` | 1 |
 | shared components | `_shared.yaml` | 0 |
 
 200 of 345 census routes covered. Pending (in `contract-pending.txt`):
