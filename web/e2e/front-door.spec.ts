@@ -22,6 +22,12 @@ interface CatalogApp {
   enabled: boolean;
 }
 
+/** A screenshot taken after the entrance animations settle, so the tiles show at full strength. */
+async function shot(page: Page, name: string) {
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: path.join(SHOTS_DIR, name) });
+}
+
 /** Sign in on the door with the dev sign-in and return the catalog the door fetched. */
 async function signInOnDoor(page: Page, name: string): Promise<CatalogApp[]> {
   await page.goto('/');
@@ -39,7 +45,7 @@ test.describe('Front door', () => {
     await expect(page).toHaveTitle(/Front Door/);
     await expect(page.getByRole('heading', { name: 'Sign in to Gable' })).toBeVisible();
     await expect(page.getByLabel('Display name')).toBeVisible();
-    await page.screenshot({ path: path.join(SHOTS_DIR, 'door-signed-out.png') });
+    await shot(page, 'door-signed-out.png');
 
     const apps = await signInOnDoor(page, 'Playwright Door');
 
@@ -60,7 +66,7 @@ test.describe('Front door', () => {
     expect(labels.length).toBeGreaterThan(5);
     for (const l of labels) expect(expected.has(l), `tile "${l}" is in the catalog response`).toBe(true);
 
-    await page.screenshot({ path: path.join(SHOTS_DIR, 'door-signed-in.png') });
+    await shot(page, 'door-signed-in.png');
   });
 
   test('the desk tile opens /home and the desk shell renders', async ({ page }) => {
@@ -141,7 +147,7 @@ test.describe('Front door', () => {
     await expect(page.getByRole('heading', { name: 'Sign in to Gable' })).toBeVisible();
     await expect(page.getByRole('alert')).toContainText('Your session expired');
     await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
-    await page.screenshot({ path: path.join(SHOTS_DIR, 'door-session-expired.png') });
+    await shot(page, 'door-session-expired.png');
   });
 });
 
@@ -155,7 +161,7 @@ test.describe('Desk', () => {
     await expect(tiles.first()).toBeVisible();
     expect(await tiles.count()).toBeGreaterThan(5);
     await expect(page.getByRole('button', { name: 'Open Quotes' })).toBeVisible();
-    await page.screenshot({ path: path.join(SHOTS_DIR, 'desk-home.png') });
+    await shot(page, 'desk-home.png');
   });
 
   test('/quotes/<seeded id> opens directly and renders that quote', async ({ page, request }) => {
@@ -170,7 +176,7 @@ test.describe('Desk', () => {
     await expect(page).toHaveURL(new RegExp(`/quotes/${q.id}$`));
     await expect(page.getByRole('heading', { name: `Quote #${q.id.slice(0, 8)}` })).toBeVisible();
     if (q.customer_name) await expect(page.getByText(q.customer_name).first()).toBeVisible();
-    await page.screenshot({ path: path.join(SHOTS_DIR, 'desk-quote-record.png') });
+    await shot(page, 'desk-quote-record.png');
   });
 
   test('a record URL opened cold, with no session, does not 404 at the server', async ({ page, request }) => {
