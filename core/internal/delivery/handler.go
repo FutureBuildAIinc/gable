@@ -94,6 +94,7 @@ func (h *Handler) HandleCreateVehicle(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(v)
 }
@@ -121,6 +122,7 @@ func (h *Handler) HandleCreateDriver(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(d)
 }
@@ -167,6 +169,7 @@ func (h *Handler) HandleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(route)
 }
@@ -427,6 +430,7 @@ func (h *Handler) HandleCompleteRoute(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to complete route", http.StatusBadRequest, err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "completed"})
 }
@@ -533,6 +537,7 @@ func (h *Handler) HandleAdjustQuantity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "adjusted"})
 }
