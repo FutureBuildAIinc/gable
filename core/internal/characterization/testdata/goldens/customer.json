@@ -18,9 +18,21 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-2>\",\"primary_branch_id\":\"<id-1>\",\"name\":\"Golden Harness Co\",\"account_number\":\"GOLD-001\",\"email\":\"goldens@example.com\",\"phone\":\"250-555-0199\",\"address\":\"1 Golden Way, Kelowna BC\",\"tier\":\"GOLD\",\"credit_limit\":100000,\"balance_due\":0,\"is_active\":false,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "balance_due": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit": 100000,
+        "email": "goldens@example.com",
+        "id": "<id-2>",
+        "is_active": false,
+        "name": "Golden Harness Co",
+        "phone": "250-555-0199",
+        "primary_branch_id": "<id-1>",
+        "tier": "GOLD",
+        "updated_at": "<ts+0d>"
       }
     }
   },

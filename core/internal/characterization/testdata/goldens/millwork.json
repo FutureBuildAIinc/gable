@@ -15,9 +15,17 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-1>\",\"category\":\"Species\",\"name\":\"Golden Douglas Fir\",\"price_adjustment\":1.5,\"attributes\":{\"grade\":\"Clear\"},\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "attributes": {
+          "grade": "Clear"
+        },
+        "category": "Species",
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "name": "Golden Douglas Fir",
+        "price_adjustment": 1.5,
+        "updated_at": "<ts+0d>"
       }
     }
   },
