@@ -27,6 +27,6 @@ top of it.
 | R1-10 | | | | | not started |
 | R1-11 | `refactor/r1-11-idempotency` | https://github.com/FutureBuildAIinc/gable/pull/5 | 0 | `d48a3da` | in review |
 | R1-12 | | | | | not started |
-| R1-13 | `refactor/r1-13-keys` | https://github.com/FutureBuildAIinc/gable/pull/10 | 0 | `5a0bab7` | in review |
+| R1-13 | `refactor/r1-13-keys` | https://github.com/FutureBuildAIinc/gable/pull/10 | 2 | `5e3cbef` | in review |
 | R1-14 | | | | | not started |
 | R1-15 | | | | | not started |
