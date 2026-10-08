@@ -20,7 +20,7 @@ product's stocking unit"), the `uom` rule of section 2.2, the unit of the
 allocation invariant of section 5.4 (it now reads on `stock_quantity`, which
 equals `quantity` for every line cycle 2 writes), the unit of the
 fulfilment body's `lines[].quantity` in section 5.6, with its new optional
-`tally` (section 4.5 here), and the `unit_not_stock_unit` refusal of
+`tally` (section 4.4 here), and the `unit_not_stock_unit` refusal of
 section 5.8. ADR 0005's Status says so.
 
 ## Context
@@ -78,8 +78,8 @@ by number.
      pair is (1, 1 / r);
   3. else r in lowest integer terms (p, q) when both fit the bound; when
      they do not, (p x k, q x k) for the largest k of 0.1, 0.01, 0.001 and
-     0.0001 for which both fit (the smallest scale 4 multiple of the ratio
-     that fits; every such side is still exact at scale 4);
+     0.0001 for which both fit, the multiple closest to the integer form
+     (every such side is still exact at scale 4);
   4. a ratio that fits the bound (99999999.9999, the NUMERIC(12,4) bound,
      `httpx.QuantityMax`) in no form above is refused where it is written,
      never at a line.
@@ -312,12 +312,15 @@ The transaction: lock the product row `FOR UPDATE`, check the revision,
 replace the rows, update the defaults, `revision = revision + 1`, the audit
 row, then the event `product.updated` with `data.parts: ["units"]` last.
 
-Until C3-2A-pricing lands (section 9.1), the pricing engine still reads
-`base_price` as "per the stocking unit". C3-2A-units therefore adds a CHECK
-`price_uom = uom_primary` on `products` (a PUT that sets another price unit
-is a 400 naming `price_uom`, "a price unit other than the stocking unit
-arrives with the pricing item"), and C3-2A-pricing drops the CHECK. Rows
-with `price` set may exist before then; nothing prices in them yet.
+Until C3-2B lands (section 9.1), the counter, the portal and the
+integration price read still treat every price as "per the stocking unit",
+and each of them swallows a pricing error and falls back to `base_price`.
+C3-2A-units therefore adds a CHECK `price_uom = uom_primary` on `products`
+(a PUT that sets another price unit is a 400 naming `price_uom`, "a price
+unit other than the stocking unit arrives with C3-2B"), C3-2A-pricing holds
+every price it adds to the same rule (9.1), and C3-2B lifts it together
+with the readers it fixes. Rows with `price` set may exist before then;
+nothing prices in them yet.
 
 #### 3.3 Resolving a line's pair
 
@@ -520,11 +523,21 @@ that carries a tally, on every document, holds the one rule above: its
 tally's linear feet equal its quantity (negated on a credit). A partial
 bill's invoice line therefore carries a tally only when one is given that
 sums exactly to its quantity: the fulfilment line's optional `tally`
-(4.5), or, on the bill of the line's last quantity, the rows the earlier
-bills of the line did not carry, when those sum exactly to it. Otherwise
-the invoice line carries no tally; its money is the same either way.
+(4.4), or, on the bill of the line's last quantity, the line's unbilled
+rows, when those sum exactly to it. Otherwise the invoice line carries no
+tally; its money is the same either way.
 
-#### 4.5 What this changes in ADR 0005's fulfilment route
+**Unbilled rows and sub tallies.** A tallied line's unbilled rows are its
+rows less, length by length, the pieces every earlier bill's tally
+carried. A tally given for part of a line (a fulfilment's, or a partial
+credit memo's against its invoice line) must be a sub tally of the rows it
+draws from: every length it names is a length of those rows, and its pieces
+at each length are at most the unbilled (or uncredited) pieces there.
+Otherwise the request is a 400 naming `lines[i].tally`. So no subtraction
+ever goes below zero, and a partial credit memo of a tallied line either
+carries a sub tally of its invoice line's rows or carries none.
+
+#### 4.4 What this changes in ADR 0005's fulfilment route
 
 ADR 0005 section 5.6's body `lines[].quantity` never named its unit,
 because the sale unit and the stocking unit were equal. From C3-2B it is
@@ -540,10 +553,10 @@ named, and this subsection amends 5.6 (ADR 0005's Status lists it):
   a charge line in the line's own `uom`, as 5.6 says;
 - `lines[].tally` is optional, allowed on a tallied line only, `{"rows":
   [...]}` in 4.3's request shape; its linear feet must equal
-  `lines[].quantity`, or the request is a 400 naming
-  `lines[i].tally`.
+  `lines[].quantity` and it must be a sub tally of the line's unbilled rows
+  (4.3), or the request is a 400 naming `lines[i].tally`.
 
-#### 4.4 Stock by length: deferred to cycle 4
+#### 4.5 Stock by length: deferred to cycle 4
 
 Cycle 3 stocks a random length product as one quantity in `LF` per inventory
 row. A tallied line moves `stock_quantity` linear feet; the lengths are kept
@@ -586,7 +599,7 @@ reading the same value; section 7.6 lists what each must do about its unit.
 | `code` | TEXT NOT NULL UNIQUE | `^[A-Z][A-Z0-9_]{0,15}$` | `code` |
 | `name` | TEXT NOT NULL | | `name` |
 | `basis` | TEXT NOT NULL CHECK (`BASE`, `AVERAGE_COST`, `REPLACEMENT_COST`) | what a level price is derived from when the product has no explicit price at this level | `basis` (lowercase) |
-| `adjust_percent` | NUMERIC(9,4) NOT NULL, -100 <= p <= 99999.9999 | added to the basis: -10 is ten percent off the base; 25 on a cost basis is a 25 percent markup; -100 is a price of zero, which today's multiplier of 0 means. The bound is the column's own, so no multiplier stored today aborts the backfill | `adjust_percent` (decimal string) |
+| `adjust_percent` | NUMERIC(14,4) NOT NULL, -100 <= p | added to the basis: -10 is ten percent off the base; 25 on a cost basis is a 25 percent markup; -100 is a price of zero, which today's multiplier of 0 means. NUMERIC(14,4) holds the percent of any multiplier `price_levels.multiplier` (NUMERIC(12,4)) can store; a negative multiplier, which has no meaning as a price, is the one value the backfill refuses (8, P1) | `adjust_percent` (decimal string) |
 | `position` | INTEGER NOT NULL | display order | `position` |
 | `is_active` | BOOLEAN NOT NULL DEFAULT TRUE | | `is_active` |
 | `revision`, `created_at`, `updated_at` | | | same |
@@ -653,7 +666,7 @@ follow the table.
 |---|---|---|---|
 | 1 | Contract: `customer_contracts` for (customer, product), the branch's row before the all branch row | its fixed price, its `price_uom` | `contract` |
 | 2 | Pricing rules: job override, promotional, quantity break, by today's `selectRule` (priority, then the waterfall order, quantity break ties to the lowest price) | a fixed price in its `price_uom`, or a percent off or a markup on the reference price, in the reference's unit (today's `applyRule` marks up on the base price, and so does this rung; there is no cost markup rule kind) | `job_override`, `promotional`, `quantity_break` |
-| 3 | Category rules: account, then profile, then level (the profile's), each exact category then ancestor | as today's `ApplyRule`: markdown on the reference price, in its unit; fixed, per the product's `price_uom`; markup and margin on cost, in the stocking unit, when the cost is positive, and otherwise, as today, markup on the reference price in its unit and margin answering the reference price unchanged | `category_account`, `category_profile`, `category_level` |
+| 3 | Category rules: account, then profile, then level (the profile's), each exact category then ancestor | as today's `ApplyRule`: markdown on the reference price, in its unit; fixed, per the product's `price_uom`; markup and margin on cost, in the stocking unit, when the cost is positive, and otherwise, as today, markup on the reference price in its unit and margin answering the reference price unchanged (as `ApplyRule` also does when the margin is 100 or more) | `category_account`, `category_profile`, `category_level` |
 | 4 | Customer level: the profile's level. Its explicit price at the branch, else its explicit price at every branch, else derived: `BASE` from the reference price; `AVERAGE_COST` from `products.average_unit_cost`; `REPLACEMENT_COST` from the product's primary vendor's current cost (5.5) at its default vendor level, falling back to average cost (named in `details`) | explicit: its own unit; derived: the unit of what it derives from | `level` |
 | 5 | Branch base: `product_prices` (level null, the branch) | its unit | `branch` |
 | 6 | Base: `products.base_price` | `products.price_uom` | `base` |
@@ -757,9 +770,13 @@ C3-1 converts the existing pricing routes (`/api/v1/pricing/calculate`,
 
 - `GET`, `POST /pricing/levels`; `GET`, `PUT /pricing/levels/{id}`.
 - `GET`, `POST /pricing/profiles`; `GET`, `PUT /pricing/profiles/{id}`.
-- `GET /pricing/products/{id}/prices`, `PUT /pricing/products/{id}/prices`
-  (the product's whole price list, base excluded, replaced at the product's
-  revision; each row carries its own revision for reads).
+- `GET /pricing/products/{id}/prices` and `PUT
+  /pricing/products/{id}/prices?branch_id=<id>`: the PUT replaces one
+  branch's slice of the product's price list (its branch base and its level
+  prices for that branch), at the product's revision, and touches no other
+  branch's rows. Without `branch_id` it replaces the every branch slice
+  (the rows whose `branch_id` is null). Each row carries its own revision
+  for reads.
 - `GET`, `POST /pricing/vendor-levels` (filter `vendor_id`); `GET`, `PUT
   /pricing/vendor-levels/{id}`.
 - `GET /pricing/vendor-costs` (filters `vendor_id`, `product_id`,
@@ -775,7 +792,29 @@ admit, since the counter prices through it. Every write carrying a
 `branch_id` (a product price, a contract, a vendor cost) and the price
 read's `branch_id` pass the payload branch rule of ADR 0007
 (`BranchGuard.CheckPayloadBranch`, PR 37): a branch outside the caller's
-grants is refused as that rule says.
+grants is refused as that rule says. The rule has to see every row a write
+can change, not only the rows it sends, so:
+
+- **The price list PUT is scoped by branch** (chosen over checking every
+  row a whole list PUT inserts, changes or removes: a scoped write cannot
+  reach a row it was not checked for, and one branch's manager edits one
+  branch's slice anyway). The query's `branch_id` is the one value the rule
+  checks; rows in the body carry no `branch_id` (sending one is a 400
+  naming it), and the replace is `DELETE ... WHERE product_id = $1 AND
+  branch_id IS NOT DISTINCT FROM $2` then the inserts, in one transaction
+  under the product row's lock. The every branch slice (no `branch_id`)
+  is admitted only for a caller the rule admits for every branch: an
+  administrator, or an unbound caller with no context branch.
+- **Contracts and vendor costs are written one row at a time** (create,
+  update by id); an update checks the rule on the row's stored `branch_id`
+  and on the new one, and a null `branch_id`, old or new, needs the every
+  branch admission above. Neither has a set replacing route; one added
+  later takes the price list's scoping.
+- **Reads apply the branch wall.** `GET /pricing/products/{id}/prices`,
+  `GET /pricing/vendor-costs` and the contract reads show the caller's
+  context branch rows and the every branch rows; an administrator or an
+  unbound caller with no context branch sees every branch, the recipe's
+  wall (`middleware.BranchIDForQuery`, a nil result meaning no wall).
 
 `GET /api/v1/pricing/calculate` after C3-2A-pricing takes `customer_id`,
 `product_id`, `quantity`, `uom` (default the product's `sale_uom`),
@@ -893,7 +932,7 @@ C3-2B, after C2-5 and C3-2A-pricing have merged (9.1):
 - allocation, fulfilment, restock and COGS read `stock_quantity` (3.4);
 - the invoice bills a partial line as 3.4 says, and copies the tally (4.3);
 - the fulfilment route reads `lines[].quantity` in the stocking unit and
-  accepts a line `tally` (4.5);
+  accepts a line `tally` (4.4);
 - stock moves apply the stock unit rule (3.4);
 - ADR 0005's pricing wrapper and 9.1's adapters are deleted; these modules
   call `Resolve`;
@@ -910,11 +949,16 @@ it cannot carry, in C3-2B: the counter's product lookups
 (`pos/repository.go`, which price at `base_price` per `uom_primary`), the
 portal catalogue and reorder (`portal/repository.go`; the reorder also
 bypasses customer pricing, and C2-2 already moves it onto the order create),
-the portal cart, and the seed. The cart's `unit_price` is NUMERIC(12,2)
+the portal cart, the integration seam's price read
+(`integrations/handler.go`, which passes `base_price` to the engine and
+keeps its frozen wire), and the seed. The cart's `unit_price` is NUMERIC(12,2)
 today, so a price of 3.75 per M bought by the EA is stored as 0.00: C3-2B
-widens it to NUMERIC(12,4), adds `price_uom` beside it, has the cart's add
-path store the engine's price in its own unit, and computes the cart's line
-totals through `Extend` with the pair. The portal's float wire stays as it
+widens it to NUMERIC(12,4) and gives each cart item the line shape's unit
+fields: its quantity is in the item's `uom`, the product's `sale_uom` when
+the item is added; `price_uom` is the engine's; the pair between the two is
+resolved from the product's set when the item is added and stored on it
+(`uom_qty`, `price_uom_qty`), the posture of every sales line (3.3). The
+cart's line totals are `Extend` over the stored fields. The portal's float wire stays as it
 is until C5-1 converts the portal. The AI load management seam (`integrations/ailm_store_pg.go`)
 reads `uom_primary::text` and `base_price` for its frozen contract: both keep
 their values, so its golden does not change, and the cast is a no op on TEXT.
@@ -969,7 +1013,7 @@ database and to a seeded one, with the backfill tested on rows that exist.
    per product: `uom_primary`, (1, 1), `sell`, `purchase`, `price` all true.
    Add `sale_uom`, `price_uom`, `purchase_uom`, backfilled to `uom_primary`,
    NOT NULL, the deferred composite FKs; the stocking row constraint trigger;
-   the CHECK `price_uom = uom_primary` (3.2, dropped by A3). No unit set row
+   the CHECK `price_uom = uom_primary` (3.2, dropped by C3-2B). No unit set row
    is made from quote lines: R1-15 checked a quote line's pair only for
    being positive, so one careless line (MBF against PCS at 1 and 1) would
    otherwise become the product's conversion and drive stock from then on.
@@ -994,8 +1038,11 @@ database and to a seeded one, with the backfill tested on rows that exist.
    `name`, uppercased, runs of other characters to `_`, a numeric suffix on
    collision, in `(created_at, id)` order), `basis` (`BASE`),
    `adjust_percent` = `(multiplier - 1) x 100` (exact: a scale 4 multiplier
-   is a scale 2 percent; 2.2's bound holds every multiplier the column can
-   store, so none aborts), `position` by `(created_at, id)`, `is_active`,
+   is a scale 2 percent; NUMERIC(14,4) holds the percent of every
+   multiplier the column can store). A negative multiplier has no meaning
+   as a price and aborts the migration with `RAISE EXCEPTION` naming the
+   level; the pre flight report (A1) names such levels first, so the
+   dealer corrects them before upgrading. `position` by `(created_at, id)`, `is_active`,
    `revision`; then UNIQUE (`code`), NOT NULLs, drop `multiplier`. These
    rows stay what they are: the levels customers name today.
 2. **P2, fresh levels for the tiers and the default.** The backfill always
@@ -1041,7 +1088,11 @@ database and to a seeded one, with the backfill tested on rows that exist.
    so a dealer level named "Gold" at 0.92 keeps exactly its customers and
    its price.
 5. **P5, prices.** `product_prices` (empty: there is no branch or level
-   price today). Drop A2's CHECK `price_uom = uom_primary`.
+   price today). A2's CHECK `price_uom = uom_primary` stays, and P5 adds
+   the same hold on every price it creates: a constraint trigger on
+   `product_prices`, `customer_contracts` and `pricing_rules` refusing a
+   `price_uom` other than the product's `uom_primary` (9.1). C3-2B drops
+   the CHECK and the trigger.
    `customer_contracts`: rows with a null `customer_id` or `product_id`
    cannot match today's lookup (it filters on both); they move to
    `customer_contracts_orphaned` (same columns) and are reported, then both
@@ -1071,8 +1122,11 @@ database and to a seeded one, with the backfill tested on rows that exist.
 3. `line_tally_rows`: add `order_line_id`, `invoice_line_id`,
    `credit_memo_line_id`, `pos_line_item_id` with their FKs and partial
    unique indexes; replace the CHECK with the five column form.
-4. `portal_cart_items.unit_price` widened to NUMERIC(12,4) and
-   `portal_cart_items.price_uom TEXT NULL` added (7.6).
+4. `portal_cart_items.unit_price` widened to NUMERIC(12,4); `uom`,
+   `price_uom`, `uom_qty` and `price_uom_qty` added (7.6), backfilled to
+   the product's `uom_primary` and the pair 1 and 1 (every cart item today
+   is per the stocking unit). Then drop P5's price unit trigger and A2's
+   CHECK, in the same migration that fixes the readers (9.1).
 
 **Down files.** Each reverses its own steps, and refuses, naming the first
 row it cannot map back, wherever data written in the new shape has no
@@ -1123,17 +1177,46 @@ cycle 2 item owns. The order:
 | C3-1 | nothing: it may start now | `internal/order`, `invoice`, `pos`, `customer`, `payment`, `deposit`, `account`, `gl`, `salesdoc`, `quote`, and `inventory/service.go` | every Go entry point with its signature and its result shape: `CalculatePrice`, `CalculatePriceWithQty` (taking `*customer.Customer`, a float64 base price and quantity) and `VolumeBreaks`. Their float64 fields now carry the exact scale 4 value, never a cent rounding. It adds `CalculateScaled`, the same inputs answering an `httpx.Price`, which ADR 0005's wrapper in the order and counter modules may call; the wrapper itself stays until C3-2B |
 | C3-1's inventory read | C2-2 has merged | as C3-1 | as C3-1 |
 | C3-2A-units | C3-1 and C2-2 have merged | the cycle 2 modules, `internal/pricing` | unchanged from C3-1. A2's CHECK holds every product's price unit at its stocking unit, so the engine's "per stocking unit" reading stays true |
-| C3-2A-pricing | C3-2A-units and C2-4 have merged | `internal/order`, `invoice`, `pos`, `payment`, `deposit`, `account`, `gl`, `salesdoc` | `Resolve` arrives. `CalculatePrice`, `CalculatePriceWithQty` and `CalculateScaled` stay as adapters over it, with their signatures: the customer argument is read for its id only, the float64 base price argument is ignored (`Resolve` reads the reference itself, the value callers pass today), and the branch comes from the request's branch context. When the resolved price unit is not the product's stocking unit they return `ErrPriceUnitNotStock`, which ADR 0005's wrapper turns into a 409 `conflict` with the blocker `price_unit_not_stock_unit` on the line: refused, never converted, until C3-2B |
-| C3-2B | C3-2A-pricing and C2-5 have merged | nothing in cycle 2 is open | the adapters and ADR 0005's wrapper are deleted; the order, invoice, credit memo and counter modules call `Resolve` |
+| C3-2A-pricing | C3-2A-units and C2-4 have merged | `internal/order`, `invoice`, `pos`, `payment`, `deposit`, `account`, `gl`, `salesdoc` | `Resolve` arrives. `CalculatePrice`, `CalculatePriceWithQty` and `CalculateScaled` stay as adapters over it, with their signatures: the customer argument is read for its id only, the float64 base price argument is ignored (`Resolve` reads the reference itself, the value callers pass today), and the branch comes from the request's branch context. Every price stays in the product's stocking unit until C3-2B (the hold below), so every answer is per the stocking unit and today's callers stay right. `ErrPriceUnitNotStock` remains as an assertion the adapters make, unreachable while the hold stands, and proved by a unit test |
+| C3-2B | C3-2A-pricing and C2-5 have merged | nothing in cycle 2 is open | the adapters and ADR 0005's wrapper are deleted; the order, invoice, credit memo and counter modules, the portal and the integration price read call `Resolve`; the hold is lifted in the same pull request |
+
+**The stocking unit hold.** From C3-2A-units until C3-2B, every price is
+in the product's stocking unit: the base (A2's CHECK on
+`products.price_uom`), and every list, level, branch, contract and rule
+fixed price (P5's trigger on `product_prices`, `customer_contracts` and
+`pricing_rules`, plus the service's own check, a 400 naming the field: "a
+price unit other than the stocking unit arrives with C3-2B"). Derived
+prices follow: a `BASE` level derives from a stocking unit reference, an
+`AVERAGE_COST` level from a cost per stocking unit, and a
+`REPLACEMENT_COST` level reads only a vendor cost whose `purchase_uom` is
+the stocking unit, otherwise falling back to average cost with `details`
+naming why (vendor costs themselves may be in any purchase unit: nothing
+outside pricing reads them before cycle 4). The reason: today's callers
+outside the order module swallow a pricing error and fall back to
+`base_price` (`posCalcAdapter.CalculateItemPrice` in `serve.go`,
+`pos/service.go`, `portal/cart.go`, `portal/catalog.go`), and the counter,
+the cart and the catalogue multiply `base_price` per the stocking unit.
+A price in another unit during the window would ring 525.00 per MBF as
+525.00 a piece, or a refused contract price as the base price, silently.
+With the hold, no such price can exist until C3-2B fixes those readers in
+the same pull request that lifts it.
+
+**Shared seed.** `internal/app/seed/seed.go` is every module's. C2-4
+changes it (ADR 0005 posts the seed's documents through the AR core), and
+C3-2A-pricing rewrites only its price level and customer pricing writes,
+after C2-4 has merged. C2-5, the counter and till, only adds data to it if
+it touches it at all; if C2-5 is open when C3-2A-pricing merges, the two
+edit disjoint parts of the file and the second to merge takes the first's
+through its merge of `refactor/v1`.
 
 C3-1's inventory read (7.2) is held to its own pull request, C3-1b, when
 C2-2 has not merged by the time the rest of C3-1 is ready; otherwise it is
 C3-1's last commit set. C3-2A-pricing drops the customer columns and
 changes the customer wire, so it waits for C2-4, the last cycle 2 item
-that edits `internal/customer`; it assumes C2-5 does not edit
-`internal/customer` (ADR 0005 gives C2-5 only a migration that inserts
-the walk-in customer row, which takes the column default), and if C2-5's
-brief turns out to edit it, C3-2A-pricing also waits for C2-5. Waiting was
+that edits `internal/customer`. C2-5 does not edit
+`internal/customer`: C2-5's brief is the counter and till only, and ADR
+0005 gives it only a migration that inserts the walk-in customer row,
+which takes the column default. Waiting was
 chosen over keeping `tier` and `price_level_id` beside the profile behind
 a synchronising trigger: a trigger that mints profiles and copies rules
 on every customer write is a second pricing engine in SQL.
@@ -1209,9 +1292,16 @@ code, through the new columns), and migration C3-2A-pricing. Tests:
 - pricing: each of the six rungs wins in its order with the rung above it
   absent; branch rows beating all branch rows; explicit level prices
   beating derived ones; each basis of a level; `REPLACEMENT_COST` falling
-  back to average cost and a cost basis with no cost falling to rung 5; a
-  price in MBF compared to a floor in PCS correctly; the adapters answering
-  `ErrPriceUnitNotStock` for a product priced per MBF and stocked in PCS;
+  back to average cost and a cost basis with no cost falling to rung 5;
+- **the hold:** a product price, a contract and a rule fixed price in a unit
+  other than the stocking unit each refused with a 400 naming `price_uom`,
+  through the route and, for a raw insert, by the trigger; a
+  `REPLACEMENT_COST` level whose vendor cost is per MBF on a product
+  stocked in PCS falling back to average cost; the adapters' assertion
+  `ErrPriceUnitNotStock` proved with a fake repository that returns a price
+  in another unit (the database cannot hold one);
+- the counter, cart and catalogue paths through the adapters answering the
+  same price as before the migration for the backfill fixture;
 - **the backfill preserves every price.** A fixture priced on the engine of
   C3-2A-units' head before the migration and on `Resolve` after it, equal
   to the ten thousandth for every (customer, product) pair: customers with
@@ -1230,11 +1320,17 @@ code, through the new columns), and migration C3-2A-pricing. Tests:
   effective date rules; a cost in MBF for a purchase line in PCS answering
   the right pair;
 - the payload branch rule (`BranchGuard.CheckPayloadBranch`, PR 37) on
-  every write carrying a `branch_id`: product prices, contracts, vendor
-  costs; and on the price read's `branch_id`.
+  every write carrying a `branch_id` and on the price read's `branch_id`;
+  the price list PUT: a branch A user's PUT with `?branch_id=` B refused,
+  a branch A user's every branch PUT (no `branch_id`) refused, an
+  administrator's every branch PUT admitted, and a branch A PUT leaving
+  branch B's and the every branch rows byte for byte; a branch A user's
+  contract or vendor cost update moving a row from branch B, or to or from
+  every branch, refused; the reads showing only the context branch and
+  every branch rows to a branch user, every row to an administrator;
 
 **C3-2B (28 to 52 dev hour equivalents)** builds 7.5 and 7.6, the
-amendment of ADR 0005's fulfilment route (4.5), and migration C3-2B.
+amendment of ADR 0005's fulfilment route (4.4), and migration C3-2B.
 Tests:
 - each line table: the pair and stock quantity resolved and stored; a non
   stocking sale unit on an order line accepted (the cycle 2 refusal gone);
@@ -1254,6 +1350,12 @@ Tests:
   when its rows sum to its quantity, a credit memo tally with
   `quantity = -linear_feet`;
 - `price_basis` stored from the engine; an override in another unit refused;
+- the hold lifted: a product priced per MBF and stocked in PCS priced
+  through `Resolve` at the counter, in the cart and in the catalogue, and a
+  price in MBF compared to a floor in PCS correctly;
+- the tally sub tally rule: a fulfilment tally naming a length the line
+  lacks, or more pieces than remain unbilled, refused naming
+  `lines[i].tally`; the same for a partial credit memo;
 - the counter and portal readers of `base_price` applying the pair (an
   `MBF` priced product rung at the counter by the piece), the cart storing
   a sub cent price and its unit, recipe step 9.
@@ -1400,7 +1502,7 @@ rounded, and no price ever changes unit.
 Adopted: both, as a level's basis, the replacement cost read from the
 vendor cost side this record adds, falling back to average.
 
-**Stock by length now or in cycle 4.** Settled in 4.4: deferred, because
+**Stock by length now or in cycle 4.** Settled in 4.5: deferred, because
 stock identity is ADR 0008's and nothing in cycle 3 needs it.
 
 ## Consequences
