@@ -80,6 +80,16 @@ type Config struct {
 	// the events feed. Defaults to "default".
 	EventsOrg string // EVENTS_ORG
 
+	// OutboxRetentionDays is how many days the worker role keeps
+	// events_outbox rows (OUTBOX_RETENTION_DAYS, default 14). A row older than
+	// this is deleted only once every registered subscriber cursor is at or
+	// past it and no parked entry names it (ADR 0003 section 6). Zero or a
+	// negative value turns the purge off; a value above
+	// MaxOutboxRetentionDays is clamped to it. An outside consumer of GET
+	// /api/v1/events that falls further behind than this loses the events
+	// between its cursor and the oldest retained row.
+	OutboxRetentionDays int // OUTBOX_RETENTION_DAYS
+
 	// EDI
 	//
 	// EDIOutputDir is where generated X12 documents are written. It defaults to
@@ -102,6 +112,10 @@ type Config struct {
 	FBBrainPublicKeyPath  string // Path to Brain's RSA public key PEM for A2A JWS verification
 	FBBrainOrgID          string // Tenant org_id for Brain financial attribution
 }
+
+// MaxOutboxRetentionDays caps OUTBOX_RETENTION_DAYS (ten years), so the
+// worker's days to Duration conversion cannot overflow.
+const MaxOutboxRetentionDays = 3650
 
 func Load() (*Config, error) {
 	_ = godotenv.Load() // Load .env if it exists, ignore if not
@@ -157,7 +171,8 @@ func Load() (*Config, error) {
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),
 
 		// Events
-		EventsOrg: getEnv("EVENTS_ORG", "default"),
+		EventsOrg:           getEnv("EVENTS_ORG", "default"),
+		OutboxRetentionDays: getEnvInt("OUTBOX_RETENTION_DAYS", 14),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),
@@ -188,6 +203,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid TRUSTED_PROXIES: %w", err)
 	}
 	cfg.TrustedProxies = trusted
+
+	if cfg.OutboxRetentionDays > MaxOutboxRetentionDays {
+		slog.Warn("OUTBOX_RETENTION_DAYS above the cap, using the cap", "value", cfg.OutboxRetentionDays, "cap", MaxOutboxRetentionDays)
+		cfg.OutboxRetentionDays = MaxOutboxRetentionDays
+	}
 
 	return cfg, nil
 }

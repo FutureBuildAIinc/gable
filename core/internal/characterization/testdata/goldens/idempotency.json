@@ -1,0 +1,86 @@
+[
+  {
+    "name": "idempotency.first",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/vision/scan",
+      "headers": {
+        "Idempotency-Key": "golden-idempotency-key-1"
+      },
+      "body": {
+        "blueprint_text": "Wall: 2x4 studs at 16in OC"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "extracted_dimensions": {
+          "cross_section": "2x4",
+          "spacing": "16\" OC"
+        },
+        "mismatches": [],
+        "summary": "Blueprint analysis complete. 2 dimensions extracted. No mismatches found."
+      }
+    }
+  },
+  {
+    "name": "idempotency.key_reused",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/vision/scan",
+      "headers": {
+        "Idempotency-Key": "golden-idempotency-key-1"
+      },
+      "body": {
+        "blueprint_text": "Wall: 2x6 studs at 24in OC"
+      }
+    },
+    "response": {
+      "status": 422,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "idempotency_key_reused",
+          "details": [],
+          "message": "This idempotency key was already used with a different request (method, path, query or body differs)"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  },
+  {
+    "name": "idempotency.key_malformed",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/vision/scan",
+      "headers": {
+        "Idempotency-Key": "bad key with\ttab"
+      },
+      "body": {
+        "blueprint_text": ""
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "Idempotency-Key",
+              "message": "must be 1 to 255 printable ASCII characters"
+            }
+          ],
+          "message": "Idempotency-Key must be 1 to 255 printable ASCII characters"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  }
+]

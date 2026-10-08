@@ -78,6 +78,13 @@ services:
       # (see README, "Behind a reverse proxy"):
       #   - key: TRUSTED_PROXIES
       #     value: <proxy network CIDR>
+      # OUTBOX_RETENTION_DAYS: how many days the worker role keeps rows of the
+      # events outbox (default 14, at most 3650, zero or negative turns the
+      # purge off). A consumer of GET /api/v1/events that falls further behind
+      # than this loses the events past its cursor (docs/adr/0003-events-outbox.md,
+      # section 6):
+      #   - key: OUTBOX_RETENTION_DAYS
+      #     value: "14"
       - key: DATABASE_URL
         value: ${gable-db.DATABASE_URL}
         scope: RUN_AND_BUILD_TIME

@@ -64,6 +64,8 @@ func allGroups() []groupDef {
 		appsGroups(),
 		integrationGroups(),
 		clockGroups(),
+		eventsGroups(),
+		idempotencyGroups(),
 	)
 }
 
@@ -84,6 +86,9 @@ type stepDef struct {
 	// maskOrderCount marks steps whose order_count field is masked to a
 	// placeholder before comparison (see capturedStep.MaskOrderCount).
 	maskOrderCount bool
+	// maskFields names response keys masked to a placeholder before
+	// comparison (see capturedStep.MaskFields).
+	maskFields []string
 }
 
 type groupDef struct {

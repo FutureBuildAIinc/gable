@@ -65,6 +65,34 @@ func visionGroups() []groupDef {
 	}}
 }
 
+// idempotencyGroups pins the wire envelope of an answer written by middleware
+// rather than a handler: the idempotency layer's 422 when an Idempotency-Key
+// is reused with a different body. The first step's 200 is stored under the
+// key; the second reuses the key with another body.
+func idempotencyGroups() []groupDef {
+	key := map[string]string{"Idempotency-Key": "golden-idempotency-key-1"}
+	return []groupDef{{
+		name: "idempotency",
+		steps: []stepDef{
+			{
+				name: "idempotency.first", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": "Wall: 2x4 studs at 16in OC"},
+				headers: key,
+			},
+			{
+				name: "idempotency.key_reused", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": "Wall: 2x6 studs at 24in OC"},
+				headers: key,
+			},
+			{
+				name: "idempotency.key_malformed", method: "POST", path: "/api/v1/vision/scan",
+				body:    map[string]any{"blueprint_text": ""},
+				headers: map[string]string{"Idempotency-Key": "bad key with\ttab"},
+			},
+		},
+	}}
+}
+
 func millworkGroups() []groupDef {
 	return []groupDef{{
 		name: "millwork",
@@ -311,6 +339,39 @@ func integrationGroups() []groupDef {
 					"notes": "golden characterisation route",
 					"stops": []map[string]any{{"order_id": "{myOrder}", "sequence": 1}},
 				},
+			},
+		},
+	}}
+}
+
+// eventsGroups pins the events feed (R1-12b). It runs after the exposure
+// groups, whose scans write outbox rows, so the feed has events to serve. The
+// first page is small so the golden stays short; the types filter, the empty
+// page, the unknown parameter and the broken cursor pin the feed's strict
+// query posture and its always-present next_cursor.
+func eventsGroups() []groupDef {
+	return []groupDef{{
+		name: "events",
+		steps: []stepDef{
+			{name: "events.list", method: "GET", path: "/api/v1/events?limit=2", maskFields: []string{"quote_short_id", "salesperson_name"}},
+			{name: "events.list.types", method: "GET", path: "/api/v1/events?limit=2&types=quote.exposure.ack_required", maskFields: []string{"quote_short_id", "salesperson_name"}},
+			{name: "events.list.empty", method: "GET", path: "/api/v1/events?types=nothing.matches.this"},
+			{name: "events.list.bad_param", method: "GET", path: "/api/v1/events?status=sent"},
+			{name: "events.list.bad_cursor", method: "GET", path: "/api/v1/events?cursor=not-a-cursor"},
+			// A machine key holding no events scope: the auth layer refuses it
+			// with the lowercase wire envelope (the 403 every route shares).
+			{
+				name:    "events.key.create",
+				method:  "POST",
+				path:    "/api/v1/admin/keys",
+				body:    map[string]any{"name": "golden-events-denied", "scopes": []any{"quotes:read"}},
+				extract: map[string]string{"eventsKey": "/api_key"},
+			},
+			{
+				name:    "events.list.forbidden",
+				method:  "GET",
+				path:    "/api/v1/events",
+				headers: map[string]string{"Authorization": "Bearer {eventsKey}"},
 			},
 		},
 	}}
