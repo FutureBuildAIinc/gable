@@ -528,3 +528,157 @@ func (f *fixture) lineID(orderID string) string {
 	}
 	return id
 }
+
+// RULE (ADR 0005 2.1, 8.2, 8.3, 14.2): each line type's treatment on a
+// fulfilment. A product line posts 4010 and its cost; a charge line posts to
+// its code's account (FREIGHT: 4020), untaxed per the code, in full on the first
+// invoice that bills it and never again, with no cost; a text line is copied to
+// the invoice with no amount. Revenue posts net of the line discount.
+func TestEachLineTypeOnAFulfilment(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	f.serveWith(f.withStock(), f.withMoney())
+	f.cleanMoney()
+	f.stock(f.productID, "10")
+	f.setCost(f.productID, "2.00")
+
+	body := f.createBody(
+		map[string]any{"product_id": f.productID.String(), "quantity": "4", "discount_percent": "10", "discount_reason": "volume"},
+		map[string]any{"line_type": "charge", "charge_code": "FREIGHT", "description": "Freight", "quantity": "1", "unit_price_ten_thousandths": 250000},
+		map[string]any{"line_type": "text", "description": "Leave at the gate"},
+	)
+	r := f.do("POST", "/api/v1/orders", body)
+	if r.status != 201 {
+		t.Fatalf("create = %d: %s", r.status, r.raw)
+	}
+	id := str(t, r.body, "id")
+	lines := r.body["lines"].([]any)
+	prodID := str(t, lines[0].(map[string]any), "id")
+	// 4 x 5.50 less 10% = 1980; freight 25.00 untaxed; tax 8.875% of 1980 = 176
+	if num(t, r.body, "subtotal_cents") != 4480 {
+		t.Fatalf("subtotal = %d, want 4480", num(t, r.body, "subtotal_cents"))
+	}
+	r = f.transition(id, 1, "confirmed")
+	// Fulfil 1 of the 4 first: the charge bills in full with it.
+	one := f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter", "lines": []map[string]any{{"order_line_id": prodID, "quantity": "1"}}})
+	if one.status != 201 {
+		t.Fatalf("first fulfilment = %d: %s", one.status, one.raw)
+	}
+	inv1 := invoiceIDOf(t, one)
+	_, legs := f.entryLegs(inv1)
+	// 1 of 4 at 10 percent off: round(550 x 0.9) = 495 on the product (cumulative),
+	// plus 2500 freight in 4020 only when the charge was named - it was not named,
+	// so it did NOT bill on this invoice: naming lines bills only what is named.
+	if legs["4010"].credit != 495 || legs["5010"].debit != 200 || legs["1030"].credit != 200 {
+		t.Errorf("legs of the first invoice = %+v, want 4010 cr 495, 5010 dr 200, 1030 cr 200", legs)
+	}
+	if _, has := legs["4020"]; has {
+		t.Errorf("an unnamed charge billed on a partial fulfilment: %+v", legs["4020"])
+	}
+
+	// The rest with no lines: 3 more units (cumulative 1980 - 495 = 1485), the
+	// freight in full, the note copied.
+	rest := f.fulfil(id, revision(t, one), map[string]any{"picked_up_by": "Counter"})
+	if rest.status != 201 || str(t, rest.body, "status") != "fulfilled" {
+		t.Fatalf("second fulfilment = %d %q: %s", rest.status, rest.body["status"], rest.raw)
+	}
+	inv2 := invoiceIDOf(t, rest)
+	_, legs = f.entryLegs(inv2)
+	if legs["4010"].credit != 1485 || legs["4020"].credit != 2500 || legs["5010"].debit != 600 {
+		t.Errorf("legs of the second invoice = %+v, want 4010 cr 1485, 4020 cr 2500, 5010 dr 600", legs)
+	}
+	taxable := int64(1485)
+	wantTax := (taxable*88750 + 500000) / 1000000
+	if legs["2020"].credit != wantTax {
+		t.Errorf("2020 cr %d, want %d: the freight is untaxed, the discounted goods taxed once per document", legs["2020"].credit, wantTax)
+	}
+	rows, err := db.Pool.Query(context.Background(), `SELECT line_type, COALESCE(ROUND(line_total * 100)::bigint, -1), ROUND(cost * 100)::bigint FROM invoice_lines WHERE invoice_id = $1 ORDER BY position`, inv2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var typ string
+		var total, cost int64
+		if err := rows.Scan(&typ, &total, &cost); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s:%d:%d", typ, total, cost))
+	}
+	if fmt.Sprint(got) != "[PRODUCT:1485:600 CHARGE:2500:0 TEXT:-1:0]" {
+		t.Errorf("second invoice lines = %v, want the product (cost 6.00), the freight (no cost) and the note", got)
+	}
+	// The freight billed once: the first invoice had no charge line.
+	var chargeLines int
+	if err := db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id WHERE i.order_id = $1 AND l.line_type = 'CHARGE'`, id).Scan(&chargeLines); err != nil || chargeLines != 1 {
+		t.Errorf("%d charge lines billed across the invoices (%v), want exactly 1", chargeLines, err)
+	}
+}
+
+// RULE (ADR 0005 8.4): a non stock line carries cost only through a linked
+// RECEIVED purchase order line, at that line's cost (never the estimate on the
+// order line); with none received it posts no cost and that is not an error.
+func TestNonStockLineCostComesFromTheReceivedPurchaseOrderLine(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	f.serveWith(f.withStock(), f.withMoney())
+	f.cleanMoney()
+	ctx := context.Background()
+	vendor, po, poLine := uuid.New(), uuid.New(), uuid.New()
+	must := func(sql string, args ...any) {
+		if _, err := db.Pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	must(`INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "nsv-"+vendor.String()[:8])
+	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`, po, vendor)
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
+	})
+
+	mk := func(estimate int) (orderID, lineID string) {
+		r := f.do("POST", "/api/v1/orders", f.createBody(map[string]any{
+			"description": "Custom millwork", "quantity": "2", "uom": "EA", "unit_price_ten_thousandths": 100000,
+			"is_special_order": true, "special_order_unit_cost_ten_thousandths": estimate,
+		}))
+		if r.status != 201 {
+			t.Fatalf("create = %d: %s", r.status, r.raw)
+		}
+		orderID = str(t, r.body, "id")
+		lineID = str(t, r.body["lines"].([]any)[0].(map[string]any), "id")
+		r = f.transition(orderID, 1, "confirmed")
+		if r.status != 200 {
+			t.Fatalf("confirm = %d: %s", r.status, r.raw)
+		}
+		return orderID, lineID
+	}
+
+	// Not received yet: no cost, no error, even with an estimate on the line.
+	o1, l1 := mk(30000)
+	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id) VALUES ($1, $2, 'special', 2, 4.00, 0, $3)`, poLine, po, l1)
+	g := f.do("GET", "/api/v1/orders/"+o1, nil)
+	r := f.fulfil(o1, revision(t, g), map[string]any{"picked_up_by": "Counter"})
+	if r.status != 201 {
+		t.Fatalf("fulfil before the receipt = %d: %s", r.status, r.raw)
+	}
+	if _, legs := f.entryLegs(invoiceIDOf(t, r)); legs["5010"].debit != 0 || legs["4010"].credit != 2000 {
+		t.Errorf("unreceived special order legs = %+v, want revenue 2000 and no cost", legs)
+	}
+
+	// Received: cost = the purchase order line's 4.00 x 2, not the 3.00 estimate.
+	o2, l2 := mk(30000)
+	must(`UPDATE purchase_order_lines SET linked_so_line_id = $2, qty_received = 2 WHERE id = $1`, poLine, l2)
+	g = f.do("GET", "/api/v1/orders/"+o2, nil)
+	r = f.fulfil(o2, revision(t, g), map[string]any{"picked_up_by": "Counter"})
+	if r.status != 201 {
+		t.Fatalf("fulfil after the receipt = %d: %s", r.status, r.raw)
+	}
+	if _, legs := f.entryLegs(invoiceIDOf(t, r)); legs["5010"].debit != 800 || legs["1030"].credit != 800 {
+		t.Errorf("received special order legs = %+v, want 5010 dr 800 and 1030 cr 800 (the purchase cost, not the 600 estimate)", legs)
+	}
+}

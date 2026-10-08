@@ -204,10 +204,13 @@ func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Inv
 
 	// Get Lines with product names
 	queryLines := `
-		SELECT il.id, il.invoice_id, il.product_id, COALESCE(p.sku, ''), COALESCE(p.description, ''), il.quantity, il.price_each, il.created_at
+		SELECT il.id, il.invoice_id, COALESCE(il.product_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       COALESCE(p.sku, il.sku, ''), COALESCE(p.description, il.description, ''),
+		       COALESCE(il.quantity, 0), COALESCE(il.price_each, 0), il.created_at
 		FROM invoice_lines il
 		LEFT JOIN products p ON p.id = il.product_id
-		WHERE il.invoice_id = $1
+		WHERE il.invoice_id = $1 AND il.line_type <> 'TEXT'
+		ORDER BY il.position, il.created_at, il.id
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryLines, id)
 	if err != nil {
@@ -408,7 +411,7 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 				order_line_id, unit_cost, cost, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000, $15::numeric / 10000,
-				COALESCE(CASE WHEN $10::numeric > 0 AND $20::numeric IS NOT NULL THEN ROUND(($20::numeric / 100) / ($10::numeric / 10000), 4) ELSE $15::numeric / 10000 END, 0),
+				CASE WHEN $10::numeric > 0 AND $20::numeric IS NOT NULL THEN ROUND(($20::numeric / 100) / ($10::numeric / 10000), 4) ELSE $15::numeric / 10000 END,
 				$16, $17::numeric / 10000, $18::numeric / 100, $19, $20::numeric / 100, $21, $22,
 				$23, $24::numeric / 10000, $25::numeric / 100, NOW())`,
 			l.ID, in.ID, l.Position, l.LineType, l.ParentLineID, l.ProductID, l.ChargeCodeID,

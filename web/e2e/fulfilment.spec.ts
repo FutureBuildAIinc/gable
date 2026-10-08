@@ -18,6 +18,7 @@ import fs from 'fs';
 const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
 fs.mkdirSync(SHOTS_DIR, { recursive: true });
 const RUN = Date.now().toString(36);
+let counter = 0;
 
 async function signIn(page: Page, name: string) {
   await page.goto('/');
@@ -29,7 +30,7 @@ async function signIn(page: Page, name: string) {
 }
 
 async function freshCustomer(request: APIRequestContext) {
-  const res = await request.post('/api/v1/customers', { data: { account_number: `E2E-FUL-${RUN}`, name: `E2E Fulfilment ${RUN}` } });
+  const res = await request.post('/api/v1/customers', { data: { account_number: `E2E-FUL-${RUN}-${++counter}`, name: `E2E Fulfilment ${RUN} ${counter}` } });
   expect(res.status(), await res.text()).toBe(201);
   return (await res.json()) as { id: string; name: string };
 }
@@ -39,7 +40,7 @@ async function stockedProduct(request: APIRequestContext) {
   const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string; uom_primary: string }[] | { data: { id: string; sku: string; uom_primary: string }[] };
   const list = Array.isArray(products) ? products : products.data;
   for (const p of list) {
-    const inv = (await (await request.get(`/api/v1/inventory/product/${p.id}`)).json()) as { quantity: number; allocated: number }[];
+    const inv = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { quantity: number; allocated: number }[];
     if (Array.isArray(inv) && inv.reduce((n, r) => n + (r.quantity - r.allocated), 0) >= 50) return p;
   }
   throw new Error('no stocked product in the demo seed');

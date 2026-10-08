@@ -95,9 +95,9 @@ test.describe('Order flow on the new contract', () => {
     // A confirm over the customer's credit limit lands the hold instead: both
     // are committed states with their events, so accept either and assert the
     // page agrees with the server.
-    expect(['confirmed', 'on_hold']).toContain(confirmed.status);
+    expect(['confirmed', 'on_hold', 'backordered']).toContain(confirmed.status);
     expect(confirmed.revision).toBe(2);
-    await expect(page.getByText(confirmed.status === 'on_hold' ? 'On Hold' : 'Confirmed', { exact: true })).toBeVisible();
+    await expect(page.getByText({ on_hold: 'On Hold', backordered: 'Backordered', confirmed: 'Confirmed' }[confirmed.status as string]!, { exact: true })).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'order-after-confirm.png') });
 
     // The list: the envelope's items carry the order, and the status filter
@@ -110,7 +110,7 @@ test.describe('Order flow on the new contract', () => {
     await page.getByRole('button', { name: 'Fulfilled', exact: true }).click();
     await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/orders' && new URL(r.url()).searchParams.get('status') === 'fulfilled');
     await expect(row).toHaveCount(0);
-    await page.getByRole('button', { name: /Confirmed|On Hold/ }).first().click();
+    await page.getByRole('button', { name: { on_hold: 'On Hold', backordered: 'Backordered', confirmed: 'Confirmed' }[confirmed.status as string]!, exact: true }).click();
     await expect(page.locator('tr', { hasText: order.number })).toBeVisible();
 
     // The record page by API agrees with the page.

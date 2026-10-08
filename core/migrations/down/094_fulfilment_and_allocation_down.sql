@@ -17,6 +17,8 @@ ALTER TABLE invoice_lines DROP CONSTRAINT IF EXISTS invoice_lines_price_source_c
 ALTER TABLE invoice_lines DROP CONSTRAINT IF EXISTS invoice_lines_line_type_check;
 DELETE FROM invoice_lines WHERE line_type IN ('KIT', 'COMPONENT', 'CHARGE', 'TEXT') OR product_id IS NULL;
 ALTER TABLE invoice_lines ALTER COLUMN product_id SET NOT NULL;
+ALTER TABLE invoice_lines ALTER COLUMN price_each SET NOT NULL;
+ALTER TABLE invoice_lines ALTER COLUMN quantity SET NOT NULL;
 ALTER TABLE invoice_lines ALTER COLUMN price_each TYPE NUMERIC(10, 2);
 ALTER TABLE invoice_lines ALTER COLUMN quantity TYPE NUMERIC(10, 4);
 ALTER TABLE invoice_lines DROP COLUMN IF EXISTS cost;

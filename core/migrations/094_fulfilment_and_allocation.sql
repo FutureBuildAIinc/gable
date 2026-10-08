@@ -220,6 +220,10 @@ JOIN ranked_ol ol ON ol.order_id = r.order_id AND ol.product_id = r.product_id A
 WHERE il.id = r.id AND (SELECT first_apply FROM _m094_first_apply);
 
 ALTER TABLE invoice_lines ALTER COLUMN product_id DROP NOT NULL;
+-- a text line carries no quantity or price (the per type CHECKs below hold the
+-- rest of the shape)
+ALTER TABLE invoice_lines ALTER COLUMN quantity DROP NOT NULL;
+ALTER TABLE invoice_lines ALTER COLUMN price_each DROP NOT NULL;
 
 DO $$ BEGIN
     ALTER TABLE invoice_lines ADD CONSTRAINT invoice_lines_line_type_check
