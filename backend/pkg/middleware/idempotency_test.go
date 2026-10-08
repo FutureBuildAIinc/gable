@@ -697,7 +697,7 @@ func TestIdempotency_OversizedBodyRejected(t *testing.T) {
 
 	handler := countingHandler(&calls, http.StatusCreated, `{}`)
 	w := httptest.NewRecorder()
-	MaxRequestSize(10 << 20)(Idempotency(db)(handler)).ServeHTTP(w, r)
+	MaxRequestSize(10<<20)(Idempotency(db)(handler)).ServeHTTP(w, r)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized body: status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
 	}
