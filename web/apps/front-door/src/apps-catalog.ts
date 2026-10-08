@@ -124,11 +124,13 @@ function admits(app: AppInfo, roles: readonly string[]): boolean {
 }
 
 /**
- * The tiles the door shows, in catalog order: the desk tile pinned first
- * (every signed in staff role gets it), then every ENABLED catalog app that
- * has an entry and that the user's roles admit. Enablement is the backend's
- * answer. `roles` is null for a dev session, which carries no roles because
- * the core passes dev callers through every guard: it sees every tile.
+ * The tiles the door shows: the desk tile pinned first (every signed in staff
+ * role gets it), then every ENABLED catalog app that has an entry and that
+ * the user's roles admit, grouped by category in the order the desk's
+ * launcher shows them (the catalog's: category, then name; the sort here is
+ * stable, so the catalog's order holds within a category). Enablement is the
+ * backend's answer. `roles` is null for a dev session, which carries no roles
+ * because the core passes dev callers through every guard: it sees every tile.
  */
 export function tilesFor(apps: AppInfo[], roles: readonly string[] | null): DoorTile[] {
   const tiles = apps
@@ -141,7 +143,8 @@ export function tilesFor(apps: AppInfo[], roles: readonly string[] | null): Door
       summary: a.summary,
       category: a.category,
       path: DESK_ENTRIES[a.key],
-    }));
+    }))
+    .sort((a, b) => (a.category < b.category ? -1 : a.category > b.category ? 1 : 0));
   return [DESK_HOME_TILE, ...tiles];
 }
 

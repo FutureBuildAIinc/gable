@@ -9,7 +9,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { authConfig, authCustody } from '@gable/auth';
 import './front-door.ts';
-import type { GableFrontDoor } from './front-door.ts';
+import { TILE_ICONS, type GableFrontDoor } from './front-door.ts';
+import { DESK_ENTRIES } from './apps-catalog.ts';
 
 async function mount(): Promise<GableFrontDoor> {
   const el = document.createElement('gable-front-door') as GableFrontDoor;
@@ -62,5 +63,19 @@ describe('front door session expiry', () => {
     expect(el.textContent).toContain('The apps catalog did not answer');
     expect([...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Try again')).toBe(true);
     expect(authCustody.session).not.toBeNull();
+  });
+});
+
+describe('front door tile icons', () => {
+  it('every app with an entry has its own icon, and no two apps share one', () => {
+    const keys = ['desk', ...Object.keys(DESK_ENTRIES)];
+    for (const k of keys) expect(TILE_ICONS[k], `an icon for ${k}`).toBeDefined();
+    const icons = keys.map((k) => TILE_ICONS[k]);
+    expect(new Set(icons).size).toBe(icons.length);
+  });
+
+  it('quotes use the document icon, as the desk does', async () => {
+    const { FileText } = await import('lucide');
+    expect(TILE_ICONS.quote).toBe(FileText);
   });
 });

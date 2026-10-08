@@ -60,6 +60,8 @@ check "front door asset loads ($door_asset)" "$([ -n "$door_asset" ] && [ "$(cod
 check "desk asset loads ($desk_asset)" "$([ -n "$desk_asset" ] && [ "$(code "$desk_asset")" = 200 ] && echo ok)"
 check "a missing door asset is 404, not the desk" "$([ "$(code /door/nope.js)" = 404 ] && echo ok)"
 check "a missing desk asset is 404, not index.html" "$([ "$(code /assets/nope.js)" = 404 ] && echo ok)"
+check "/api/v1/apps is 404 JSON when no API upstream is mounted, not the desk" \
+  "$([ "$(code /api/v1/apps)" = 404 ] && ! body /api/v1/apps | grep -qi '<html' && echo ok)"
 check "CSP connect-src is same origin only" \
   "$(curl -sSI "$BASE/" | grep -i '^content-security-policy' | grep -q "connect-src 'self';" && ! curl -sSI "$BASE/" | grep -qi 'localhost' && echo ok)"
 for p in / /home /quotes/7 "$desk_asset" "$door_asset"; do

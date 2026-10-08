@@ -45,9 +45,19 @@ describe('tilesFor', () => {
     expect(tiles.map((t) => t.key)).toEqual(['desk']);
   });
 
-  it('keeps catalog order among the mapped tiles', () => {
-    const tiles = tilesFor([app({ key: 'order' }), app({ key: 'inventory' }), app({ key: 'quote' })], null);
-    expect(tiles.map((t) => t.key)).toEqual(['desk', 'order', 'inventory', 'quote']);
+  it('groups the mapped tiles by category in the desk order, catalog order within a category', () => {
+    const tiles = tilesFor(
+      [
+        app({ key: 'order', category: 'Sales', name: 'Orders' }),
+        app({ key: 'dashboard', category: 'Front of House', name: 'Dashboard' }),
+        app({ key: 'inventory', category: 'Catalog & Inventory', name: 'Inventory' }),
+        app({ key: 'quote', category: 'Sales', name: 'Quotes' }),
+        app({ key: 'invoice', category: 'Finance', name: 'Invoices' }),
+        app({ key: 'reporting', category: 'Front of House', name: 'Reporting' }),
+      ],
+      null,
+    );
+    expect(tiles.map((t) => t.key)).toEqual(['desk', 'inventory', 'invoice', 'dashboard', 'reporting', 'order', 'quote']);
   });
 
   it('every entry path is a real desk route shape (leading slash, no query)', () => {

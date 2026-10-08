@@ -29,9 +29,9 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
-  Building2, ClipboardList, CreditCard, Hammer, ScrollText, LayoutDashboard,
+  Building2, ClipboardList, CreditCard, FileText, Hammer, ScrollText, LayoutDashboard,
   LayoutGrid, Package, Receipt, BookOpen, BarChart3, Settings, ShoppingBag,
-  Store, Truck, Users, Globe, Monitor,
+  Store, Tags, Truck, Users, Globe, Monitor,
 } from 'lucide';
 import { icon, cn } from '@gable/design-system';
 import { authCustody, authConfig, InvalidTokenError } from '@gable/auth';
@@ -44,13 +44,13 @@ type DoorState =
   | { kind: 'error'; message: string };
 
 /** The door's icon per catalog key (the desk launcher's own set). */
-const TILE_ICONS: Record<string, Parameters<typeof icon>[0]> = {
+export const TILE_ICONS: Record<string, Parameters<typeof icon>[0]> = {
   desk: Monitor,
   inventory: Package,
   location: Building2,
-  quote: BookOpen,
+  quote: FileText,
   order: ClipboardList,
-  pricing: LayoutGrid,
+  pricing: Tags,
   invoice: Receipt,
   gl: BookOpen,
   purchase_order: ShoppingBag,
@@ -65,6 +65,17 @@ const TILE_ICONS: Record<string, Parameters<typeof icon>[0]> = {
   governance: ScrollText,
   techadmin: Settings,
 };
+
+/** Consecutive tiles of one category become one section (tilesFor already groups them). */
+function groupByCategory(tiles: DoorTile[]): { category: string; tiles: DoorTile[] }[] {
+  const groups: { category: string; tiles: DoorTile[] }[] = [];
+  for (const tile of tiles) {
+    const last = groups[groups.length - 1];
+    if (last !== undefined && last.category === tile.category) last.tiles.push(tile);
+    else groups.push({ category: tile.category, tiles: [tile] });
+  }
+  return groups;
+}
 
 function initialsFor(name: string): string {
   const parts = name.trim().split(/[\s@.]+/).filter(Boolean);
@@ -148,7 +159,7 @@ export class GableFrontDoor extends LitElement {
   }
 
   private get _headerWord(): string {
-    if (this._state.kind === 'signed-out') return 'Sign in';
+    if (this._state.kind === 'signed-out') return '';
     if (this._state.kind === 'loading') return 'Opening the door…';
     if (this._state.kind === 'error') return 'The catalog did not answer';
     return 'Pick an app';
@@ -161,7 +172,7 @@ export class GableFrontDoor extends LitElement {
         <main class="flex-1 w-full max-w-[1600px] mx-auto px-6 md:px-8 py-8">
           ${this._renderBody()}
         </main>
-        <footer class="px-6 md:px-8 py-4 text-center text-xs text-zinc-600 border-t border-white/5">
+        <footer class="px-6 md:px-8 py-4 text-center text-xs text-muted-foreground border-t border-white/5">
           GableLBM · the front door
         </footer>
       </div>
@@ -171,15 +182,15 @@ export class GableFrontDoor extends LitElement {
   private _renderHeader() {
     const signedIn = this._state.kind !== 'signed-out';
     return html`
-      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 flex items-center gap-4 sticky top-0 z-40">
-        <div class="flex items-center gap-3 shrink-0">
+      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid grid-cols-[1fr_auto_1fr] items-center gap-4 sticky top-0 z-40">
+        <div class="flex items-center gap-3 justify-self-start">
           <gable-brand-logo variant="mark" size="md" class-name="text-white drop-shadow-glow"></gable-brand-logo>
           <span class="hidden md:block"><gable-brand-logo variant="text" size="md"></gable-brand-logo></span>
         </div>
-        <div class="flex-1 text-center text-sm font-medium tracking-wide text-zinc-400 truncate">
+        <div class="text-center text-sm font-medium tracking-wide text-zinc-400 truncate">
           ${this._headerWord}
         </div>
-        <div class="flex items-center gap-3 shrink-0">
+        <div class="flex items-center gap-3 justify-self-end">
           ${signedIn ? html`
             ${this._userName && this._userName !== '' ? html`
               <div class="hidden sm:flex items-center gap-2">
@@ -189,9 +200,9 @@ export class GableFrontDoor extends LitElement {
                 <div class="hidden lg:block leading-tight">
                   <div class="text-sm font-medium text-white">${this._userName}</div>
                   ${this._roles.length > 0
-                    ? html`<div class="text-[10px] uppercase tracking-wider text-zinc-500 font-mono">${this._roles.join(' · ')}</div>`
+                    ? html`<div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${this._roles.join(' · ')}</div>`
                     : this._state.kind === 'ready' || this._state.kind === 'loading' || this._state.kind === 'error'
-                      ? html`<div class="text-[10px] uppercase tracking-wider text-zinc-500 font-mono">local development</div>`
+                      ? html`<div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">local development</div>`
                       : nothing}
                 </div>
               </div>
@@ -217,7 +228,7 @@ export class GableFrontDoor extends LitElement {
           <div class="flex items-center justify-center py-32">
             <div class="flex flex-col items-center gap-3">
               <div class="h-8 w-8 animate-spin rounded-full border-2 border-gable-green border-t-transparent"></div>
-              <span class="text-sm text-zinc-500 font-medium tracking-wide">Loading apps…</span>
+              <span class="text-sm text-muted-foreground font-medium tracking-wide">Loading apps…</span>
             </div>
           </div>
         `;
@@ -255,7 +266,7 @@ export class GableFrontDoor extends LitElement {
           </div>
           ${authConfig.devMode ? html`
             <label class="block space-y-1.5">
-              <span class="text-xs uppercase tracking-wider text-zinc-500">Display name</span>
+              <span class="text-xs uppercase tracking-wider text-muted-foreground">Display name</span>
               <input
                 .value=${this._devName}
                 @input=${(e: Event) => { this._devName = (e.target as HTMLInputElement).value; }}
@@ -266,7 +277,7 @@ export class GableFrontDoor extends LitElement {
             </label>
           ` : html`
             <label class="block space-y-1.5">
-              <span class="text-xs uppercase tracking-wider text-zinc-500">Bearer token</span>
+              <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
               <textarea
                 .value=${this._token}
                 @input=${(e: Event) => { this._token = (e.target as HTMLTextAreaElement).value; }}
@@ -299,8 +310,15 @@ export class GableFrontDoor extends LitElement {
         <h1 class="text-2xl font-semibold text-white">Good to see you${this._userName ? html`, <span class="text-gable-green">${this._userName}</span>` : nothing}</h1>
         <p class="text-sm text-zinc-400">The enabled apps your roles admit. A tile opens the app inside the desk.</p>
       </div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
-        ${tiles.map((tile) => this._renderTile(tile))}
+      <div class="space-y-8">
+        ${groupByCategory(tiles).map((group) => html`
+          <section aria-label=${group.category}>
+            <h2 class="mb-3 text-xs uppercase tracking-wider text-muted-foreground font-mono">${group.category}</h2>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
+              ${group.tiles.map((tile) => this._renderTile(tile))}
+            </div>
+          </section>
+        `)}
       </div>
     `;
   }
@@ -317,7 +335,7 @@ export class GableFrontDoor extends LitElement {
           ${icon(iconData, 28)}
         </div>
         <div class="text-sm font-medium text-white text-center leading-tight">${tile.name}</div>
-        <div class="${cn('text-[10px] uppercase tracking-wider text-zinc-500 text-center')}">${tile.category}</div>
+        <div class="${cn('text-[10px] uppercase tracking-wider text-muted-foreground text-center')}">${tile.category}</div>
       </button>
     `;
   }
