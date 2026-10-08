@@ -103,6 +103,13 @@ export class GableFrontDoor extends LitElement {
       const apps = await loadAppsCatalog(import.meta.env.VITE_API_URL || '');
       this._state = { kind: 'ready', apps };
     } catch (err) {
+      // A 401 makes the fetch client drop custody's session; with none left a
+      // retry could only 401 again, so go back to the sign in card.
+      if (authCustody.session === null) {
+        this._signOut();
+        this._signInError = 'Your session expired. Sign in again.';
+        return;
+      }
       this._state = { kind: 'error', message: err instanceof Error ? err.message : String(err) };
     }
   }
@@ -129,6 +136,7 @@ export class GableFrontDoor extends LitElement {
 
   private _signOut() {
     authCustody.signOut();
+    this._signInError = null;
     this._userName = null;
     this._roles = [];
     this._state = { kind: 'signed-out' };
@@ -242,7 +250,7 @@ export class GableFrontDoor extends LitElement {
             <p class="text-sm text-zinc-400">
               ${authConfig.devMode
                 ? 'This build runs against a core in dev mode: no credential is needed, pick a name for the session.'
-                : 'Paste the bearer token your identity provider issued. It is held in memory only, never in localStorage.'}
+                : 'Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.'}
             </p>
           </div>
           ${authConfig.devMode ? html`

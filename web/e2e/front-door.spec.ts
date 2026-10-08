@@ -132,6 +132,17 @@ test.describe('Front door', () => {
     await expect(page.getByRole('button', { name: 'Open Quotes' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Tech Admin' })).toBeVisible();
   });
+
+  test('a 401 on the catalog returns to the sign in card with a session expired line', async ({ page }) => {
+    await page.goto('/');
+    await page.getByLabel('Display name').fill('Playwright Expiry');
+    await page.route('**/api/v1/apps', (route) => route.fulfill({ status: 401, json: { error: 'unauthorized' } }));
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Sign in to Gable' })).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText('Your session expired');
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'door-session-expired.png') });
+  });
 });
 
 test.describe('Desk', () => {
