@@ -2324,8 +2324,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List inventory rows of a product
-         * @description A product_id that is not a UUID reaches the service and answers 500, not 400.
+         * List inventory levels
+         * @description The keyset envelope of ADR 0001 section 1, ordered created_at DESC, id DESC (ADR 0006 7.2). Every quantity is a scale 4 decimal string in the product's stocking unit, with available (quantity - allocated) and uom beside it. The list is held to the branch wall: a context branch (X-Branch-Id) lists its own rows; with no context branch a bound non-admin user lists the branches granted to the user, none granted listing none; an administrator without a header, an unbound key, the single-branch switch and callers with no branch context at all list every branch's. A legacy row with no location_id has no branch on its joined location and stays visible to an administrator without a header and to callers with no branch context only (C4-1 migrates legacy rows onto locations). product_id and location_id are optional filters; a request without product_id is the whole levels list, where the base refused it with 400.
          */
         get: operations["inventoryList"];
         put?: never;
@@ -7985,20 +7985,45 @@ export interface components {
             /** @description Never null. */
             modules: string[];
         };
-        /** @description inventory.Inventory. location_id is omitted when unset. */
-        Inventory: {
+        /** @description One inventory row on the wire (ADR 0006 7.2): the quantities as scale 4 decimal strings in the product's stocking unit, available as quantity - allocated, and the location's name beside its id. The product summary is present only under include=product. */
+        InventoryLevel: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             product_id: string;
-            /** Format: uuid */
-            location_id?: string;
-            /** @description Deprecated text field. */
-            location: string;
-            quantity: number;
-            allocated: number;
+            /**
+             * Format: uuid
+             * @description The location the stock sits at; null on a legacy row that never had one.
+             */
+            location_id: string | null;
+            /** @description The location's path, or the row's deprecated free text when it has none. */
+            location_name: string;
+            /** @description On hand, in the product's stocking unit. */
+            quantity: string;
+            /** @description Reserved, in the product's stocking unit. */
+            allocated: string;
+            /** @description quantity - allocated, in the product's stocking unit. */
+            available: string;
+            uom: components["schemas"]["UOM"];
+            product?: components["schemas"]["InventoryProductSummary"];
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description The product an inventory row stocks, embedded under include=product (the expansion ADR 0001 section 1 names): the identity fields a levels screen shows beside the numbers, with the stocking unit the quantities are counted in. */
+        InventoryProductSummary: {
+            /** Format: uuid */
+            id: string;
+            sku: string;
+            description: string;
+            stock_uom: components["schemas"]["UOM"];
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        InventoryLevelPage: {
+            items: components["schemas"]["InventoryLevel"][];
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         StockAdjustmentRequest: {
             /** Format: uuid */
@@ -16752,9 +16777,17 @@ export interface operations {
     };
     inventoryList: {
         parameters: {
-            query: {
-                /** @description Required; a missing value answers 400. */
-                product_id: string;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+                /** @description Only the named product's rows. A value that is not a UUID is a 400 naming it. */
+                product_id?: string;
+                /** @description Only the rows at the named location. A value that is not a UUID is a 400 naming it. */
+                location_id?: string;
             };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
@@ -16765,19 +16798,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The product's inventory rows, one per location. The body is null when the product has none. */
+            /** @description The page of inventory levels. items is never null; total is present only under include=total; each row's product is present only under include=product. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Inventory"][] | null;
+                    "application/json": components["schemas"]["InventoryLevelPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     inventoryAdjust: {

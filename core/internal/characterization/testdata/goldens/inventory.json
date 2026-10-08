@@ -8,7 +8,11 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -32,22 +36,42 @@
     }
   },
   {
-    "name": "inventory.list_missing_param",
+    "name": "inventory.list_page",
     "request": {
       "method": "GET",
-      "path": "/api/v1/inventory"
+      "path": "/api/v1/inventory?limit=2&include=total"
     },
     "response": {
-      "status": 400,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-3>"
-        }
+        "items": [
+          {
+            "allocated": "0",
+            "available": "25",
+            "id": "<id-3>",
+            "location_id": null,
+            "location_name": "",
+            "product_id": "<id-2>",
+            "quantity": "25",
+            "uom": "PCS",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "allocated": "0",
+            "available": "67",
+            "id": "<id-4>",
+            "location_id": "<id-5>",
+            "location_name": "LK",
+            "product_id": "<id-6>",
+            "quantity": "67",
+            "uom": "LF",
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 2,
+        "next_cursor": "<cursor>",
+        "total": 205
       }
     }
   }
