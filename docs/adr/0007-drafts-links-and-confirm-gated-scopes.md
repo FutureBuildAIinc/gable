@@ -7,8 +7,10 @@
 
 Proposed for the Gable v1 refactor (item C5-0, the design stop before
 cycle 5's agent surface); accepted when the lead merges it after its review.
-Item C5-2 builds from this record. Where C5-2 has to differ from it, this
-record is changed first, in its own pull request.
+Item C5-2 builds from this record, as C5-2a (the server) and C5-2b (the desk
+and web), section 11. Where either has to differ from it, this record is
+changed first, in its own pull request. This pull request also amends ADR
+0002's known limits to point at where each limit is now taken up (5.5).
 
 It stands on ADR 0001 (the wire contract: revision and `If-Match`, the
 transitions route, document numbers, the error table), ADR 0002 (scoped
@@ -198,12 +200,33 @@ Payload rules, enforced at create and at every `PUT`:
   draft is by nature unfinished;
 - the payload never carries `revision`: the draft's own revision is the
   precondition, and a payload `revision` is a 400 naming `payload.revision`;
-- the branch is fixed at create (the payload's `branch_id` when present,
-  otherwise the request's branch context through
-  `ResolveBranchForWrite`); a later payload naming another branch is a 400
-  naming `payload.branch_id`;
-- the size bound is the server's request bound, as for the entity's own
-  create (a quote payload may carry an AI parse's original file).
+- the branch is fixed at create, by the branch rule below; a later payload
+  naming another branch is a 400 naming `payload.branch_id`;
+- a payload is at most 256 KiB of JSON (a 413 `payload_too_large` above
+  it). A draft never carries a file: `payload.original_file` (and with it
+  `original_filename` and `original_content_type`) is a 400 naming the
+  field. Every autosave re-sends the payload and every feed subscriber
+  re-reads it, and a quote's original file may be several MiB decoded,
+  past the idempotency store's 1 MiB cap on a stored response. The AI
+  parse's file attaches to the quote after promotion (section 10).
+
+The branch rule, for drafts and for the module's own create alike. When
+the request's branch context names a branch (always, for a bound key,
+section 5.5), a payload `branch_id` must equal it, else 403 `forbidden`
+naming `payload.branch_id`. With no context branch (an administrator
+across branches, an unbound key) a payload `branch_id` must be a branch the
+caller may target (a user's `user_locations` grant, or any branch for an
+unbound key), else 403 naming it. With no payload `branch_id` the draft
+takes the context branch, or `ResolveBranchForWrite`'s default. Today the
+quote create lets the payload's branch override the context with no grant
+check (`internal/quote/service.go`); C5-2a closes that on the quote create
+path as part of this rule, a listed contract change.
+
+Drafts are shared, not owned. Any person holding the kind's role on the
+draft's branch, and any key holding the kind's `propose` or `commit` scope
+that reaches the branch, may read, edit, discard or promote any draft
+there, whoever created it. The audit trail (section 6) records who did
+what; discard is reversible by reopen.
 
 Who may read and write is section 5.
 
@@ -217,7 +240,9 @@ built on. At create the server reads the subject's current revision: the
 client may assert it with `subject_revision` (a mismatch is 409
 `stale_revision` naming the subject in a `subject_stale` blocker), or omit
 it and take the current one. A `PUT` may move `subject_revision` forward
-(a rebase after the entity moved), never back past what the server has. A
+(a rebase after the entity moved), bounded: the stored `subject_revision`
+must be at most the new value, and the new value at most the subject's
+current revision, else 400 naming `subject_revision`. A
 subject the caller cannot see is a 404, the same as reading it.
 
 #### 2.5 Revision concurrency, and how an agent and a person co-edit
@@ -255,14 +280,15 @@ into `draft_events` in the same transaction, as its last draft statement:
 | Column | Rule |
 |---|---|
 | `position` | `BIGINT NOT NULL PRIMARY KEY`, assigned by a `BEFORE INSERT` trigger that takes a transaction scoped advisory lock and then draws from `draft_events_position_seq`, exactly the ADR 0003 section 2 mechanism, with its own lock key distinct from the outbox's |
-| `draft_id`, `module`, `branch_id` | the draft's |
+| `draft_id`, `module`, `branch_id`, `subject_id` | the draft's (`subject_id` NULL on a create draft) |
 | `op` | `created`, `updated`, `discarded`, `reopened`, `promoted` |
 | `revision`, `status` | after the write |
 | `actor_kind`, `actor_id`, `acting_as`, `tool` | who wrote it (section 6) |
 | `promoted_entity_id`, `promoted_number` | on `promoted` only |
 | `at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` |
 
-Index `(module, position)`. The commit ordered position gives the feed the
+Indexes `(module, position)` and `(subject_id, position) WHERE subject_id
+IS NOT NULL`. The commit ordered position gives the feed the
 same guarantee ADR 0003 proves for the events feed: a reader paging with
 `position > cursor` can never skip a row that commits later.
 
@@ -282,7 +308,7 @@ and streams:
 ```
 id: <cursor>
 event: draft
-data: {"draft_id":"...","module":"quotes","op":"updated","revision":5,"status":"open","branch_id":"...","by":{"kind":"user","id":"...","acting_as":null,"tool":null},"promoted":null,"at":"..."}
+data: {"draft_id":"...","module":"quotes","op":"updated","revision":5,"status":"open","branch_id":"...","subject_id":null,"by":{"kind":"user","id":"...","acting_as":null,"tool":null},"promoted":null,"at":"..."}
 
 ```
 
@@ -299,9 +325,11 @@ data: {"draft_id":"...","module":"quotes","op":"updated","revision":5,"status":"
 - **The cursor:** opaque, minted by `httpx` with ordering scope
   `drafts.feed_position`, carried as each event's SSE `id`. The client
   resumes with the `Last-Event-ID` header (what an SSE client sends on
-  reconnect) or the `cursor` query parameter; both present and different is
-  a 400 naming `cursor`; a malformed one is a 400 naming whichever carried
-  it. No cursor means "from now".
+  reconnect) or the `cursor` query parameter. When both are present,
+  `Last-Event-ID` wins: a reconnecting client keeps its original `?cursor=`
+  in the URL and adds the newer `Last-Event-ID`, so refusing the pair would
+  fail every reconnect. A malformed value is a 400 naming whichever was
+  used. No cursor means "from now".
 - **Opening without a gap:** the first thing the server writes is `event:
   ready` with `id:` the head cursor. A client opens the stream first, then
   reads the draft (or the list): any write after the stream opened arrives
@@ -313,8 +341,14 @@ data: {"draft_id":"...","module":"quotes","op":"updated","revision":5,"status":"
   sending an event, the next heartbeat is `event: cursor` with the new
   `id:` and no data, so a reconnecting client does not rescan them.
 - **Heartbeat:** a comment line `: keepalive` (or the `cursor` event above)
-  at an interval the configuration sets below the proxy's read timeout
-  (`DRAFT_FEED_HEARTBEAT`), so idle streams survive intermediaries.
+  every `DRAFT_FEED_HEARTBEAT` (section 3.5), so idle streams survive
+  intermediaries. The heartbeat must sit below the idle timeout of every
+  hop in front of core: in production `/api` reaches core through the
+  hosting platform's ingress, not the bundled nginx (`web/nginx.conf` mounts
+  no API upstream there), so the operator checks that ingress's idle
+  timeout against the setting; locally, the Playwright stack's
+  `web/nginx-local-api.conf` gains `proxy_buffering off` and a
+  `proxy_read_timeout` above the heartbeat for `/api/` (C5-2b).
 - **Retention:** a worker purge deletes `draft_events` rows older than
   `DRAFT_EVENTS_RETENTION` in batches (the ADR 0003 section 6 shape, without
   subscriber cursors to respect: this feed has no in process drain) and
@@ -340,7 +374,10 @@ data: {"draft_id":"...","module":"quotes","op":"updated","revision":5,"status":"
 - **Lifetime:** a stream ends at the JWT's `exp`, or at
   `DRAFT_FEED_MAX_LIFETIME`, whichever is first, with `event: reauth` before
   the close; the client reconnects with a fresh token and its last cursor.
-  This bounds how long a revoked key or an expired session keeps reading.
+- **Revocation:** a keyed stream rechecks its key at every heartbeat by id
+  (one row read of `api_keys.revoked_at`, no hash work); a revoked key's
+  stream gets `event: reauth` and closes, so it reads for at most one
+  heartbeat after revocation.
 
 #### 3.4 One wake signal per process, one reader per stream, and back pressure
 
@@ -365,13 +402,30 @@ data: {"draft_id":"...","module":"quotes","op":"updated","revision":5,"status":"
   `unavailable`), both answered before the stream opens, in the error
   envelope.
 - The response carries `Cache-Control: no-store` and `X-Accel-Buffering: no`
-  so the nginx in front does not buffer it. The serve role's graceful
+  so no nginx or ingress in front buffers it. The serve role's graceful
   shutdown cancels the hub's context (through `RegisterOnShutdown`) so open
   streams end and `Shutdown` is not held by connections that are never idle.
 - LISTEN and NOTIFY were considered for the wake signal and deferred: they
   need a dedicated connection outside the pool per process and do not
   survive a transaction mode pooler. The hub hides the wake source, so
   adding NOTIFY later changes the hub only.
+
+#### 3.5 Settings and their defaults
+
+Each is read in `internal/config` with this default; zero or negative is
+refused at boot, except the retention, where zero or negative turns the
+purge off (the outbox's rule).
+
+| Setting | Default | Why this value |
+|---|---|---|
+| `DRAFT_FEED_HEARTBEAT` | 15s | below the common 30s to 60s idle timeouts of proxies and ingresses |
+| `DRAFT_FEED_POLL` | 1s | cross replica latency a person co-editing does not notice; one cheap query per process |
+| `DRAFT_FEED_BATCH` | 100 rows | bounds memory per stream at one small page |
+| `DRAFT_FEED_WRITE_TIMEOUT` | 10s | a healthy client drains one small event in far less; a stalled socket is closed within it, and inside one heartbeat interval |
+| `DRAFT_FEED_MAX_LIFETIME` | 15m | bounds an expired or lost session's stream; reconnects are cheap and lose nothing |
+| `DRAFT_EVENTS_RETENTION` | 7d | a screen reconnecting after a long sleep still resumes; drafts themselves are never purged |
+| `DRAFT_FEED_MAX_STREAMS_PER_PRINCIPAL` | 8 | a person with a few tabs and screens; stops one runaway client |
+| `DRAFT_FEED_MAX_STREAMS` | 500 | far above a dealer's staff and agents per replica; each idle stream holds a socket and a goroutine, no pool connection |
 
 ### 4. Promotion
 
@@ -397,8 +451,11 @@ saved after the person looked; that confirm is 409 `stale_revision`.
 4. Parse the payload with the kind's full parser (the module's create or
    update parsing, the same code the entity route runs). A failure is 400
    `validation_failed` with every field, each path prefixed `payload.`.
-5. Call the kind's promoter inside the transaction (4.3). It runs the
-   module's own create or update: references checked, document priced,
+5. Call the kind's promoter inside the transaction (4.3), with the
+   draft's `branch_id` as the branch context, whatever the committer's
+   `X-Branch-Id` names: the draft's branch was checked against its writers
+   at every save (2.3), and step 1 checked the committer can see it. It
+   runs the module's own create or update: references checked, document priced,
    number minted, rows written, the module's lock order kept. It writes no
    event; it returns the entity's id, number and revision and the event(s)
    the module would have written.
@@ -416,7 +473,11 @@ the draft events lock, and after each insert only the next insert runs, so
 ADR 0003's last statement rule holds for both feeds. A draft `PUT` takes
 only the draft row and the draft events lock; an entity route takes only its
 module's rows and the outbox lock; neither can close a cycle with a
-promotion.
+promotion. One cost is accepted: a promotion holds the draft events lock
+while it waits for the outbox lock, so under outbox contention (a money
+writer mid commit) autosaves of every draft queue briefly behind that
+promotion. Promotions are rare next to saves and each outbox hold is a few
+statements long.
 
 The answer: a create draft is 201 with `Location` the entity's URL
 (`/api/v1/quotes/{id}`); an edit draft is 200. The body is the draft
@@ -480,7 +541,12 @@ the HTTP status, the error code and the draft revision, so the trail shows
 who tried to commit and why it did not happen. The response carries the
 module's own error: a 400 with `payload.`-prefixed fields, or the module's
 409 blockers unchanged (`quote_not_draft` for an edit draft whose quote has
-been sent, `subject_stale` when the subject moved past `subject_revision`).
+been sent). One is translated: when the module refuses an edit draft's
+precondition with `stale_revision` (the subject moved past
+`subject_revision`), the drafts layer keeps the code and adds the blocker
+`subject_stale` naming the subject, so a client tells a stale subject (rebase
+the draft, 2.4) from a stale draft (re-read it, 2.5), which carries no
+blocker.
 
 ### 5. Confirm gated scopes
 
@@ -496,30 +562,38 @@ the whole policy, and a grant reads back as written.
 |---|---|---|
 | entity read | `GET`, `HEAD` under `/api/v1/m/...` | `m:read` |
 | entity write | any other method under `/api/v1/m/...` | `m:write` |
-| draft read | `GET` under `/api/v1/drafts/m/...`, the feed included | `m:read`, `m:propose`, `m:commit` |
+| draft read | `GET` under `/api/v1/drafts/m/...`, the feed included | `m:propose`, `m:commit` |
 | draft write | `POST /api/v1/drafts/m`, `PUT .../{id}`, `POST .../{id}/transitions` | `m:propose`, `m:commit` |
 | promotion | `POST /api/v1/drafts/m/{id}/promote` | `m:commit` |
 | link | `GET /api/v1/links/m/{id}` | `m:read` |
-| draft link | `GET /api/v1/links/drafts/m/{id}` | `m:read`, `m:propose`, `m:commit` |
+| draft link | `GET /api/v1/links/drafts/m/{id}` | `m:propose`, `m:commit` |
 
 So a `quotes:propose` key creates, edits, discards and reads quote drafts
 and nothing else: it is refused promotion (403, the refused scope
 `quotes:commit`), every quote entity write (403, `quotes:write`), and even
-quote entity reads unless it also holds `quotes:read`. `quotes:commit`
+quote entity reads unless it also holds `quotes:read`. `m:read` admits no
+draft route either: proposals are unfinished work, and an existing read key
+must not start reading them, their payloads and their feed because this
+record landed. Every existing key's reach is therefore unchanged. `quotes:commit`
 includes the draft writes because a committer that may cause the entity
 write may also correct the draft first; a deployment that wants a strict
 two party rule grants the agent `propose` and the committing service
 `commit` and reads both actors on the promotion's audit row. `m:write`
-admits no draft route: an existing write key's reach is unchanged, and a key
-meant to work through drafts is granted for that explicitly.
+admits no draft route either, and a key meant to work through drafts is
+granted for that explicitly.
 
 #### 5.2 Mapping a path to its scope
 
 ADR 0002 derives the module from the first segment. Two segments become
 delegating: `drafts` and `links`. Under them the module is the next segment
-(`/api/v1/drafts/quotes/...` is module `quotes`, class by method and the
-last literal segment; `/api/v1/links/drafts/quotes/...` is a draft link of
-`quotes`). `ModuleForPath` is replaced by `ScopeTarget(method, path)
+(`/api/v1/drafts/quotes/...` is module `quotes`;
+`/api/v1/links/drafts/quotes/...` is a draft link of `quotes`). The class is
+decided by matching the whole method and path against the seven draft
+shapes of section 2.3 and the two link shapes, never by the method or the
+last segment alone. It fails closed: any route under `/api/v1/drafts/m/` or
+`/api/v1/links/` whose method and shape is not one of those is refused for a
+key (403, `key.path_refused`), so a later draft route cannot quietly fall
+into the draft write class. `ModuleForPath` is replaced by `ScopeTarget(method, path)
 (module, class, ok)` and `RequiredScope` by `AdmittedScopes(module, class)`;
 the refusal audit row records the first admitted scope as the refused one.
 `drafts` and `links` are not modules: they never appear in the vocabulary
@@ -527,7 +601,9 @@ and cannot be granted.
 
 The census test extends in both directions: every route under
 `/api/v1/drafts/` and `/api/v1/links/` must resolve through `ScopeTarget` to
-a vocabulary module; every draft route's module must be a registered kind;
+a vocabulary module; every registered draft route must resolve to the
+class this record gives its shape (the test asserts the class, not only the
+module); every draft route's module must be a registered kind;
 every registered kind must have its seven routes; and every module allowed
 `propose` and `commit` must be a registered kind.
 
@@ -538,7 +614,13 @@ every registered kind must have its seven routes; and every module allowed
 module with no draft kind: 400 `validation_failed` naming `scopes[i]`. A key
 could already be minted with a typo that silently granted nothing; with four
 verbs the typo space is wider, and the mint is where the operator can still
-fix it. No stored key changes: the table holds none outside the grammar.
+fix it. No stored key changes. That the table holds no key outside the
+grammar is true of the repository's seed but unverified on any deployed
+database, so the migration of section 9 reports (as a `NOTICE`, and the
+`migrate` command logs it) every key whose scopes fall outside the grammar,
+by id and prefix, without changing it; such a key keeps exactly the reach
+it had, since the scope check matches exact strings, and the operator
+revokes and re-mints it.
 
 #### 5.4 People, and agents acting with a person's session
 
@@ -548,14 +630,21 @@ branch middleware, exactly as the module's entity routes. A person with the
 role proposes, edits and promotes.
 
 An agent that acts on a person's behalf with the person's JWT and the
-R1-14 marker (`X-Acting-As: agent`) is held to propose authority on every
-confirm gated module, server side: on such a request the confirm gate
+R1-14 marker is held to propose authority on every confirm gated module,
+server side. The gate fires when `actor.FromContext` resolves kind `agent`
+on a session request, which is any non-empty `X-Acting-As` value (the actor
+seam records any marker as an agent, so the gate must not key on the value
+`agent` alone, or `X-Acting-As: x` would be recorded as an agent and escape
+it). Keyed requests are governed by scopes alone, with or without a marker:
+the marker is recorded and changes nothing. The gate is mounted after auth
+(so it sees the claims and the key) and before the idempotency layer (so a
+refused request never claims a key). On a request it fires on, the gate
 refuses the promotion route and every entity write route of a gated module
 with 403 `forbidden`, message "an agent proposes through drafts; a person
 confirms", and writes the audit row `agent.commit_refused` with the method,
 the bounded path and the tool. Reads and draft writes pass. The gate sits
-in a small package of its own (`pkg/confirmgate`, mounted inside auth so it
-sees both the claims and the marker); `pkg/actor` keeps granting nothing.
+in a small package of its own (`pkg/confirmgate`); `pkg/actor` keeps
+granting nothing.
 
 The honest limit: the marker is self asserted, so an agent holding a
 person's token that leaves the marker off is, to the server, that person.
@@ -577,7 +666,11 @@ null branch is today's behaviour. A bound key:
   lists, reads, drafts, the feed and links see that branch only, and writes
   resolve to it;
 - naming another branch in `X-Branch-Id` is 403 `forbidden`, audited as
-  `key.branch_refused`.
+  `key.branch_refused`;
+- naming another branch in a payload `branch_id` is 403 `forbidden` naming
+  `payload.branch_id`, by the branch rule of section 2.3, on draft routes
+  and on the module's own create alike (`POST /api/v1/quotes` today lets a
+  payload branch override the context; C5-2a closes it).
 
 One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A
@@ -586,7 +679,25 @@ dealer that needs a key for two branches mints two.
 ADR 0002's second known limit (finer `admin` and `users` scopes) is not
 taken up here. It is not a confirm gate question: no admin act is a draft.
 It belongs with the tech admin module's conversion in C5-1, on its own
-record.
+record, and this pull request amends ADR 0002's known limits row to say so
+(the row named R5-2 for both limits). C5-1's tech admin conversion and
+C5-2a's mint changes both edit `internal/techadmin`; the lead sequences
+them.
+
+#### 5.6 The integration seam
+
+The integration seam (`/api/integration/`) writes quotes and converts them
+with a shared key and is outside the confirm gate on the base: AI load
+management authenticates with the one shared `X-Integration-Key` on a path
+the machine key core skips, creates quotes through `POST
+/api/integration/quotes` and turns them into orders through `POST
+/api/integration/quotes/{id}/accept-and-convert`. No `propose` or `commit`
+scope and no marker gate applies there. C5-1 moves AI load management to
+scoped keys holding `quotes:write` and `orders:write`, so its goldens hold:
+that makes it a direct writer by an explicit operator grant, recorded as a
+known limit. Moving its quote creation to `quotes:propose` drafts is a later
+item. Every statement in this record that the gate is enforced "for keys"
+means keys on `/api/v1`.
 
 ### 6. Agent identity, in all of it
 
@@ -625,6 +736,9 @@ own actor. "Who proposed and who committed" is therefore one audit row.
 
 ### 7. Document numbers in record URLs
 
+- An entity gets number URLs only when its `number` column is `UNIQUE NOT
+  NULL` (ADR 0001 section 8's backfill puts the constraint in place); an
+  entity whose number is not yet unique keeps UUID URLs until it is.
 - Every `GET` route whose path has `{id}` for a numbered entity accepts the
   document number in that slot as well as the UUID: `GET
   /api/v1/quotes/Q-000123` answers exactly what `GET /api/v1/quotes/<uuid>`
@@ -638,8 +752,12 @@ own actor. "Who proposed and who committed" is therefore one audit row.
 - The canonical record URL of a numbered entity uses the number:
   `/quotes/Q-000123` in the desk. The desk route `/quotes/:id` accepts
   either; when it was opened by UUID it replaces the address with the
-  number form (`history.replaceState`) once the document loads. Entities
-  with no number (customers, products) keep the UUID.
+  number form (`history.replaceState`) once the document loads. Every
+  write from a page opened by number uses the UUID it loaded, never the
+  path segment. In `routes.ts`, `/quotes/drafts` and `/quotes/drafts/:id`
+  are registered before `/quotes/:id` (the table is order sensitive), as
+  `/quotes/analytics` already is. Entities with no number (customers,
+  products) keep the UUID.
 - C5-2 does this for quotes, and for orders and invoices if cycle 2 has not
   already (their prefixes are ADR 0005's `SO` and `IN`); each later
   numbered entity does it in its own conversion, a step added to the
@@ -661,10 +779,14 @@ number (section 7). The answer:
     "desk": "https://gable.example.com/quotes/Q-000123",
     "front_door": "https://gable.example.com/?open=quotes/Q-000123",
     "portal": null,
-    "app": "gable://quotes/Q-000123"
+    "app": "gable://quotes/Q-000123",
+    "agent": null
   }
 }
 ```
+
+The exit test's "a link resolves to both frontends" means the desk and the
+front door, the two frontends `manifest.yaml` declares.
 
 - **Which entities in C5-2:** quotes, orders, invoices, customers
   (`/accounts/{id}` in the desk), products (`/inventory/{id}`), and quote
@@ -683,11 +805,23 @@ number (section 7). The answer:
   record. In v1 the door opens it in the desk (the only app). After cycle
   6's split the door maps the record path to the role micro app that serves
   it for this person, and the link does not change. The door validates
-  `open` with the same plain segment rule the Tauri shell applies (one
-  shared rule, tested in both), so the parameter can never steer the
-  browser off the origin.
+  `open` with the same plain segment rule the Tauri shell applies, so the
+  parameter can never steer the browser off the origin. The rule lives in
+  two languages (Rust in the shell, TypeScript in the door), so it is held
+  together by one shared file of test vectors (`core/api/link-paths.json`:
+  paths each implementation must accept and paths each must refuse, from
+  `Q-000123` to `..`, empty segments, queries and over long segments), read
+  by the shell's `cargo test` and the door's `vitest` alike.
 - **app:** `gable://<record path>`. The shell's existing parser already
   admits `Q-000123` segments and maps the link to the same desk path.
+- **agent:** the agentic UI's record URL, which the inputs ask for beside
+  the classic one (`{classicUrl, agentUrl}`). Built from a deployment
+  template, `GABLE_AGENT_URL_TEMPLATE`, holding `{module}`, `{entity}`,
+  `{id}` and `{number}` placeholders (for example
+  `https://agent.example.com/{entity}/{number}`); `null` when the
+  template is unset, which is every deployment today. Gable ships no agent
+  UI; the slot lets a deployment that runs one point agents and people at it
+  without a route table.
 - **portal:** present and `null` until the portal has a record screen for
   the entity. Today the portal has list screens only, served on its own
   session and its own API; when C5-1 or cycle 6 adds a portal record
@@ -712,10 +846,13 @@ C5-2 merges `refactor/v1`), and its down file. Every step idempotent.
 2. `draft_events_position_seq`, `draft_events` with no position default,
    the `BEFORE INSERT` trigger function taking the draft events advisory
    lock key then drawing the position (the 089 trigger's shape with its own
-   key), the `(module, position)` index.
+   key), the `(module, position)` and `(subject_id, position)` indexes.
 3. `draft_events_purged (id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
    through_position BIGINT NOT NULL DEFAULT 0)` with its one row.
 4. `api_keys.branch_id UUID NULL REFERENCES locations(id)`.
+5. A read only report: a `DO` block that raises a `NOTICE` naming, by id and
+   prefix, every unrevoked key with a scope outside the section 5.1 grammar
+   (section 5.3). It changes nothing.
 
 No backfill: every table is new and the new column is nullable with today's
 meaning. No entity table changes. The down file drops in reverse order.
@@ -734,11 +871,17 @@ draft runs the create core: the quote is born in status `draft` with its
 quote, by whoever holds `quotes:write` or a person's session. Promotion of
 an edit draft runs the update core with `subject_revision` as the
 precondition, so a quote already sent refuses it (`quote_not_draft`) and a
-quote edited since refuses it (`subject_stale`). The desk gains
+quote edited since refuses it (`subject_stale`). A quote draft never
+carries the AI parse's original file (2.3): the parse flow creates the
+draft from the parsed lines, and the file is attached to the quote after
+promotion through a quote file route C5-2a adds, `PUT
+/api/v1/quotes/{id}/file` (raw body with its content type, the same 5 MiB
+bound the create applies today, `quotes:write`, the revision precondition),
+by the committer. The desk gains
 `/quotes/drafts` (open proposals) and `/quotes/drafts/:id` (the quote
 builder bound to a draft, following the feed, with a Confirm action that
 promotes), each against its visual reference, the quote builder screen, with
-the visual review the UI rule requires.
+the visual review the UI rule requires (C5-2b).
 
 **Orders (after C2-2).** Once cycle 2 lands the order create and draft edit
 on the recipe (ADR 0005 sections 5.2 and 5.7), the order kind registers the
@@ -756,21 +899,31 @@ orders after cycle 4.
 
 ### 11. What C5-2 builds and tests
 
-Size: 46 to 72 dev hour equivalents (the plan's R5-2 band, 42 to 68, plus
-the desk draft screens and branch bound keys, which this record places in
-it).
+C5-2 is split in two:
+
+- **C5-2a, the server:** 46 to 72 dev hour equivalents. The migration, the
+  drafts core, the feed, promotion, scopes, branch bound keys, identity,
+  number reads, the resolver and its registry, the quote file route, the
+  contract.
+- **C5-2b, the desk and web:** 14 to 22 dev hour equivalents, after C5-2a.
+  The desk draft screens with their visual review, the shared stream
+  helper, the door's `open` handling, the shell and door test vector rows,
+  the local nginx settings, and the Playwright runs.
+
+The two together are above the plan's R5-2 band (42 to 68) by the desk
+screens and branch bound keys, which the lead placed here.
 
 | Piece | Builds | Tests |
 |---|---|---|
 | Migration (9) | the four steps and the down file | applies on empty and seeded databases; down then up is clean |
-| Drafts core (2) | `internal/drafts`: repository, service, handler, kind registry; quote kind | wire tests per the recipe set: create shape, `validation`, payload refusals, list and cursor, 428, 409 `stale_revision` with strong and weak `If-Match`, `draft_not_open`, transitions, idempotent create; transaction proofs: three writers at pool size 4 on one revision have one winner; the gated saturation test for create, `PUT`, transition and promotion |
-| Feed (3) | `draft_events`, the hub, the SSE handler, the purge in the worker, the web stream helper | a stream receives a `PUT` made on another connection with the right `by`; resume by `Last-Event-ID` and by `cursor` serves each row once; two transactions with the lower position committing last are both served (the ADR 0003 case); a filtered stream advances its cursor; a reader that never reads holds one batch of memory and is closed at its write deadline; `reset` after a purge; the stream ends at token `exp`; shutdown ends open streams |
-| Promotion (4) | the route, the quote kind's in transaction create and update cores | one transaction: a failing outbox write leaves no quote, no number reuse, the draft unchanged; two promoters racing one draft: one 201, one 409; a `PUT` racing a promotion: exactly one wins; `already_promoted` on a keyless retry, replay on a keyed one; `payload.` paths on a 400; `subject_stale`; events in order (`quote.created`, `draft.promoted`); the `draft.promotion_refused` row after a failure; quote goldens unchanged |
-| Scopes (5) | `ScopeTarget`, `AdmittedScopes`, the census extension, mint validation, the confirm gate, branch bound keys | the class table row by row for a propose, a commit, a read and a write key; mint refusals naming `scopes[i]`; the agent marker refused promotion and entity writes on quotes and admitted draft writes; a bound key pinned and refused another branch, with its audit row |
+| Drafts core (2) | `internal/drafts`: repository, service, handler, kind registry; quote kind | wire tests per the recipe set: create shape, `validation`, payload refusals (`original_file`, a payload over 256 KiB, a payload `revision`), the `subject_revision` rebase bounds, list and cursor, 428, 409 `stale_revision` with strong and weak `If-Match`, `draft_not_open`, transitions, idempotent create; transaction proofs: three writers at pool size 4 on one revision have one winner; the gated saturation test for create, `PUT`, transition and promotion |
+| Feed (3) | `draft_events`, the hub, the SSE handler, the purge in the worker, the settings with their defaults | a `subject_id` filtered stream receives only that subject's drafts; a reconnect carrying both the original `?cursor=` and a newer `Last-Event-ID` resumes from `Last-Event-ID`; a revoked key's stream closes at the next heartbeat; a stream receives a `PUT` made on another connection with the right `by`; resume by `Last-Event-ID` and by `cursor` serves each row once; two transactions with the lower position committing last are both served (the ADR 0003 case); a filtered stream advances its cursor; a reader that never reads holds one batch of memory and is closed at its write deadline; `reset` after a purge; the stream ends at token `exp`; shutdown ends open streams |
+| Promotion (4) | the route, the quote kind's in transaction create and update cores, the quote file route | the promoter runs at the draft's branch whatever the committer's `X-Branch-Id`; `subject_stale` added to a subject's `stale_revision` and absent on a stale draft; one transaction: a failing outbox write leaves no quote, no number reuse, the draft unchanged; two promoters racing one draft: one 201, one 409; a `PUT` racing a promotion: exactly one wins; `already_promoted` on a keyless retry, replay on a keyed one; `payload.` paths on a 400; `subject_stale`; events in order (`quote.created`, `draft.promoted`); the `draft.promotion_refused` row after a failure; quote goldens unchanged |
+| Scopes (5) | `ScopeTarget`, `AdmittedScopes`, the census extension with classes, mint validation, the migrate report, the confirm gate, branch bound keys | the class table row by row for a propose, a commit, a read and a write key (a read key refused every draft route); an unlisted shape under `/api/v1/drafts/quotes/` refused for a key; mint refusals naming `scopes[i]`; the agent gate refuses promotion and entity writes on quotes and admits draft writes, with `X-Acting-As: agent` and with another marker value (`X-Acting-As: x`); a keyed request with a marker governed by its scopes alone; a bound key pinned and refused another branch by header, with its audit row; a bound key refused a foreign payload `branch_id` on `POST /api/v1/drafts/quotes` and on `POST /api/v1/quotes`; an unbound user refused a payload branch outside their grants; a `quotes:propose` key on `/api/integration/quotes` answered by the seam's own 401, so a key cannot route around the gate (section 5.6) |
 | Identity (6) | actor columns on drafts and events, the audit actions | each act's audit row with its actor; `proposers` and the committer on the promotion row; outbox data's `proposed_by` and `committed_by` |
-| Numbers and links (7, 8) | number reads on quotes (orders and invoices if not done), the desk's canonical URL, the resolver and its registry, `links.json`, the door's `open` handling, the shell test rows | `GET /quotes/Q-000123`; wrong prefix 400; invisible 404; the resolver for each entity; desk, door and shell drift tests against `links.json` |
-| Contract | fragments for every new route, `CONTRACT-CHANGES.md` rows (quote reads by number; agent marked writes refused on gated modules; the scope grammar; `branch_id` on keys), census regenerated | `make contract` green |
-| Desk (10) | `/quotes/drafts`, `/quotes/drafts/:id` | Playwright: a person edits a draft while an API client acting as an agent edits it, sees the agent's revision arrive, and confirms; visual review |
+| Numbers and links (7, 8) | number reads on quotes (orders and invoices if not done), the resolver and its registry with the `agent` slot, `links.json`, `link-paths.json` | `GET /quotes/Q-000123`; wrong prefix 400; invisible 404; the resolver for each entity; `links.agent` from the template and `null` without it |
+| Contract | fragments for every new route, `CONTRACT-CHANGES.md` rows (quote reads by number; the quotes kind registered, so agent marked session writes on quotes are refused, one row per kind as each registers; the payload branch rule on `POST /api/v1/quotes`; the scope grammar; `branch_id` on keys; the quote file route), census regenerated | `make contract` green |
+| Desk and web (C5-2b) | `/quotes/drafts`, `/quotes/drafts/:id` registered before `/quotes/:id`, the canonical number URL, the web stream helper, the door's `open` handling, the shell and door test vector rows, `proxy_buffering off` and the read timeout in `web/nginx-local-api.conf` | Playwright: a person edits a draft while an API client acting as an agent edits it, sees the agent's revision arrive, and confirms; a page opened by number writes by UUID; desk, door and shell drift tests against `links.json` and `link-paths.json`; visual review |
 
 The cycle 5 exit test lines this item answers:
 
@@ -880,8 +1033,16 @@ write must have one fingerprint.
 - Agents and people bind to one server side document per proposal, see each
   other's saves as they happen, and cannot overwrite each other silently.
 - "The agent proposes, the person confirms" is a server rule: enforced
-  exactly for keys, and for agents acting with a person's session wherever
-  the agent declares itself.
+  exactly for keys on `/api/v1`, and for agents acting with a person's
+  session wherever the agent declares itself. The integration seam is
+  outside it (5.6).
+- An agent acting with a person's session loses every write on a gated
+  module that has no draft path: on quotes that is the transitions (send,
+  accept, reject), `convert`, and the exposure acknowledge, escalate,
+  override and request routes under `/api/v1/quotes/{id}/exposure/`. A
+  person does those. Each kind registered later widens the gate to its
+  module the same way, so each registration carries its own
+  `CONTRACT-CHANGES.md` row.
 - A confirm commits exactly the revision the person read, in one
   transaction with the entity, its number, its events and an audit row that
   names every proposer and the committer.
@@ -913,7 +1074,11 @@ write must have one fingerprint.
   own resolver arrives with the portal conversion.
 - **Finer `admin` and `users` scopes** (ADR 0002's second limit) stay open,
   assigned to the tech admin conversion's record (5.5).
-- **A large draft's retried `PUT` may run twice:** a response over the
-  idempotency store's cap is served but not stored (ADR 0001 section 9), so
-  its keyed retry executes again and meets 409 `stale_revision`, which is
-  the safe outcome but not a replay.
+- **The integration seam is a direct writer** (5.6): after C5-1, AI load
+  management holds `quotes:write` and `orders:write` by an explicit operator
+  grant and writes quotes and orders without a draft. Moving its quote
+  creation to `quotes:propose` drafts is a later item.
+- **A propose only agent cannot attach a file:** the original file attaches
+  to the quote after promotion through `quotes:write` (section 10). A draft
+  side attachment, held outside the payload, is a later item if agents need
+  it.
