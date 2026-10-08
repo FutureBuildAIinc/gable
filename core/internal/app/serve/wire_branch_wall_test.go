@@ -596,3 +596,45 @@ func TestBranchWall_DocumentRoutes(t *testing.T) {
 		}
 	}
 }
+
+// The match exceptions list is filtered by the caller's branches: a finance
+// user held to branch A reads only branch A's exceptions, an administrator
+// without a header every branch's.
+func TestBranchWall_MatchingExceptions(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	// One exception match result per branch's purchase order, seeded here
+	// and not in the fixture: the other tests read the matching routes on
+	// the no-match-result answer.
+	ctx := context.Background()
+	for _, po := range []uuid.UUID{f.poA, f.poB} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO po_match_results (po_id, status) VALUES ($1, 'EXCEPTION')`, po); err != nil {
+			t.Fatalf("seed match result: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM po_match_results WHERE po_id IN ($1, $2)`, f.poA, f.poB)
+	})
+
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantA, wantB            bool
+	}{
+		{"finance, header A", "finance", "u-a", A, true, false},
+		{"admin, no header", "admin", "boss", "", true, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/matching/exceptions", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("matching exceptions, %s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), f.poA.String()); got != c.wantA {
+			t.Errorf("matching exceptions, %s: branch A's exception present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), f.poB.String()); got != c.wantB {
+			t.Errorf("matching exceptions, %s: branch B's exception present = %v, want %v", c.name, got, c.wantB)
+		}
+	}
+}
