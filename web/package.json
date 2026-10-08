@@ -15,7 +15,11 @@
     "lint": "eslint .",
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "e2e": "playwright test"
   },
-  "license": "LicenseRef-OpenLBM-Surface-1.0"
+  "license": "LicenseRef-OpenLBM-Surface-1.0",
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
+  }
 }
