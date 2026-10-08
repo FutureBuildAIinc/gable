@@ -12952,6 +12952,8 @@ components:
             - PAYMENT
             - ADJUSTMENT
             - REFUND
+            - CREDIT_MEMO
+            - REVERSAL
         amount:
           type: integer
           format: int64
@@ -15669,7 +15671,7 @@ components:
           type: string
         source:
           type: string
-          description: MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN or DEPOSIT.
+          description: MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN, DEPOSIT, CREDIT_MEMO or WRITE_OFF.
         source_ref_id:
           type: string
           format: uuid

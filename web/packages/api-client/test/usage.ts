@@ -70,7 +70,34 @@ async function _happy() {
   );
   const customerRevision: number = edited.body.revision;
 
-  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, limit, terms, shipToRevision, customerRevision];
+  // Invoices and credit memos (ADR 0005 6.2 and 6.3): the cursor list, the
+  // detail with its lines, the void, and the credit memo from draft to posted.
+  const invoices = await client.get("/api/v1/invoices", { query: { status: "unpaid", overdue: "true", limit: 10 } });
+  const invoiceNumber: string | undefined = invoices.body.items[0]?.number;
+  const invoice = await client.get("/api/v1/invoices/{id}", { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } });
+  const billed: number = invoice.body.lines[0]?.line_total_cents ?? 0;
+  const open: number = invoice.body.open_cents;
+  const voided = await client.post(
+    "/api/v1/invoices/{id}/transitions",
+    { to: "void", revision: 2, reason: "billed in error" },
+    { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } },
+  );
+  const voidedAt: string | null | undefined = voided.body?.voided_at;
+  const memo = await client.post("/api/v1/credit-memos", {
+    invoice_id: "8f14e45f-ceea-467f-a830-aacd11a4",
+    reason_code: "return",
+    reason: "two pieces came back",
+    lines: [{ invoice_line_id: "8f14e45f-ceea-467f-a830-aacd11a4", quantity: "-2", restock: true }],
+  });
+  const memoNumber: string | null | undefined = memo.body?.number;
+  const posted = await client.post(
+    "/api/v1/credit-memos/{id}/transitions",
+    { to: "open", revision: 1 },
+    { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } },
+  );
+  const memoTotal: number = posted.body?.total_cents ?? 0;
+
+  return [invoiceNumber, billed, open, voidedAt, memoNumber, memoTotal, quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, limit, terms, shipToRevision, customerRevision];
 }
 
 // Wrong paths: each line must be a compile error --------------------------
@@ -105,6 +132,15 @@ async function _wrong() {
 
   // @ts-expect-error a ship-to needs its code, name and line1
   await client.post("/api/v1/customers/{id}/ship-tos", { name: "only a name" }, { path: { id: "x" } });
+
+  // @ts-expect-error overdue is a computed flag and a list filter: it is a true/false string
+  await client.get("/api/v1/invoices", { query: { overdue: 7 } });
+
+  // @ts-expect-error the only invoice transition a client sends is void; the body needs its target
+  await client.post("/api/v1/invoices/{id}/transitions", { revision: 1 }, { path: { id: "x" } });
+
+  // @ts-expect-error a credit memo names its reason by code and carries its lines
+  await client.post("/api/v1/credit-memos", { customer_id: "x" });
 
   // @ts-expect-error path parameter must be a string
   await client.get("/api/v1/quotes/{id}", { path: { id: 123 } });
