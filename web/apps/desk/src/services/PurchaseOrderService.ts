@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import type { PurchaseOrder, CreatePORequest, ReceivePORequest, RecommendationSummary, FreightCharge, FreightUploadResponse, POSourceSummary } from '../types/purchaseOrder';
-import type { ReorderAlert } from '../types/product';
+import type { ReorderAlert, ReorderAlertList } from '../types/product';
 import { fetchWithAuth } from './fetchClient';
+import { parseApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -54,8 +55,10 @@ export const PurchaseOrderService = {
 
     async getReorderAlerts(): Promise<ReorderAlert[]> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/products/reorder-alerts`);
-        if (!response.ok) throw new Error('Failed to fetch reorder alerts');
-        return response.json();
+        if (!response.ok) throw await parseApiError(response, 'Failed to fetch reorder alerts');
+        // The envelope of ADR 0001; the alerts answer on one page.
+        const page: ReorderAlertList = await response.json();
+        return page.items;
     },
 
     async generateReorders(): Promise<{ count: number }> {

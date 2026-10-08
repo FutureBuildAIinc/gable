@@ -3,24 +3,31 @@
 
 import type { CalculatedPrice, MarketIndex, EscalationRequest, EscalationResult } from '../types/pricing';
 import { fetchWithAuth } from './fetchClient';
+import { parseApiError } from './apiError';
+import { isPositiveQuantity } from '../lib/money';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const PricingService = {
-    calculatePrice: async (customerId: string, productId: string, quantity?: number, jobId?: string): Promise<CalculatedPrice> => {
+    /**
+     * The price a customer pays for a product (ADR 0006 section 7.3). The quantity is a decimal
+     * string; one that is not positive is refused here rather than ignored. Failures are ApiErrors.
+     */
+    calculatePrice: async (customerId: string, productId: string, quantity?: string, jobId?: string): Promise<CalculatedPrice> => {
         const params = new URLSearchParams({
             customer_id: customerId,
             product_id: productId,
         });
-        if (quantity && quantity > 0) {
-            params.set('quantity', quantity.toString());
+        if (quantity !== undefined) {
+            if (!isPositiveQuantity(quantity)) throw new Error('The quantity must be a positive number');
+            params.set('quantity', quantity);
         }
         if (jobId) {
             params.set('job_id', jobId);
         }
         const response = await fetchWithAuth(`${API_URL}/api/v1/pricing/calculate?${params.toString()}`);
         if (!response.ok) {
-            throw new Error('Failed to calculate price');
+            throw await parseApiError(response, 'Failed to calculate price');
         }
         return response.json() as Promise<CalculatedPrice>;
     },

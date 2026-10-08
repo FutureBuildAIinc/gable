@@ -8,6 +8,8 @@ import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import type { ProductDetail as ProductDetailType, PIMContent } from '../../types/pim.ts';
 import { PIMService } from '../../services/PIMService.ts';
+import { apiErrorMessage } from '../../services/apiError.ts';
+import { formatPrice4 } from '../../lib/utils.ts';
 import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse, Box } from 'lucide';
 import './tabs/ProductOverviewTab.ts';
 import './tabs/ProductContentTab.ts';
@@ -16,6 +18,7 @@ import './tabs/ProductCollateralTab.ts';
 import './tabs/ProductSEOTab.ts';
 import './tabs/ProductStockTab.ts';
 import './tabs/ProductGeometryTab.ts';
+import '../../components/inventory/ProductMarginModal.ts';
 
 type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock' | 'geometry';
 
@@ -41,8 +44,10 @@ export class GableProductDetail extends LitElement {
 
     @property({ attribute: 'route-id' }) routeId = '';
 
-    @state() private product: ProductDetailType | null = null;
+    /** The PIM aggregate as loaded; detail.product carries the revision every write of this page names. */
+    @state() private detail: ProductDetailType | null = null;
     @state() private loading = true;
+    @state() private isMarginModalOpen = false;
     @state() private activeTab: TabId = 'overview';
 
     connectedCallback() {
@@ -61,18 +66,18 @@ export class GableProductDetail extends LitElement {
         if (!this.routeId) return;
         try {
             const data = await PIMService.getProductDetail(this.routeId);
-            this.product = data;
+            this.detail = data;
         } catch (err) {
             console.error('Failed to load product:', err);
-            ToastService.show('Failed to load product', 'error');
+            ToastService.show(apiErrorMessage(err, 'Failed to load product'), 'error');
         } finally {
             this.loading = false;
         }
     }
 
     private handleContentUpdate(content: PIMContent) {
-        if (this.product) {
-            this.product = { ...this.product, content };
+        if (this.detail) {
+            this.detail = { ...this.detail, content };
         }
     }
 
@@ -93,7 +98,8 @@ export class GableProductDetail extends LitElement {
             `;
         }
 
-        if (!this.product) {
+        const detail = this.detail;
+        if (!detail) {
             return html`
                 <div class="flex flex-col items-center justify-center h-96 gap-4">
                     ${icon(Package, 64, 'w-16 h-16 text-zinc-600')}
@@ -105,6 +111,7 @@ export class GableProductDetail extends LitElement {
             `;
         }
 
+        const product = detail.product;
         return html`
             <div class="space-y-6">
                 <!-- Header -->
@@ -118,15 +125,15 @@ export class GableProductDetail extends LitElement {
                     </button>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-3 mb-1">
-                            <h1 class="text-xl font-bold text-white truncate">${this.product.description}</h1>
+                            <h1 class="text-xl font-bold text-white truncate">${product.description}</h1>
                             <span class="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-xs font-mono text-zinc-400 shrink-0">
-                                ${this.product.sku}
+                                ${product.sku}
                             </span>
                         </div>
                         <div class="flex items-center gap-3 text-sm text-zinc-500">
-                            ${this.product.vendor ? html`<span>${this.product.vendor}</span>` : nothing}
-                            <span>${this.product.uom_primary}</span>
-                            <span class="font-mono text-emerald-400">$${(this.product.base_price || 0).toFixed(2)}</span>
+                            ${product.vendor ? html`<span>${product.vendor}</span>` : nothing}
+                            <span>${product.stock_uom}</span>
+                            <span class="font-mono text-emerald-400">${formatPrice4(product.base_price_ten_thousandths)}</span>
                         </div>
                     </div>
                 </div>
@@ -154,50 +161,58 @@ export class GableProductDetail extends LitElement {
                 <div>
                     ${this.activeTab === 'overview' ? html`
                         <gable-product-overview-tab
-                            .product=${this.product}
-                            @open-margin-modal=${() => this.loadProduct()}
+                            .detail=${detail}
+                            @open-margin-modal=${() => { this.isMarginModalOpen = true; }}
                         ></gable-product-overview-tab>
                     ` : nothing}
                     ${this.activeTab === 'content' ? html`
                         <gable-product-content-tab
-                            .productId=${this.product.id}
-                            .content=${this.product.content}
+                            .productId=${product.id}
+                            .content=${detail.content}
                             @content-update=${(e: CustomEvent<PIMContent>) => this.handleContentUpdate(e.detail)}
                         ></gable-product-content-tab>
                     ` : nothing}
                     ${this.activeTab === 'media' ? html`
                         <gable-product-media-tab
-                            .productId=${this.product.id}
-                            .media=${this.product.media}
+                            .productId=${product.id}
+                            .media=${detail.media}
                             @media-update=${() => this.handleMediaUpdate()}
                         ></gable-product-media-tab>
                     ` : nothing}
                     ${this.activeTab === 'collateral' ? html`
                         <gable-product-collateral-tab
-                            .productId=${this.product.id}
-                            .collateral=${this.product.collateral}
+                            .productId=${product.id}
+                            .collateral=${detail.collateral}
                             @collateral-update=${() => this.handleCollateralUpdate()}
                         ></gable-product-collateral-tab>
                     ` : nothing}
                     ${this.activeTab === 'seo' ? html`
                         <gable-product-seo-tab
-                            .productId=${this.product.id}
-                            .content=${this.product.content}
+                            .productId=${product.id}
+                            .content=${detail.content}
                             @content-update=${(e: CustomEvent<PIMContent>) => this.handleContentUpdate(e.detail)}
                         ></gable-product-seo-tab>
                     ` : nothing}
                     ${this.activeTab === 'stock' ? html`
                         <gable-product-stock-tab
-                            .productId=${this.product.id}
-                            .productDescription=${this.product.description}
+                            .productId=${product.id}
+                            .productDescription=${product.description}
                         ></gable-product-stock-tab>
                     ` : nothing}
                     ${this.activeTab === 'geometry' ? html`
                         <gable-product-geometry-tab
-                            .productId=${this.product.id}
+                            .productId=${product.id}
+                            @dimensions-update=${() => { void this.loadProduct(); }}
                         ></gable-product-geometry-tab>
                     ` : nothing}
                 </div>
+
+                <gable-product-margin-modal
+                    ?is-open=${this.isMarginModalOpen}
+                    .product=${product}
+                    @close=${() => { this.isMarginModalOpen = false; }}
+                    @success=${() => { void this.loadProduct(); }}
+                ></gable-product-margin-modal>
             </div>
         `;
     }

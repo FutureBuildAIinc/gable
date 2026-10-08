@@ -83,6 +83,16 @@ export function numberToQuantity(value: number): string | null {
     return normalizeQuantity(value.toFixed(4));
 }
 
+/**
+ * Normalises a user decimal (a percentage, for example) to the wire's decimal string at most four
+ * fraction digits: "15" -> "15", "12.50" -> "12.5". Unlike normalizeQuantity, zero is allowed.
+ * Null when the text is empty, signed, malformed or over-precise.
+ */
+export function normalizeDecimal(text: string): string | null {
+    const scaled = parseScaled(text, 4);
+    return scaled === null ? null : scaledToQuantity(scaled);
+}
+
 function scaledToQuantity(scaled: number): string {
     const whole = Math.floor(scaled / 10000);
     const frac = String(scaled % 10000).padStart(4, '0').replace(/0+$/, '');
@@ -117,4 +127,51 @@ export function extensionCents(
     let cents = abs / divisor;
     if ((abs % divisor) * 2n >= divisor) cents += 1n;
     return Number(negative ? -cents : cents);
+}
+
+/**
+ * A wire quantity (a decimal string, up to four fraction digits) for display: thousands
+ * separators on the whole part, trailing fraction zeros dropped. "1234.5000" -> "1,234.5",
+ * "10.0000" -> "10". Pure string work, so a stock level never passes through a float.
+ * Null, empty or anything that is not a plain decimal gives "0" or the text unchanged.
+ */
+export function formatQuantity(text: string | null | undefined): string {
+    if (text === null || text === undefined || text.trim() === '') return '0';
+    const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(text.trim());
+    if (!m || (m[2] === '' && !m[3])) return text;
+    const whole = (m[2] === '' ? '0' : m[2]).replace(/^0+(?=\d)/, '');
+    const frac = (m[3] ?? '').replace(/0+$/, '');
+    const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const out = frac === '' ? grouped : `${grouped}.${frac}`;
+    return m[1] === '-' && /[1-9]/.test(out) ? `-${out}` : out;
+}
+
+/** True when a decimal string is greater than zero ("0", "0.0000", "" and "-1" are not). */
+export function isPositiveQuantity(text: string | null | undefined): boolean {
+    if (!text) return false;
+    const t = text.trim();
+    return /^\d*\.?\d*$/.test(t) && /[1-9]/.test(t);
+}
+
+/** True when a decimal string is below zero; used to flag a negative available quantity. */
+export function isNegativeQuantity(text: string | null | undefined): boolean {
+    if (!text) return false;
+    const t = text.trim();
+    return /^-\d*\.?\d*$/.test(t) && /[1-9]/.test(t);
+}
+
+/**
+ * A percentage of a ten thousandths amount, rounded half away from zero, in integers:
+ * (tt x numerator) / denominator. scaleTenThousandths(42500, 6, 10) is 25500.
+ */
+export function scaleTenThousandths(tt: number, numerator: number, denominator: number): number {
+    if (!Number.isFinite(tt) || !Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) return 0;
+    const product = BigInt(Math.trunc(tt)) * BigInt(Math.trunc(numerator));
+    const d = BigInt(Math.trunc(denominator));
+    const negative = (product < 0n) !== (d < 0n);
+    const absP = product < 0n ? -product : product;
+    const absD = d < 0n ? -d : d;
+    let q = absP / absD;
+    if ((absP % absD) * 2n >= absD) q += 1n;
+    return Number(negative ? -q : q);
 }
