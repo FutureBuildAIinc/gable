@@ -3,9 +3,9 @@
 
 // Package worker is the worker role of the core binary: the background
 // jobs that do not belong to the HTTP server. Today that is the
-// idempotency retention purge, which R1-4 moved out of serve, and the
+// idempotency retention purge, which R1-4 moved out of serve, the
 // outbox drain (R1-12), which delivers committed events to their
-// subscribers; the cron schedulers that serve mounts beside its own HTTP
+// subscribers, and the outbox retention purge (R1-12b); the cron schedulers that serve mounts beside its own HTTP
 // surface (auto-reorder and scheduled report delivery) stay in serve.
 package worker
 
@@ -96,7 +96,15 @@ func Run() {
 		logger.Error("outbox drain failed to start; event subscribers receive nothing until it runs", "error", err)
 	}
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain")
+	// Outbox retention: delete events_outbox rows past OUTBOX_RETENTION_DAYS
+	// that every subscriber cursor has moved beyond and no parked entry
+	// names. Runs only here, beside the drain whose cursors it reads.
+	purge := newOutboxPurge(db, cfg, logger)
+	if err := purge.Start(context.Background()); err != nil {
+		logger.Error("outbox purge failed to start; the outbox grows until it runs", "error", err)
+	}
+
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -104,6 +112,9 @@ func Run() {
 	// Step 1: stop the background jobs. Same reasoning as serve's job stops:
 	// no purge statement may start against a draining pool, and an in-flight
 	// batch (or drain window) finishes before step 2 closes it.
+	logger.Info("Shutdown step 1/2: stopping outbox purge...")
+	purge.Stop()
+	logger.Info("Shutdown step 1/2: outbox purge stopped")
 	logger.Info("Shutdown step 1/2: stopping outbox drain...")
 	drain.Stop()
 	logger.Info("Shutdown step 1/2: outbox drain stopped")
@@ -127,4 +138,9 @@ func newOutboxDrain(db *database.DB, logger *slog.Logger) *outbox.DrainRunner {
 	notifier := notification.NewExposureNotifier(notification.NewLogEmailService(logger), db, logger)
 	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
 	return drain
+}
+
+// newOutboxPurge builds the retention job from the configured age in days.
+func newOutboxPurge(db *database.DB, cfg *config.Config, logger *slog.Logger) *outbox.PurgeRunner {
+	return outbox.NewPurgeRunner(db, logger, time.Duration(cfg.OutboxRetentionDays)*24*time.Hour)
 }

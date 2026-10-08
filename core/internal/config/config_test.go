@@ -67,3 +67,24 @@ func TestLoad_TrustedProxies(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_OutboxRetentionDays(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutboxRetentionDays != 14 {
+		t.Errorf("default retention = %d days, want 14", cfg.OutboxRetentionDays)
+	}
+
+	t.Setenv("OUTBOX_RETENTION_DAYS", "30")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutboxRetentionDays != 30 {
+		t.Errorf("retention = %d days, want 30", cfg.OutboxRetentionDays)
+	}
+}
