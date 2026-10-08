@@ -1,0 +1,45 @@
+[
+  {
+    "name": "health.live",
+    "request": {
+      "method": "GET",
+      "path": "/healthz/live"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "ok"
+      }
+    }
+  },
+  {
+    "name": "health.legacy",
+    "request": {
+      "method": "GET",
+      "path": "/health"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "db": "connected",
+        "status": "ok"
+      }
+    }
+  },
+  {
+    "name": "health.method_not_allowed",
+    "request": {
+      "method": "DELETE",
+      "path": "/healthz/live"
+    },
+    "response": {
+      "status": 405,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "Method Not Allowed\n"
+      }
+    }
+  }
+]

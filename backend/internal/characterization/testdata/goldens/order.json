@@ -1,0 +1,99 @@
+[
+  {
+    "name": "order.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders",
+      "body": {
+        "customer_id": "<id-1>",
+        "lines": [
+          {
+            "price_each": 550,
+            "product_id": "<id-2>",
+            "quantity": 5
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-3>\",\"branch_id\":\"<id-4>\",\"customer_id\":\"<id-1>\",\"status\":\"DRAFT\",\"total_amount\":2750,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\",\"total_cost\":0,\"total_margin\":0,\"margin_percent\":0,\"total_commission\":0,\"lines\":[{\"id\":\"<id-5>\",\"order_id\":\"<id-3>\",\"product_id\":\"<id-2>\",\"quantity\":5,\"price_each\":550,\"unit_cost\":0,\"commission_rate\":0,\"is_special_order\":false}]}\n"
+      }
+    }
+  },
+  {
+    "name": "order.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/orders/<id-3>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-6>",
+        "created_at": "<ts>",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "id": "<id-3>",
+        "lines": [
+          {
+            "commission_rate": 0,
+            "id": "<id-5>",
+            "is_special_order": false,
+            "order_id": "<id-3>",
+            "price_each": 550,
+            "product_id": "<id-2>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 5,
+            "unit_cost": 350
+          }
+        ],
+        "margin_percent": 36.36363636363637,
+        "status": "DRAFT",
+        "total_amount": 2750,
+        "total_commission": 0,
+        "total_cost": 1750,
+        "total_margin": 1000,
+        "updated_at": "<ts>"
+      }
+    }
+  },
+  {
+    "name": "order.exposure_gate",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/orders/<id-3>/exposure-gate"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "blocked": false
+      }
+    }
+  },
+  {
+    "name": "order.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/orders/<id-7>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,75 @@
+[
+  {
+    "name": "sales_team.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/sales-team"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts>",
+          "email": "amanda.w@gablelumber.ca",
+          "id": "<id-1>",
+          "is_active": true,
+          "name": "Amanda Wong",
+          "phone": "250-555-5006",
+          "role": "Account Executive",
+          "updated_at": "<ts>"
+        },
+        {
+          "created_at": "<ts>",
+          "email": "cameron.f@gablelumber.ca",
+          "id": "<id-2>",
+          "is_active": true,
+          "name": "Cameron Fraser",
+          "phone": "250-555-5004",
+          "role": "Sales Rep",
+          "updated_at": "<ts>"
+        },
+        {
+          "created_at": "<ts>",
+          "email": "ethan.g@gablelumber.ca",
+          "id": "<id-3>",
+          "is_active": true,
+          "name": "Ethan Gagnon",
+          "phone": "250-555-5002",
+          "role": "Sales Rep",
+          "updated_at": "<ts>"
+        },
+        {
+          "created_at": "<ts>",
+          "email": "heather.m@gablelumber.ca",
+          "id": "<id-4>",
+          "is_active": true,
+          "name": "Heather Macdonald",
+          "phone": "250-555-5001",
+          "role": "Sales Manager",
+          "updated_at": "<ts>"
+        },
+        {
+          "created_at": "<ts>",
+          "email": "lucas.p@gablelumber.ca",
+          "id": "<id-5>",
+          "is_active": true,
+          "name": "Lucas Pelletier",
+          "phone": "250-555-5005",
+          "role": "Sales Rep",
+          "updated_at": "<ts>"
+        },
+        {
+          "created_at": "<ts>",
+          "email": "priya.b@gablelumber.ca",
+          "id": "<id-6>",
+          "is_active": true,
+          "name": "Priya Brar",
+          "phone": "250-555-5003",
+          "role": "Account Executive",
+          "updated_at": "<ts>"
+        }
+      ]
+    }
+  }
+]

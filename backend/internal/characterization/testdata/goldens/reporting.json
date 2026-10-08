@@ -1,0 +1,151 @@
+[
+  {
+    "name": "reporting.save",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/save",
+      "body": {
+        "definition_json": {
+          "metric": "total_amount"
+        },
+        "description": "characterisation",
+        "entity_type": "orders",
+        "name": "Golden Report"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts>",
+        "created_by": "",
+        "definition_json": {
+          "metric": "total_amount"
+        },
+        "description": "characterisation",
+        "entity_type": "orders",
+        "id": "<id-1>",
+        "name": "Golden Report",
+        "updated_at": "<ts>"
+      }
+    }
+  },
+  {
+    "name": "reporting.saved.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/saved"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts>",
+          "created_by": "",
+          "definition_json": {
+            "metric": "total_amount"
+          },
+          "description": "characterisation",
+          "entity_type": "orders",
+          "id": "<id-1>",
+          "name": "Golden Report",
+          "updated_at": "<ts>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "reporting.schedule.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/schedules",
+      "body": {
+        "cron_expression": "0 6 * * * *",
+        "format": "CSV",
+        "recipients": [
+          "goldens@example.com"
+        ],
+        "report_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "execution": {
+          "cron_dialect": "Six fields, seconds first: \"second minute hour day-of-month month day-of-week\" (e.g. \"0 0 9 * * *\" for 09:00 daily). Five-field crontab expressions are rejected. Descriptors such as @daily and @every 1h are accepted.",
+          "delivery": "Email is log-only in this deployment: the report is generated and handed to notification.LogEmailService, which records the recipients, subject, filename and size in the server log instead of sending. Replace the NewLogEmailService call in cmd/server/main.go with an SMTP-backed EmailService to deliver for real.",
+          "enabled": true,
+          "summary": "Schedules run on the server's cron engine: each run executes the saved report and renders it to CSV."
+        },
+        "schedule": {
+          "created_at": "<ts>",
+          "cron_expression": "0 6 * * * *",
+          "format": "CSV",
+          "id": "<id-2>",
+          "recipients": [
+            "goldens@example.com"
+          ],
+          "report_id": "<id-1>",
+          "status": "ACTIVE",
+          "updated_at": "<ts>"
+        }
+      }
+    }
+  },
+  {
+    "name": "reporting.schedule.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/reporting/schedules"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "execution": {
+          "cron_dialect": "Six fields, seconds first: \"second minute hour day-of-month month day-of-week\" (e.g. \"0 0 9 * * *\" for 09:00 daily). Five-field crontab expressions are rejected. Descriptors such as @daily and @every 1h are accepted.",
+          "delivery": "Email is log-only in this deployment: the report is generated and handed to notification.LogEmailService, which records the recipients, subject, filename and size in the server log instead of sending. Replace the NewLogEmailService call in cmd/server/main.go with an SMTP-backed EmailService to deliver for real.",
+          "enabled": true,
+          "summary": "Schedules run on the server's cron engine: each run executes the saved report and renders it to CSV."
+        },
+        "schedules": [
+          {
+            "created_at": "<ts>",
+            "cron_expression": "0 6 * * * *",
+            "format": "CSV",
+            "id": "<id-2>",
+            "recipients": [
+              "goldens@example.com"
+            ],
+            "report_id": "<id-1>",
+            "status": "ACTIVE",
+            "updated_at": "<ts>"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "reporting.schedule.create.missing_fields",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/reporting/schedules",
+      "body": {}
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  }
+]

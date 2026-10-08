@@ -1,0 +1,99 @@
+[
+  {
+    "name": "tax.exemption.list_empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/tax/exemptions/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "tax.exemption.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/tax/exemptions",
+      "body": {
+        "certificate_number": "GOLD-CERT-1",
+        "customer_id": "<id-1>",
+        "exempt_reason": "RESALE",
+        "issuing_state": "BC"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "certificate_number": "GOLD-CERT-1",
+        "created_at": "<ts>",
+        "customer_id": "<id-1>",
+        "effective_date": "<ts>",
+        "exempt_reason": "RESALE",
+        "id": "<id-2>",
+        "is_active": true,
+        "issuing_state": "BC"
+      }
+    }
+  },
+  {
+    "name": "tax.preview",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/tax/preview",
+      "body": {
+        "customer_id": "<id-1>",
+        "lines": [
+          {
+            "amount": 2750,
+            "description": "2x4x8 SPF",
+            "item_code": "LUM-248-PREM",
+            "line_number": 1,
+            "quantity": 5,
+            "tax_code": "PF"
+          }
+        ],
+        "ship_from": {
+          "city": "Kelowna",
+          "country": "CA",
+          "line1": "2450 Enterprise Way",
+          "postal_code": "V1X 7K2",
+          "state": "BC"
+        },
+        "ship_to": {
+          "city": "Kelowna",
+          "country": "CA",
+          "line1": "1885 Formwork Rd",
+          "postal_code": "V1Y 4X1",
+          "state": "BC"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "grand_total": 2750,
+        "is_estimate": true,
+        "lines": [
+          {
+            "amount": 2750,
+            "description": "2x4x8 SPF",
+            "exempt": true,
+            "item_code": "LUM-248-PREM",
+            "jurisdiction": "",
+            "line_number": 1,
+            "quantity": 5,
+            "tax_amount": 0,
+            "tax_code": "",
+            "tax_rate": 0
+          }
+        ],
+        "total_amount": 2750,
+        "total_tax": 0
+      }
+    }
+  }
+]

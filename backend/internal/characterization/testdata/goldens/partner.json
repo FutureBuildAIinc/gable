@@ -1,0 +1,22 @@
+[
+  {
+    "name": "partner.dashboard.unauthenticated",
+    "request": {
+      "method": "GET",
+      "path": "/api/partner/v1/dashboard"
+    },
+    "response": {
+      "status": 401,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNAUTHORIZED",
+          "message": "Unauthorized"
+        },
+        "meta": {
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  }
+]

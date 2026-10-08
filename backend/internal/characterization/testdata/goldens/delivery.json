@@ -1,0 +1,241 @@
+[
+  {
+    "name": "delivery.vehicle.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/vehicles",
+      "body": {
+        "capacity_weight_lbs": 5000,
+        "license_plate": "GLD0001",
+        "name": "Golden Truck 01",
+        "vehicle_type": "BOX_TRUCK"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-1>\",\"name\":\"Golden Truck 01\",\"vehicle_type\":\"BOX_TRUCK\",\"license_plate\":\"GLD0001\",\"capacity_weight_lbs\":5000,\"vin\":null,\"year\":null,\"make\":null,\"model\":null,\"insurance_expiry\":null,\"next_service_date\":null,\"odometer_miles\":null,\"notes\":null,\"photo_url\":null,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+      }
+    }
+  },
+  {
+    "name": "delivery.vehicle.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/vehicles"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "capacity_weight_lbs": 5000,
+          "created_at": "<ts>",
+          "id": "<id-1>",
+          "insurance_expiry": null,
+          "license_plate": "GLD0001",
+          "make": null,
+          "model": null,
+          "name": "Golden Truck 01",
+          "next_service_date": null,
+          "notes": null,
+          "odometer_miles": null,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "BOX_TRUCK",
+          "vin": null,
+          "year": null
+        },
+        {
+          "capacity_weight_lbs": 24000,
+          "created_at": "<ts>",
+          "id": "<id-2>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-FLT-101",
+          "make": "International",
+          "model": "CV515",
+          "name": "Truck 1 - Flatbed",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 45230,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "FLATBED",
+          "vin": "1HTMMAAL8CH123456",
+          "year": 2022
+        },
+        {
+          "capacity_weight_lbs": 24000,
+          "created_at": "<ts>",
+          "id": "<id-3>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-FLT-102",
+          "make": "International",
+          "model": "CV515",
+          "name": "Truck 2 - Flatbed",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 62100,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "FLATBED",
+          "vin": "1HTMMAAL0CH234567",
+          "year": 2021
+        },
+        {
+          "capacity_weight_lbs": 16000,
+          "created_at": "<ts>",
+          "id": "<id-4>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-BOX-201",
+          "make": "Freightliner",
+          "model": "M2 106",
+          "name": "Truck 3 - Box",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 28400,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "BOX_TRUCK",
+          "vin": "3ALACWFC4HDGH5678",
+          "year": 2023
+        },
+        {
+          "capacity_weight_lbs": 18000,
+          "created_at": "<ts>",
+          "id": "<id-5>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-BOM-301",
+          "make": "Mack",
+          "model": "Granite",
+          "name": "Truck 4 - Boom",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 71800,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "CRANE",
+          "vin": "1M2AX04C0CM345678",
+          "year": 2020
+        },
+        {
+          "capacity_weight_lbs": 3000,
+          "created_at": "<ts>",
+          "id": "<id-6>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-PKP-401",
+          "make": "Ford",
+          "model": "F-150",
+          "name": "Truck 5 - Pickup",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 15200,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "PICKUP",
+          "vin": "1FTFW1E55MFA56789",
+          "year": 2023
+        },
+        {
+          "capacity_weight_lbs": 14000,
+          "created_at": "<ts>",
+          "id": "<id-7>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-BOX-202",
+          "make": "Isuzu",
+          "model": "NPR-HD",
+          "name": "Truck 6 - Box (Liftgate)",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 8750,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "BOX_TRUCK",
+          "vin": "3ALACWFC6HDGJ9012",
+          "year": 2024
+        },
+        {
+          "capacity_weight_lbs": 5000,
+          "created_at": "<ts>",
+          "id": "<id-8>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-VAN-501",
+          "make": "Chevrolet",
+          "model": "Express 3500",
+          "name": "Truck 7 - Van",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 34600,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "VAN",
+          "vin": "1GCWGAFG5K1234567",
+          "year": 2022
+        },
+        {
+          "capacity_weight_lbs": 30000,
+          "created_at": "<ts>",
+          "id": "<id-9>",
+          "insurance_expiry": "<ts>",
+          "license_plate": "BC-FLT-103",
+          "make": "Peterbilt",
+          "model": "348",
+          "name": "Truck 8 - Flatbed (Long)",
+          "next_service_date": "<ts>",
+          "notes": "",
+          "odometer_miles": 89200,
+          "photo_url": null,
+          "updated_at": "<ts>",
+          "vehicle_type": "FLATBED",
+          "vin": "1HTMMAAL2CH345678",
+          "year": 2020
+        }
+      ]
+    }
+  },
+  {
+    "name": "delivery.driver.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/drivers",
+      "body": {
+        "license_number": "GLD-DL-1",
+        "name": "Golden Driver",
+        "phone_number": "250-555-0198"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-10>\",\"name\":\"Golden Driver\",\"license_number\":\"GLD-DL-1\",\"status\":\"ACTIVE\",\"phone_number\":\"250-555-0198\",\"cdl_class\":null,\"cdl_expiry\":null,\"hire_date\":null,\"email\":null,\"photo_url\":null,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+      }
+    }
+  },
+  {
+    "name": "delivery.driver.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/drivers/<id-10>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "cdl_class": null,
+        "cdl_expiry": null,
+        "created_at": "<ts>",
+        "email": null,
+        "hire_date": null,
+        "id": "<id-10>",
+        "license_number": "GLD-DL-1",
+        "name": "Golden Driver",
+        "phone_number": "250-555-0198",
+        "photo_url": null,
+        "status": "ACTIVE",
+        "updated_at": "<ts>"
+      }
+    }
+  }
+]

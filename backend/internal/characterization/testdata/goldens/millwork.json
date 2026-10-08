@@ -1,0 +1,48 @@
+[
+  {
+    "name": "millwork.option.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/millwork/options",
+      "body": {
+        "attributes": {
+          "grade": "Clear"
+        },
+        "category": "Species",
+        "name": "Golden Douglas Fir",
+        "price_adjustment": 1.5
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-1>\",\"category\":\"Species\",\"name\":\"Golden Douglas Fir\",\"price_adjustment\":1.5,\"attributes\":{\"grade\":\"Clear\"},\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+      }
+    }
+  },
+  {
+    "name": "millwork.option.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/millwork/options?category=Species"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "attributes": {
+            "grade": "Clear"
+          },
+          "category": "Species",
+          "created_at": "<ts>",
+          "id": "<id-1>",
+          "name": "Golden Douglas Fir",
+          "price_adjustment": 1.5,
+          "updated_at": "<ts>"
+        }
+      ]
+    }
+  }
+]

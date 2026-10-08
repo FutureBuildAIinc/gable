@@ -1,0 +1,82 @@
+[
+  {
+    "name": "rebate.program.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pricing/rebates/programs",
+      "body": {
+        "program": {
+          "end_date": "<ts>",
+          "is_active": true,
+          "name": "Golden Volume Rebate",
+          "program_type": "VOLUME",
+          "start_date": "<ts>",
+          "vendor_id": "<id-1>"
+        },
+        "tiers": [
+          {
+            "min_volume": 100,
+            "rebate_pct": 2
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts>",
+        "end_date": "<ts>",
+        "id": "<id-2>",
+        "is_active": true,
+        "name": "Golden Volume Rebate",
+        "program_type": "VOLUME",
+        "start_date": "<ts>",
+        "tiers": [
+          {
+            "created_at": "<ts>",
+            "id": "<id-3>",
+            "max_volume": null,
+            "min_volume": 100,
+            "program_id": "<id-2>",
+            "rebate_pct": 2
+          }
+        ],
+        "vendor_id": "<id-1>"
+      }
+    }
+  },
+  {
+    "name": "rebate.program.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rebates/programs?vendor_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts>",
+          "end_date": "<ts>",
+          "id": "<id-2>",
+          "is_active": true,
+          "name": "Golden Volume Rebate",
+          "program_type": "VOLUME",
+          "start_date": "<ts>",
+          "tiers": [
+            {
+              "created_at": "<ts>",
+              "id": "<id-3>",
+              "max_volume": null,
+              "min_volume": 100,
+              "program_id": "<id-2>",
+              "rebate_pct": 2
+            }
+          ],
+          "vendor_id": "<id-1>"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,90 @@
+[
+  {
+    "name": "pim.content.get_empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>/pim/content"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "attributes": {},
+        "created_at": "<ts>",
+        "id": "<id-2>",
+        "last_gen_at": null,
+        "last_gen_model": "",
+        "last_gen_prompt": "",
+        "long_description": "",
+        "marketing_copy": "",
+        "product_id": "<id-1>",
+        "seo_description": "",
+        "seo_keywords": [],
+        "seo_slug": "",
+        "seo_title": "",
+        "short_description": "",
+        "updated_at": "<ts>"
+      }
+    }
+  },
+  {
+    "name": "pim.content.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/products/<id-1>/pim/content",
+      "body": {
+        "seo_title": "Golden SPF stud",
+        "short_description": "Golden 2x4 premium stud"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "attributes": {},
+        "created_at": "<ts>",
+        "id": "<id-3>",
+        "last_gen_at": null,
+        "last_gen_model": "",
+        "last_gen_prompt": "",
+        "long_description": "",
+        "marketing_copy": "",
+        "product_id": "<id-1>",
+        "seo_description": "",
+        "seo_keywords": null,
+        "seo_slug": "",
+        "seo_title": "Golden SPF stud",
+        "short_description": "Golden 2x4 premium stud",
+        "updated_at": "<ts>"
+      }
+    }
+  },
+  {
+    "name": "pim.content.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>/pim/content"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "attributes": {},
+        "created_at": "<ts>",
+        "id": "<id-3>",
+        "last_gen_at": null,
+        "last_gen_model": "",
+        "last_gen_prompt": "",
+        "long_description": "",
+        "marketing_copy": "",
+        "product_id": "<id-1>",
+        "seo_description": "",
+        "seo_keywords": [],
+        "seo_slug": "",
+        "seo_title": "Golden SPF stud",
+        "short_description": "Golden 2x4 premium stud",
+        "updated_at": "<ts>"
+      }
+    }
+  }
+]

@@ -1,0 +1,103 @@
+[
+  {
+    "name": "ap.invoice.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices",
+      "body": {
+        "due_date": "<date>",
+        "invoice_date": "<date>",
+        "invoice_number": "GOLD-AP-001",
+        "lines": [
+          {
+            "description": "golden ap line",
+            "quantity": 1,
+            "unit_price": 100
+          }
+        ],
+        "tax_amount": 0,
+        "vendor_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "amount_paid": 0,
+        "created_at": "<ts>",
+        "due_date": "<ts>",
+        "id": "<id-2>",
+        "invoice_date": "<ts>",
+        "invoice_number": "GOLD-AP-001",
+        "status": "PENDING",
+        "subtotal": 10000,
+        "tax_amount": 0,
+        "total": 10000,
+        "vendor_id": "<id-1>"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/invoices/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_paid": 0,
+        "created_at": "<ts>",
+        "due_date": "<ts>",
+        "id": "<id-2>",
+        "invoice_date": "<ts>",
+        "invoice_number": "GOLD-AP-001",
+        "lines": [
+          {
+            "created_at": "<ts>",
+            "description": "golden ap line",
+            "id": "<id-3>",
+            "invoice_id": "<id-2>",
+            "line_total": 10000,
+            "quantity": 1,
+            "unit_price": 10000
+          }
+        ],
+        "status": "PENDING",
+        "subtotal": 10000,
+        "tax_amount": 0,
+        "total": 10000,
+        "vendor_id": "<id-1>",
+        "vendor_name": "BC Roofing Wholesale"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/invoices?limit=3"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "amount_paid": 0,
+          "created_at": "<ts>",
+          "due_date": "<ts>",
+          "id": "<id-2>",
+          "invoice_date": "<ts>",
+          "invoice_number": "GOLD-AP-001",
+          "status": "PENDING",
+          "subtotal": 10000,
+          "tax_amount": 0,
+          "total": 10000,
+          "vendor_id": "<id-1>",
+          "vendor_name": "BC Roofing Wholesale"
+        }
+      ]
+    }
+  }
+]

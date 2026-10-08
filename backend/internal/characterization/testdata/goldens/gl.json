@@ -1,0 +1,342 @@
+[
+  {
+    "name": "gl.accounts.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/accounts"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "balance": 0,
+          "code": "1010",
+          "created_at": "<ts>",
+          "description": "Cash and checking accounts",
+          "id": "<id-1>",
+          "is_active": true,
+          "name": "Cash",
+          "normal_balance": "DEBIT",
+          "subtype": "Current Asset",
+          "type": "ASSET",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "1020",
+          "created_at": "<ts>",
+          "description": "Customer balances due",
+          "id": "<id-2>",
+          "is_active": true,
+          "name": "Accounts Receivable",
+          "normal_balance": "DEBIT",
+          "subtype": "Current Asset",
+          "type": "ASSET",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "1030",
+          "created_at": "<ts>",
+          "description": "Lumber, hardware, and building materials on hand",
+          "id": "<id-3>",
+          "is_active": true,
+          "name": "Inventory",
+          "normal_balance": "DEBIT",
+          "subtype": "Current Asset",
+          "type": "ASSET",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "1040",
+          "created_at": "<ts>",
+          "description": "Insurance, deposits, prepaid rent",
+          "id": "<id-4>",
+          "is_active": true,
+          "name": "Prepaid Expenses",
+          "normal_balance": "DEBIT",
+          "subtype": "Current Asset",
+          "type": "ASSET",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "1500",
+          "created_at": "<ts>",
+          "description": "Delivery trucks, forklifts, yard equipment",
+          "id": "<id-5>",
+          "is_active": true,
+          "name": "Trucks & Equipment",
+          "normal_balance": "DEBIT",
+          "subtype": "Fixed Asset",
+          "type": "ASSET",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "1510",
+          "created_at": "<ts>",
+          "description": "Contra-asset for depreciation",
+          "id": "<id-6>",
+          "is_active": true,
+          "name": "Accum. Depreciation",
+          "normal_balance": "CREDIT",
+          "subtype": "Fixed Asset",
+          "type": "ASSET",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "2010",
+          "created_at": "<ts>",
+          "description": "Vendor balances owed",
+          "id": "<id-7>",
+          "is_active": true,
+          "name": "Accounts Payable",
+          "normal_balance": "CREDIT",
+          "subtype": "Current Liability",
+          "type": "LIABILITY",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "2020",
+          "created_at": "<ts>",
+          "description": "Collected sales tax awaiting remittance",
+          "id": "<id-8>",
+          "is_active": true,
+          "name": "Sales Tax Payable",
+          "normal_balance": "CREDIT",
+          "subtype": "Current Liability",
+          "type": "LIABILITY",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "2030",
+          "created_at": "<ts>",
+          "description": "Wages, utilities, and other accruals",
+          "id": "<id-9>",
+          "is_active": true,
+          "name": "Accrued Expenses",
+          "normal_balance": "CREDIT",
+          "subtype": "Current Liability",
+          "type": "LIABILITY",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "2200",
+          "created_at": "<ts>",
+          "description": "Customer prepayments held until applied to AR",
+          "id": "<id-10>",
+          "is_active": true,
+          "name": "Customer Deposits",
+          "normal_balance": "CREDIT",
+          "subtype": "Current Liability",
+          "type": "LIABILITY",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "3010",
+          "created_at": "<ts>",
+          "description": "Owner investment and retained earnings",
+          "id": "<id-11>",
+          "is_active": true,
+          "name": "Owner Equity",
+          "normal_balance": "CREDIT",
+          "subtype": "Owner Equity",
+          "type": "EQUITY",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "3020",
+          "created_at": "<ts>",
+          "description": "Cumulative net income retained",
+          "id": "<id-12>",
+          "is_active": true,
+          "name": "Retained Earnings",
+          "normal_balance": "CREDIT",
+          "subtype": "Retained Earnings",
+          "type": "EQUITY",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "4010",
+          "created_at": "<ts>",
+          "description": "Revenue from material sales",
+          "id": "<id-13>",
+          "is_active": true,
+          "name": "Sales Revenue",
+          "normal_balance": "CREDIT",
+          "subtype": "Operating",
+          "type": "REVENUE",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "4020",
+          "created_at": "<ts>",
+          "description": "Revenue from delivery charges",
+          "id": "<id-14>",
+          "is_active": true,
+          "name": "Delivery Revenue",
+          "normal_balance": "CREDIT",
+          "subtype": "Operating",
+          "type": "REVENUE",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "5010",
+          "created_at": "<ts>",
+          "description": "Direct cost of materials sold",
+          "id": "<id-15>",
+          "is_active": true,
+          "name": "Cost of Goods Sold",
+          "normal_balance": "DEBIT",
+          "subtype": "COGS",
+          "type": "EXPENSE",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "5020",
+          "created_at": "<ts>",
+          "description": "Rent, utilities, wages, and general overhead",
+          "id": "<id-16>",
+          "is_active": true,
+          "name": "Operating Expenses",
+          "normal_balance": "DEBIT",
+          "subtype": "Operating",
+          "type": "EXPENSE",
+          "updated_at": "<ts>"
+        },
+        {
+          "balance": 0,
+          "code": "5030",
+          "created_at": "<ts>",
+          "description": "Till drawer counting variances (short = expense, over = credit)",
+          "id": "<id-17>",
+          "is_active": true,
+          "name": "Cash Over/Short",
+          "normal_balance": "DEBIT",
+          "subtype": "Operating",
+          "type": "EXPENSE",
+          "updated_at": "<ts>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "gl.journal_entry.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries",
+      "body": {
+        "entry_date": "<date>",
+        "lines": [
+          {
+            "account_id": "<id-1>",
+            "credit": 0,
+            "debit": 100,
+            "description": "golden debit"
+          },
+          {
+            "account_id": "<id-13>",
+            "credit": 100,
+            "debit": 0,
+            "description": "golden credit"
+          }
+        ],
+        "memo": "golden characterisation entry"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts>",
+        "entry_date": "<ts>",
+        "entry_number": 1,
+        "id": "<id-18>",
+        "lines": [
+          {
+            "account_id": "<id-1>",
+            "credit": 0,
+            "debit": 10000,
+            "description": "golden debit",
+            "id": "<id-19>",
+            "journal_entry_id": "<id-18>"
+          },
+          {
+            "account_id": "<id-13>",
+            "credit": 10000,
+            "debit": 0,
+            "description": "golden credit",
+            "id": "<id-20>",
+            "journal_entry_id": "<id-18>"
+          }
+        ],
+        "memo": "golden characterisation entry",
+        "posted_by": "",
+        "source": "MANUAL",
+        "status": "DRAFT",
+        "total_credit": 10000,
+        "total_debit": 10000,
+        "updated_at": "<ts>"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.post",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-18>/post"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "posted"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.unbalanced",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries",
+      "body": {
+        "entry_date": "<date>",
+        "lines": [
+          {
+            "account_id": "<id-1>",
+            "credit": 0,
+            "debit": 50,
+            "description": "debit only"
+          }
+        ],
+        "memo": "unbalanced"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  }
+]

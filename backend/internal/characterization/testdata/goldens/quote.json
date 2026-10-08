@@ -1,0 +1,108 @@
+[
+  {
+    "name": "quote.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/quotes",
+      "body": {
+        "branch_id": "<id-1>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "lines": [
+          {
+            "description": "2x4x8 SPF Premium",
+            "product_id": "<id-3>",
+            "quantity": 10,
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-4>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":55,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-5>\",\"quote_id\":\"<id-4>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":10,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":55,\"created_at\":\"<ts>\"}]}\n"
+      }
+    }
+  },
+  {
+    "name": "quote.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes/<id-4>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-1>",
+        "created_at": "<ts>",
+        "customer_id": "<id-2>",
+        "customer_name": "Kelbrook Construction",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "OK",
+        "freight_amount": 0,
+        "id": "<id-4>",
+        "lines": [
+          {
+            "created_at": "<ts>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-5>",
+            "line_total": 55,
+            "product_id": "<id-3>",
+            "quantity": 10,
+            "quote_id": "<id-4>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 55,
+        "updated_at": "<ts>"
+      }
+    }
+  },
+  {
+    "name": "quote.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/quotes?limit=1"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "data": [
+          {
+            "branch_id": "<id-1>",
+            "created_at": "<ts>",
+            "customer_id": "<id-2>",
+            "customer_name": "Kelbrook Construction",
+            "delivery_type": "PICKUP",
+            "exposure_dollars": 0,
+            "exposure_state": "",
+            "freight_amount": 0,
+            "id": "<id-4>",
+            "margin_total": 0,
+            "source": "manual",
+            "state": "DRAFT",
+            "total_amount": 55,
+            "updated_at": "<ts>"
+          }
+        ],
+        "limit": 1,
+        "offset": 0,
+        "total": 21
+      }
+    }
+  }
+]

@@ -1,0 +1,163 @@
+[
+  {
+    "name": "pricing.rules.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/rules"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "category": "Insulation",
+          "created_at": "<ts>",
+          "discount_pct": 10,
+          "expires_at": "<ts>",
+          "id": "<id-1>",
+          "is_active": true,
+          "min_quantity": 10,
+          "name": "Insulation Bundle Deal",
+          "priority": 0,
+          "rule_type": "PROMOTIONAL",
+          "starts_at": "<ts>",
+          "updated_at": "<ts>"
+        },
+        {
+          "category": "Roofing",
+          "created_at": "<ts>",
+          "discount_pct": 5,
+          "expires_at": "<ts>",
+          "id": "<id-2>",
+          "is_active": true,
+          "min_quantity": 0,
+          "name": "Spring Roofing Promo",
+          "priority": 0,
+          "rule_type": "PROMOTIONAL",
+          "starts_at": "<ts>",
+          "updated_at": "<ts>"
+        },
+        {
+          "category": "Hardware",
+          "created_at": "<ts>",
+          "discount_pct": 10,
+          "expires_at": "<ts>",
+          "id": "<id-3>",
+          "is_active": true,
+          "min_quantity": 200,
+          "name": "Hardware Bulk 200+",
+          "priority": 0,
+          "rule_type": "QUANTITY_BREAK",
+          "starts_at": "<ts>",
+          "updated_at": "<ts>"
+        },
+        {
+          "category": "Sheet Goods",
+          "created_at": "<ts>",
+          "discount_pct": 5,
+          "expires_at": "<ts>",
+          "id": "<id-4>",
+          "is_active": true,
+          "margin_floor_pct": 20,
+          "min_quantity": 50,
+          "name": "Sheet Goods Qty Break 50+",
+          "priority": 0,
+          "rule_type": "QUANTITY_BREAK",
+          "starts_at": "<ts>",
+          "updated_at": "<ts>"
+        },
+        {
+          "category": "Lumber",
+          "created_at": "<ts>",
+          "discount_pct": 15,
+          "expires_at": "<ts>",
+          "id": "<id-5>",
+          "is_active": true,
+          "margin_floor_pct": 15,
+          "min_quantity": 500,
+          "name": "Lumber Qty Break 500+",
+          "priority": 0,
+          "rule_type": "QUANTITY_BREAK",
+          "starts_at": "<ts>",
+          "updated_at": "<ts>"
+        },
+        {
+          "category": "Lumber",
+          "created_at": "<ts>",
+          "discount_pct": 10,
+          "expires_at": "<ts>",
+          "id": "<id-6>",
+          "is_active": true,
+          "margin_floor_pct": 20,
+          "min_quantity": 100,
+          "name": "Lumber Qty Break 100+",
+          "priority": 0,
+          "rule_type": "QUANTITY_BREAK",
+          "starts_at": "<ts>",
+          "updated_at": "<ts>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "pricing.rule.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pricing/rules",
+      "body": {
+        "discount_pct": 5,
+        "min_quantity": 100,
+        "name": "Golden quantity break",
+        "priority": 5,
+        "product_id": "<id-7>",
+        "rule_type": "QUANTITY_BREAK"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-8>\",\"name\":\"Golden quantity break\",\"rule_type\":\"QUANTITY_BREAK\",\"product_id\":\"<id-7>\",\"discount_pct\":5,\"min_quantity\":100,\"is_active\":false,\"priority\":5,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+      }
+    }
+  },
+  {
+    "name": "pricing.calculate",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/calculate?customer_id=<id-9>&product_id=<id-7>&quantity=10"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "details": "Gold Tier (15%)",
+        "discount_pct": 15,
+        "final_price": 4.675,
+        "original_price": 5.5,
+        "product_id": "<id-7>",
+        "source": "TIER"
+      }
+    }
+  },
+  {
+    "name": "pricing.calculate.missing_params",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/calculate"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  }
+]

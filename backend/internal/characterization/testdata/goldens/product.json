@@ -1,0 +1,193 @@
+[
+  {
+    "name": "product.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "average_unit_cost": 3.5,
+        "base_price": 5.5,
+        "commission_rate": 0,
+        "created_at": "<ts>",
+        "description": "2x4x8 SPF Premium",
+        "geometry_source": "parametric",
+        "height_in": 1.5,
+        "id": "<id-1>",
+        "length_in": 96,
+        "reorder_point": 200,
+        "reorder_qty": 500,
+        "sku": "LUM-248-PREM",
+        "stackable": true,
+        "target_margin": 0,
+        "total_allocated": 0,
+        "total_quantity": 385,
+        "uom_primary": "PCS",
+        "upc": null,
+        "updated_at": "<ts>",
+        "vendor": "Gable Lumber & Supply",
+        "vendor_id": null,
+        "weight_lbs": 9,
+        "width_in": 3.5
+      }
+    }
+  },
+  {
+    "name": "product.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products?limit=3"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "data": [
+          {
+            "average_unit_cost": 15.5,
+            "base_price": 23.25,
+            "commission_rate": 0,
+            "created_at": "<ts>",
+            "description": "Flashing J 6 X 6 X 10",
+            "geometry_source": "parametric",
+            "height_in": 6,
+            "id": "<id-2>",
+            "length_in": 120,
+            "reorder_point": 20,
+            "reorder_qty": 50,
+            "sku": "CORN2006",
+            "stackable": true,
+            "target_margin": 0,
+            "total_allocated": 0,
+            "total_quantity": 303,
+            "uom_primary": "EA",
+            "upc": null,
+            "updated_at": "<ts>",
+            "vendor": "Gable Lumber & Supply",
+            "vendor_id": null,
+            "weight_lbs": 3,
+            "width_in": 6
+          },
+          {
+            "average_unit_cost": 3.5,
+            "base_price": 5.25,
+            "commission_rate": 0,
+            "created_at": "<ts>",
+            "description": "Flashing Z Bar 3/4 X 10'",
+            "geometry_source": "parametric",
+            "height_in": 3,
+            "id": "<id-3>",
+            "length_in": 120,
+            "reorder_point": 30,
+            "reorder_qty": 60,
+            "sku": "CORN2009",
+            "stackable": true,
+            "target_margin": 0,
+            "total_allocated": 0,
+            "total_quantity": 966,
+            "uom_primary": "EA",
+            "upc": null,
+            "updated_at": "<ts>",
+            "vendor": "Gable Lumber & Supply",
+            "vendor_id": null,
+            "weight_lbs": 1.5,
+            "width_in": 0.75
+          },
+          {
+            "average_unit_cost": 5.75,
+            "base_price": 8.65,
+            "commission_rate": 0,
+            "created_at": "<ts>",
+            "description": "Silicone Clear Caulk",
+            "geometry_source": null,
+            "height_in": null,
+            "id": "<id-4>",
+            "length_in": null,
+            "reorder_point": 40,
+            "reorder_qty": 80,
+            "sku": "CORNCLEAR",
+            "stackable": null,
+            "target_margin": 0,
+            "total_allocated": 0,
+            "total_quantity": 404,
+            "uom_primary": "EA",
+            "upc": null,
+            "updated_at": "<ts>",
+            "vendor": "Okanagan Hardware Distribution",
+            "vendor_id": null,
+            "weight_lbs": 0.8,
+            "width_in": null
+          }
+        ],
+        "limit": 3,
+        "offset": 0,
+        "total": 68
+      }
+    }
+  },
+  {
+    "name": "product.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/products",
+      "body": {
+        "base_price": 4.25,
+        "description": "Golden harness stud",
+        "reorder_point": 10,
+        "reorder_qty": 50,
+        "sku": "GOLD-HARNESS-2X4",
+        "uom_primary": "PCS"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-5>\",\"sku\":\"GOLD-HARNESS-2X4\",\"description\":\"Golden harness stud\",\"uom_primary\":\"PCS\",\"base_price\":4.25,\"vendor\":null,\"vendor_id\":null,\"upc\":null,\"weight_lbs\":0,\"length_in\":null,\"width_in\":null,\"height_in\":null,\"stackable\":null,\"geometry_source\":null,\"reorder_point\":10,\"reorder_qty\":50,\"total_quantity\":0,\"total_allocated\":0,\"average_unit_cost\":0,\"target_margin\":0,\"commission_rate\":0,\"created_at\":\"<ts>\",\"updated_at\":\"<ts>\"}\n"
+      }
+    }
+  },
+  {
+    "name": "product.get.bad_uuid",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "product.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/products/<id-7>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  }
+]

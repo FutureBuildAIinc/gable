@@ -1,0 +1,99 @@
+[
+  {
+    "name": "purchase_order.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/purchase-orders",
+      "body": {
+        "lines": [
+          {
+            "cost": 24,
+            "description": "golden sheet goods",
+            "product_id": "<id-1>",
+            "quantity": 20
+          }
+        ],
+        "vendor_id": "<id-2>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-3>",
+        "created_at": "<ts>",
+        "id": "<id-4>",
+        "lines": [
+          {
+            "cost": 24,
+            "description": "golden sheet goods",
+            "id": "<id-5>",
+            "po_id": "<id-4>",
+            "product_id": "<id-1>",
+            "qty_received": 0,
+            "quantity": 20
+          }
+        ],
+        "source": "MANUAL",
+        "status": "DRAFT",
+        "updated_at": "<ts>",
+        "vendor_id": "<id-2>"
+      }
+    }
+  },
+  {
+    "name": "purchase_order.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/purchase-orders/<id-4>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-3>",
+        "created_at": "<ts>",
+        "id": "<id-4>",
+        "lines": [
+          {
+            "cost": 24,
+            "description": "golden sheet goods",
+            "id": "<id-5>",
+            "po_id": "<id-4>",
+            "product_id": "<id-1>",
+            "qty_received": 0,
+            "quantity": 20
+          }
+        ],
+        "source": "MANUAL",
+        "status": "DRAFT",
+        "updated_at": "<ts>",
+        "vendor_id": "<id-2>"
+      }
+    }
+  },
+  {
+    "name": "purchase_order.create.bad_vendor",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/purchase-orders",
+      "body": {
+        "lines": [],
+        "vendor_id": "not-a-uuid"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  }
+]
