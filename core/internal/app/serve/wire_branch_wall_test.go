@@ -84,6 +84,12 @@ type wallFixture struct {
 
 func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixture {
 	t.Helper()
+	// Callers take the shared outbox lock before this fixture: the wall's
+	// route calls (a location create, a product write) run through the serve
+	// wiring, which records outbox events, and must not interleave with
+	// another package's feed assertions. The lock cannot live here: a caller
+	// that already holds it (the orders wall) would open a second session and
+	// self-deadlock on the advisory lock.
 	ctx := context.Background()
 	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New(),
 		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
@@ -270,6 +276,7 @@ func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, bran
 }
 
 func TestBranchWall_ServeWiring(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A, B := f.branchA.String(), f.branchB.String()
@@ -412,6 +419,7 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 // so a bound caller reaches any location (the intended single branch
 // behaviour, not a hole: there is one branch).
 func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, false)
 	body := fmt.Sprintf(`{"product_id":%q,"location_id":%q,"quantity":5,"reason":"t"}`, f.productID, f.yardB)
@@ -452,6 +460,7 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 // methods, the real role guards and the real BranchMiddleware; a route that
 // loses its record check fails here.
 func TestBranchWall_PathIDRecords(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -578,6 +587,7 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 // context branch and a 403 with none (its grants, none granted none), and
 // can read, print and email only its own branch's records.
 func TestBranchWall_DocumentRoutes(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -614,6 +624,7 @@ func TestBranchWall_DocumentRoutes(t *testing.T) {
 // branch or, with none, through its grants; a bound user with no grants reads
 // none; an administrator without a header reads every branch's.
 func TestBranchWall_MatchingExceptions(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -658,6 +669,7 @@ func TestBranchWall_MatchingExceptions(t *testing.T) {
 // branches only (ADR 0007 section 2.3, ADR 0006 7.1), and a branch read by id
 // is held to the record rule: a branch the caller may not target is a 403.
 func TestBranchWall_CatalogReads(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A, B := f.branchA.String(), f.branchB.String()

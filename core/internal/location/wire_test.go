@@ -124,17 +124,39 @@ func TestBranchListEnvelopeAndRevision(t *testing.T) {
 	if list.body["limit"] != json.Number("1") {
 		t.Fatalf("limit = %v", list.body["limit"])
 	}
+	// The created branch appears on the first page whose window covers its
+	// created_at. Another package's concurrent branch create (a wall fixture
+	// seeds branches through the whole suite run) can commit between this
+	// test's create and its read with a later created_at, so "first page"
+	// alone is not stable; the cursor walk finding it within the total is.
 	found := false
-	for _, it := range list.body["items"].([]any) {
-		if it.(map[string]any)["id"] == id {
-			found = true
-			if it.(map[string]any)["type"] != "branch" {
-				t.Fatalf("type = %v, want lowercase branch", it.(map[string]any)["type"])
+	checkRow := func(items []any) bool {
+		for _, it := range items {
+			m := it.(map[string]any)
+			if m["id"] == id {
+				found = true
+				if m["type"] != "branch" {
+					t.Fatalf("type = %v, want lowercase branch", m["type"])
+				}
 			}
 		}
+		return found
 	}
-	if !found {
-		t.Fatalf("the created branch is not on the first page: %s", list.raw)
+	if checkRow(list.body["items"].([]any)) {
+		// nothing more to walk
+	} else {
+		cursor, _ := list.body["next_cursor"].(string)
+		for pages := 0; cursor != "" && pages < 20 && !found; pages++ {
+			next := f.do("GET", "/api/v1/branches?limit=1&include=total&cursor="+cursor, nil)
+			if next.status != http.StatusOK {
+				t.Fatalf("walk page: %d %s", next.status, next.raw)
+			}
+			checkRow(next.body["items"].([]any))
+			cursor, _ = next.body["next_cursor"].(string)
+		}
+		if !found {
+			t.Fatalf("the created branch is not served by the walk: %s", list.raw)
+		}
 	}
 
 	// The write's preconditions.
@@ -383,8 +405,16 @@ func TestLocationListCursorWalk(t *testing.T) {
 		}
 		cursor = next
 	}
-	if json.Number(strconv.Itoa(len(seen))) != total {
-		t.Fatalf("the walk served %d rows while include=total says %v", len(seen), total)
+	// include=total is a snapshot of its own query; on the shared test
+	// database another package's location create can commit between the
+	// total read and the walk, so the walk serves AT LEAST the total, never
+	// fewer, and never a row twice (checked above).
+	totalN, err := strconv.ParseInt(string(total.(json.Number)), 10, 64)
+	if err != nil {
+		t.Fatalf("total %v: %v", total, err)
+	}
+	if int64(len(seen)) < totalN {
+		t.Fatalf("the walk served %d rows while include=total says %d", len(seen), totalN)
 	}
 	for _, id := range ids {
 		if !seen[id] {

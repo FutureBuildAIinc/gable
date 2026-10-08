@@ -248,6 +248,7 @@ func TestKitComponentsPut_RequiresTheProductRevision(t *testing.T) {
 // TestKitComponentsPut_RepeatedComponentIsA400: one component twice in a
 // list is a field error naming the second entry, never a database fault.
 func TestKitComponentsPut_RepeatedComponentIsA400(t *testing.T) {
+	testutil.LockOutboxTables(t) // the fixture's creates write outbox events
 	f := newKitFixture(t, nil, testutil.RequireDB(t))
 	kitID, compA, compB, _ := f.createKit()
 	defer f.cleanupKit(kitID, compA, compB)
