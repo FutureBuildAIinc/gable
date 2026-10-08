@@ -7,6 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { MapPin, Plus, Minus, ArrowRightLeft, Loader2, Warehouse } from 'lucide';
 import { InventoryService } from '../../../services/InventoryService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import { formatQuantity, parseScaled } from '../../../lib/money.ts';
 import type { Inventory } from '../../../types/product.ts';
 
 @customElement('gable-product-stock-tab')
@@ -63,12 +64,18 @@ export class GableProductStockTab extends LitElement {
         }
     }
 
+    // The levels wire carries scale 4 decimal strings (C3-1b); the sums run
+    // on the scaled integers and divide once at the end.
+    private sumLevels(field: 'quantity' | 'allocated'): number {
+        return this.inventory.reduce((sum, i) => sum + (parseScaled(i[field], 4) ?? 0), 0) / 10000;
+    }
+
     private get totalQty(): number {
-        return this.inventory.reduce((sum, i) => sum + (i.quantity || 0), 0);
+        return this.sumLevels('quantity');
     }
 
     private get totalAlloc(): number {
-        return this.inventory.reduce((sum, i) => sum + (i.allocated || 0), 0);
+        return this.sumLevels('allocated');
     }
 
     private _getStockColorClass(color: string): string {
@@ -143,28 +150,28 @@ export class GableProductStockTab extends LitElement {
                                 </thead>
                                 <tbody class="divide-y divide-white/5">
                                     ${this.inventory.map(inv => {
-                                        const avail = (inv.quantity || 0) - (inv.allocated || 0);
+                                        const availNeg = (parseScaled(inv.available, 4) ?? 0) < 0;
                                         return html`
                                             <tr class="hover:bg-white/5 transition-colors">
                                                 <td class="px-5 py-3">
                                                     <div class="flex items-center gap-2">
                                                         ${icon(MapPin, 16, 'w-4 h-4 text-zinc-500')}
-                                                        <span class="text-white">${inv.location_name || inv.location || 'Unknown'}</span>
+                                                        <span class="text-white">${inv.location_name || 'Unknown'}</span>
                                                     </div>
                                                 </td>
-                                                <td class="px-5 py-3 text-right font-mono text-white">${inv.quantity.toLocaleString()}</td>
-                                                <td class="px-5 py-3 text-right font-mono text-amber-400">${(inv.allocated || 0).toLocaleString()}</td>
-                                                <td class="px-5 py-3 text-right font-mono font-bold ${avail < 0 ? 'text-rose-500' : 'text-emerald-400'}">
-                                                    ${avail.toLocaleString()}
+                                                <td class="px-5 py-3 text-right font-mono text-white">${formatQuantity(inv.quantity)}</td>
+                                                <td class="px-5 py-3 text-right font-mono text-amber-400">${formatQuantity(inv.allocated)}</td>
+                                                <td class="px-5 py-3 text-right font-mono font-bold ${availNeg ? 'text-rose-500' : 'text-emerald-400'}">
+                                                    ${formatQuantity(inv.available)}
                                                 </td>
                                                 <td class="px-5 py-3 text-right">
                                                     <div class="flex items-center justify-end gap-1">
                                                         <button
-                                                            @click=${() => this._openAdjustModal(inv.location_id || inv.id, inv.location_name || inv.location)}
+                                                            @click=${() => this._openAdjustModal(inv.location_id || inv.id, inv.location_name)}
                                                             class="p-1.5 rounded-md hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
                                                             title="Adjust Stock"
                                                         >
-                                                            ${icon(ArrowRightLeft, 16, 'w-4 h-4')}
+                                                            ${icon(ArrowRightLeft, 16, 'w-4 h-4 text-zinc-400')}
                                                         </button>
                                                     </div>
                                                 </td>

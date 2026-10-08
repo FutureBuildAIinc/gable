@@ -125,7 +125,8 @@ var modelBoundSchemas = []struct {
 	{"DeliveryRouteLeg", delivery.RouteLeg{}},
 	{"DeliveryRouteOptimizationResult", delivery.RouteOptimizationResult{}},
 	// inventory
-	{"Inventory", inventory.Inventory{}},
+	{"InventoryLevel", inventory.Level{}},
+	{"InventoryProductSummary", inventory.ProductSummary{}},
 	// deposits
 	{"Deposit", deposit.CustomerDeposit{}},
 	{"DepositApplication", deposit.DepositApplication{}},

@@ -811,11 +811,27 @@ func TestBranchWall_QuoteListGrants(t *testing.T) {
 	}
 }
 
-// The inventory levels list is filtered by the caller's branches like the
-// module's writes: a warehouse user held to branch A reads only branch A's
-// rows, through its context branch or, with none, through its grants; a bound
-// user with no grants reads none; an administrator without a header reads
-// every branch's.
+// invLevelPage is the envelope the inventory levels list answers (ADR 0006
+// 7.2), with the one row shape the wall test reads.
+type invLevelPage struct {
+	Items []struct {
+		LocationID *string `json:"location_id"`
+		Location   string  `json:"location_name"`
+		Available  string  `json:"available"`
+		UOM        string  `json:"uom"`
+		ProductID  string  `json:"product_id"`
+	} `json:"items"`
+	NextCursor *string `json:"next_cursor"`
+	Limit      int     `json:"limit"`
+}
+
+// The inventory levels list is the contract's envelope (ADR 0006 7.2) and is
+// filtered by the caller's branches like the module's writes: a warehouse user
+// held to branch A reads only branch A's rows, through its context branch or,
+// with none, through its grants; a bound user with no grants reads none (an
+// empty page, still the envelope); an administrator without a header reads
+// every branch's. Every row carries `available` and `uom` beside the
+// quantities, in the product's stocking unit.
 func TestBranchWall_InventoryListGrants(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
@@ -829,7 +845,7 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		{f.yardB, "wl-inv-b-" + f.yardB.String()[:8]},
 	} {
 		if _, err := db.Pool.Exec(context.Background(),
-			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, 5)`,
+			`INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, $3, 5, 2)`,
 			f.productID, r.yard, r.name); err != nil {
 			t.Fatalf("seed inventory: %v", err)
 		}
@@ -847,28 +863,64 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		t.Fatalf("seed legacy inventory: %v", err)
 	}
 
+	list := func(role, sub, header string) invLevelPage {
+		t.Helper()
+		status, body := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", role, sub, header)
+		if status != http.StatusOK {
+			t.Fatalf("inventory list as %s/%s: %d %s", role, sub, status, body)
+		}
+		var page invLevelPage
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("inventory list body is not the envelope: %v\n%s", err, body)
+		}
+		if page.Limit == 0 {
+			t.Fatalf("inventory list carries no limit: %s", body)
+		}
+		return page
+	}
+	rowAt := func(page invLevelPage, yard string) bool {
+		for _, it := range page.Items {
+			if it.LocationID != nil && *it.LocationID == yard {
+				if it.Available != "3" || it.UOM != "PCS" || it.ProductID != f.productID.String() {
+					t.Errorf("row at %s carries available %q uom %q product %q, want 3 / PCS / the seeded product",
+						yard, it.Available, it.UOM, it.ProductID)
+				}
+				return true
+			}
+		}
+		return false
+	}
+	legacyIn := func(page invLevelPage) bool {
+		for _, it := range page.Items {
+			if it.LocationID == nil && it.Location == legacyName {
+				return true
+			}
+		}
+		return false
+	}
+
 	for _, c := range []struct {
 		name, role, sub, header string
-		wantA, wantB            bool
-		wantLegacy              bool
+		wantRows                 int
+		wantA, wantB             bool
+		wantLegacy               bool
 	}{
-		{"warehouse, header A", "warehouse", "u-a", A, true, false, false},
-		{"warehouse, no header", "warehouse", "u-a", "", true, false, false},
-		{"warehouse u-none, no header", "warehouse", "u-none", "", false, false, false},
-		{"admin, no header", "admin", "boss", "", true, true, true},
+		{"warehouse, header A", "warehouse", "u-a", A, 1, true, false, false},
+		{"warehouse, no header", "warehouse", "u-a", "", 1, true, false, false},
+		{"warehouse u-none, no header", "warehouse", "u-none", "", 0, false, false, false},
+		{"admin, no header", "admin", "boss", "", 3, true, true, true},
 	} {
-		status, body := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", c.role, c.sub, c.header)
-		if status != http.StatusOK {
-			t.Errorf("inventory list, %s: %d, want 200", c.name, status)
-			continue
+		page := list(c.role, c.sub, c.header)
+		if len(page.Items) != c.wantRows {
+			t.Errorf("inventory list, %s: %d rows, want %d", c.name, len(page.Items), c.wantRows)
 		}
-		if got := strings.Contains(string(body), f.yardA.String()); got != c.wantA {
+		if got := rowAt(page, f.yardA.String()); got != c.wantA {
 			t.Errorf("inventory list, %s: branch A's row present = %v, want %v", c.name, got, c.wantA)
 		}
-		if got := strings.Contains(string(body), f.yardB.String()); got != c.wantB {
+		if got := rowAt(page, f.yardB.String()); got != c.wantB {
 			t.Errorf("inventory list, %s: branch B's row present = %v, want %v", c.name, got, c.wantB)
 		}
-		if got := strings.Contains(string(body), legacyName); got != c.wantLegacy {
+		if got := legacyIn(page); got != c.wantLegacy {
 			t.Errorf("inventory list, %s: legacy row present = %v, want %v", c.name, got, c.wantLegacy)
 		}
 	}
