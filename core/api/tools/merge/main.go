@@ -305,20 +305,10 @@ func assemble(apiDir string) (*yaml.Node, error) {
 	// names would be two routes the router cannot distinguish.
 	// The router tells two spellings of one shape apart by method (GET
 	// /exemptions/{customerID} beside DELETE /exemptions/{id} is legal), so
-	// the collision is per method.
-	seenTemplates := map[string]string{} // method + shape -> path
-	for i := 0; i+1 < len(paths.Content); i += 2 {
-		path := paths.Content[i].Value
-		shape := templateShape(path)
-		item := paths.Content[i+1]
-		for j := 0; j+1 < len(item.Content); j += 2 {
-			key := item.Content[j].Value + " " + shape
-			if prev, ok := seenTemplates[key]; ok && prev != path {
-				problem("templated path collision: %s vs %s (%s)", prev, path, item.Content[j].Value)
-			} else {
-				seenTemplates[key] = path
-			}
-		}
+	// the collision is per method. ServeMux registers GET as also matching
+	// HEAD, so a GET beside a HEAD on one shape collides too.
+	for _, msg := range templateCollisions(&paths) {
+		problem("%s", msg)
 	}
 
 	// Every templated path parameter is declared, inline or through a
@@ -472,6 +462,42 @@ func tagList(paths *yaml.Node) *yaml.Node {
 		list.Content = append(list.Content, mapping(pair("name", scalar(n))))
 	}
 	return &list
+}
+
+// templateCollisions reports every pair of paths that share a templated shape
+// under different parameter names for the same method. A GET claims HEAD as
+// well, because ServeMux treats it as matching both.
+func templateCollisions(paths *yaml.Node) []string {
+	var out []string
+	seen := map[string]string{} // method + shape -> path
+	for i := 0; i+1 < len(paths.Content); i += 2 {
+		path := paths.Content[i].Value
+		shape := templateShape(path)
+		item := paths.Content[i+1]
+		for j := 0; j+1 < len(item.Content); j += 2 {
+			method := item.Content[j].Value
+			if !httpMethods[method] {
+				continue
+			}
+			claims := []string{method}
+			if method == "get" {
+				claims = append(claims, "head")
+			}
+			reported := false
+			for _, m := range claims {
+				key := m + " " + shape
+				if prev, ok := seen[key]; ok && prev != path {
+					if !reported {
+						out = append(out, fmt.Sprintf("templated path collision: %s vs %s (%s)", prev, path, method))
+						reported = true
+					}
+				} else {
+					seen[key] = path
+				}
+			}
+		}
+	}
+	return out
 }
 
 func templateShape(path string) string {
