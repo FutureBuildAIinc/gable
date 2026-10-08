@@ -84,20 +84,32 @@ func (q *Quantity) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// extendScaleDivisor is the power of ten between the product of two scale
-// 4 values and cents: quantity ten-thousandths times factor ten-thousandths
-// times price ten-thousandths lands at scale 12 of the major unit, and a
-// cent is scale 2, so the divisor is 10^10.
-const extendScaleDivisor = 10_000_000_000
+// extendScaleDivisor is the power of ten between the scaled product and
+// cents: quantity ten-thousandths times price-unit ten-thousandths times
+// price ten-thousandths lands at scale 12 of the major unit, dividing by
+// the sale units' own scale 4 lands at scale 8, and a cent is scale 2, so
+// the divisor carries 10^6.
+const extendScaleDivisor = 1_000_000
 
-// Extend prices one line (ADR 0001 §7a): the quantity, converted from its
-// sale unit into the price unit by factor (factor 1 when the units agree),
-// multiplied by the unit price, rounded once, to cents, half away from
-// zero. The product is exact in big arithmetic until that one rounding;
-// every module prices lines through here and nowhere else.
-func Extend(qty, factor Quantity, price Price) (Cents, error) {
-	n := new(big.Int).Mul(big.NewInt(int64(qty)), big.NewInt(int64(factor)))
+// Extend prices one line (ADR 0001 §7a). The conversion between the line's
+// sale unit and its price unit is the pair (uomQty, priceUomQty), the wire
+// fields uom_qty and price_uom_qty: uomQty of the sale unit is the same
+// goods as priceUomQty of the price unit, 187.5 and 1 for lumber sold by
+// the piece and priced per MBF (187.5 PCS = 1 MBF), 1 and 1 when the units
+// agree. A single scale 4 factor cannot carry such a conversion (1/187.5
+// is 0.0053 at scale 4, half a percent off a whole MBF); the pair holds
+// both sides exactly. The extension is quantity x unit price x priceUomQty
+// / uomQty, rounded once, to cents, half away from zero, exact in big
+// arithmetic until that one rounding; every module prices lines through
+// here and nowhere else. A pair with a zero side is refused: no real
+// conversion has one.
+func Extend(qty, uomQty, priceUomQty Quantity, price Price) (Cents, error) {
+	if uomQty == 0 || priceUomQty == 0 {
+		return 0, errZeroConversion
+	}
+	n := new(big.Int).Mul(big.NewInt(int64(qty)), big.NewInt(int64(priceUomQty)))
 	n.Mul(n, big.NewInt(int64(price)))
+	div := new(big.Int).Mul(big.NewInt(int64(uomQty)), big.NewInt(extendScaleDivisor))
 	neg := n.Sign() < 0
 
 	var mag big.Int
@@ -105,8 +117,8 @@ func Extend(qty, factor Quantity, price Price) (Cents, error) {
 	// Half away from zero: add half the divisor to the magnitude before
 	// the one division, which lands .5 (and only .5 or more) on the
 	// farther side of zero.
-	mag.Add(&mag, big.NewInt(extendScaleDivisor/2))
-	mag.Div(&mag, big.NewInt(extendScaleDivisor))
+	mag.Add(&mag, new(big.Int).Rsh(div, 1))
+	mag.Div(&mag, div)
 	if !mag.IsInt64() {
 		return 0, errOverflow
 	}

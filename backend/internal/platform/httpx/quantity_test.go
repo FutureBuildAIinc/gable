@@ -98,21 +98,23 @@ func TestQuantityWireString(t *testing.T) {
 
 // RULE: on the wire a quantity is a JSON string, never a JSON number: a
 // number in a quantity field does not decode, so no client can send a
-// float where a decimal string is the contract.
+// float where a decimal string is the contract. The conversion between a
+// line's sale unit and its price unit is the pair `uom_qty`, `price_uom_qty`
+// (ADR 0001 §7a): 187.5 PCS = 1 MBF travels as "187.5" and "1".
 func TestQuantityOnTheWireIsAString(t *testing.T) {
 	type line struct {
 		Quantity    Quantity `json:"quantity"`
-		Converts    Quantity `json:"conversion_factor"`
+		UomQty      Quantity `json:"uom_qty"`
+		PriceUomQty Quantity `json:"price_uom_qty"`
 		UnitPrice   Price    `json:"unit_price_ten_thousandths"`
-		PricePerM   Price    `json:"price_per_m_ten_thousandths"`
 		TotalCents  Cents    `json:"total_cents"`
 		IgnoreExtra string   `json:"-"`
 	}
-	out, err := json.Marshal(line{Quantity: 125000, Converts: 10, UnitPrice: 13725, PricePerM: 37500, TotalCents: 375})
+	out, err := json.Marshal(line{Quantity: 125000, UomQty: 1875000, PriceUomQty: 10000, UnitPrice: 13725, TotalCents: 375})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"quantity":"12.5","conversion_factor":"0.001","unit_price_ten_thousandths":13725,"price_per_m_ten_thousandths":37500,"total_cents":375}`
+	want := `{"quantity":"12.5","uom_qty":"187.5","price_uom_qty":"1","unit_price_ten_thousandths":13725,"total_cents":375}`
 	if string(out) != want {
 		t.Errorf("wire form = %s, want %s", out, want)
 	}
@@ -142,10 +144,14 @@ func TestQuantityOnTheWireIsAString(t *testing.T) {
 	}
 }
 
-// RULE (ADR 0001 §7a): the extension of a line is the quantity converted
-// to the price unit, times the unit price, rounded once, to cents, half
+// RULE (ADR 0001 §7a): the extension of a line is the quantity, converted
+// to the price unit through the pair (uomQty of the sale unit = priceUomQty
+// of the price unit), times the unit price, rounded once, to cents, half
 // away from zero. The product is exact until that one rounding; it is
-// computed here, once, for every module.
+// computed here, once, for every module. A single scale 4 factor cannot
+// carry a conversion like 187.5 pieces per thousand board feet (0.0053 at
+// scale 4, half a percent off a whole MBF); the pair holds both sides
+// exactly.
 func TestExtend(t *testing.T) {
 	mustQ := func(s string) Quantity {
 		q, err := ParseQuantity(s)
@@ -155,41 +161,59 @@ func TestExtend(t *testing.T) {
 		return q
 	}
 	cases := []struct {
-		name   string
-		qty    string
-		factor string
-		price  Price
-		want   Cents
+		name        string
+		qty         string
+		uomQty      string
+		priceUomQty string
+		price       Price
+		want        Cents
 	}{
-		{"ten at 1.50 each", "10", "1", 15000, 1500},
-		{"1000 each at 3.75 per M", "1000", "0.001", 37500, 375},
-		{"1600 BF at 450.00 per MBF", "1600", "0.001", 4500000, 72000},
-		{"a credit line", "-100", "1", 15000, -15000},
-		{"a negative price", "100", "1", -15000, -15000},
-		{"half a cent rounds away from zero", "1", "1", 50, 1},
-		{"minus half a cent rounds away from zero", "1", "1", -50, -1},
-		{"exact when the product is whole cents", "4", "1", 125, 5},
-		{"a hundredth of a cent rounds to zero", "1", "1", 1, 0},
-		{"zero quantity", "0", "1", 13725, 0},
-		{"sub cent price on a big quantity", "20000", "1", 1, 200},
+		{"ten at 1.50 each", "10", "1", "1", 15000, 1500},
+		{"1000 each at 3.75 per M", "1000", "1000", "1", 37500, 375},
+		{"1600 BF at 450.00 per MBF", "1600", "1000", "1", 4500000, 72000},
+		{"a whole MBF of pieces at 500.00 per MBF is exact", "187.5", "187.5", "1", 5000000, 50000},
+		{"one piece at 500.00 per MBF rounds to 2.67", "1", "187.5", "1", 5000000, 267},
+		{"24 pieces sold as one bundle at 12.00 per bundle", "24", "24", "1", 120000, 1200},
+		{"two bundles priced per each through 1 BDL = 24 EA", "2", "1", "24", 5000, 2400},
+		{"a credit line", "-100", "1", "1", 15000, -15000},
+		{"a credit line of pieces priced per MBF", "-187.5", "187.5", "1", 5000000, -50000},
+		{"half a cent rounds away from zero", "1", "1", "1", 50, 1},
+		{"minus half a cent rounds away from zero", "1", "1", "1", -50, -1},
+		{"exact when the product is whole cents", "4", "1", "1", 125, 5},
+		{"a hundredth of a cent rounds to zero", "1", "1", "1", 1, 0},
+		{"zero quantity", "0", "1", "1", 13725, 0},
+		{"sub cent price on a big quantity", "20000", "1", "1", 1, 200},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Extend(mustQ(tc.qty), mustQ(tc.factor), tc.price)
+			got, err := Extend(mustQ(tc.qty), mustQ(tc.uomQty), mustQ(tc.priceUomQty), tc.price)
 			if err != nil {
 				t.Fatalf("Extend: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("Extend(%s, %s, %d) = %d cents, want %d", tc.qty, tc.factor, tc.price, got, tc.want)
+				t.Errorf("Extend(%s, %s, %s, %d) = %d cents, want %d",
+					tc.qty, tc.uomQty, tc.priceUomQty, tc.price, got, tc.want)
 			}
 		})
+	}
+}
+
+// RULE: a conversion pair with a zero side is not a conversion; it is
+// refused rather than dividing by zero or pricing the line at nothing.
+func TestExtendRefusesZeroPair(t *testing.T) {
+	one := Quantity(10000)
+	if _, err := Extend(one, 0, one, Price(15000)); err == nil {
+		t.Error("zero sale units extended, want a refusal")
+	}
+	if _, err := Extend(one, one, 0, Price(15000)); err == nil {
+		t.Error("zero price units extended, want a refusal")
 	}
 }
 
 // RULE: a product past the int64 cent range is refused, not wrapped.
 func TestExtendOverflow(t *testing.T) {
 	big := Quantity(9_000_000_000_000_000)
-	if _, err := Extend(big, big, Price(9_000_000_000_000_000)); err == nil {
+	if _, err := Extend(big, big, big, Price(9_000_000_000_000_000)); err == nil {
 		t.Error("overflowing product extended, want a refusal")
 	}
 }

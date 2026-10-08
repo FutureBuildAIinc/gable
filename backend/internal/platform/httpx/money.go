@@ -181,10 +181,11 @@ type parseError string
 func (e parseError) Error() string { return string(e) }
 
 const (
-	errNotADecimal   parseError = "not a plain decimal number"
-	errBeyondScale   parseError = "carries precision beyond the fixed scale"
-	errOverflow      parseError = "beyond the range of a 64-bit integer at this scale"
-	errNullIsNotZero parseError = "the field is required and null is not zero; a field documented optional is the pointer type"
+	errNotADecimal    parseError = "not a plain decimal number"
+	errBeyondScale    parseError = "carries precision beyond the fixed scale"
+	errOverflow       parseError = "beyond the range of a 64-bit integer at this scale"
+	errZeroConversion parseError = "the conversion pair has a zero side"
+	errNullIsNotZero  parseError = "the field is required and null is not zero; a field documented optional is the pointer type"
 )
 
 // ParseCents parses a database decimal string into Cents exactly. The
