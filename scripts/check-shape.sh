@@ -62,9 +62,17 @@ def fail(msg):
 
 def scalar(v):
     v = v.strip()
-    if v.startswith("[") and v.endswith("]"):
+    if v.startswith("[") or v.endswith("]"):
+        if not (v.startswith("[") and v.endswith("]")) or v.count("[") != 1 or v.count("]") != 1:
+            fail("manifest.yaml has an unbalanced or nested bracket list: %s" % v)
         inner = v[1:-1].strip()
-        return [x.strip() for x in inner.split(",")] if inner else []
+        items = [x.strip() for x in inner.split(",")] if inner else []
+        if "" in items:
+            fail("manifest.yaml has an empty item in the list: %s" % v)
+        dup = sorted({x for x in items if items.count(x) > 1})
+        if dup:
+            fail("manifest.yaml has a duplicate list item %s in: %s" % (", ".join(dup), v))
+        return items
     if v == "true":
         return True
     if v == "false":
