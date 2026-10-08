@@ -71,6 +71,18 @@ jobs:
         working-directory: core
         run: go vet ./...
 
+      # Contract gates (R1-7): the assembled document and the pending list
+      # are generated files. An edited fragment without a regeneration, or
+      # a shrunk pending list without a remerge, fails here before the test
+      # suite runs the coverage gate in internal/apicontract.
+      - name: Contract assembly drift
+        working-directory: core
+        run: go run ./api/tools/merge -check
+
+      - name: Contract pending drift
+        working-directory: core
+        run: go run ./cmd/pending
+
       - name: Build
         working-directory: core
         run: go build ./...
@@ -141,7 +153,23 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: web/apps/desk/package-lock.json
+          cache-dependency-path: |
+            web/apps/desk/package-lock.json
+            web/packages/api-client/package-lock.json
+
+      # Generated TypeScript types (R1-7): npm run drift regenerates
+      # src/schema.d.ts from the committed core/api/openapi.yaml in check
+      # mode and fails when the committed types are stale, so a contract
+      # change that never reached the client blocks the merge.
+      - name: API client drift (generated types)
+        working-directory: web/packages/api-client
+        run: |
+          npm ci
+          npm run drift
+
+      - name: API client typecheck
+        working-directory: web/packages/api-client
+        run: npm run typecheck
 
       - name: Install dependencies
         working-directory: web/apps/desk
