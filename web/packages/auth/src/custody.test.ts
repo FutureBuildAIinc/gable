@@ -147,6 +147,42 @@ describe('custody — the sessionStorage handoff', () => {
   })
 })
 
+describe('custody — the handoff value is removed', () => {
+  it('on sign out', () => {
+    const store = memoryStorage()
+    const c = new AuthCustody(store)
+    c.signInWithToken(TOKEN)
+    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(true)
+    c.signOut()
+    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
+  })
+
+  it('on a 401 (onUnauthorized)', () => {
+    const store = memoryStorage()
+    const c = new AuthCustody(store)
+    c.signInWithToken(TOKEN)
+    c.onUnauthorized()
+    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
+    expect(c.session).toBeNull()
+  })
+
+  it('on a 401 through the real fetch client, from the real sessionStorage', async () => {
+    const { fetchWithAuth } = await import('./fetchClient')
+    const { authCustody } = await import('./custody')
+    authCustody.signInWithToken(TOKEN)
+    expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).not.toBeNull()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
+    await expect(fetchWithAuth('/api/v1/quotes')).rejects.toThrow()
+    vi.unstubAllGlobals()
+    expect(sessionStorage.getItem(SESSION_HANDOFF_KEY)).toBeNull()
+  })
+
+  it('and no other module can read the key: the package does not export it', async () => {
+    const pkg = await import('./index')
+    expect('SESSION_HANDOFF_KEY' in pkg).toBe(false)
+  })
+})
+
 describe('custody — dev sign-in', () => {
   it('is refused in a build without VITE_AUTH_DEV_MODE', () => {
     authConfig.devMode = false

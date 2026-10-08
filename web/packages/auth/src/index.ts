@@ -16,7 +16,6 @@ export {
   authCustody,
   DevModeDisabledError,
   InvalidTokenError,
-  SESSION_HANDOFF_KEY,
   type AuthSession,
   type StorageLike,
 } from './custody.ts';

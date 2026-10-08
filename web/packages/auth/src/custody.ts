@@ -5,12 +5,16 @@
  * JWT custody for Gable's frontends.
  *
  * THE RULE: a bearer token lives in private memory in this module and is
- * never written to localStorage. The only place a session may outlive a
- * document is the handoff key in sessionStorage, and only so the front
- * door can hand a signed-in session to the desk across a full page
- * navigation (the door at / and the desk at /home are separate bundles;
- * an in-memory token alone would die at the navigation). sessionStorage is
- * per tab and dies with it; a credential never lands in persistent storage.
+ * never written to localStorage. One exception, stated plainly: at sign in the
+ * session is also written to sessionStorage (the handoff key below), so the
+ * front door can hand it to the desk across a full page navigation (the door
+ * at / and the desk are separate documents, and a desk reload must keep the
+ * session). That copy is readable by ANY script on the origin for the life of
+ * the tab: an XSS flaw in either bundle can take the token. It is tab scoped
+ * and dies with the tab, which is the only thing that makes it better than
+ * localStorage. It is removed on sign out and on any 401, and nothing but this
+ * module reads it. The target is an HttpOnly SameSite=Strict cookie issued by
+ * the API at the cutover; see docs/adr/0004-web-session-custody.md.
  *
  * The record is validated field by field on adoption and dropped outright
  * when it does not parse: a hostile or stale payload buys nothing.
