@@ -1,13 +1,16 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: gable_postgres
+    # The name and the host port are overridable (GABLE_PG_CONTAINER, GABLE_PG_PORT)
+    # for a workstation that already holds a container or a listener under the
+    # defaults; the defaults are unchanged.
+    container_name: ${GABLE_PG_CONTAINER:-gable_postgres}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gable_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gable_password}
       POSTGRES_DB: ${POSTGRES_DB:-gable_db}
     ports:
-      - "127.0.0.1:5434:5432"
+      - "127.0.0.1:${GABLE_PG_PORT:-5434}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -16,6 +19,90 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Migrate and seed run as a one shot service, not in the entrypoint: serve
+  # and worker both start from the same image, and putting migrations in an
+  # entrypoint would race two processes through the same migration files.
+  # One owner runs them once, and serve and worker start only after it exits 0
+  # (service_completed_successfully). The seed TRUNCATEs the transactional
+  # tables (see core/internal/app/seed/seed.go), so every `make up` repaves the
+  # demo data; this stack is for local development and the smoke run only.
+  migrate:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    image: gable-core:local
+    command: ["sh", "-c", "./core migrate && ./core seed"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      DEMO_SEED: "1"
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # `core serve`, one image with migrate and worker.
+  #
+  # !!! AUTH_MODE=dev IS FOR THIS LOCAL STACK ONLY !!!
+  # It switches authentication off: every anonymous caller gets full admin
+  # reach. Never copy this setting to a host anyone else can reach (see
+  # AGENTS.md and SECURITY.md). The stack publishes only on 127.0.0.1.
+  core:
+    image: gable-core:local
+    pull_policy: never
+    command: ["./core", "serve"]
+    environment:
+      AUTH_MODE: dev
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      # The smoke run and the desk make many calls from one address.
+      RATE_LIMIT_PER_MINUTE: "5000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # `core worker`: the outbox drain and the retention purges. It serves no
+  # HTTP, so the image's curl healthcheck is replaced by a process check (the
+  # entrypoint is the only `core` process in the container).
+  worker:
+    image: gable-core:local
+    pull_policy: never
+    command: ["./core", "worker"]
+    environment:
+      AUTH_MODE: dev
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+    healthcheck:
+      test: ["CMD-SHELL", "pidof core >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # web/Dockerfile: nginx serving the front door at / and the desk everywhere
+  # else; /api is proxied to core by the snippet mounted below.
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        # Dev sign in (a display name, no credential) is offered only by a
+        # build made with this; it matches AUTH_MODE=dev on core. Local only.
+        VITE_AUTH_DEV_MODE: "true"
+    image: gable-web:local
+    ports:
+      - "127.0.0.1:${GABLE_WEB_PORT:-8080}:8080"
+    volumes:
+      - ./web/nginx-local-api.conf:/etc/nginx/gable-api.conf:ro
+    depends_on:
+      core:
+        condition: service_healthy
+    restart: unless-stopped
 
 # NOTE: a NATS container used to live here, but no Go code imports a NATS
 # client — the event bus is a future consideration (see

@@ -93,7 +93,7 @@ make vuln             # pinned govulncheck — informational, not a merge gate
 
 - CI runs `go test -race`, not plain `go test`. A data race plain `go test` tolerates turns CI
   red. `make test` uses `-race`; use it.
-- `make test` needs Postgres. `make up` boots it (port **5434** locally, the docker-compose
+- `make test` needs Postgres. `make db` boots it (port **5434** locally, the docker-compose
   mapping — not 5432). Without Docker, `make test-short` is the honest fallback: DB-backed
   tests skip themselves under `-short`.
 - If you added a migration, prove it applies from empty: `make reset-db` (drop, create,

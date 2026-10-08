@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-.PHONY: help up down logs ps pg-shell migrate seed reset-db \
+.PHONY: help up db down smoke logs ps pg-shell migrate seed reset-db \
         build vet test test-short cover \
         contract contract-go contract-ts \
         fe-install fe-typecheck fe-lint fe-test fe-cover fe-build \
@@ -17,7 +17,9 @@ help:
 	@echo "Gable make targets"
 	@echo ""
 	@echo "  Infra"
-	@echo "    up down logs ps pg-shell     docker compose lifecycle"
+	@echo "    up down logs ps pg-shell     the local stack (docker compose)"
+	@echo "    db                           Postgres alone, for running core from source"
+	@echo "    smoke                        the exit test's step 3 against the running stack"
 	@echo "    migrate seed reset-db        database lifecycle"
 	@echo "                                 (seed needs DEMO_SEED=1 — see the Makefile)"
 	@echo ""
@@ -38,20 +40,49 @@ help:
 # ---------------------------------------------------------------------------
 # Infra (Docker)
 # ---------------------------------------------------------------------------
-up:
-	docker compose up -d
+# The whole local stack: Postgres, a migrate and seed step, core serve, core
+# worker and the web image (front door and desk on one origin). AUTH_MODE=dev,
+# local only. Builds one image at a time, then waits until every service is
+# healthy. http://127.0.0.1:$${GABLE_WEB_PORT:-8080}
+#
+# The stack runs in its own compose project (gable-stack), so its Postgres volume
+# is gable-stack_postgres_data and its Postgres container gable_stack_postgres.
+# The seed repaves the demo data on every `make up` and `make down` deletes the
+# volume, so the stack must never share a volume with the Postgres alone
+# workflow (`make db`, whose volume is named after the checkout's directory):
+# that data is never truncated or removed by `make up` or `make down`.
+# Why a separate project and not a guard: a guard has to tell a developer's data
+# from the stack's own, which is a heuristic; two volumes cannot collide.
+STACK_PROJECT ?= gable-stack
+STACK_ENV = COMPOSE_PROJECT_NAME=$(STACK_PROJECT) GABLE_PG_CONTAINER=$${GABLE_PG_CONTAINER:-gable_stack_postgres}
 
+up:
+	$(STACK_ENV) COMPOSE_PARALLEL_LIMIT=1 docker compose up -d --build --wait --wait-timeout 600
+
+# Postgres alone (localhost:5434), for running core from source. Uses the
+# checkout's own compose project and volume, never the stack's.
+db:
+	docker compose up -d --wait postgres
+
+# Stop and remove the stack's containers AND its volume (the stack's Postgres
+# data only; `make db` data is in another volume and is not touched).
 down:
-	docker compose down
+	$(STACK_ENV) docker compose down -v
+
+# The exit test's step 3 against the running stack (scripts/smoke.sh).
+smoke:
+	$(STACK_ENV) bash scripts/smoke.sh
 
 logs:
-	docker compose logs -f
+	$(STACK_ENV) docker compose logs -f
 
 ps:
-	docker compose ps
+	$(STACK_ENV) docker compose ps
 
+# psql in the Postgres alone container (`make db`). For the stack's Postgres:
+# COMPOSE_PROJECT_NAME=gable-stack make pg-shell
 pg-shell:
-	docker exec -it gable_postgres psql -U gable_user -d gable_db
+	docker compose exec postgres psql -U gable_user -d gable_db
 
 # ---------------------------------------------------------------------------
 # Backend lifecycle
@@ -79,11 +110,11 @@ migrate:
 seed:
 	cd core && go run ./cmd/seed
 
-# Nuke + repave the dev database, then migrate and seed. Requires the
-# `gable_postgres` container from docker compose to be running.
+# Nuke + repave the dev database, then migrate and seed. Requires the Postgres
+# from `make db` to be running.
 reset-db:
-	docker exec -i gable_postgres psql -U gable_user -d postgres -c "DROP DATABASE IF EXISTS gable_db;"
-	docker exec -i gable_postgres psql -U gable_user -d postgres -c "CREATE DATABASE gable_db OWNER gable_user;"
+	docker compose exec -T postgres psql -U gable_user -d postgres -c "DROP DATABASE IF EXISTS gable_db;"
+	docker compose exec -T postgres psql -U gable_user -d postgres -c "CREATE DATABASE gable_db OWNER gable_user;"
 	$(MAKE) migrate
 	$(MAKE) seed
 
@@ -96,7 +127,7 @@ build:
 vet:
 	cd core && go vet ./...
 
-# The full suite, exactly as CI runs it. Needs Postgres — `make up && make
+# The full suite, exactly as CI runs it. Needs Postgres — `make db && make
 # migrate` first, or point DATABASE_URL at your own instance.
 test:
 	cd core && go test -race ./...

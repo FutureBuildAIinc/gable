@@ -46,8 +46,8 @@ back so every dealer benefits.
 **Prerequisites:** Docker, Go 1.25+, Node 20+, PostgreSQL 16.
 
 ```bash
-# 1. Boot Postgres (docker compose → localhost:5434)
-make up
+# 1. Boot Postgres alone (docker compose → localhost:5434)
+make db
 
 # 2. Apply migrations
 make migrate
@@ -82,6 +82,19 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 > full access to the ERP, general ledger, AP/AR and payments. It is safe **only**
 > on your own machine against throwaway data, and must **never** be set on a
 > reachable or production deployment — see [SECURITY.md](./SECURITY.md).
+
+## The whole stack in Docker
+
+`make up` builds and starts everything: Postgres, a one shot migrate and seed
+step, `core serve`, `core worker` and the web image (the front door at `/`, the
+desk everywhere else, `/api` proxied to core), then waits until each is healthy.
+Open <http://127.0.0.1:8080>. `make smoke` checks the running stack end to end
+(`scripts/smoke.sh`), and `make down` removes the containers **and** their
+volumes. The stack runs with `AUTH_MODE=dev` and publishes on `127.0.0.1` only:
+local use, never a reachable host. The stack has its own Docker volume
+(compose project `gable-stack`), so `make up`, its seed and `make down` never
+touch the data of a Postgres started with `make db`. If 8080 or 5434 is taken, set `GABLE_WEB_PORT`
+or `GABLE_PG_PORT`.
 
 ## Behind a reverse proxy
 
