@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The installable apps registry, transcribed from pkg/apps (handler.go,
+# registry.go, apps.go) as it behaves today. Quirks the transcription
+# preserves: the list route is open to any authenticated role while the two
+# toggle routes are admin or owner only; both toggles answer the whole
+# catalog; the core and dependency refusals are hand written 409 bodies with
+# lowercase machine codes and no meta block; and a request to a route of a
+# disabled app (millwork, governance) is a 404 with the app_disabled code,
+# declared here as the AppDisabled response the other app fragments reuse.
+paths:
+  /api/v1/apps:
+    get:
+      operationId: appsList
+      tags: [apps]
+      summary: List the app catalog with live enablement
+      description: >-
+        Any authenticated role (the web client builds its navigation from
+        it); no role guard. The catalog is the union of the compiled in
+        manifests and orphaned database rows, sorted by category then name.
+        An empty catalog on a fresh database triggers one self heal sync, so
+        the list is never null.
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppsList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/apps/{key}/enable:
+    post:
+      operationId: appsEnable
+      tags: [apps]
+      summary: Enable an app
+      description: >-
+        Admin or owner only (a 403 for any other role). Every app the target
+        depends on must be enabled, except core dependencies which are always
+        treated as enabled; otherwise the answer is a 409 with the blockers.
+        Answers the full catalog after the change. Enabling an already enabled
+        app succeeds again.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The catalog after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppsList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: >-
+            The key names no compiled in manifest, or the manifest has no
+            registry row. The standard error envelope with the generic text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: >-
+            Either a disabled dependency blocks the enable (the hand written
+            app_dependency_conflict body with the blockers), or the idempotency
+            layer reports an in progress claim (the standard envelope).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsDependencyConflictError"
+                  - $ref: "#/components/schemas/Error"
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/apps/{key}/disable:
+    post:
+      operationId: appsDisable
+      tags: [apps]
+      summary: Disable an app
+      description: >-
+        Admin or owner only (a 403 for any other role). A core app cannot be
+        disabled (409 app_core), and an app that another enabled app depends
+        on cannot be disabled (409 app_dependency_conflict with the dependents
+        as blockers). Disabled apps do not block. Answers the full catalog
+        after the change. The effect on the app's routes follows within the
+        gate cache window.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The catalog after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppsList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: >-
+            The key names no compiled in manifest, or the manifest has no
+            registry row. The standard error envelope with the generic text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: >-
+            A core app (app_core), a dependent enabled app
+            (app_dependency_conflict), or an idempotency in progress claim
+            (the standard envelope).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsCoreConflictError"
+                  - $ref: "#/components/schemas/AppsDependencyConflictError"
+                  - $ref: "#/components/schemas/Error"
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  responses:
+    AppDisabled:
+      description: >-
+        The route belongs to an app that is disabled on this instance. Written
+        by the registry gate before the handler or its role guard runs, in a
+        hand written body with no meta block. Applies to every route of a
+        non core app (millwork and configurator under the millwork key,
+        governance).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppsDisabledError"
+  schemas:
+    AppsManifestStatus:
+      type: object
+      required: [key, name, summary, category, core, depends_on, enabled]
+      description: >-
+        One catalog entry (Go type apps.Status, which embeds apps.Manifest).
+        orphaned is present, and true, only for registry rows with no compiled
+        in manifest; it is omitted otherwise.
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        category:
+          type: string
+        core:
+          type: boolean
+          description: Core apps cannot be disabled.
+        depends_on:
+          type: array
+          items:
+            type: string
+          description: App keys that must be enabled for this app to be enabled.
+        enabled:
+          type: boolean
+        orphaned:
+          type: boolean
+    AppsList:
+      type: object
+      required: [apps]
+      description: The envelope every apps route answers (a map literal in the handler).
+      properties:
+        apps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppsManifestStatus"
+    AppsDisabledError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [app_disabled]
+            message:
+              type: string
+    AppsCoreConflictError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [app_core]
+            message:
+              type: string
+              description: The specific text, for example core apps cannot be disabled followed by the quoted key.
+    AppsDependencyConflictError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, blockers]
+          properties:
+            code:
+              type: string
+              enum: [app_dependency_conflict]
+            message:
+              type: string
+            blockers:
+              type: array
+              items:
+                type: string
+              description: Sorted keys of the disabled dependencies (on enable) or the enabled dependents (on disable).

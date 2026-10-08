@@ -230,6 +230,17 @@ Fragments done (the pattern the rest copy):
 | partner | `partner.yaml` | 3 |
 | health and metrics | `health.yaml` | 4 |
 | uploads | `uploads.yaml` | 1 |
+| admin (tech admin, staff, exposure scan) | `admin.yaml` | 17 |
+| apps registry | `apps.yaml` | 3 |
+| governance | `governance.yaml` | 4 |
+| millwork | `millwork.yaml` | 2 |
+| configurator | `configurator.yaml` | 5 |
+| reporting and reports | `reporting.yaml` | 17 |
+| dashboard | `dashboard.yaml` | 5 |
+| documents | `documents.yaml` | 2 |
+| vision | `vision.yaml` | 1 |
+| parsing | `parsing.yaml` | 1 |
+| a2a purchase order | `a2a.yaml` | 1 |
 | shared components | `_shared.yaml` | 0 |
 
 200 of 345 census routes covered. Pending (in `contract-pending.txt`):

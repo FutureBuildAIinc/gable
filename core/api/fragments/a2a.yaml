@@ -1,0 +1,238 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The inbound A2A purchase order webhook from FB Brain, transcribed from
+# internal/purchase_order/a2a_receiver.go and its mount in
+# internal/app/serve/serve.go. The route is public at the HTTP auth layer
+# ("/api/v1/a2a/" is in publicAPIPaths, so neither the JWT nor the machine key
+# mount runs) and carries its own JWS detached signature check instead. It is
+# mounted only when FB Brain is enabled and FB_BRAIN_PUBLIC_KEY_PATH names a
+# loadable RSA public key; otherwise the path is unregistered and the mux
+# answers its own plain text 404 (declared as a 404 response). The receiver
+# writes its own error body, {"error":{"code","message"}} without the meta
+# object, with upper case codes of its own (VALIDATION_ERROR, UNAUTHORIZED,
+# DUPLICATE, INTERNAL_ERROR); it is not the standard envelope.
+paths:
+  /api/v1/a2a/purchase-order:
+    post:
+      operationId: a2aPurchaseOrderReceive
+      tags: [a2a]
+      summary: Receive a signed create_purchase_order event from FB Brain
+      description: >-
+        Order of checks, exactly as the receiver runs them. (1) The body is
+        read up to 1 MiB; anything beyond that is silently truncated, which
+        makes the signature fail. (2) X-JWS-Signature must be present, else
+        401. (3) X-Idempotency-Key must be present, else 400. (4) The
+        signature must be a compact detached JWS (RS256 only) that verifies
+        over the raw request body with Brain's RSA public key, else 401
+        "invalid JWS signature". (5) The key is looked up in the
+        a2a_inbound_po_log table; a key already logged is a 409 DUPLICATE
+        (the receiver's own check, in addition to the global idempotency
+        layer). (6) The body must be JSON, else 400. (7) An event_type other
+        than create_purchase_order is acknowledged with 200 {"status":
+        "ignored"} and nothing is created. (8) payload must decode into the
+        purchase order payload and its vendor_id must be a UUID, else 400.
+        The purchase order is created through the purchase order service with
+        source A2A, stamped with the branch from the brain_inbound_branch_id
+        system setting (falling back to default_branch_id); a failure is a
+        500. On success the webhook is logged against the idempotency key
+        (a failure to log is only logged, the answer stays 201) and the
+        answer is 201 {"status":"created","po_id"}. The key is recorded only
+        after a successful creation, so a failed attempt can be retried with
+        the same key. The global idempotency layer (the Idempotency-Key or
+        X-Idempotency-Key header) only claims requests that carry an
+        identifiable principal; this route has no JWT, so outside
+        AUTH_MODE=dev the global layer passes it through uncached, and under
+        AUTH_MODE=dev it claims under the dev principal and may answer 409
+        (in progress) or 422 (key reused with a different body) in the
+        standard envelope. There is no role guard and no JWT.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: X-JWS-Signature
+          in: header
+          required: true
+          description: >-
+            A compact detached JWS (header..signature, empty payload segment)
+            signed RS256 over the exact request body bytes, verifiable with
+            the configured Brain public key. A missing header is a 401, an
+            unparseable or non verifying signature is a 401.
+          schema:
+            type: string
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          description: >-
+            The receiver's own duplicate key, checked against the
+            a2a_inbound_po_log table. The same header name is also read by the
+            global idempotency layer as an alias of Idempotency-Key. A missing
+            header is a 400 (after the signature header check, before the
+            signature verification).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: >-
+          The signed body; the signature covers these exact bytes, so a
+          re-serialization breaks it.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/A2aInboundPOWebhook"
+      responses:
+        "200":
+          description: The event type is not create_purchase_order; acknowledged and ignored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aIgnoredResponse"
+        "201":
+          description: The purchase order was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aCreatedResponse"
+        "400":
+          description: >-
+            VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body
+            not JSON, payload not a purchase order payload, or vendor_id not a
+            UUID. The global idempotency layer can also answer 400 in the
+            standard envelope under AUTH_MODE=dev.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/A2aError"
+                  - $ref: "#/components/schemas/Error"
+        "401":
+          description: >-
+            UNAUTHORIZED: missing X-JWS-Signature header, or a signature that
+            does not parse or verify against Brain's public key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aError"
+        "409":
+          description: >-
+            DUPLICATE: the X-Idempotency-Key was already processed (the
+            receiver's body), or, under AUTH_MODE=dev only, the global layer's
+            in progress claim in the standard envelope.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/A2aError"
+                  - $ref: "#/components/schemas/Error"
+        "404":
+          description: >-
+            The route is not mounted (FB Brain disabled or no loadable public
+            key): the mux's own plain text 404, not an error envelope.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500":
+          description: >-
+            INTERNAL_ERROR: the idempotency lookup failed or the purchase
+            order could not be created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2aError"
+components:
+  schemas:
+    A2aInboundPOWebhook:
+      type: object
+      description: >-
+        Go type purchase_order.InboundPOWebhook
+        (github.com/gablelbm/gable/internal/purchase_order), the A2A webhook
+        envelope. No field is validated at this level except that the body is
+        JSON; for event_type create_purchase_order the payload must decode as
+        purchase_order.A2APurchaseOrderPayload (vendor_id, lines,
+        requested_by, project_id, rfq_ref) and vendor_id must be a UUID. Only
+        vendor_id and the line product_id, description, quantity and cost are
+        used to create the order; the other fields are logged or ignored.
+      properties:
+        event_type:
+          type: string
+          description: Only create_purchase_order is processed; any other value is acknowledged and ignored.
+        payload:
+          type: object
+          description: >-
+            For create_purchase_order, purchase_order.A2APurchaseOrderPayload.
+          properties:
+            vendor_id:
+              type: string
+              format: uuid
+            lines:
+              type: array
+              items:
+                $ref: "#/components/schemas/A2aPurchaseOrderLine"
+            requested_by:
+              type: string
+            project_id:
+              type: string
+            rfq_ref:
+              type: string
+        trace_id:
+          type: string
+        idempotency_key:
+          type: string
+          description: Carried in the envelope and ignored; the X-Idempotency-Key header is what the receiver uses.
+        timestamp:
+          type: string
+        iss:
+          type: string
+    A2aPurchaseOrderLine:
+      type: object
+      description: >-
+        Go type purchase_order.A2APurchaseOrderLine
+        (github.com/gablelbm/gable/internal/purchase_order). quantity is a
+        unit quantity and cost a per unit cost in float dollars.
+      properties:
+        product_id:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: number
+        cost:
+          type: number
+    A2aCreatedResponse:
+      type: object
+      description: >-
+        Inline map in ReceiveWebhook with the keys status (created) and po_id.
+      required: [status, po_id]
+      properties:
+        status:
+          type: string
+          enum: [created]
+        po_id:
+          type: string
+          format: uuid
+    A2aIgnoredResponse:
+      type: object
+      description: >-
+        Inline map in ReceiveWebhook with the single key status (ignored).
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ignored]
+    A2aError:
+      type: object
+      description: >-
+        The receiver's own error body (writeError in a2a_receiver.go): code
+        and message only, no meta object.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [VALIDATION_ERROR, UNAUTHORIZED, DUPLICATE, INTERNAL_ERROR]
+            message:
+              type: string

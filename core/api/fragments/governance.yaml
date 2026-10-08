@@ -1,0 +1,205 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The governance (RFC) app, transcribed from internal/governance as it
+# behaves today. Quirks the transcription preserves: the two input structs
+# carry no json tags, so the request keys are the Go field names matched
+# case insensitively and snake_case keys such as problem_statement are
+# silently ignored (the stored value is then empty); an update overwrites
+# every field, so an omitted one becomes empty; status is not validated by
+# the handler; a missing RFC is a 404 on read but a 500 on update; the list
+# is null when there are no RFCs. Every route sits behind the governance app
+# gate (404 app_disabled when the app is off) and the admin or owner guard.
+paths:
+  /api/v1/governance/rfcs:
+    get:
+      operationId: governanceListRfcs
+      tags: [governance]
+      summary: List RFCs
+      description: >-
+        Admin or owner only. Newest first. Not paginated. Answers null, not an
+        empty array, when there are no RFCs.
+      responses:
+        "200":
+          description: Every RFC, or null when none exist.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/GovernanceRFC"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      operationId: governanceCreateRfc
+      tags: [governance]
+      summary: Draft an RFC
+      description: >-
+        Admin or owner only. The content is expanded from a fixed Markdown
+        template (no model is called). The new RFC is always status draft. The
+        request keys are the Go field names matched case insensitively; the
+        snake_case spelling of ProblemStatement, ProposedSolution and AuthorID
+        is ignored without an error.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceCreateRFCRequest"
+      responses:
+        "201":
+          description: The drafted RFC.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceRFC"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/governance/rfcs/{id}:
+    get:
+      operationId: governanceGetRfc
+      tags: [governance]
+      summary: Get an RFC
+      description: >-
+        Admin or owner only. Any lookup failure, including a database fault,
+        answers 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The RFC.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceRFC"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: >-
+            The RFC does not exist (or the lookup failed), or the governance
+            app is disabled (the app_disabled body). The standard envelope in
+            the first case.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/AppsDisabledError"
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      operationId: governanceUpdateRfc
+      tags: [governance]
+      summary: Replace an RFC's editable fields
+      description: >-
+        Admin or owner only. A full overwrite: title, status, problem
+        statement, proposed solution and content are all set from the body, so
+        an omitted key blanks the stored value. Status is not validated by the
+        handler; a value outside the database's allowed set surfaces as a 500.
+        An unknown id is a 500, not a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceUpdateRFCRequest"
+      responses:
+        "200":
+          description: The updated RFC.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceRFC"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  schemas:
+    GovernanceRFC:
+      type: object
+      required: [id, title, status, problem_statement, proposed_solution, content, author_id, created_at, updated_at]
+      description: Go type governance.RFC.
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+          enum: [draft, review, approved, rejected]
+        problem_statement:
+          type: string
+        proposed_solution:
+          type: string
+        content:
+          type: string
+          description: Markdown.
+        author_id:
+          type: [string, "null"]
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GovernanceCreateRFCRequest:
+      type: object
+      description: >-
+        Go type governance.CreateRFCInput, which has no json tags. Keys match
+        the Go field names case insensitively; any other spelling is ignored.
+      properties:
+        Title:
+          type: string
+        ProblemStatement:
+          type: string
+        ProposedSolution:
+          type: string
+        AuthorID:
+          type: [string, "null"]
+          format: uuid
+    GovernanceUpdateRFCRequest:
+      type: object
+      description: >-
+        Go type governance.UpdateRFCInput, which has no json tags. Keys match
+        the Go field names case insensitively; any other spelling is ignored.
+        Every field is written, so an omitted key becomes the empty string.
+      properties:
+        Title:
+          type: string
+        Status:
+          type: string
+          description: Stored as sent; the handler does not check it against the status vocabulary (draft, review, approved, rejected).
+        ProblemStatement:
+          type: string
+        ProposedSolution:
+          type: string
+        Content:
+          type: string

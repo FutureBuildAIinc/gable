@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The printable document routes of internal/document, transcribed from
+# handler.go and service.go as they behave today. Both are GETs that render a
+# PDF with maroto and answer it inline. They are registered with
+# RequireRole("admin", "owner", "sales", "finance") in internal/app/serve/serve.go.
+# Any lookup failure (invoice, order or customer, whatever the underlying
+# error) is a 404; a non UUID id is a 400; a render failure is a 500. The
+# invoice email route registered by the same handler (POST
+# /api/v1/invoices/{id}/email) is not described here.
+paths:
+  /api/v1/documents/print/invoice/{id}:
+    get:
+      operationId: documentsPrintInvoice
+      tags: [documents]
+      summary: Print an invoice as PDF
+      description: >-
+        Renders the invoice and its customer to a PDF and answers the bytes
+        inline (Content-Type application/pdf, Content-Disposition
+        "inline; filename=invoice.pdf"). Requires one of the roles admin,
+        owner, sales or finance. A path id that is not a UUID is a 400; an
+        unknown invoice or an unknown customer on the invoice is a 404 (any
+        lookup error maps to 404); a PDF generation failure is a 500.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The invoice id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=invoice.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/documents/print/pickticket/{id}:
+    get:
+      operationId: documentsPrintPickticket
+      tags: [documents]
+      summary: Print an order pick ticket as PDF
+      description: >-
+        Renders the order and its customer to a pick ticket PDF and answers
+        the bytes inline (Content-Type application/pdf, Content-Disposition
+        "inline; filename=pickticket.pdf"). Requires one of the roles admin,
+        owner, sales or finance. A path id that is not a UUID is a 400; an
+        unknown order or an unknown customer on the order is a 404 (any lookup
+        error maps to 404); a PDF generation failure is a 500.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The order id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The pick ticket as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=pickticket.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components: {}

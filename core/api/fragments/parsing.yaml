@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The material list upload of internal/parsing, transcribed from handler.go,
+# model.go and service.go. Registered with RequireRole("admin", "owner",
+# "sales") in internal/app/serve/serve.go. Quirks preserved: with no AI client
+# configured (or a failed AI call) the handler still answers 200 with a fixed
+# demo list flagged synthetic; items is a nil slice (JSON null) when nothing
+# was extracted; float quantities, confidences and prices are plain numbers.
+paths:
+  /api/v1/parsing/upload:
+    post:
+      operationId: parsingUpload
+      tags: [parsing]
+      summary: Parse a material list upload into catalog matched items
+      description: >-
+        Accepts multipart/form-data with one file field named file: an image,
+        a PDF, a CSV or an xlsx spreadsheet (a name ending .xlsx or .xls whose
+        sniffed type is octet-stream or zip is treated as a spreadsheet and
+        converted to tab separated text before extraction; an unreadable
+        spreadsheet is a 400). The whole request body is capped at 10 MiB by
+        the server's request size middleware and the file read at 10 MiB; a
+        body over the cap, an unparseable form or a missing file field is a
+        400. Requires the role admin, owner or sales. Extracted lines are
+        matched against the whole product catalog. When the AI extractor is
+        unavailable (OPENROUTER_API_KEY unset, the default, or the call
+        failed) the response is still 200 but items is a fixed demo list, not
+        the file's contents, and synthetic is true with synthetic_reason
+        filled. source_image is always a base64 data URI of the real upload.
+        A catalog or extraction failure is a 500.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The material list file (image, PDF, CSV or xlsx), at most 10 MiB.
+      responses:
+        "200":
+          description: The matched items, or a synthetic demo list when extraction is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParsingParseResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  schemas:
+    ParsingParseResponse:
+      type: object
+      description: Go type parsing.ParseResponse (github.com/gablelbm/gable/internal/parsing).
+      required: [items, source_image, parse_time_ms, item_count, synthetic]
+      properties:
+        items:
+          type: [array, "null"]
+          description: Null when no line was extracted (an append built slice).
+          items:
+            $ref: "#/components/schemas/ParsingParsedItem"
+        source_image:
+          type: string
+          description: A data URI, data:<sniffed content type>;base64,<upload bytes>.
+        parse_time_ms:
+          type: integer
+          format: int64
+        item_count:
+          type: integer
+        synthetic:
+          type: boolean
+          description: True when items is the fixed demo list rather than the upload's contents.
+        synthetic_reason:
+          type: string
+          description: Present only when synthetic is true.
+    ParsingParsedItem:
+      type: object
+      description: Go type parsing.ParsedItem (github.com/gablelbm/gable/internal/parsing).
+      required: [raw_text, quantity, uom, confidence, is_special_order]
+      properties:
+        raw_text:
+          type: string
+        matched_product:
+          $ref: "#/components/schemas/ParsingMatchedProduct"
+        quantity:
+          type: number
+        uom:
+          type: string
+        confidence:
+          type: number
+          description: 0.0 to 1.0.
+        is_special_order:
+          type: boolean
+        alternatives:
+          type: array
+          description: Up to three runner up products; absent when none.
+          items:
+            $ref: "#/components/schemas/ParsingMatchedProduct"
+    ParsingMatchedProduct:
+      type: object
+      description: Go type parsing.MatchedProduct (github.com/gablelbm/gable/internal/parsing).
+      required: [product_id, sku, description, uom, base_price]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        uom:
+          type: string
+        base_price:
+          type: number
+          description: Float dollars today.

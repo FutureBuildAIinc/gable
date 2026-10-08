@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The blueprint scan prototype of internal/vision, transcribed from
+# handler.go, model.go and service.go. Despite the name there is no image and
+# no AI provider: the request carries already extracted blueprint text and the
+# service runs regular expressions over it, so there is no unconfigured
+# provider state and no 503. The route is registered with
+# RequireRole("admin", "owner") in internal/app/serve/serve.go.
+paths:
+  /api/v1/vision/scan:
+    post:
+      operationId: visionScan
+      tags: [vision]
+      summary: Compare blueprint text against configurator selections
+      description: >-
+        Takes simulated blueprint text (a JSON string, not an image) and the
+        user's configurator selections, extracts cross section, length, stud
+        length, spacing, species and treatment with regular expressions, and
+        reports mismatches against the selections. The body is capped at
+        1 MiB; an undecodable or oversize body, or an empty blueprint_text, is
+        a 400. Requires the role admin or owner. The response is always 200
+        with mismatches an empty array (never null) when nothing disagrees.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisionBlueprintScanRequest"
+      responses:
+        "200":
+          description: The extracted dimensions and any mismatches.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisionBlueprintScanResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+components:
+  schemas:
+    VisionBlueprintScanRequest:
+      type: object
+      description: >-
+        Go type vision.BlueprintScanRequest
+        (github.com/gablelbm/gable/internal/vision). Unknown fields are
+        ignored.
+      required: [blueprint_text]
+      properties:
+        blueprint_text:
+          type: string
+          minLength: 1
+          description: Simulated text extracted from a blueprint PDF; empty is a 400.
+        config_selections:
+          type: [object, "null"]
+          description: >-
+            The configurator choices, keyed by name. The keys the comparison
+            reads are Species, Dimensions (for example "2x6-10") and
+            Treatment. Absent or null skips the mismatch check.
+          additionalProperties:
+            type: string
+    VisionBlueprintScanResponse:
+      type: object
+      description: Go type vision.BlueprintScanResponse (github.com/gablelbm/gable/internal/vision).
+      required: [extracted_dimensions, mismatches, summary]
+      properties:
+        extracted_dimensions:
+          type: object
+          description: >-
+            Zero or more of cross_section ("2x4"), length ("10'"),
+            stud_length ("10'"), spacing ("16\" OC"), species (SYP, Douglas
+            Fir, Cedar, SPF, Hem-Fir) and treatment ("Treatable").
+          additionalProperties:
+            type: string
+        mismatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisionMismatch"
+        summary:
+          type: string
+    VisionMismatch:
+      type: object
+      description: Go type vision.Mismatch (github.com/gablelbm/gable/internal/vision).
+      required: [field, blueprint_value, config_value, severity, message]
+      properties:
+        field:
+          type: string
+          description: Species, Dimensions, Length or Treatment.
+        blueprint_value:
+          type: string
+        config_value:
+          type: string
+        severity:
+          type: string
+          enum: [warning, error]
+        message:
+          type: string

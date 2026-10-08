@@ -1,0 +1,245 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The executive dashboard (internal/dashboard), transcribed as it behaves
+# today. Every route admits admin, owner and finance and sits behind the
+# branch middleware, so each can also answer the branch middleware's 400 and
+# 403. Quirks the transcription preserves: money is int64 cents here (unlike
+# the reports module's float dollars); each response is cached for 60 seconds
+# per branch; the lists are capped server side and are never null.
+paths:
+  /api/v1/dashboard/summary:
+    get:
+      operationId: dashboardSummary
+      tags: [dashboard]
+      summary: The dashboard KPIs
+      description: >-
+        Roles admin, owner, finance, scoped to the X-Branch-Id branch (all
+        branches for an admin with no header). A failure is a 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The KPIs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/inventory-alerts:
+    get:
+      operationId: dashboardInventoryAlerts
+      tags: [dashboard]
+      summary: Products at or below their reorder point
+      description: >-
+        Roles admin, owner, finance, branch scoped. At most 10 rows, lowest
+        stock first. A product with no inventory row counts as zero stock. A
+        reorder point of NULL counts as 10.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The alerts, an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardInventoryAlert"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/top-customers:
+    get:
+      operationId: dashboardTopCustomers
+      tags: [dashboard]
+      summary: The top five customers by invoiced revenue in the last 30 days
+      description: Roles admin, owner, finance, branch scoped. Customers with no invoiced revenue are left out.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ranked customers, an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardTopCustomer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/order-activity:
+    get:
+      operationId: dashboardOrderActivity
+      tags: [dashboard]
+      summary: The ten newest orders and the 30 day status breakdown
+      description: Roles admin, owner, finance, branch scoped. An order with no customer shows Walk-In as its customer name.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The activity feed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardOrderActivity"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/dashboard/revenue-trend:
+    get:
+      operationId: dashboardRevenueTrend
+      tags: [dashboard]
+      summary: Daily collected revenue for the last seven days
+      description: Roles admin, owner, finance, branch scoped. Oldest day first; a day with no payments is absent, not zero.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The points, an empty array when none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardRevenueTrendPoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    DashboardSummary:
+      type: object
+      description: dashboard.DashboardSummary. Money is int64 cents.
+      required: [today_revenue, today_revenue_change, active_orders, pending_dispatch, outstanding_ar, outstanding_ar_count]
+      properties:
+        today_revenue:
+          type: integer
+          format: int64
+          description: Cents collected today.
+        today_revenue_change:
+          type: number
+          description: Percentage change against yesterday; 0 when yesterday collected nothing.
+        active_orders:
+          type: integer
+        pending_dispatch:
+          type: integer
+        outstanding_ar:
+          type: integer
+          format: int64
+          description: Cents.
+        outstanding_ar_count:
+          type: integer
+    DashboardInventoryAlert:
+      type: object
+      description: dashboard.InventoryAlert.
+      required: [product_id, sku, name, current_qty, reorder_qty, alert_type]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+          description: The product description column.
+        current_qty:
+          type: integer
+        reorder_qty:
+          type: integer
+        alert_type:
+          type: string
+          enum: [LOW_STOCK, OUT_OF_STOCK]
+        location_id:
+          type: string
+          format: uuid
+          description: Absent when the product has no inventory row.
+    DashboardTopCustomer:
+      type: object
+      description: dashboard.TopCustomer. Money is int64 cents.
+      required: [customer_id, customer_name, total_revenue, order_count]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        total_revenue:
+          type: integer
+          format: int64
+          description: Cents.
+        order_count:
+          type: integer
+    DashboardRecentOrder:
+      type: object
+      description: dashboard.RecentOrder. total_amount is int64 cents.
+      required: [order_id, customer_name, total_amount, status, created_at]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        total_amount:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    DashboardOrderActivity:
+      type: object
+      description: dashboard.OrderActivity.
+      required: [recent_orders, status_breakdown]
+      properties:
+        recent_orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRecentOrder"
+        status_breakdown:
+          type: object
+          description: Order count per status over the last 30 days.
+          additionalProperties:
+            type: integer
+    DashboardRevenueTrendPoint:
+      type: object
+      description: dashboard.RevenueTrendPoint. revenue is int64 cents.
+      required: [date, revenue]
+      properties:
+        date:
+          type: string
+          format: date
+        revenue:
+          type: integer
+          format: int64
+          description: Cents.

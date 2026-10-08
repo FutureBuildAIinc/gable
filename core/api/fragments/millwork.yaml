@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The millwork option catalog, transcribed from internal/millwork as it
+# behaves today. Quirks the transcription preserves: price_adjustment is a
+# float (dollars); attributes is raw JSON stored as sent and serializes as
+# null when the create request omitted it; the list is null when the category
+# has no options. Both routes sit behind the millwork app gate (404
+# app_disabled when the app is off) and the admin, owner or sales guard.
+paths:
+  /api/v1/millwork/options:
+    get:
+      operationId: millworkListOptions
+      tags: [millwork]
+      summary: List the options of a category
+      description: >-
+        Admin, owner or sales. Ordered by name. Not paginated. Answers null,
+        not an empty array, when the category has no options.
+      parameters:
+        - name: category
+          in: query
+          required: true
+          description: Exact match on the category column. An empty or missing value is a 400.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The options, or null when none match.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/MillworkOption"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      operationId: millworkCreateOption
+      tags: [millwork]
+      summary: Create an option
+      description: >-
+        Admin, owner or sales. No field is validated by the handler; a value
+        the table refuses (a category over 50 characters, a name over 100)
+        surfaces as a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MillworkCreateOptionRequest"
+      responses:
+        "201":
+          description: The created option.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkOption"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  schemas:
+    MillworkOption:
+      type: object
+      required: [id, category, name, price_adjustment, attributes, created_at, updated_at]
+      description: Go type millwork.MillworkOption.
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+        name:
+          type: string
+        price_adjustment:
+          type: number
+          description: Float dollars today.
+        attributes:
+          description: Any JSON value stored as sent (an object in practice); null when the create request omitted it.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MillworkCreateOptionRequest:
+      type: object
+      description: Go type millwork.CreateOptionRequest.
+      properties:
+        category:
+          type: string
+        name:
+          type: string
+        price_adjustment:
+          type: number
+          description: Float dollars today; absent means 0.
+        attributes:
+          description: Any JSON value; stored as sent. Absent is stored as null.

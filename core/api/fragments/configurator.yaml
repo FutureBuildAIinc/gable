@@ -1,0 +1,281 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The product configurator, transcribed from internal/configurator as it
+# behaves today. It registers under the millwork app, so every route is also
+# gated by that app (404 app_disabled when it is off) and by the admin, owner
+# or sales guard. Quirks the transcription preserves: a preset's config is a
+# Go byte slice and serializes as a base64 string, not as a JSON object;
+# build-sku answers 400 for any service failure, a rule conflict or a
+# database fault alike; validate answers 200 with valid false for a conflict.
+paths:
+  /api/v1/configurator/rules:
+    get:
+      operationId: configuratorListRules
+      tags: [configurator]
+      summary: List every configurator rule
+      description: Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+      responses:
+        "200":
+          description: The full rule set.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfiguratorRule"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/configurator/options:
+    get:
+      operationId: configuratorListOptions
+      tags: [configurator]
+      summary: List the allowed values of one attribute
+      description: >-
+        Admin, owner or sales. Every query parameter other than attribute_type
+        is read as a current selection (attribute type to chosen value, first
+        value wins), for example attribute_type=Grade&Species=SYP. With no
+        selections, or when no rule matches them, the static defaults for the
+        attribute are answered (an empty array for an unknown attribute).
+        Otherwise the order of the options is unspecified.
+      parameters:
+        - name: attribute_type
+          in: query
+          required: true
+          description: The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The values with their allowed flag. Never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfiguratorAvailableOption"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/configurator/presets:
+    get:
+      operationId: configuratorListPresets
+      tags: [configurator]
+      summary: List the active presets
+      description: Admin, owner or sales. Active presets only, ordered by name. Never null.
+      parameters:
+        - name: product_type
+          in: query
+          required: false
+          description: Exact match on the preset's product type; absent or empty lists all.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The presets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfiguratorPreset"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/configurator/validate:
+    post:
+      operationId: configuratorValidate
+      tags: [configurator]
+      summary: Validate a set of selections against the rules
+      description: >-
+        Admin, owner or sales. The body is capped at 64 KiB; an oversized or
+        malformed body is a 400, as is an empty selections map. A rule conflict
+        is a 200 with valid false and the conflicts listed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfiguratorValidateRequest"
+      responses:
+        "200":
+          description: The verdict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfiguratorValidateResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/configurator/build-sku:
+    post:
+      operationId: configuratorBuildSku
+      tags: [configurator]
+      summary: Build a non stock SKU from selections
+      description: >-
+        Admin, owner or sales. The body is capped at 64 KiB. Product type and
+        selections are both required. The selections are validated first; a
+        conflict, and any other service failure including a database fault,
+        answers 400 (never 500). The SKU is NS, the product type code, then
+        the Species, Grade, Treatment and Dimensions selections upper cased
+        with spaces as hyphens; the keys other than those four are ignored.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfiguratorBuildSKURequest"
+      responses:
+        "200":
+          description: The generated SKU and description.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfiguratorBuildSKUResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/AppDisabled" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+components:
+  schemas:
+    ConfiguratorRule:
+      type: object
+      required: [id, attribute_type, attribute_value, depends_on_type, depends_on_value, is_allowed, created_at, updated_at]
+      description: >-
+        Go type configurator.ConfiguratorRule. error_message is a pointer with
+        omitempty, so it is absent when the database value is null.
+      properties:
+        id:
+          type: string
+          format: uuid
+        attribute_type:
+          type: string
+        attribute_value:
+          type: string
+        depends_on_type:
+          type: string
+        depends_on_value:
+          type: string
+        is_allowed:
+          type: boolean
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ConfiguratorPreset:
+      type: object
+      required: [id, name, product_type, config, is_active, created_at, updated_at]
+      description: >-
+        Go type configurator.ConfiguratorPreset. config is a Go byte slice, so
+        it serializes as a base64 string of the stored JSON text, not as a JSON
+        object. description is a pointer with omitempty, absent when null.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        product_type:
+          type: string
+        config:
+          type: [string, "null"]
+          contentEncoding: base64
+          contentMediaType: application/json
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ConfiguratorAvailableOption:
+      type: object
+      required: [value, allowed]
+      description: Go type configurator.AvailableOption. message is omitted when empty.
+      properties:
+        value:
+          type: string
+        allowed:
+          type: boolean
+        message:
+          type: string
+          description: Why the value is disallowed.
+    ConfiguratorValidateRequest:
+      type: object
+      required: [selections]
+      description: Go type configurator.ValidateConfigRequest. An empty map is a 400.
+      properties:
+        selections:
+          type: object
+          additionalProperties:
+            type: string
+          description: Attribute type to chosen value, for example Species to SYP.
+    ConfiguratorValidationConflict:
+      type: object
+      required: [attribute_type, attribute_value, depends_on_type, depends_on_value, message]
+      description: Go type configurator.ValidationConflict.
+      properties:
+        attribute_type:
+          type: string
+        attribute_value:
+          type: string
+        depends_on_type:
+          type: string
+        depends_on_value:
+          type: string
+        message:
+          type: string
+    ConfiguratorValidateResponse:
+      type: object
+      required: [valid]
+      description: Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none.
+      properties:
+        valid:
+          type: boolean
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConfiguratorValidationConflict"
+    ConfiguratorBuildSKURequest:
+      type: object
+      required: [product_type, selections]
+      description: Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400.
+      properties:
+        product_type:
+          type: string
+          description: Lumber, Door, Trim or Panel map to LBR, DR, TRM and PNL; any other value is upper cased and cut to three characters.
+        selections:
+          type: object
+          additionalProperties:
+            type: string
+    ConfiguratorBuildSKUResponse:
+      type: object
+      required: [sku, description]
+      description: Go type configurator.BuildSKUResponse.
+      properties:
+        sku:
+          type: string
+        description:
+          type: string

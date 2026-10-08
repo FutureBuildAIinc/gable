@@ -1,0 +1,990 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The reporting module (internal/reporting) plus GET /api/v1/reports/exposure,
+# whose handler lives in internal/pricing, transcribed as they behave today.
+# Quirks the transcription preserves: the report money fields are float
+# dollars; the dates are plain YYYY-MM-DD strings; the saved report and
+# schedule timestamps are Postgres ::text strings (for example
+# "2026-01-02 03:04:05.678+00"), not RFC 3339, so they carry no date-time
+# format; nearly every failure is a 500, including a saved report or
+# schedule that does not exist, a malformed id, a malformed date parameter
+# and an unknown builder entity or column; the builder rows are whatever pgx
+# decodes (a uuid column is a 16 element array of integers, a numeric column
+# a JSON number); and a result with no rows is null on the builder preview and
+# the BI export but [] on a saved report run. Role guards: the reports/*
+# routes, the builder, saved report and schedule routes admit admin, owner and
+# finance; the BI export admits admin and owner; the exposure report admits
+# admin, owner and sales. None of these routes sits behind the branch
+# middleware. With no claims at all (dev mode, or a machine key) the guard
+# passes.
+paths:
+  /api/v1/reporting/builder/preview:
+    post:
+      operationId: reportingBuilderPreview
+      tags: [reporting]
+      summary: Run an ad hoc report definition and return the rows
+      description: >-
+        Roles admin, owner, finance. Builds a parameterised query from the
+        definition over one of the entities invoices, orders or inventory and
+        returns at most 1000 rows. A body that is not JSON is a 400. An unknown
+        entity_type, a column, filter or grouping field outside the entity's
+        whitelist, an unsupported aggregation or operator, an empty column
+        list, or a database error are all 500 today. Filter operators are
+        =, !=, >, <, >=, <= and LIKE (matched case insensitively as a
+        contains); aggregations are SUM, COUNT, AVG, MIN and MAX.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingBuilderRequest"
+      responses:
+        "200":
+          description: The rows, or null when the query matched nothing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingRows"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/builder/export:
+    post:
+      operationId: reportingBuilderExport
+      tags: [reporting]
+      summary: Run an ad hoc report definition and download it as CSV or XLSX
+      description: >-
+        Roles admin, owner, finance. Runs the same query as the preview, then
+        renders the rows with the requested columns. The query runs before the
+        format is checked, so an unsupported format is a 400 only when the
+        query itself succeeds; a failing query is a 500 whatever the format.
+        The CSV header row uses each column's label (the field when the label
+        is empty). The attachment file name is fixed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingBuilderExportRequest"
+      responses:
+        "200":
+          description: The rendered report, chosen by the request's format.
+          headers:
+            Content-Disposition:
+              description: 'attachment; filename="report.csv" or attachment; filename="report.xlsx".'
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/export/{entity}:
+    get:
+      operationId: reportingBiEntityExport
+      tags: [reporting]
+      summary: Dump every whitelisted column of an entity as JSON for BI tools
+      description: >-
+        Roles admin, owner only. A SELECT of every whitelisted column of the
+        entity with the builder's 1000 row cap, as JSON (not a file). The key
+        order of each row is not stable. An entity outside invoices, orders and
+        inventory is a 400.
+      parameters:
+        - name: entity
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [invoices, orders, inventory]
+      responses:
+        "200":
+          description: The rows, or null when the entity has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingRows"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/save:
+    post:
+      operationId: reportingSaveReport
+      tags: [reporting]
+      summary: Save a report definition
+      description: >-
+        Roles admin, owner, finance. Answers 200 (not 201) with the stored
+        report. The id and timestamps in the body are ignored; created_by is
+        taken from the token subject when that is a UUID and is the empty
+        string otherwise. A missing definition_json, a name over 128
+        characters or a database error is a 500.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingSavedReportInput"
+      responses:
+        "200":
+          description: The saved report as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingSavedReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/saved:
+    get:
+      operationId: reportingListSavedReports
+      tags: [reporting]
+      summary: List saved reports
+      description: Roles admin, owner, finance. Newest first, unpaged. A bare array that is null when none exist.
+      responses:
+        "200":
+          description: The saved reports.
+          content:
+            application/json:
+              schema:
+                type: [array, "null"]
+                items:
+                  $ref: "#/components/schemas/ReportingSavedReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/saved/{id}:
+    get:
+      operationId: reportingGetSavedReport
+      tags: [reporting]
+      summary: Get one saved report
+      description: >-
+        Roles admin, owner, finance. The id is not validated as a UUID; a
+        malformed id and an id that does not exist are both a 500 today, never
+        a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The saved report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingSavedReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: reportingUpdateSavedReport
+      tags: [reporting]
+      summary: Replace a saved report's name, description, entity and definition
+      description: >-
+        Roles admin, owner, finance. Answers 200 with an empty body (the
+        updated report is not returned). Only name, description, entity_type
+        and definition_json are written. An id that does not exist or is not a
+        UUID is a 500, never a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingSavedReportInput"
+      responses:
+        "200":
+          description: Updated; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: reportingDeleteSavedReport
+      tags: [reporting]
+      summary: Delete a saved report
+      description: >-
+        Roles admin, owner, finance. Not covered by the idempotency layer.
+        Deleting an id that does not exist is still a 204. A report that a
+        schedule still references fails the foreign key and is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted; no body.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/saved/{id}/run:
+    post:
+      operationId: reportingRunSavedReport
+      tags: [reporting]
+      summary: Run a saved report now and return its rows
+      description: >-
+        Roles admin, owner, finance. Any failure to load the saved report
+        (not found or a malformed id) is a 404. A stored definition that
+        cannot be parsed, or a query that fails, is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The saved report id; not validated as a UUID by the handler.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The rows; an empty array (never null) when nothing matched.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReportingRow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/schedules:
+    get:
+      operationId: reportingListSchedules
+      tags: [reporting]
+      summary: List report schedules and say whether schedules run
+      description: Roles admin, owner, finance. Newest first, unpaged. The schedules array is never null.
+      responses:
+        "200":
+          description: The schedules with the execution disclosure block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingScheduleList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: reportingCreateSchedule
+      tags: [reporting]
+      summary: Schedule a saved report for emailed delivery
+      description: >-
+        Roles admin, owner, finance. report_id, cron_expression and at least
+        one recipient are required (400 otherwise). format defaults to CSV and
+        is case insensitive; anything outside CSV, XLSX and PDF is a 400. The
+        cron expression is six fields with seconds first; a five field
+        expression is a 400. The status in the request is ignored: the row is
+        ACTIVE when a scheduler is attached (the shipped server) and STORED
+        otherwise. A report_id that is not a saved report violates the foreign
+        key and is a 500, as is a scheduler that cannot register the row (the
+        row stays saved).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportingScheduleCreate"
+      responses:
+        "201":
+          description: The stored schedule with the execution disclosure block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reporting/schedules/{id}:
+    delete:
+      operationId: reportingDeleteSchedule
+      tags: [reporting]
+      summary: Delete a report schedule
+      description: >-
+        Roles admin, owner, finance. Not covered by the idempotency layer.
+        Deletes the row, then unregisters the cron entry. An id that does not
+        exist is still a 204; a malformed id is a 500.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted; no body.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/daily-till:
+    get:
+      operationId: reportsDailyTill
+      tags: [reporting]
+      summary: Payments collected on one day, by method
+      description: >-
+        Roles admin, owner, finance. The date defaults to today in the server's
+        time zone. A date that is not YYYY-MM-DD is a 500. The report is cached
+        for 60 seconds per date.
+      parameters:
+        - name: date
+          in: query
+          description: The day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The day's collections.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingDailyTill"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/sales-summary:
+    get:
+      operationId: reportsSalesSummary
+      tags: [reporting]
+      summary: Invoiced, collected and outstanding totals for a period
+      description: >-
+        Roles admin, owner, finance. start defaults to 30 days ago and end to
+        now; end is inclusive of its whole day. A date that is not YYYY-MM-DD
+        is a 500. Cached for 60 seconds per start and end pair.
+      parameters:
+        - name: start
+          in: query
+          description: First day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          description: Last day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The period totals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingSalesSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/ar-aging:
+    get:
+      operationId: reportsArAging
+      tags: [reporting]
+      summary: Open invoice totals by customer and age bucket
+      description: >-
+        Roles admin, owner, finance. Invoices in UNPAID, PARTIAL or OVERDUE
+        status, aged from the due date (the creation date when there is none),
+        largest customer first. Cached for 60 seconds. buckets is null when
+        there are no open invoices.
+      responses:
+        "200":
+          description: The aging report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingArAging"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/customer-statement/{id}:
+    get:
+      operationId: reportsCustomerStatement
+      tags: [reporting]
+      summary: A customer's ledger lines and balances for a period
+      description: >-
+        Roles admin, owner, finance. An id that is not a UUID is a 400. start
+        defaults to one month ago and end to now (inclusive of its whole day);
+        a date that is not YYYY-MM-DD is a 500. A customer that does not exist
+        is not an error: the name is empty and the lines are null. The
+        balances are customer_transactions cents divided by 100 as float
+        dollars. Not cached.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: start
+          in: query
+          description: First day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          description: Last day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The statement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportingCustomerStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/reports/exposure:
+    get:
+      operationId: reportsExposure
+      tags: [reporting]
+      summary: Portfolio rollup of open lumber index exposure
+      description: >-
+        Roles admin, owner, sales (registered by internal/pricing). A caller
+        with the sales role and a UUID subject sees only the customers that
+        salesperson owns, and then by_salesperson is empty; every other caller
+        sees the whole portfolio. Only quotes in SENT or ACCEPTED state whose
+        exposure state is not OK count. by_customer is capped at 50 rows.
+        summary=true trims the body to the three totals. The ExposureRow
+        schema of the quote fragment is not used by this route.
+      parameters:
+        - name: summary
+          in: query
+          description: When exactly "true", only the three totals are returned.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The full portfolio, or only the totals when summary=true.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/ReportsExposurePortfolio"
+                  - $ref: "#/components/schemas/ReportsExposureTotals"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    ReportingColumn:
+      type: object
+      description: reporting.ReportColumn (request only). Field must be a whitelisted column of the entity.
+      properties:
+        field:
+          type: string
+        label:
+          type: string
+        aggregation:
+          type: string
+          description: SUM, COUNT, AVG, MIN or MAX, case insensitive; empty for none.
+    ReportingFilter:
+      type: object
+      description: reporting.ReportFilter (request only).
+      properties:
+        field:
+          type: string
+        operator:
+          type: string
+          enum: ["=", "!=", ">", "<", ">=", "<=", LIKE]
+        value:
+          description: Any JSON value, bound as a query parameter.
+    ReportingGrouping:
+      type: object
+      description: reporting.ReportGrouping (request only).
+      properties:
+        field:
+          type: string
+    ReportingDefinition:
+      type: object
+      description: reporting.ReportDefinition (request only).
+      properties:
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingColumn"
+        filters:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingFilter"
+        groupings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingGrouping"
+    ReportingBuilderRequest:
+      type: object
+      description: The anonymous preview request struct.
+      properties:
+        entity_type:
+          type: string
+          enum: [invoices, orders, inventory]
+        definition:
+          $ref: "#/components/schemas/ReportingDefinition"
+    ReportingBuilderExportRequest:
+      type: object
+      description: The anonymous export request struct.
+      properties:
+        entity_type:
+          type: string
+          enum: [invoices, orders, inventory]
+        format:
+          type: string
+          enum: [csv, xlsx]
+          description: Lower case only; anything else is a 400.
+        definition:
+          $ref: "#/components/schemas/ReportingDefinition"
+    ReportingRow:
+      type: object
+      description: >-
+        One result row keyed by the requested field names. Values are whatever
+        pgx decodes: strings, numbers (numeric as a JSON number), booleans,
+        RFC 3339 timestamps, null, and a uuid column as an array of 16
+        integers.
+      additionalProperties: true
+    ReportingRows:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/ReportingRow"
+    ReportingSavedReportInput:
+      type: object
+      description: >-
+        reporting.SavedReport read as a request. Only name, description,
+        entity_type and definition_json are used.
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        description:
+          type: string
+        entity_type:
+          type: string
+        definition_json:
+          type: object
+          additionalProperties: true
+          description: Required in practice; the column is NOT NULL.
+    ReportingSavedReport:
+      type: object
+      description: reporting.SavedReport. The timestamps are Postgres ::text strings.
+      required: [id, name, description, entity_type, definition_json, created_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        entity_type:
+          type: string
+        definition_json:
+          type: object
+          additionalProperties: true
+        created_by:
+          type: string
+          description: A user UUID, or the empty string when no author is recorded.
+        created_at:
+          type: string
+          description: Postgres timestamptz text, for example 2026-01-02 03:04:05.678+00.
+        updated_at:
+          type: string
+          description: Postgres timestamptz text.
+    ReportingScheduleCreate:
+      type: object
+      description: reporting.ReportSchedule read as a request. status and the timestamps are ignored.
+      required: [report_id, cron_expression, recipients]
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        cron_expression:
+          type: string
+          description: Six fields, seconds first; descriptors such as @daily are accepted.
+        recipients:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        format:
+          type: string
+          description: CSV, XLSX or PDF, case insensitive; empty means CSV.
+    ReportingSchedule:
+      type: object
+      description: reporting.ReportSchedule. The timestamps are Postgres ::text strings.
+      required: [id, report_id, cron_expression, recipients, status, format, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        report_id:
+          type: string
+          format: uuid
+        cron_expression:
+          type: string
+        recipients:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          description: ACTIVE when a scheduler is attached, STORED when none is.
+        format:
+          type: string
+          enum: [CSV, XLSX, PDF]
+        last_run_at:
+          type: string
+          description: Absent until the first run. Postgres timestamptz text.
+        next_run_at:
+          type: string
+          description: Absent until the first run. Postgres timestamptz text.
+        created_at:
+          type: string
+          description: Postgres timestamptz text.
+        updated_at:
+          type: string
+          description: Postgres timestamptz text.
+    ReportingScheduleExecution:
+      type: object
+      description: reporting.ScheduleExecution.
+      required: [enabled, summary, cron_dialect]
+      properties:
+        enabled:
+          type: boolean
+        summary:
+          type: string
+        blockers:
+          type: array
+          items:
+            type: string
+          description: Present only when enabled is false.
+        delivery:
+          type: string
+          description: Present only when enabled is true.
+        cron_dialect:
+          type: string
+    ReportingScheduleResponse:
+      type: object
+      description: reporting.ReportScheduleResponse.
+      required: [schedule, execution]
+      properties:
+        schedule:
+          $ref: "#/components/schemas/ReportingSchedule"
+        execution:
+          $ref: "#/components/schemas/ReportingScheduleExecution"
+    ReportingScheduleList:
+      type: object
+      description: reporting.ReportScheduleListResponse.
+      required: [schedules, execution]
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportingSchedule"
+        execution:
+          $ref: "#/components/schemas/ReportingScheduleExecution"
+    ReportingDailyTill:
+      type: object
+      description: reporting.DailyTillReport. Amounts are float dollars.
+      required: [date, total_collected, by_method, transaction_count]
+      properties:
+        date:
+          type: string
+          format: date
+        total_collected:
+          type: number
+        by_method:
+          type: object
+          description: Dollars collected per payment method.
+          additionalProperties:
+            type: number
+        transaction_count:
+          type: integer
+    ReportingSalesSummary:
+      type: object
+      description: reporting.SalesSummaryReport. Amounts are float dollars.
+      required: [start_date, end_date, total_invoiced, total_collected, outstanding_ar, invoice_count]
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        total_invoiced:
+          type: number
+        total_collected:
+          type: number
+        outstanding_ar:
+          type: number
+        invoice_count:
+          type: integer
+    ReportingArAgingBucket:
+      type: object
+      description: reporting.ARAgingBucket. Amounts are float dollars.
+      required: [customer_id, customer_name, current, days_31_60, days_61_90, over_90, total]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+          description: Unknown when the customer row is missing.
+        current:
+          type: number
+          description: 0 to 30 days.
+        days_31_60:
+          type: number
+        days_61_90:
+          type: number
+        over_90:
+          type: number
+        total:
+          type: number
+    ReportingArAging:
+      type: object
+      description: reporting.ARAgingReport. Amounts are float dollars.
+      required: [as_of_date, buckets, total_current, total_31_60, total_61_90, total_over_90, grand_total]
+      properties:
+        as_of_date:
+          type: string
+          format: date
+        buckets:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ReportingArAgingBucket"
+        total_current:
+          type: number
+        total_31_60:
+          type: number
+        total_61_90:
+          type: number
+        total_over_90:
+          type: number
+        grand_total:
+          type: number
+    ReportingStatementLine:
+      type: object
+      description: reporting.StatementLine. Amounts are float dollars (ledger cents divided by 100).
+      required: [date, type, description, debit, credit, balance]
+      properties:
+        date:
+          type: string
+          format: date
+        type:
+          type: string
+        description:
+          type: string
+        debit:
+          type: number
+        credit:
+          type: number
+        balance:
+          type: number
+    ReportingCustomerStatement:
+      type: object
+      description: reporting.CustomerStatement. Balances are float dollars.
+      required: [customer_id, customer_name, start_date, end_date, open_balance, close_balance, lines]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        open_balance:
+          type: number
+        close_balance:
+          type: number
+        lines:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ReportingStatementLine"
+    ReportsExposureCustomerRow:
+      type: object
+      description: pricing.PortfolioCustomerRow. exposure_dollars is float dollars.
+      required: [customer_id, customer_name, quote_count, exposure_dollars, policy, last_activity_at]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        quote_count:
+          type: integer
+        exposure_dollars:
+          type: number
+        top_index_code:
+          type: string
+          description: Absent when no active escalator exists.
+        policy:
+          type: string
+        last_activity_at:
+          type: string
+          format: date-time
+          description: 0001-01-01T00:00:00Z when no quote has been checked.
+    ReportsExposureSalespersonRow:
+      type: object
+      description: pricing.PortfolioSalespersonRow. exposure_dollars is float dollars.
+      required: [salesperson_id, salesperson_name, quote_count, exposure_dollars, flagged_count, ack_required_count]
+      properties:
+        salesperson_id:
+          type: string
+          format: uuid
+        salesperson_name:
+          type: string
+        quote_count:
+          type: integer
+        exposure_dollars:
+          type: number
+        flagged_count:
+          type: integer
+        ack_required_count:
+          type: integer
+    ReportsExposurePortfolio:
+      type: object
+      description: pricing.PortfolioSummary. exposure_dollars is float dollars.
+      required: [total_exposure_dollars, total_quotes, total_customers, by_customer, by_salesperson]
+      properties:
+        total_exposure_dollars:
+          type: number
+        total_quotes:
+          type: integer
+        total_customers:
+          type: integer
+        by_customer:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportsExposureCustomerRow"
+        by_salesperson:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportsExposureSalespersonRow"
+    ReportsExposureTotals:
+      type: object
+      description: The hand built map the handler writes when summary=true.
+      required: [total_exposure_dollars, total_quotes, total_customers]
+      properties:
+        total_exposure_dollars:
+          type: number
+        total_quotes:
+          type: integer
+        total_customers:
+          type: integer
