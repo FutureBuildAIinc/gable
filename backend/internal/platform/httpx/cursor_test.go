@@ -82,6 +82,13 @@ func TestDecodeCursorRefusesMalformed(t *testing.T) {
 		{"newline in part", b64(`{"v":1,"o":"` + testScope + `","k":["a\nb"]}`)},
 		{"too many parts", b64(`{"v":1,"o":"` + testScope + `","k":["1","2","3","4","5","6","7","8","9"]}`)},
 		{"oversize payload", b64(`{"v":1,"o":"` + testScope + `","k":["` + strings.Repeat("a", maxCursorDecodedBytes) + `"]}`)},
+		{"trailing bytes after the object", b64(`{"v":1,"o":"` + testScope + `","k":["a"]}garbage`)},
+		{"trailing second value", b64(`{"v":1,"o":"` + testScope + `","k":["a"]} {"x":1}`)},
+		{"trailing whitespace", b64(`{"v":1,"o":"` + testScope + `","k":["a"]} `)},
+		{"uppercase field names", b64(`{"V":1,"O":"` + testScope + `","K":["a"]}`)},
+		{"mixed case field names", b64(`{"v":1,"o":"` + testScope + `","k":["a"],"K":["b"]}`)},
+		{"duplicate field", b64(`{"v":1,"v":1,"o":"` + testScope + `","k":["a"]}`)},
+		{"non canonical spacing", b64(`{"v": 1,"o":"` + testScope + `","k":["a"]}`)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

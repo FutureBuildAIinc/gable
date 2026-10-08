@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -136,6 +137,19 @@ func DecodeCursor(raw, scope string) ([]string, error) {
 	dec := json.NewDecoder(bytes.NewReader(decoded))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&payload); err != nil {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	// One JSON value and nothing after it: a payload with trailing bytes of
+	// any kind, even whitespace, is not a cursor this package minted.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	// Canonical form only: the decoded value must re-marshal to exactly the
+	// bytes it arrived as. This refuses case-variant field names (which Go's
+	// decoder matches leniently), duplicated fields, and any spacing or
+	// ordering difference: a cursor that did not come from MintCursor byte
+	// for byte does not resume a list.
+	if canonical, err := json.Marshal(payload); err != nil || !bytes.Equal(canonical, decoded) {
 		return nil, cursorBadRequest("cursor is malformed")
 	}
 	if payload.V != cursorVersion {
