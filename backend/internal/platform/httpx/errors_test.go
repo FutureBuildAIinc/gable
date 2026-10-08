@@ -6,6 +6,7 @@ package httpx
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -129,6 +130,46 @@ func TestWriteErrorCarries5xxWithoutLeakingMessage(t *testing.T) {
 	}
 	if details != nil {
 		t.Errorf("details = %+v, want none on a 5xx", details)
+	}
+}
+
+// RULE: a *Error wrapped by a handler keeps its status and code: a return of
+// fmt.Errorf around Conflict answers 409 with its message, not a 500.
+func TestWriteErrorUnwrapsWrappedErrors(t *testing.T) {
+	w := httptest.NewRecorder()
+	WriteError(w, writeErrorRequest(),
+		fmt.Errorf("create quote: %w", Conflict("a quote with this number already exists")))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	code, message, _, _ := decodeErrorBody(t, w)
+	if code != CodeConflict {
+		t.Errorf("code = %q, want %q", code, CodeConflict)
+	}
+	if message != "a quote with this number already exists" {
+		t.Errorf("message = %q, want the wrapped Error's message", message)
+	}
+}
+
+// RULE: a *Error built with no status is a server bug, and it renders as a
+// 500 internal_error rather than panicking inside WriteHeader.
+func TestWriteErrorZeroStatusDefaultsTo500(t *testing.T) {
+	w := httptest.NewRecorder()
+	WriteError(w, writeErrorRequest(), &Error{Message: "status was never set"})
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	code, message, details, _ := decodeErrorBody(t, w)
+	if code != CodeInternalError {
+		t.Errorf("code = %q, want %q", code, CodeInternalError)
+	}
+	if message != internalErrorMessage {
+		t.Errorf("message = %q, want the fixed 5xx message", message)
+	}
+	if details != nil {
+		t.Errorf("details = %+v, want none on a 500", details)
 	}
 }
 

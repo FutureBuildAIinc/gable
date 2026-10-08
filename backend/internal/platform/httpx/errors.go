@@ -5,6 +5,7 @@ package httpx
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 )
@@ -117,9 +118,17 @@ func requestID(w http.ResponseWriter, r *http.Request) string {
 // is logged with the request id either way, and 4xx responses are not logged
 // at all: they are the client's, stated in full on the wire.
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
-	e, ok := err.(*Error)
-	if !ok {
+	// errors.As, not a type assertion: handlers wrap their returns
+	// (fmt.Errorf with %w), and a wrapped *Error must keep its status
+	// instead of collapsing into a 500.
+	var e *Error
+	if !errors.As(err, &e) || e == nil {
 		e = &Error{Status: http.StatusInternalServerError, Code: CodeInternalError, Message: err.Error()}
+	} else if e.Status == 0 {
+		// A *Error built with no status is a server bug; it renders as a
+		// 500 rather than panicking inside WriteHeader.
+		e = &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+			Message: e.Message, Details: e.Details}
 	}
 
 	body := errorBody{Code: e.Code, Message: e.Message, Details: e.Details}
