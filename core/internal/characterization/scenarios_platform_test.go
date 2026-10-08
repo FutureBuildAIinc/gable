@@ -180,6 +180,21 @@ func portalGroups() []groupDef {
 				extract: map[string]string{"myProject": "/id"},
 			},
 			{name: "project.get", method: "GET", path: "/api/portal/v1/projects/{myProject}"},
+			// A write with no precondition is 428 (ADR 0001 section 11).
+			{name: "project.update.no_precondition", method: "PUT", path: "/api/portal/v1/projects/{myProject}",
+				body: map[string]any{"name": "Golden Project Renamed"}},
+			{name: "project.update", method: "PUT", path: "/api/portal/v1/projects/{myProject}",
+				headers: map[string]string{"If-Match": `\"1\"`},
+				body:    map[string]any{"status": "completed"}},
+			{name: "project.get.after_update", method: "GET", path: "/api/portal/v1/projects/{myProject}"},
+			// The list: the envelope, a filter that filters, an unknown
+			// parameter refused (the strict query posture).
+			{name: "project.list", method: "GET", path: "/api/portal/v1/projects?limit=2"},
+			{name: "project.list.filter", method: "GET", path: "/api/portal/v1/projects?status=completed"},
+			{name: "project.list.unknown_param", method: "GET", path: "/api/portal/v1/projects?zzz=1"},
+			// The module's events, read back from the feed (ADR 0003).
+			{name: "project.events", method: "GET",
+				path: "/api/v1/events?types=project.created,project.updated&limit=2", sortPrimaryArray: true},
 		},
 	}}
 }

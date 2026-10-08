@@ -772,11 +772,15 @@ func Run() {
 	portalChain := func(next http.Handler) http.Handler { return portalMw(portalIdem(next)) }
 	portalHandler.RegisterRoutes(mux, portalChain, middleware.StrictRateLimit(10, cfg.TrustedProxies))
 
-	// Project Module (Sprint 34: Project Management Dashboard)
-	projectRepo := project.NewRepository(db)
-	projectSvc := project.NewService(projectRepo)
-	projectHandler := project.NewHandler(projectSvc)
-	projectHandler.RegisterRoutes(mux, portalChain)
+	// Project Module: the portal's job dashboard on the wire contract, its
+	// writes in one transaction with their audit row and project.* event.
+	// The portal chain scopes every read and write to the customer it
+	// identifies.
+	projectSvc := project.NewService(project.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog)
+	project.NewHandler(projectSvc).RegisterRoutes(mux, portalChain)
 
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff

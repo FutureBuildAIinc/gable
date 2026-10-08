@@ -4784,13 +4784,13 @@ export interface paths {
         };
         /**
          * The customer's jobs
-         * @description A bare array, newest created first, no page envelope.
+         * @description The cursor list envelope, newest first on (created_at, id). status filters (lowercase); total appears only under include=total. A parameter the route does not declare, a status outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["projectList"];
         put?: never;
         /**
          * Create a job
-         * @description An empty name is a 500 today (the handler's status is fixed). The project starts Active.
+         * @description name is required (1 to 255 characters); the project starts active and no status is accepted on create. Writes the audit row project.created and the event project.created in the same transaction, the event last.
          */
         post: operations["projectCreate"];
         delete?: never;
@@ -4808,12 +4808,12 @@ export interface paths {
         };
         /**
          * One job with its orders, deliveries and invoices
-         * @description The dashboard aggregate. Scoped to the caller; any failure, including another customer's project, is the handler's fixed 404.
+         * @description The dashboard aggregate with the project's ETag. Scoped to the caller: another customer's project is a 404. Item statuses are lowercase summaries of each document's own status; totals are integer cents (null on a delivery, which carries no money).
          */
         get: operations["projectGetDashboard"];
         /**
          * Rename a job or change its status
-         * @description Partial update; absent fields keep their values. An empty name or a status outside Active and Completed is a 500 today (the handler's status is fixed), and so is a project the caller does not own.
+         * @description Partial update on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. Absent fields keep their values; status accepts active or completed. Writes the audit row project.updated and the event project.updated (with the changed field list) in the same transaction, the event last.
          */
         put: operations["projectUpdate"];
         post?: never;
@@ -10295,12 +10295,26 @@ export interface components {
             /** Format: uuid */
             customer_id: string;
             name: string;
-            /** @enum {string} */
-            status: "Active" | "Completed";
+            /**
+             * @description Lowercase on the wire (ADR 0001 section 6). inactive is a storage value the 091 job merge wrote; writes accept active and completed.
+             * @enum {string}
+             */
+            status: "active" | "completed" | "inactive";
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        ProjectPage: {
+            items: components["schemas"]["Project"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         ProjectDashboard: {
             project: components["schemas"]["Project"];
@@ -10314,24 +10328,34 @@ export interface components {
         ProjectItem: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            type: "ORDER" | "DELIVERY" | "INVOICE";
+            /**
+             * @description Lowercase.
+             * @enum {string}
+             */
+            type: "order" | "delivery" | "invoice";
+            /** @description A lowercase summary of the document's own status. */
             status: string;
-            /** @description Float dollars; omitted when zero. */
-            total_amount?: number;
+            /**
+             * Format: int64
+             * @description Integer cents (ADR 0001 section 7); null on a delivery, which carries no money.
+             */
+            total_cents: number | null;
             /** Format: date-time */
             created_at: string;
-            /** @description A human label such as "Order 1a2b3c4d"; omitted when empty. */
-            reference?: string;
+            /** @description A human label such as "Order 1a2b3c4d". */
+            reference: string;
         };
-        ProjectCreateRequest: {
-            name: string;
-        };
-        /** @description Partial: only the fields present are applied. */
-        ProjectUpdateRequest: {
+        /** @description The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. On create only name applies (required); on update absent fields keep their values. */
+        ProjectRequest: {
+            /** @description 1 to 255 characters. */
             name?: string;
             /** @enum {string} */
-            status?: "Active" | "Completed";
+            status?: "active" | "completed";
+            /**
+             * Format: int64
+             * @description The body revision, on update only. A create carrying one is a 400.
+             */
+            revision?: number;
         };
         /** @description A purchase order. Lines appear only on create and get; line_count and total_cost only on the list (omitted when zero). total_cost is float dollars today. */
         PurchaseOrder: {
@@ -21218,24 +21242,34 @@ export interface operations {
     };
     projectList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description One lowercase status. */
+                status?: "active" | "completed";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The projects, a bare array, never null. */
+            /** @description The page of projects. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Project"][];
+                    "application/json": components["schemas"]["ProjectPage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectCreate: {
@@ -21250,13 +21284,16 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProjectCreateRequest"];
+                "application/json": components["schemas"]["ProjectRequest"];
             };
         };
         responses: {
-            /** @description The created project. */
+            /** @description The created project, with its ETag and a Location header. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21265,10 +21302,10 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectGetDashboard: {
@@ -21285,15 +21322,18 @@ export interface operations {
             /** @description The project and its associated documents. */
             200: {
                 headers: {
+                    /** @description The project's revision in quotes. Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectDashboard"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectUpdate: {
@@ -21302,6 +21342,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -21310,13 +21352,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProjectUpdateRequest"];
+                "application/json": components["schemas"]["ProjectRequest"];
             };
         };
         responses: {
-            /** @description The updated project. */
+            /** @description The updated project at its new revision, with its ETag. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21325,10 +21369,12 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     purchaseOrderList: {

@@ -10076,28 +10076,40 @@ paths:
       operationId: projectList
       tags: [project]
       summary: The customer's jobs
-      description: A bare array, newest created first, no page envelope.
+      description: >-
+        The cursor list envelope, newest first on (created_at, id). status filters (lowercase); total appears only under include=total. A parameter the route does not declare, a status outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
       security:
         - PortalSession: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: One lowercase status.
+          schema:
+            type: string
+            enum: [active, completed]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: The projects, a bare array, never null.
+          description: The page of projects.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Project"
+                $ref: "#/components/schemas/ProjectPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: projectCreate
       tags: [project]
       summary: Create a job
       description: >-
-        An empty name is a 500 today (the handler's status is fixed). The project starts Active.
+        name is required (1 to 255 characters); the project starts active and no status is accepted on create. Writes the audit row project.created and the event project.created in the same transaction, the event last.
       security:
         - PortalSession: []
       parameters:
@@ -10107,10 +10119,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProjectCreateRequest"
+              $ref: "#/components/schemas/ProjectRequest"
       responses:
         "201":
-          description: The created project.
+          description: The created project, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -10120,20 +10140,20 @@ paths:
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/portal/v1/projects/{id}:
     get:
       operationId: projectGetDashboard
       tags: [project]
       summary: One job with its orders, deliveries and invoices
       description: >-
-        The dashboard aggregate. Scoped to the caller; any failure, including another customer's project, is the handler's fixed 404.
+        The dashboard aggregate with the project's ETag. Scoped to the caller: another customer's project is a 404. Item statuses are lowercase summaries of each document's own status; totals are integer cents (null on a delivery, which carries no money).
       security:
         - PortalSession: []
       parameters:
@@ -10146,22 +10166,29 @@ paths:
       responses:
         "200":
           description: The project and its associated documents.
+          headers:
+            ETag:
+              description: The project's revision in quotes. Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProjectDashboard"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: projectUpdate
       tags: [project]
       summary: Rename a job or change its status
       description: >-
-        Partial update; absent fields keep their values. An empty name or a status outside Active and Completed is a 500 today (the handler's status is fixed), and so is a project the caller does not own.
+        Partial update on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. Absent fields keep their values; status accepts active or completed. Writes the audit row project.updated and the event project.updated (with the changed field list) in the same transaction, the event last.
       security:
         - PortalSession: []
       parameters:
@@ -10172,15 +10199,21 @@ paths:
             type: string
             format: uuid
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProjectUpdateRequest"
+              $ref: "#/components/schemas/ProjectRequest"
       responses:
         "200":
-          description: The updated project.
+          description: The updated project at its new revision, with its ETag.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -10189,14 +10222,18 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/purchase-orders:
     get:
       operationId: purchaseOrderList
@@ -20005,7 +20042,7 @@ components:
           type: string
     Project:
       type: object
-      required: [id, customer_id, name, status, created_at, updated_at]
+      required: [id, customer_id, name, status, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -20017,13 +20054,34 @@ components:
           type: string
         status:
           type: string
-          enum: [Active, Completed]
+          description: Lowercase on the wire (ADR 0001 section 6). inactive is a storage value the 091 job merge wrote; writes accept active and completed.
+          enum: [active, completed, inactive]
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    ProjectPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
     ProjectDashboard:
       type: object
       required: [project, orders, deliveries, invoices]
@@ -20047,40 +20105,44 @@ components:
             $ref: "#/components/schemas/ProjectItem"
     ProjectItem:
       type: object
-      required: [id, type, status, created_at]
+      required: [id, type, status, total_cents, created_at, reference]
       properties:
         id:
           type: string
           format: uuid
         type:
           type: string
-          enum: [ORDER, DELIVERY, INVOICE]
+          description: Lowercase.
+          enum: [order, delivery, invoice]
         status:
           type: string
-        total_amount:
-          type: number
-          description: Float dollars; omitted when zero.
+          description: A lowercase summary of the document's own status.
+        total_cents:
+          type: [integer, "null"]
+          format: int64
+          description: Integer cents (ADR 0001 section 7); null on a delivery, which carries no money.
         created_at:
           type: string
           format: date-time
         reference:
           type: string
-          description: A human label such as "Order 1a2b3c4d"; omitted when empty.
-    ProjectCreateRequest:
+          description: A human label such as "Order 1a2b3c4d".
+    ProjectRequest:
       type: object
-      required: [name]
+      description: >-
+        The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. On create only name applies (required); on update absent fields keep their values.
+      required: []
       properties:
         name:
           type: string
-    ProjectUpdateRequest:
-      type: object
-      description: "Partial: only the fields present are applied."
-      properties:
-        name:
-          type: string
+          description: 1 to 255 characters.
         status:
           type: string
-          enum: [Active, Completed]
+          enum: [active, completed]
+        revision:
+          type: integer
+          format: int64
+          description: The body revision, on update only. A create carrying one is a 400.
     PurchaseOrder:
       type: object
       required: [id, branch_id, status, source, created_at, updated_at]
