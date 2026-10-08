@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -39,6 +39,18 @@ type AuditLogger interface {
 	LogChange(ctx context.Context, action string, customerID uuid.UUID, changes map[string]any) error
 }
 
+// ErrBranchRefused is the verdict a BranchGuard returns when a payload branch is
+// outside what the caller may target.
+var ErrBranchRefused = errors.New("payload branch is outside the caller's branches")
+
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3). The
+// customer package cannot import pkg/middleware (which imports this package for
+// partner auth), so customerguard adapts *middleware.BranchGuard to it, mapping
+// middleware.ErrPayloadBranchRefused to ErrBranchRefused.
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+}
+
 // Event types the module writes to the outbox. Every state change of a
 // customer, its ship-tos, contacts and terms is customer.updated; its data
 // names the part (ADR 0005 section 7.4).
@@ -57,11 +69,12 @@ const (
 )
 
 type Service struct {
-	repo   Repository
-	events EventRecorder // optional; nil records nothing (unit tests)
-	tx     TxRunner      // optional; nil runs each method unwrapped (unit tests)
-	audit  AuditLogger   // optional; nil writes no audit rows (unit tests)
-	now    func() time.Time
+	repo     Repository
+	events   EventRecorder // optional; nil records nothing (unit tests)
+	tx       TxRunner      // optional; nil runs each method unwrapped (unit tests)
+	audit    AuditLogger   // optional; nil writes no audit rows (unit tests)
+	branches BranchGuard   // optional; nil leaves a payload branch unchecked (unit tests)
+	now      func() time.Time
 }
 
 func NewService(repo Repository) *Service {
@@ -79,6 +92,12 @@ func (s *Service) WithOutbox(events EventRecorder) *Service {
 // other customer write keeps its event only.
 func (s *Service) WithAudit(a AuditLogger) *Service {
 	s.audit = a
+	return s
+}
+
+// WithBranchGuard makes Create refuse a primary_branch_id the caller may not target.
+func (s *Service) WithBranchGuard(g BranchGuard) *Service {
+	s.branches = g
 	return s
 }
 
@@ -186,14 +205,21 @@ func (s *Service) checkTerms(ctx context.Context, id uuid.UUID, held *uuid.UUID)
 	return nil
 }
 
+// checkBranch applies the payload branch rule (ADR 0007 section 2.3) to the
+// primary_branch_id a create names: it may not widen or move the branch context
+// the caller holds. A refusal is 403 forbidden naming the field; the guard fails
+// closed on a request with no branch context.
 func (s *Service) checkBranch(ctx context.Context, branch *uuid.UUID) error {
-	if branch == nil {
+	if s.branches == nil || branch == nil {
 		return nil
 	}
-	if w := branchctx.IDForQuery(ctx); w != nil && *w != *branch {
-		return fieldProblem("primary_branch_id", "is outside the branch of this request")
+	err := s.branches.CheckPayloadBranch(ctx, *branch)
+	if errors.Is(err, ErrBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "primary_branch_id is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "primary_branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
 	}
-	return nil
+	return err
 }
 
 // Create validates the references, stores the customer and writes

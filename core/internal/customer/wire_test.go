@@ -26,6 +26,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
+	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/audit"
@@ -57,15 +58,19 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		t.Fatal(err)
 	}
 
-	svc := customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(customeraudit.New(audit.NewLogger(db)))
+	svc := customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(customeraudit.New(audit.NewLogger(db))).
+		WithBranchGuard(customerguard.New(middleware.NewBranchGuard(db)))
 	mux := http.NewServeMux()
 	customer.NewHandler(svc).RegisterRoutes(mux)
 	wallMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// What the branch middleware settles for a real request: the caller's
+		// user, whether an administrator, and the branch it is bound to.
+		bc := &branchctx.Context{UserSub: r.Header.Get("X-Test-Sub"), IsAdmin: r.Header.Get("X-Test-Admin") == "1"}
 		if b := r.Header.Get("X-Test-Branch"); b != "" {
 			id := uuid.MustParse(b)
-			r = r.WithContext(branchctx.With(r.Context(), &branchctx.Context{BranchID: &id}))
+			bc.BranchID = &id
 		}
-		mux.ServeHTTP(w, r)
+		mux.ServeHTTP(w, r.WithContext(branchctx.With(r.Context(), bc)))
 	})
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(wallMux))
 
@@ -1384,10 +1389,7 @@ func TestWire_BranchWall(t *testing.T) {
 	if g := f.do("GET", "/api/v1/customers/"+cid, nil, "X-Test-Branch", f.branch.String()); g.status != 200 || num(t, g.body, "revision") != 1 {
 		t.Errorf("the owning branch's read = %d: %s", g.status, g.raw)
 	}
-	// A create that names another branch than the request's wall is refused.
-	if r := f.do("POST", "/api/v1/customers", f.body(map[string]any{"primary_branch_id": f.branch.String()}), wall...); r.status != 400 || !hasField(detailsOf(t, r), "primary_branch_id") {
-		t.Errorf("a create outside the wall = %d: %s", r.status, r.raw)
-	}
+
 }
 
 // A replayed create returns the first response and makes one row and one event.
@@ -1622,5 +1624,97 @@ func TestWire_ControlChangesAreAudited(t *testing.T) {
 	}
 	if _, ok := changes[1]["can_place_orders"]; !ok {
 		t.Errorf("the audit row does not carry can_place_orders: %v", changes[1])
+	}
+}
+
+// RULE (review P2-3, ADR 0007 section 2.3): a body's primary_branch_id may not
+// widen or move the branch context the caller holds, whichever way the context
+// is settled. A refusal is 403 forbidden naming primary_branch_id, and the
+// guard fails closed.
+func TestWire_CreatePayloadBranchRule(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	ctx := context.Background()
+	own, foreign := uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{own, foreign} {
+		if _, err := f.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, id, "CB-"+id.String()[:8]); err != nil {
+			t.Fatalf("seed branch: %v", err)
+		}
+	}
+	sub := "user-" + uuid.NewString()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, sub, own); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE branch_id IN ($1, $2)`, own, foreign)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customers WHERE primary_branch_id IN ($1, $2)`, own, foreign)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = $1`, sub)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, own, foreign)
+	})
+
+	create := func(payload string, headers ...string) resp {
+		extra := map[string]any{}
+		if payload != "" {
+			extra["primary_branch_id"] = payload
+		}
+		return f.do("POST", "/api/v1/customers", f.body(extra), headers...)
+	}
+	refused := func(name string, r resp) {
+		t.Helper()
+		if r.status != http.StatusForbidden {
+			t.Fatalf("%s: status %d, want 403: %s", name, r.status, r.raw)
+		}
+		code, _, details := errorOf(t, r)
+		if code != "forbidden" || len(details) == 0 || details[0]["field"] != "primary_branch_id" {
+			t.Fatalf("%s: want forbidden naming primary_branch_id, got %s", name, r.raw)
+		}
+	}
+	created := func(name string, r resp, want uuid.UUID) {
+		t.Helper()
+		if r.status != http.StatusCreated {
+			t.Fatalf("%s: status %d, want 201: %s", name, r.status, r.raw)
+		}
+		if got := str(t, r.body, "primary_branch_id"); got != want.String() {
+			t.Fatalf("%s: customer at branch %s, want %s", name, got, want)
+		}
+	}
+
+	// A user bound to one branch (the middleware set it from X-Branch-Id).
+	bound := []string{"X-Test-Sub", sub, "X-Test-Branch", own.String()}
+	refused("bound user, foreign payload", create(foreign.String(), bound...))
+	created("bound user, own payload", create(own.String(), bound...), own)
+
+	// A user with no context branch may target only a granted branch.
+	unbound := []string{"X-Test-Sub", sub}
+	refused("granted user, ungranted payload", create(foreign.String(), unbound...))
+	created("granted user, granted payload", create(own.String(), unbound...), own)
+
+	// An administrator across branches may target any branch; one holding a
+	// context branch is held to it like anyone.
+	created("admin, no context", create(foreign.String(), "X-Test-Sub", "boss", "X-Test-Admin", "1"), foreign)
+	refused("admin in a branch, other payload", create(foreign.String(), "X-Test-Sub", "boss", "X-Test-Admin", "1", "X-Test-Branch", own.String()))
+
+	// A machine key: unbound reaches any branch; a bound one is held to its branch.
+	created("unbound key, any payload", create(foreign.String()), foreign)
+	refused("bound key, foreign payload", create(foreign.String(), "X-Test-Branch", own.String()))
+
+	// No payload branch: no check, the context decides (the customer lands in it).
+	created("bound user, no payload", create("", bound...), own)
+
+	// Fails closed: a request that reaches the handler with no branch context at
+	// all (a route mounted without the branch middleware) is refused.
+	svc := customer.NewService(customer.NewRepository(f.db)).WithTxRunner(f.db).WithBranchGuard(customerguard.New(middleware.NewBranchGuard(f.db)))
+	bare := http.NewServeMux()
+	customer.NewHandler(svc).RegisterRoutes(bare)
+	srv := httptest.NewServer(bare)
+	t.Cleanup(srv.Close)
+	raw, _ := json.Marshal(f.body(map[string]any{"primary_branch_id": own.String()}))
+	res, err := http.Post(srv.URL+"/api/v1/customers", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("a payload branch with no branch context = %d, want 403 (fail closed)", res.StatusCode)
 	}
 }
