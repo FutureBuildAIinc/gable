@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/google/uuid"
 )
@@ -391,12 +392,13 @@ func TestGeneratePickTicketPDF_CarriesNoPricing(t *testing.T) {
 	prodID := uuid.New()
 	repo := newRepo(&product.Product{ID: prodID, SKU: "2X4-8", Description: "SPF Stud", UOMPrimary: "EA", BasePrice: 4.75})
 	svc := NewService(repo)
+	limit := httpx.Cents(2500000)
 
 	ord := &order.Order{
 		ID: uuid.New(), CreatedAt: time.Now(), TotalAmount: 128450,
 		Lines: []order.OrderLine{{ProductID: prodID, Quantity: 10, PriceEach: 475}},
 	}
-	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme", CreditLimit: 25000, BalanceDue: 4873.19})
+	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme", CreditLimitCents: &limit, BalanceCents: 487319})
 	if err != nil {
 		t.Fatalf("GeneratePickTicketPDF: %v", err)
 	}

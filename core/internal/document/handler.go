@@ -131,7 +131,7 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := cust.Email
+	email := cust.EmailOrEmpty()
 	if email == "" {
 		httputil.RespondError(w, r, "customer has no email address on file", http.StatusBadRequest, nil)
 		return

@@ -294,7 +294,9 @@ func Run() {
 	inventoryHandler.RegisterRoutes(mux, scoped("admin", "owner", "warehouse"))
 
 	customerRepo := customer.NewRepository(db)
-	customerSvc := customer.NewService(customerRepo)
+	customerSvc := customer.NewService(customerRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db)
 	customerHandler := customer.NewHandler(customerSvc)
 	customerHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 

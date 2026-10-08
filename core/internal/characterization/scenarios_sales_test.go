@@ -61,6 +61,21 @@ func productGroups() []groupDef {
 }
 
 func customerGroups() []groupDef {
+	// The customer module is on the wire contract (C2-1): lowercase tier,
+	// _cents money with a credit limit that is null for no limit, the list
+	// envelope with filters that filter, and a revision every edit names in
+	// If-Match (the revision of a scripted customer is deterministic: create
+	// 1, then one per write).
+	header := func(extra map[string]any) map[string]any {
+		b := map[string]any{
+			"account_number": "GOLD-001", "name": "Golden Harness Co", "email": "goldens@example.com",
+			"phone": "250-555-0199", "address": "1 Golden Way, Kelowna BC", "tier": "gold",
+		}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
 	return []groupDef{{
 		name: "customer",
 		steps: []stepDef{
@@ -68,19 +83,49 @@ func customerGroups() []groupDef {
 				name:   "customer.create",
 				method: "POST",
 				path:   "/api/v1/customers",
-				body: map[string]any{
-					"name": "Golden Harness Co", "account_number": "GOLD-001",
-					"email": "goldens@example.com", "phone": "250-555-0199",
-					"address": "1 Golden Way, Kelowna BC", "tier": "GOLD",
-					"payment_terms": "NET30", "credit_limit": 100000, "primary_branch_id": "{branch}",
-				},
+				body: header(map[string]any{
+					"credit_limit_cents": 10000000, "primary_branch_id": "{branch}",
+				}),
 				extract: map[string]string{"myCustomer": "/id"},
 			},
 			{name: "customer.get", method: "GET", path: "/api/v1/customers/{myCustomer}"},
 			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3"},
-			// Registered by the customer handler; empty list pins null vs [].
-			{name: "price_level.list", method: "GET", path: "/api/v1/price_levels"},
+			// The filters filter; an unsupported parameter, a tier outside the
+			// lowercase vocabulary and a broken cursor are 400s naming the field.
+			{name: "customer.list.search", method: "GET", path: "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"},
+			{name: "customer.list.unsupported_parameter", method: "GET", path: "/api/v1/customers?offset=0"},
+			{name: "customer.list.unsupported_tier", method: "GET", path: "/api/v1/customers?tier=GOLD"},
+			{name: "customer.list.bad_cursor", method: "GET", path: "/api/v1/customers?cursor=garbage"},
+			// Registered by the customer handler; the list envelope now.
+			{name: "price_level.list", method: "GET", path: "/api/v1/price_levels?limit=2"},
+			{name: "price_level.list.unsupported_parameter", method: "GET", path: "/api/v1/price_levels?offset=1"},
 			{name: "customer.get.not_found", method: "GET", path: "/api/v1/customers/00000000-0000-0000-0000-0000000000aa"},
+			{name: "customer.get.bad_id", method: "GET", path: "/api/v1/customers/not-a-uuid"},
+			{
+				name:   "customer.create.invalid",
+				method: "POST",
+				path:   "/api/v1/customers",
+				body:   map[string]any{"tier": "GOLD", "email": "not an email", "credit_limit_cents": -1, "currency": "usd"},
+			},
+			{name: "customer.create.unknown_field", method: "POST", path: "/api/v1/customers",
+				body: header(map[string]any{"account_number": "GOLD-002", "balance_due": 5})},
+			{name: "customer.create.duplicate", method: "POST", path: "/api/v1/customers", body: header(nil)},
+			// An edit names the revision; the first edit moves it to 2.
+			{name: "customer.update.without_revision", method: "PUT", path: "/api/v1/customers/{myCustomer}", body: header(nil)},
+			{
+				name:    "customer.update",
+				method:  "PUT",
+				path:    "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"1"`},
+				body:    header(map[string]any{"credit_limit_cents": 10000000, "po_required": true}),
+			},
+			{name: "customer.update.stale", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"1"`}, body: header(nil)},
+			{name: "customer.update.primary_branch", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"2"`}, body: header(map[string]any{"primary_branch_id": "{branch}"})},
+			{name: "customer.update.currency_not_enabled", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"2"`}, body: header(map[string]any{"currency": "EUR"})},
+			{name: "customer.get.after_update", method: "GET", path: "/api/v1/customers/{myCustomer}"},
 		},
 	}}
 }

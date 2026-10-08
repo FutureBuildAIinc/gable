@@ -1,0 +1,900 @@
+[
+  {
+    "name": "ship_to.list_empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/ship-tos"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "ship_to.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-1>/ship-tos",
+      "body": {
+        "city": "Kelowna",
+        "code": "YARD",
+        "country": "CA",
+        "delivery_instructions": "Call before arriving",
+        "line1": "12 Lake Rd",
+        "line2": "Gate 3",
+        "name": "Lakeshore job site",
+        "phone": "250-555-0100",
+        "postal_code": "V1Y 1A1",
+        "region": "BC",
+        "tax_rate_percent": "12"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "city": "Kelowna",
+        "code": "YARD",
+        "country": "CA",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "delivery_instructions": "Call before arriving",
+        "id": "<id-2>",
+        "is_active": true,
+        "is_default": true,
+        "line1": "12 Lake Rd",
+        "line2": "Gate 3",
+        "name": "Lakeshore job site",
+        "phone": "250-555-0100",
+        "postal_code": "V1Y 1A1",
+        "region": "BC",
+        "revision": 1,
+        "tax_rate_percent": "12",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "ship_to.create.second",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-1>/ship-tos",
+      "body": {
+        "code": "SITE2",
+        "is_default": true,
+        "line1": "9 Hill St",
+        "name": "Second site"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "city": null,
+        "code": "SITE2",
+        "country": null,
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "delivery_instructions": null,
+        "id": "<id-3>",
+        "is_active": true,
+        "is_default": true,
+        "line1": "9 Hill St",
+        "line2": null,
+        "name": "Second site",
+        "phone": null,
+        "postal_code": null,
+        "region": null,
+        "revision": 1,
+        "tax_rate_percent": null,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "ship_to.create.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-1>/ship-tos",
+      "body": {
+        "country": "can",
+        "tax_rate_percent": "101"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "code",
+              "message": "is required"
+            },
+            {
+              "field": "name",
+              "message": "is required"
+            },
+            {
+              "field": "line1",
+              "message": "is required"
+            },
+            {
+              "field": "country",
+              "message": "must be at most 2 characters"
+            },
+            {
+              "field": "country",
+              "message": "must be an ISO 3166 alpha-2 code of two capital letters"
+            },
+            {
+              "field": "tax_rate_percent",
+              "message": "must be between 0 and 100"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ship_to.create.duplicate",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-1>/ship-tos",
+      "body": {
+        "code": "YARD",
+        "line1": "12 Lake Rd",
+        "name": "Lakeshore job site"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "duplicate",
+          "details": [
+            {
+              "code": "ship_to_code_taken",
+              "message": "code is already used by another ship-to of this customer"
+            }
+          ],
+          "message": "this customer already has a ship-to with this code"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ship_to.create.unknown_customer",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers/<id-6>/ship-tos",
+      "body": {
+        "code": "YARD",
+        "line1": "12 Lake Rd",
+        "name": "Lakeshore job site"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "customer not found"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ship_to.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/ship-tos?include=total"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "city": null,
+            "code": "SITE2",
+            "country": null,
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "delivery_instructions": null,
+            "id": "<id-3>",
+            "is_active": true,
+            "is_default": true,
+            "line1": "9 Hill St",
+            "line2": null,
+            "name": "Second site",
+            "phone": null,
+            "postal_code": null,
+            "region": null,
+            "revision": 1,
+            "tax_rate_percent": null,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "city": "Kelowna",
+            "code": "YARD",
+            "country": "CA",
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "delivery_instructions": "Call before arriving",
+            "id": "<id-2>",
+            "is_active": true,
+            "is_default": false,
+            "line1": "12 Lake Rd",
+            "line2": "Gate 3",
+            "name": "Lakeshore job site",
+            "phone": "250-555-0100",
+            "postal_code": "V1Y 1A1",
+            "region": "BC",
+            "revision": 2,
+            "tax_rate_percent": "12",
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null,
+        "total": 2
+      }
+    }
+  },
+  {
+    "name": "ship_to.list.inactive",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/ship-tos?is_active=false"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "ship_to.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/ship-tos?offset=0"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ship_to.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ship-tos/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "city": "Kelowna",
+        "code": "YARD",
+        "country": "CA",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "delivery_instructions": "Call before arriving",
+        "id": "<id-2>",
+        "is_active": true,
+        "is_default": false,
+        "line1": "12 Lake Rd",
+        "line2": "Gate 3",
+        "name": "Lakeshore job site",
+        "phone": "250-555-0100",
+        "postal_code": "V1Y 1A1",
+        "region": "BC",
+        "revision": 2,
+        "tax_rate_percent": "12",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "ship_to.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ship-tos/<id-6>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "ship-to not found"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ship_to.update.without_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/ship-tos/<id-2>",
+      "body": {
+        "code": "YARD",
+        "line1": "12 Lake Rd",
+        "name": "Lakeshore job site"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ship_to.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/ship-tos/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "code": "YARD",
+        "is_active": false,
+        "line1": "12 Lake Rd",
+        "name": "Lakeshore job site (closed)"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "city": null,
+        "code": "YARD",
+        "country": null,
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "delivery_instructions": null,
+        "id": "<id-2>",
+        "is_active": false,
+        "is_default": false,
+        "line1": "12 Lake Rd",
+        "line2": null,
+        "name": "Lakeshore job site (closed)",
+        "phone": null,
+        "postal_code": null,
+        "region": null,
+        "revision": 3,
+        "tax_rate_percent": null,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "ship_to.update.stale",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/ship-tos/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "code": "YARD",
+        "line1": "12 Lake Rd",
+        "name": "Lakeshore job site"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.a.terms",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-1>",
+      "headers": {
+        "If-Match": "\"5\""
+      },
+      "body": {
+        "account_number": "GOLD-A-001",
+        "address": "7 Golden Way, Kelowna BC",
+        "credit_limit_cents": 5000000,
+        "email": "contacts@example.com",
+        "name": "Golden Contacts Co",
+        "payment_terms_id": "<id-12>",
+        "phone": "250-555-0177",
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "GOLD-A-001",
+        "address": "7 Golden Way, Kelowna BC",
+        "balance_cents": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit_cents": 5000000,
+        "currency": null,
+        "effective_currency": "USD",
+        "email": "contacts@example.com",
+        "id": "<id-1>",
+        "is_active": true,
+        "name": "Golden Contacts Co",
+        "payment_terms": {
+          "code": "GOLDEN-NET15",
+          "id": "<id-12>",
+          "name": "Golden net 20"
+        },
+        "payment_terms_id": "<id-12>",
+        "phone": "250-555-0177",
+        "po_required": false,
+        "price_level": null,
+        "price_level_id": null,
+        "primary_branch_id": "<id-13>",
+        "revision": 6,
+        "salesperson_id": null,
+        "salesperson_name": null,
+        "tier": "gold",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "customer.a.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "GOLD-A-001",
+        "address": "7 Golden Way, Kelowna BC",
+        "balance_cents": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit_cents": 5000000,
+        "currency": null,
+        "effective_currency": "USD",
+        "email": "contacts@example.com",
+        "id": "<id-1>",
+        "is_active": true,
+        "name": "Golden Contacts Co",
+        "payment_terms": {
+          "code": "GOLDEN-NET15",
+          "id": "<id-12>",
+          "name": "Golden net 20"
+        },
+        "payment_terms_id": "<id-12>",
+        "phone": "250-555-0177",
+        "po_required": false,
+        "price_level": null,
+        "price_level_id": null,
+        "primary_branch_id": "<id-13>",
+        "revision": 6,
+        "salesperson_id": null,
+        "salesperson_name": null,
+        "tier": "gold",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "customer.events.created",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=customer.created&limit=10"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "credit_limit_cents": 10000000,
+              "currency": "USD",
+              "customer_id": "<id-14>",
+              "number": "GOLD-001",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-14>",
+              "kind": "customer"
+            },
+            "event_id": "<id-15>",
+            "org": "default",
+            "type": "customer.created"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-16>",
+            "org": "default",
+            "type": "customer.created"
+          }
+        ],
+        "limit": 10,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "customer.events.updated",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=customer.updated&limit=50"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "changed": [
+                "po_required"
+              ],
+              "credit_limit_cents": 10000000,
+              "currency": "USD",
+              "customer_id": "<id-14>",
+              "number": "GOLD-001",
+              "part": "header",
+              "revision": 2
+            },
+            "entity": {
+              "id": "<id-14>",
+              "kind": "customer"
+            },
+            "event_id": "<id-17>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "action": "created",
+              "balance_cents": 0,
+              "contact_id": "<id-18>",
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "contact",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-19>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "action": "created",
+              "balance_cents": 0,
+              "contact_id": "<id-20>",
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "contact",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-21>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "action": "updated",
+              "balance_cents": 0,
+              "contact_id": "<id-18>",
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "contact",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-22>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "escalation_policy",
+              "revision": 2
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-23>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "escalation_policy",
+              "revision": 3
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-24>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "changed": [
+                "salesperson_id"
+              ],
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "header",
+              "revision": 4
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-25>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "changed": [
+                "salesperson_id"
+              ],
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "header",
+              "revision": 5
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-26>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "action": "deleted",
+              "balance_cents": 0,
+              "contact_id": "<id-18>",
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "contact",
+              "revision": 5
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-27>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "action": "created",
+              "balance_cents": 0,
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "ship_to",
+              "revision": 5,
+              "ship_to_id": "<id-2>"
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-28>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "action": "created",
+              "balance_cents": 0,
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "ship_to",
+              "revision": 5,
+              "ship_to_id": "<id-3>"
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-29>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "action": "updated",
+              "balance_cents": 0,
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "ship_to",
+              "revision": 5,
+              "ship_to_id": "<id-2>"
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-30>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-13>",
+            "data": {
+              "balance_cents": 0,
+              "changed": [
+                "payment_terms_id"
+              ],
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "terms",
+              "revision": 6
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-31>",
+            "org": "default",
+            "type": "customer.updated"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": "<cursor>"
+      }
+    }
+  }
+]

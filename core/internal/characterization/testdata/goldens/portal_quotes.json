@@ -769,8 +769,8 @@
           ],
           "notes": "",
           "priced": true,
-          "project_id": null,
-          "project_name": null,
+          "project_id": "<id-50>",
+          "project_name": "Glenmore Lofts",
           "rejected_at": null,
           "sent_at": null,
           "status": "ACCEPTED",
@@ -784,16 +784,16 @@
           "erp_state": "SENT",
           "expires_at": "<ts-13d>",
           "freight_amount": 0,
-          "id": "<id-50>",
+          "id": "<id-51>",
           "lines": [
             {
               "customer_note": "",
               "description": "R-20 Fiberglass Batts 15x93",
-              "id": "<id-51>",
+              "id": "<id-52>",
               "is_special_order": false,
               "line_total": 7052,
               "price_uom": "BAG",
-              "product_id": "<id-52>",
+              "product_id": "<id-53>",
               "product_sku": "INS-R19-15",
               "quantity": 86,
               "unit_price": 82,
@@ -802,11 +802,11 @@
             {
               "customer_note": "",
               "description": "Vinyl H Mold 1/4 X 12'",
-              "id": "<id-53>",
+              "id": "<id-54>",
               "is_special_order": false,
               "line_total": 324,
               "price_uom": "EA",
-              "product_id": "<id-54>",
+              "product_id": "<id-55>",
               "product_sku": "CORNHMOLD14",
               "quantity": 54,
               "unit_price": 6,
@@ -815,11 +815,11 @@
             {
               "customer_note": "",
               "description": "Vented Soffit Hardie Textured 1/4 X 24 X 8",
-              "id": "<id-55>",
+              "id": "<id-56>",
               "is_special_order": false,
               "line_total": 2703.75,
               "price_uom": "EA",
-              "product_id": "<id-56>",
+              "product_id": "<id-57>",
               "product_sku": "CORNSFT2408V",
               "quantity": 103,
               "unit_price": 26.25,
@@ -828,7 +828,7 @@
             {
               "customer_note": "",
               "description": "2x8x16 Hem-Fir No.2",
-              "id": "<id-57>",
+              "id": "<id-58>",
               "is_special_order": false,
               "line_total": 1579.75,
               "price_uom": "PCS",
@@ -841,11 +841,11 @@
             {
               "customer_note": "",
               "description": "Cemtrim Textured 7/16 X 6 X 12",
-              "id": "<id-58>",
+              "id": "<id-59>",
               "is_special_order": false,
               "line_total": 1504.44,
               "price_uom": "EA",
-              "product_id": "<id-59>",
+              "product_id": "<id-60>",
               "product_sku": "CORNCTRMG12+",
               "quantity": 84,
               "unit_price": 17.91,
@@ -854,8 +854,8 @@
           ],
           "notes": "",
           "priced": true,
-          "project_id": null,
-          "project_name": null,
+          "project_id": "<id-61>",
+          "project_name": "Mission Hill Custom Home",
           "rejected_at": null,
           "sent_at": null,
           "status": "PRICED",
@@ -869,12 +869,12 @@
           "erp_state": "DRAFT",
           "expires_at": "<ts-38d>",
           "freight_amount": 0,
-          "id": "<id-60>",
+          "id": "<id-62>",
           "lines": [
             {
               "customer_note": "",
               "description": "2x4x8 SPF Premium",
-              "id": "<id-61>",
+              "id": "<id-63>",
               "is_special_order": false,
               "line_total": 275,
               "price_uom": "PCS",
@@ -887,11 +887,11 @@
             {
               "customer_note": "",
               "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
-              "id": "<id-62>",
+              "id": "<id-64>",
               "is_special_order": false,
               "line_total": 3687.62,
               "price_uom": "EA",
-              "product_id": "<id-63>",
+              "product_id": "<id-65>",
               "product_sku": "CORNSFT1612V",
               "quantity": 94,
               "unit_price": 39.23,
@@ -900,11 +900,11 @@
             {
               "customer_note": "",
               "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
-              "id": "<id-64>",
+              "id": "<id-66>",
               "is_special_order": false,
               "line_total": 274.61,
               "price_uom": "EA",
-              "product_id": "<id-63>",
+              "product_id": "<id-65>",
               "product_sku": "CORNSFT1612V",
               "quantity": 7,
               "unit_price": 39.23,
@@ -913,11 +913,11 @@
             {
               "customer_note": "",
               "description": "Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX",
-              "id": "<id-65>",
+              "id": "<id-67>",
               "is_special_order": false,
               "line_total": 463.32,
               "price_uom": "EA",
-              "product_id": "<id-66>",
+              "product_id": "<id-68>",
               "product_sku": "CORNSHTGR49",
               "quantity": 33,
               "unit_price": 14.04,
@@ -926,8 +926,8 @@
           ],
           "notes": "",
           "priced": false,
-          "project_id": null,
-          "project_name": null,
+          "project_id": "<id-69>",
+          "project_name": "Knox Park Pavilion",
           "rejected_at": null,
           "sent_at": null,
           "status": "REQUESTED",
@@ -1009,7 +1009,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-67>"
+          "request_id": "<id-70>"
         }
       }
     }
@@ -1018,7 +1018,7 @@
     "name": "portal_quotes.get.unknown",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/quotes/<id-68>"
+      "path": "/api/portal/v1/quotes/<id-71>"
     },
     "response": {
       "status": 404,
@@ -1029,7 +1029,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-69>"
+          "request_id": "<id-72>"
         }
       }
     }
@@ -1050,7 +1050,7 @@
           "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
         },
         "meta": {
-          "request_id": "<id-70>"
+          "request_id": "<id-73>"
         }
       }
     }
@@ -1071,7 +1071,7 @@
           "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
         },
         "meta": {
-          "request_id": "<id-71>"
+          "request_id": "<id-74>"
         }
       }
     }
@@ -1093,7 +1093,7 @@
       "content_type": "application/json",
       "body": {
         "accepted_at": null,
-        "branch_id": "<id-72>",
+        "branch_id": "<id-75>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
         "customer_name": "Kelbrook Construction",
@@ -1175,7 +1175,7 @@
       "content_type": "application/json",
       "body": {
         "accepted_at": null,
-        "branch_id": "<id-72>",
+        "branch_id": "<id-75>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
         "customer_name": "Kelbrook Construction",
@@ -1296,7 +1296,7 @@
           "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
         },
         "meta": {
-          "request_id": "<id-73>"
+          "request_id": "<id-76>"
         }
       }
     }
@@ -1349,7 +1349,7 @@
     "name": "portal_quotes.accept.unknown",
     "request": {
       "method": "POST",
-      "path": "/api/portal/v1/quotes/<id-68>/accept"
+      "path": "/api/portal/v1/quotes/<id-71>/accept"
     },
     "response": {
       "status": 404,
@@ -1360,7 +1360,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-74>"
+          "request_id": "<id-77>"
         }
       }
     }
@@ -1380,7 +1380,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-75>"
+          "request_id": "<id-78>"
         }
       }
     }

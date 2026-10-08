@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -189,7 +190,7 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 
 	// If a credit limit is set and the live open balance + this order would
 	// exceed it, place the order ON HOLD.
-	over, err := s.overCreditLimit(ctx, o.CustomerID, cust.CreditLimit, o.TotalAmount)
+	over, err := s.overCreditLimit(ctx, o.CustomerID, cust.CreditLimitCents, o.TotalAmount)
 	if err != nil {
 		return err
 	}
@@ -411,16 +412,19 @@ func (s *Service) OverrideExposure(ctx context.Context, id uuid.UUID, notes, act
 // customer past their credit limit. The current balance is computed live from
 // open invoices — the denormalized customers.balance_due column is unmaintained
 // (stale for seed data, never updated by invoicing/POS) and must not gate credit.
-func (s *Service) overCreditLimit(ctx context.Context, customerID uuid.UUID, creditLimit float64, orderTotalCents int64) (bool, error) {
-	if creditLimit <= 0 {
+//
+// A nil limit is no limit; a limit of zero is a limit of nothing (customers.credit_limit
+// is NULL for "no limit" since C2-1, no longer 0), so any open balance plus an order
+// over zero is over it.
+func (s *Service) overCreditLimit(ctx context.Context, customerID uuid.UUID, creditLimit *httpx.Cents, orderTotalCents int64) (bool, error) {
+	if creditLimit == nil {
 		return false, nil // no limit configured
 	}
 	openCents, err := s.invoiceSvc.GetCustomerOpenBalanceCents(ctx, customerID)
 	if err != nil {
 		return false, fmt.Errorf("failed to compute current balance: %w", err)
 	}
-	limitCents := int64(math.Round(creditLimit * 100))
-	return openCents+orderTotalCents > limitCents, nil
+	return openCents+orderTotalCents > int64(*creditLimit), nil
 }
 
 func (s *Service) ListOrders(ctx context.Context) ([]Order, error) {
@@ -459,7 +463,7 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("failed to get customer: %w", err)
 	}
-	over, err := s.overCreditLimit(ctx, o.CustomerID, cust.CreditLimit, o.TotalAmount)
+	over, err := s.overCreditLimit(ctx, o.CustomerID, cust.CreditLimitCents, o.TotalAmount)
 	if err != nil {
 		return err
 	}
