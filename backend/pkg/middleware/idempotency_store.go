@@ -10,6 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
@@ -47,6 +50,7 @@ type idempotencyHolder struct {
 	state       string
 	statusCode  int
 	contentType string
+	location    string
 	body        []byte
 }
 
@@ -105,10 +109,10 @@ func (s *idempotencyStore) claim(ctx context.Context, principal, key, fingerprin
 func (s *idempotencyStore) lookup(ctx context.Context, principal, key string) (idempotencyHolder, error) {
 	var h idempotencyHolder
 	err := s.db.Pool.QueryRow(ctx, `
-		SELECT fingerprint, state, COALESCE(status_code, 0), COALESCE(content_type, ''), COALESCE(body, ''::bytea)
+		SELECT fingerprint, state, COALESCE(status_code, 0), COALESCE(content_type, ''), COALESCE(location, ''), COALESCE(body, ''::bytea)
 		FROM idempotency_keys
 		WHERE principal = $1 AND key = $2`,
-		principal, key).Scan(&h.fingerprint, &h.state, &h.statusCode, &h.contentType, &h.body)
+		principal, key).Scan(&h.fingerprint, &h.state, &h.statusCode, &h.contentType, &h.location, &h.body)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return idempotencyHolder{}, nil //nolint:nilerr // absent row is "no holder", not a failure
 	}
@@ -133,15 +137,15 @@ func (s *idempotencyStore) acquire(ctx context.Context, principal, key, fingerpr
 	return false, idempotencyHolder{}, fmt.Errorf("idempotency key %q kept racing a release after %d attempts", key, idempotencyClaimAttempts)
 }
 
-// complete stores a 2xx outcome for replay. Only an in_progress row is
+// complete stores a 2xx/3xx outcome for replay. Only an in_progress row is
 // updated: a claim whose lease lapsed and was taken over must not have an
 // older handler's response written onto the new claimant's row.
-func (s *idempotencyStore) complete(ctx context.Context, principal, key string, status int, contentType string, body []byte, retainUntil time.Time) error {
+func (s *idempotencyStore) complete(ctx context.Context, principal, key string, status int, contentType, location string, body []byte, retainUntil time.Time) error {
 	_, err := s.db.Pool.Exec(ctx, `
 		UPDATE idempotency_keys
-		SET state = $3, status_code = $4, content_type = $5, body = $6, expires_at = $7
-		WHERE principal = $1 AND key = $2 AND state = $8`,
-		principal, key, idempotencyStateComplete, status, contentType, body, retainUntil, idempotencyStateInProgress)
+		SET state = $3, status_code = $4, content_type = $5, location = $6, body = $7, expires_at = $8
+		WHERE principal = $1 AND key = $2 AND state = $9`,
+		principal, key, idempotencyStateComplete, status, contentType, location, body, retainUntil, idempotencyStateInProgress)
 	return err
 }
 
@@ -194,18 +198,46 @@ func PurgeExpiredIdempotencyKeys(ctx context.Context, db *database.DB, batchSize
 }
 
 // requestFingerprint binds an idempotency key to one request: the method, the
-// path and the body. A key reused for a different request is a client bug and
-// is refused (422) rather than answered with a stored response for that other
-// request. The query string is deliberately excluded: it does not change
-// which entity a write targets.
-func requestFingerprint(method, path string, body []byte) string {
+// path, the query string (in canonical order, so two spellings of the same
+// query are one request) and the body. A key reused for a different request
+// is a client bug and is refused (422) rather than answered with a stored
+// response for that other request.
+func requestFingerprint(method, path, query string, body []byte) string {
 	h := sha256.New()
 	h.Write([]byte(method))
 	h.Write([]byte{0})
 	h.Write([]byte(path))
 	h.Write([]byte{0})
+	h.Write([]byte(query))
+	h.Write([]byte{0})
 	h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// canonicalQuery renders a query string ordered by key then value, so
+// "?b=2&a=1" and "?a=1&b=2" are the same request while any difference in the
+// parameters themselves is a different request.
+func canonicalQuery(q url.Values) string {
+	if len(q) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(q))
+	for k := range q {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		vals := slices.Clone(q[k])
+		slices.Sort(vals)
+		for _, v := range vals {
+			b.WriteString(url.QueryEscape(k))
+			b.WriteByte('=')
+			b.WriteString(url.QueryEscape(v))
+			b.WriteByte('&')
+		}
+	}
+	return b.String()
 }
 
 // logIdempotencyError reports post-handler bookkeeping failures (complete or

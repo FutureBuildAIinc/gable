@@ -992,7 +992,7 @@ func TestIdempotency_ExpiredClaimIsTakeable(t *testing.T) {
 	_, err := db.Pool.Exec(ctx,
 		`INSERT INTO idempotency_keys (principal, key, fingerprint, state, expires_at)
 		 VALUES ($1, $2, $3, 'in_progress', now() - interval '1 minute')`,
-		principal, key, requestFingerprint(http.MethodPost, "/api/v1/quotes", []byte(`{"a":1}`)))
+		principal, key, requestFingerprint(http.MethodPost, "/api/v1/quotes", "", []byte(`{"a":1}`)))
 	if err != nil {
 		t.Fatalf("seed stale claim: %v", err)
 	}

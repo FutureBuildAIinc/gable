@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
-	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // Header names. Idempotency-Key is canonical; X-Idempotency-Key (the name the
@@ -96,9 +95,9 @@ func devAuthMode() bool {
 // (migration 087), so a replay survives a restart and is shared across
 // instances behind a load balancer.
 //
-// Scope rules, unchanged from the in-memory implementation: POST and PUT
-// only; only 2xx responses are stored and replayed (a 4xx or 5xx releases
-// the claim so the client can retry); requests without a key pass through.
+// Scope rules: POST and PUT only; 2xx and 3xx responses are stored and
+// replayed (a 4xx or 5xx releases the claim so the client can retry);
+// requests without a key pass through.
 //
 // Wiring contract: inside the auth middleware (the principal comes from the
 // context it populates) and inside MaxRequestSize (the fingerprint read
@@ -107,11 +106,11 @@ func devAuthMode() bool {
 //
 // Claim protocol: one autocommitted INSERT ... ON CONFLICT before the
 // handler, never a transaction held across it (the handler uses the pool). A
-// concurrent request with the same key gets 409 while the first is in
-// progress; the same key with a different request fingerprint gets 422; a
-// completed key replays its stored status and body with
-// Idempotency-Replayed: true. If the database is unreachable the middleware
-// fails open: the request is served uncached.
+// concurrent request with the same key gets 409 idempotency_in_progress while
+// the first is in progress; the same key with a different request fingerprint
+// gets 422 idempotency_key_reused; a completed key replays its stored status
+// and body with Idempotency-Replayed: true. If the database is unreachable
+// the middleware fails open: the request is served uncached.
 func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 	store := &idempotencyStore{db: db}
 
@@ -147,13 +146,14 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 			// be read here and handed to the handler unchanged.
 			body, err := readRequestBody(r)
 			if err != nil {
-				// The only read error reachable here is the size limit
-				// MaxRequestSize enforces around this middleware.
-				respondIdempotencyError(w, r, http.StatusRequestEntityTooLarge,
+				// The size limit MaxRequestSize enforces around this
+				// middleware is the usual cause; anything else is a client
+				// that could not be read at all.
+				respondIdempotencyError(w, r, http.StatusRequestEntityTooLarge, codeRequestTooLarge,
 					"Request body exceeds the size limit")
 				return
 			}
-			fingerprint := requestFingerprint(r.Method, r.URL.Path, body)
+			fingerprint := requestFingerprint(r.Method, r.URL.Path, canonicalQuery(r.URL.Query()), body)
 
 			claimed, holder, err := store.acquire(r.Context(), principal, clientKey, fingerprint,
 				time.Now().Add(idempotencyClaimLease))
@@ -168,15 +168,15 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 
 			if !claimed {
 				if holder.fingerprint != fingerprint {
-					respondIdempotencyError(w, r, http.StatusUnprocessableEntity,
-						"This idempotency key was already used with a different request (method, path or body differs)")
+					respondIdempotencyError(w, r, http.StatusUnprocessableEntity, codeIdempotencyKeyReused,
+						"This idempotency key was already used with a different request (method, path, query or body differs)")
 					return
 				}
 				if holder.state == idempotencyStateComplete {
 					replayStoredResponse(w, holder)
 					return
 				}
-				respondIdempotencyError(w, r, http.StatusConflict,
+				respondIdempotencyError(w, r, http.StatusConflict, codeIdempotencyInProgress,
 					"This idempotency key is already in progress; retry after the original request completes")
 				return
 			}
@@ -204,16 +204,16 @@ func Idempotency(db *database.DB) func(http.Handler) http.Handler {
 			// the response: without this, a disconnect between response and
 			// complete would leave the claim 409ing until its lease lapses.
 			bctx := context.WithoutCancel(r.Context())
-			if crw.status >= 200 && crw.status < 300 {
+			if crw.status >= 200 && crw.status < 400 {
 				if cerr := store.complete(bctx, principal, clientKey, crw.status,
-					crw.Header().Get("Content-Type"), crw.body.Bytes(),
+					crw.Header().Get("Content-Type"), crw.Header().Get("Location"), crw.body.Bytes(),
 					time.Now().Add(idempotencyRetention)); cerr != nil {
 					logIdempotencyError("store response", clientKey, cerr)
 				}
 			} else {
 				// A 4xx is validation the client must fix and a 5xx a server
-				// fault: neither is a stored outcome (the in-memory store
-				// cached 2xx only), and both leave the key claimable again.
+				// fault: neither is a stored outcome, and both leave the key
+				// claimable again so the client can retry.
 				if rerr := store.release(bctx, principal, clientKey); rerr != nil {
 					logIdempotencyError("release", clientKey, rerr)
 				}
@@ -240,50 +240,78 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 }
 
 // replayStoredResponse answers with the stored response and marks the replay.
+// The stored Location (a 201's or a 3xx's) is replayed with it; a session
+// cookie is never stored, so none is ever replayed.
 func replayStoredResponse(w http.ResponseWriter, h idempotencyHolder) {
 	if h.contentType != "" {
 		w.Header().Set("Content-Type", h.contentType)
+	}
+	if h.location != "" {
+		w.Header().Set("Location", h.location)
 	}
 	w.Header().Set(IdempotencyReplayedHeader, "true")
 	w.WriteHeader(h.statusCode)
 	_, _ = w.Write(h.body)
 }
 
-// respondIdempotencyError answers with the repository's error envelope
-// ({error: {code, message}, meta: {request_id}}), keeping the specific
-// message (httputil.RespondError would replace it with a generic one; these
-// errors only help if the client can tell what to do next).
-func respondIdempotencyError(w http.ResponseWriter, r *http.Request, code int, message string) {
+// idempotencyErrorDetail is one entry of the wire envelope's details array
+// (the error shape of docs/adr/0001-wire-contract.md): the offending field's
+// path and what is wrong with it.
+type idempotencyErrorDetail struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// idempotencyErrorEnvelope is the standard error envelope this layer answers
+// with: a machine code, the message in full, a details array (always an
+// array, never null) and the request id in meta. Held locally rather than
+// shared with httputil because the details field has not landed there yet;
+// the shapes are the wire contract's.
+type idempotencyErrorEnvelope struct {
+	Error struct {
+		Code    string                   `json:"code"`
+		Message string                   `json:"message"`
+		Details []idempotencyErrorDetail `json:"details"`
+	} `json:"error"`
+	Meta struct {
+		RequestID string `json:"request_id"`
+	} `json:"meta"`
+}
+
+// Machine codes this layer answers with: the wire contract's table, plus the
+// two idempotency outcomes reserved for this middleware.
+const (
+	codeIdempotencyInProgress = "idempotency_in_progress"
+	codeIdempotencyKeyReused  = "idempotency_key_reused"
+	codeValidationFailed      = "validation_failed"
+	codeBadRequest            = "bad_request"
+	codeRequestTooLarge       = "request_too_large"
+)
+
+// respondIdempotencyError answers with the wire contract's error envelope,
+// keeping the specific message (httputil.RespondError would replace it with a
+// generic one; these errors only help if the client can tell what to do next).
+func respondIdempotencyError(w http.ResponseWriter, r *http.Request, status int, code, message string, details ...idempotencyErrorDetail) {
 	reqID := w.Header().Get("X-Request-ID")
 	if reqID == "" {
 		reqID = r.Header.Get("X-Request-ID")
 	}
 	slog.Warn(message,
-		"status", code,
+		"status", status,
+		"code", code,
 		"method", r.Method,
 		"path", r.URL.Path,
 		"request_id", reqID,
 	)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(httputil.ErrorResponse{
-		Error: httputil.ErrorDetail{Code: idempotencyErrorCode(code), Message: message},
-		Meta:  httputil.ErrorMeta{RequestID: reqID},
-	})
-}
-
-// idempotencyErrorCode mirrors httputil's status-to-code mapping for the
-// statuses this middleware answers with.
-func idempotencyErrorCode(status int) string {
-	switch status {
-	case http.StatusConflict:
-		return "CONFLICT"
-	case http.StatusUnprocessableEntity:
-		return "UNPROCESSABLE_ENTITY"
-	default:
-		if status >= 400 && status < 500 {
-			return "BAD_REQUEST"
-		}
-		return "INTERNAL_ERROR"
+	var env idempotencyErrorEnvelope
+	env.Error.Code = code
+	env.Error.Message = message
+	if details == nil {
+		details = []idempotencyErrorDetail{}
 	}
+	env.Error.Details = details
+	env.Meta.RequestID = reqID
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(env)
 }

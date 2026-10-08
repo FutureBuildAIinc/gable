@@ -23,8 +23,12 @@
 --                of an unrelated response.
 --   state        "in_progress" (claimed, handler running elsewhere or the
 --                process died mid-handler) or "complete" (replayable).
---   status_code / content_type / body
+--   status_code / content_type / location / body
 --                the stored response, replayed byte for byte on a hit.
+--                location keeps a 201's or a 3xx's Location header so a
+--                replayed response still points the client somewhere.
+--                Set-Cookie is deliberately absent: a session cookie is
+--                never replayed to a second request.
 --   expires_at   doubles as the claim lease while in_progress (a claim whose
 --                process died is takeable again once it lapses) and as the
 --                retention horizon once complete (24h, matching the TTL the
@@ -47,6 +51,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
                     CHECK (state IN ('in_progress', 'complete')),
     status_code  INT,
     content_type TEXT,
+    location     TEXT,
     body         BYTEA,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at   TIMESTAMPTZ NOT NULL,
