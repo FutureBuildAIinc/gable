@@ -404,24 +404,37 @@ The series key is the entity; multi-company (cycle 5) may widen it to
 
 ### 9. Idempotency keys
 
-Every POST that creates or mutates accepts an idempotency key in the
-`Idempotency-Key` header: an opaque string of 1 to 128 characters chosen by
-the client. The stored scope is the principal and the key; the stored
-fingerprint adds the method and the path, and the body is hashed over the
-raw request bytes. The contract: the first request with a key executes and
-its response (status and body) is stored against it; a retry with the same
-key, the same fingerprint, and the same body hash returns the stored
-response rather than executing again, across restarts, for a retention
-window of 24 hours past the stored response; the same key reused against a
-different fingerprint or body is 422 `idempotency_key_reused`; a second
-request with the same key while the first is still executing is 409
-`idempotency_in_progress`. A response of 500 or above is not stored, so a
-retry after a server fault re-executes instead of replaying the fault.
+Every POST, PUT, and PATCH that creates or mutates accepts an idempotency
+key in the `Idempotency-Key` header: a string of 1 to 255 printable ASCII
+characters (0x20 to 0x7E) chosen by the client. Anything else is a 400
+`validation_failed` naming `Idempotency-Key`. Requests without a key are
+not idempotent by default: agents and integrations that retry must send
+one.
+
+The stored scope is the principal and the key. The principal is the
+caller each auth chain identifies: the user behind the session on the
+desk routes, the portal customer on the portal routes, the integration
+tenant on the integration routes. The stored fingerprint adds the
+method, the path, the query string sorted by key then value, and a hash
+of the raw request body bytes.
+
+The contract: the first request with a key executes and its response is
+stored against it; a retry with the same key, the same fingerprint, and
+the same body hash returns the stored response rather than executing
+again, marked by a replay response header and carrying the stored
+status, `Content-Type`, `Location` when the original had one, and body.
+Only 2xx and 3xx responses are stored: a 4xx or 5xx releases the key,
+so a corrected request, and a retry after a server fault, execute
+afresh instead of replaying the failure. The same key reused against a
+different fingerprint or body hash is 422 `idempotency_key_reused`; a
+second request with the same key while the first is still executing is
+409 `idempotency_in_progress`. Storage is durable across restarts, for a
+retention window of 24 hours past the stored response.
+
 The canonical header name is `Idempotency-Key`; the existing
-`X-Idempotency-Key` spelling keeps working until the middleware item lands
-the durable store (R1-11), after which the legacy spelling is removed,
-both steps listed as contract changes. Requests without a key are not
-idempotent by default: agents and integrations that retry must send one.
+`X-Idempotency-Key` spelling keeps working until the middleware item
+lands the durable store (R1-11), after which the legacy spelling is
+removed, both steps listed as contract changes.
 
 ### 10. The in place rule
 
