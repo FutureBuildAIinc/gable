@@ -239,36 +239,24 @@ func (s *Service) releaseAllocations(ctx context.Context, cur *Order) error {
 	return s.repo.SaveLineQuantities(ctx, cur.Lines)
 }
 
-// deriveStatus is the status a confirmed order's line quantities say (ADR
-// 0005 5.2): every non text line fully fulfilled or closed short, FULFILLED;
-// otherwise any back ordered line, BACKORDERED; otherwise CONFIRMED.
+// deriveStatus is the status an open order's line quantities say (ADR 0005
+// 5.2): every non text line fully fulfilled, FULFILLED; otherwise any back
+// ordered line, BACKORDERED; otherwise CONFIRMED. (A close short sets
+// FULFILLED itself, by its transition: the derivation runs only for an order
+// still open, where a line short of its quantity is still owed.)
 func deriveStatus(cur *Order) OrderStatus {
 	done, backordered, any := true, false, false
 	for i := range cur.Lines {
 		l := &cur.Lines[i]
-		if l.LineType == salesdoc.LineText || l.LineType == salesdoc.LineKit || l.Quantity == nil {
+		if l.LineType == salesdoc.LineText || l.Quantity == nil {
 			continue
 		}
 		any = true
-		if l.IsStocked() {
-			if l.QuantityAllocated > 0 || l.QuantityBackordered > 0 {
-				done = false
-			}
-			if l.QuantityBackordered > 0 {
-				backordered = true
-			}
-			continue
-		}
 		if l.QuantityFulfilled < *l.Quantity {
 			done = false
 		}
-	}
-	// A kit is done when its components are; a kit with no stocked component
-	// left (all fulfilled) needs its own fulfilled quantity to reach its quantity.
-	for i := range cur.Lines {
-		l := &cur.Lines[i]
-		if l.LineType == salesdoc.LineKit && l.Quantity != nil && l.QuantityFulfilled < *l.Quantity {
-			done = false
+		if l.IsStocked() && l.QuantityBackordered > 0 {
+			backordered = true
 		}
 	}
 	switch {
