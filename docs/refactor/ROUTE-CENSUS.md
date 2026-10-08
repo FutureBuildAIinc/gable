@@ -41,7 +41,7 @@ Four failure modes, all loud:
    cannot see it. The allow list `allowMethodValues` in the same file names
    the bindings the repo has reviewed as not a router; today it holds one
    entry, the exposure notifier's `notifier.Handle` event bus subscription
-   in `cmd/server/wire_exposure.go`. The same holds for a pattern name the
+   in `internal/app/serve/wire_exposure.go`. The same holds for a pattern name the
    enclosing function binds as a receiver, parameter, named result or
    variable: the census refuses to guess the value a shadowing binding
    would carry at run time.
@@ -52,13 +52,13 @@ Four failure modes, all loud:
    honoured, and an identical pair registered twice outside mutually
    exclusive branches panics the ServeMux at boot.
 3. A restricted registration fails the census: an `http.NewServeMux`
-   outside `cmd/server`, and a `Handle` whose handler mounts an
+   outside the router assembly, and a `Handle` whose handler mounts an
    `http.StripPrefix` or a sub mux. Such a mount rewrites the paths of
    everything under it, so the census could not list the mounted routes
    under their real paths. The allow list in
    `core/internal/routecensus/routecensus.go` (`allowMounts`) names the
    mounts the repo has accepted. Today it holds one entry, the `/uploads/`
-   file server of `cmd/server`, which the census lists as its outer route
+   file server of the serve package, which the census lists as its outer route
    (no method prefix, answering every method); anything else on the list
    is a deliberate, reviewed extension of it.
 4. A route added or removed without regenerating `ROUTES.txt` fails the
@@ -83,11 +83,16 @@ document.
 The alternative, building the real router behind a recording wrapper, was
 rejected for two reasons.
 
-1. The real router is assembled in `cmd/server/main.go` behind a database
-   connection (pool, audit logger, portal demo customer lookup, registry
-   sync, schedulers). Recording a boot without a database would require
-   refactoring `main` into an injectable builder first, which is its own
-   item (R1-4), not the census.
+1. The real router is assembled in the serve package (`internal/app/serve`,
+   the moved body of `cmd/server`) behind a database connection (pool,
+   audit logger, portal demo customer lookup, registry sync, schedulers).
+   Recording a boot without a database would require refactoring it into an
+   injectable builder first, which is its own item, not the census. R1-4
+   moved that body so it can be imported; the census reports the package
+   under its historical `cmd/server` label (`moduleAliases` in
+   `core/internal/routecensus/routecensus.go`), so `ROUTES.txt` stayed byte
+   identical across the move, which is the evidence the move changed no
+   route.
 2. Part of the surface is conditional on configuration, so one boot records
    one configuration, not the declared surface. The source walk lists every
    registration the sources make, whatever the flags, and this document
@@ -113,8 +118,9 @@ By method: GET 164, POST 125, PUT 29, DELETE 21, PATCH 5, and the one
 method-less `/uploads/` pattern.
 
 40 packages register routes: 38 packages under `internal/`, plus `pkg/apps`
-(the Apps API platform surface) and `cmd/server` (health, metrics,
-uploads, the A2A receiver). The largest modules are pricing and portal with
+(the Apps API platform surface) and the serve package, reported under its
+historical `cmd/server` label (health, metrics, uploads, the A2A
+receiver). The largest modules are pricing and portal with
 34 routes each, then delivery 25 and pos 19.
 
 ### Conditional registrations

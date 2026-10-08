@@ -230,7 +230,7 @@ func appsGroups() []groupDef {
 }
 
 func integrationGroups() []groupDef {
-	const integrationKey = "fb-brain-demo-key-2026" // dev-mode default from cmd/server/main.go
+	const integrationKey = "fb-brain-demo-key-2026" // dev-mode default from internal/app/serve/serve.go
 
 	withKey := map[string]string{"X-Integration-Key": integrationKey}
 

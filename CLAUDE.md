@@ -48,11 +48,11 @@ docs/         → Architecture, design system, and database specs
 
 ## Architecture
 - **Pattern:** Modular monolith — single Go binary, ~40 modules under `core/internal/<module>/`
-- **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), and `handler.go` (HTTP handlers + `RegisterRoutes` — there is no separate `routes.go`). Wired together in `core/cmd/server/main.go`
+- **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), and `handler.go` (HTTP handlers + `RegisterRoutes` — there is no separate `routes.go`). Wired together in `core/internal/app/serve/serve.go`
 - **Apps platform (Phase 0):** modules are becoming installable *apps* — manifest + DB registry (`apps` table, migration 074) + per-instance enable/disable via `pkg/apps`, managed at **Tech Admin → Apps** (`/admin/apps`). Converted so far: `millwork`, `governance`. Conversion recipe + phases: `docs/modularization-blueprint.md`
 - **Cross-module:** Synchronous Go interfaces. The one exception is notification side-effects for price exposure, published fire-and-forget over the in-process `pkg/eventbus`; no cross-module *write* goes through an event
 - **API surface:** REST JSON at `/api/v1/*` (ERP), `/api/portal/v1/*` (B2B portal, partially public), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS)
-- **Public paths** (no auth): `/health`, `/healthz/live`, `/healthz/ready`, `/metrics`, portal login/config, integration, a2a — see whitelist in `core/cmd/server/main.go`
+- **Public paths** (no auth): `/health`, `/healthz/live`, `/healthz/ready`, `/metrics`, portal login/config, integration, a2a — see whitelist in `core/internal/app/serve/serve.go`
 
 ## Key Conventions
 
@@ -67,7 +67,7 @@ docs/         → Architecture, design system, and database specs
 ### Backend Code
 - Config: env vars with `godotenv` fallback (see `core/internal/config/config.go`). Default DB URL points to **port 5434** (the docker-compose mapping), not the standard 5432
 - AI keys resolved dynamically via `ai.KeyStore` (DB-first via `system_settings`, env fallback, 30s TTL cache). Admins can set keys at runtime in Tech Admin > AI Settings
-- Server entry point: `core/cmd/server/main.go` — long initializer that wires every module's repo→service→handler→routes
+- Server entry point: `core/internal/app/serve/serve.go` — long initializer that wires every module's repo→service→handler→routes (dispatched as `core serve` by the one binary `core/cmd/core`)
 - Role middleware: `middleware.RequireRole("admin", "owner", "sales", …)` is applied per-module at registration
 - Audit logging: financial operations should use `pkg/audit.Logger`
 
@@ -108,7 +108,7 @@ go vet ./...                       # static analysis
 ```
 
 `AUTH_MODE=dev` is required to boot locally — it is not a default. Without it
-and without a `JWKS_URL`, the server fail-closes and exits (`cmd/server/main.go:146-148`).
+and without a `JWKS_URL`, the server fail-closes and exits (`core/internal/app/serve/serve.go`).
 
 Override DB connection when Postgres is on the standard port:
 ```bash
@@ -140,7 +140,7 @@ make pg-shell        # psql into the gable_postgres container
 - `cd core && go build ./...`
 - New DB columns: UUID PKs, `DECIMAL(19,4)` for quantities, money-as-cents in app code
 - UI uses design-system tokens (no hardcoded colors), JetBrains Mono for numerical data
-- New endpoints under the correct prefix (`/api/v1`, `/api/portal/v1`, `/api/integration`, `/api/v1/a2a`) and wired into a `RegisterRoutes` call in `core/cmd/server/main.go`
+- New endpoints under the correct prefix (`/api/v1`, `/api/portal/v1`, `/api/integration`, `/api/v1/a2a`) and wired into a `RegisterRoutes` call in `core/internal/app/serve/serve.go`
 
 ## Notes & Gotchas
 - Never commit build binaries. The repo used to ship a ~60 MB `docker-compose` binary and a 15 MB `core/main` — both removed July 2026 and gitignored (`/docker-compose`, `core/main`). If `git status` shows a binary, it belongs in `.gitignore`, not the tree
@@ -232,7 +232,7 @@ this repository's history. Each is cited by the artifact you can actually inspec
 
 - **#7** Canonical `products.vendor_id` UUID FK to vendors — migration `054_product_vendor_id.sql`.
 - **#8** PO source attribution column + `GET /api/v1/purchase-orders/source-summary` for the replenishment-automation KPI — migration `055_po_source.sql`, `purchase_order/handler.go:38`.
-- **#9** Scheduled auto-reorder via robfig/cron + real demand signal from `order_lines` velocity, with a `reorder_runs` observability table (migration `056_reorder_runs.sql`) and manual triggers at `POST /api/v1/purchase-orders/refresh-reorder-targets` and `GET /api/v1/purchase-orders/reorder-runs` — `purchase_order/scheduler.go`, wired at `cmd/server/main.go:339`.
+- **#9** Scheduled auto-reorder via robfig/cron + real demand signal from `order_lines` velocity, with a `reorder_runs` observability table (migration `056_reorder_runs.sql`) and manual triggers at `POST /api/v1/purchase-orders/refresh-reorder-targets` and `GET /api/v1/purchase-orders/reorder-runs` — `purchase_order/scheduler.go`, wired in `core/internal/app/serve/serve.go`.
 
 ### #10 candidates — pick one based on the active discovery doc
 

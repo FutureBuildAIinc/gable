@@ -24,9 +24,10 @@ Give this once, at the start, tailored to what they care about.
 ```
 gable/
   core/          Go 1.25 — one binary, ~41 domain modules (the "modular monolith")
-    cmd/server/     main.go: wires every module repo→service→handler→routes
-    cmd/migrate/    applies core/migrations/*.sql in order
-    cmd/seed/       the demo dataset ("Gable Lumber & Supply", Kelowna BC)
+    cmd/core/       the one binary: `core serve` (wires every module
+                    repo→service→handler→routes), `core worker` (background
+                    jobs), `core migrate` (applies core/migrations/*.sql in
+                    order), `core seed` (the demo dataset)
     internal/       the 41 modules. THIS is where business logic lives.
     pkg/            shared plumbing (database, middleware, audit, httputil, metrics…)
     pkg/apps/       the connector seam — the stable surface third parties plug into
@@ -105,7 +106,7 @@ browser page (web/apps/desk/src/pages/orders/OrderDetail.ts)
   → web/apps/desk/src/services/OrderService.ts
     → web/apps/desk/src/services/fetchClient.ts   (adds auth + base URL; never bare fetch)
       → HTTP /api/v1/orders/{id}
-        → core/cmd/server/main.go    (mux + middleware; the auth whitelist lives here)
+        → core/internal/app/serve/serve.go    (mux + middleware; the auth whitelist lives here)
           → core/internal/order/handler.go
             → service.go   (rules)
               → repository.go  (SQL)
@@ -116,12 +117,12 @@ Trace it in both directions — that round trip explains most of the codebase.
 
 ### The wiring
 
-`core/cmd/server/main.go` is one long initializer. It is the answer to "how does anything
+`core/internal/app/serve/serve.go` is one long initializer. It is the answer to "how does anything
 get connected?" and to "is my new endpoint live?". Grep it:
 
 ```bash
-grep -n "RegisterRoutes" core/cmd/server/main.go | head -40
-grep -n "publicPaths\|whitelist" core/cmd/server/main.go
+grep -n "RegisterRoutes" core/internal/app/serve/serve.go | head -40
+grep -n "PublicPaths\|whitelist" core/internal/app/serve/serve.go
 ```
 
 An endpoint that isn't in a `RegisterRoutes` call there does not exist at runtime.
@@ -201,7 +202,7 @@ ls core/internal/$M/
 head -60 core/internal/$M/model.go
 grep -n "func (s \*Service)" core/internal/$M/service.go
 grep -n "mux.HandleFunc\|RequireRole" core/internal/$M/handler.go
-grep -rn "$M\." core/cmd/server/main.go | head
+grep -rn "$M\." core/internal/app/serve/serve.go | head
 ls core/internal/$M/*_test.go 2>/dev/null || echo "no tests yet"
 ```
 

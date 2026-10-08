@@ -70,6 +70,38 @@ func collectFixture(t *testing.T, name string) Result {
 	return result
 }
 
+// TestServePackageCarriesTheCmdServerLabel pins R1-4's label rule: the body
+// of cmd/server lives in internal/app/serve (the importable package behind
+// both the one core binary and the old entry point), and the census reports
+// that package under its historical cmd/server label so api/ROUTES.txt does
+// not churn on the move. The label carries the router-assembly rules with
+// the package: it may assemble the mux, and its /uploads/ mount is the
+// allow listed one.
+func TestServePackageCarriesTheCmdServerLabel(t *testing.T) {
+	result := collectFixture(t, "servelabel")
+	if len(result.Restricted) != 0 {
+		t.Fatalf("the serve package shares cmd/server's router role, so nothing it registers is restricted, got %+v", result.Restricted)
+	}
+	if err := result.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Routes) != 2 {
+		t.Fatalf("want the fixture's two routes, got %+v", result.Routes)
+	}
+	var uploads bool
+	for _, r := range result.Routes {
+		if r.Module != "cmd/server" {
+			t.Fatalf("route %s %s must carry the cmd/server label, got module %q", r.Method, r.Pattern, r.Module)
+		}
+		if r.Pattern == "/uploads/" {
+			uploads = true
+		}
+	}
+	if !uploads {
+		t.Fatalf("the allow listed /uploads/ mount must be listed, got %+v", result.Routes)
+	}
+}
+
 // TestGatedRouterOutsidePkgAppsIsCounted pins the fix for the review's F1:
 // only the pkg/apps forwarders may skip their calls, and a call inside them
 // whose pattern resolves is a real route. A type named gatedRouter anywhere
