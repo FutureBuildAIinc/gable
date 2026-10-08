@@ -60,10 +60,11 @@ func TestHTTPStackRecordsAgentRowWithMarkerAndTool(t *testing.T) {
 
 	// cmd/server's order, outermost first.
 	var h http.Handler = handler
+	h = middleware.Idempotency(db)(h)
+	h = middleware.MaxRequestSize(10 << 20)(h)
 	h = authStandIn(h)
 	h = actor.Middleware(h)
 	h = middleware.CORSMiddleware(h)
-	h = middleware.Idempotency()(h)
 	h = middleware.RateLimit(120)(h)
 	h = middleware.Recovery(slog.Default())(h)
 	h = middleware.RequestID(h)
