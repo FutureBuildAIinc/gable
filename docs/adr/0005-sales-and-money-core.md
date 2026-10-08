@@ -473,7 +473,9 @@ Create: `POST /api/v1/orders`, status `draft`, event `order.created`.
   remainder of the customer's other orders in `confirmed`, `backordered` or
   `on_hold`, plus this order's unbilled remainder. An order's unbilled
   remainder is its `total_cents` less the `total_cents` of its invoices not
-  in `void`; at confirm that is the whole order, and at a later fulfilment
+  in `void`, clamped at zero (invoices carry the actual tax, which can exceed
+  the order's estimate, and a negative remainder must not lower the
+  exposure); at confirm that is the whole order, and at a later fulfilment
   it leaves out what earlier invoices already put in the open receivable,
   so a partly billed order is never counted twice. The open receivable is,
   in C2-2 and C2-3, the sum over the customer's invoices in `UNPAID`,
@@ -573,6 +575,38 @@ callers cycle 4 converts.
   hide it, which today's adapter never does. It writes one `audit_log` row
   (action `order.fulfillment_checks_skipped`) naming the checks skipped and
   whether each would have refused.
+- A failed fulfilment at delivery completion is never dropped. Today
+  `delivery/service.go` writes the delivered status and then calls the
+  adapter, only logging its error; the new fulfilment can fail (503 from the
+  tax provider, 409 `tax_quote_stale` when the back order worker allocates
+  between the provider call and the transaction, `exceeds_allocation`), and a
+  logged failure would leave a delivered load unbilled with no record. So
+  delivery completion does not call the fulfilment. It inserts one
+  `order_fulfillment_requests (delivery_id UUID PRIMARY KEY, order_id UUID
+  NOT NULL, position BIGSERIAL NOT NULL UNIQUE, attempts INTEGER NOT NULL
+  DEFAULT 0, last_error TEXT NULL, parked_at TIMESTAMPTZ NULL, created_at
+  TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp())` row, `ON CONFLICT DO
+  NOTHING`, in the same transaction that writes the delivered status (C2-2
+  makes that write and the insert one transaction), so a completed delivery
+  always has its request.
+- A worker job (`internal/app/worker`, beside the allocation worker) serves
+  the queue like the allocation queue: it claims the lowest `position` not
+  parked with `FOR UPDATE SKIP LOCKED`, prices the tax with the provider
+  before its transaction when one is configured (a fresh price on every
+  attempt), and runs the fulfilment above in one transaction in section
+  11's order (request, then the order row and what 5.6 locks), deleting the
+  request in that transaction when it succeeds or finds nothing left to
+  fulfil. On a failure (503, `tax_quote_stale`, `exceeds_allocation` or any
+  other) the fulfilment rolls back, and in a separate short transaction the
+  worker increments `attempts` and records `last_error`; a retried request
+  waits its turn behind newer ones only by `position`, never by a timer
+  that could lose it. After 10 failed attempts it sets `parked_at`: a parked
+  request is never retried automatically and never deleted. Parked requests
+  are visible to the desk at `GET /api/v1/orders/fulfillment-requests`
+  (list envelope, filters `parked` and `order_id`) and are retried by `POST
+  /api/v1/orders/fulfillment-requests/{delivery_id}/retry`, which clears
+  `parked_at` and `attempts`. Event `order.fulfillment_parked` when a
+  request parks.
 - Tax: a pickup order takes the branch rate, a delivery order its ship-to's
   rate when set (section 3).
 
@@ -637,6 +671,7 @@ will-call and delivery alike. An order may now have many invoices; the
 | `POST /api/v1/orders/{id}/transitions` | 5.2 |
 | `POST /api/v1/orders/{id}/fulfillments` | 5.6 |
 | `POST /api/v1/orders/{id}/allocate` | 5.4 |
+| `GET /api/v1/orders/fulfillment-requests`, `POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry` | 5.5; roles `admin`, `owner`, `finance`, `warehouse` |
 | `GET /api/v1/orders/{id}/exposure-gate`, `POST /api/v1/orders/{id}/exposure-override` | converted onto the envelope; behaviour kept |
 | `POST /api/v1/orders/{id}/confirm`, `/fulfill`, `/cancel` | removed; replaced by transitions and fulfilments (listed in CONTRACT-CHANGES) |
 | `GET/POST /api/v1/charge-codes`, `GET/PUT /api/v1/charge-codes/{id}` | new |
@@ -1177,6 +1212,11 @@ deadlocks:
 
 The order is by kind, whatever document the path names:
 
+0. a queue request row (`order_allocation_requests`,
+   `order_fulfillment_requests`), taken only by its worker, before
+   anything else; no other act locks a request row (`/allocate` never
+   touches the queue, and delivery completion only inserts);
+
 1. the order row or the counter sale row the act touches (an invoice void
    locks its order here, before the invoice);
 2. payments, in id order;
@@ -1219,7 +1259,7 @@ with `entity_type` the entity and data a small summary: `number`,
 
 | Entity | Types |
 |---|---|
-| order | `order.created`, `order.updated`, `order.confirmed`, `order.backordered`, `order.backorder_released`, `order.hold`, `order.hold_released`, `order.reopened`, `order.cancelled`, `order.partially_fulfilled`, `order.fulfilled`, `order.closed_short` |
+| order | `order.created`, `order.updated`, `order.confirmed`, `order.backordered`, `order.backorder_released`, `order.hold`, `order.hold_released`, `order.reopened`, `order.cancelled`, `order.partially_fulfilled`, `order.fulfilled`, `order.closed_short`, `order.fulfillment_parked` |
 | invoice | `invoice.created`, `invoice.partial`, `invoice.paid`, `invoice.written_off`, `invoice.reopened`, `invoice.voided` |
 | credit memo | `credit_memo.created`, `credit_memo.updated`, `credit_memo.posted`, `credit_memo.partial`, `credit_memo.applied`, `credit_memo.reopened`, `credit_memo.refunded`, `credit_memo.voided` |
 | payment | `payment.recorded`, `payment.applied`, `payment.unapplied`, `payment.refunded`, `payment.voided` |
@@ -1285,7 +1325,8 @@ exist (recipe step 3).
    estimate); `total_amount` widened; status CHECK adds `BACKORDERED`.
 6. `locations.default_tax_rate` widened to NUMERIC(9,6); `products.is_kit`,
    `products.taxable`; `product_kit_components`; `charge_codes` with the
-   seed; account `4030`; `order_allocation_requests` (5.4).
+   seed; account `4030`; `order_allocation_requests` (5.4);
+   `order_fulfillment_requests` (5.5).
 7. `order_lines`: the columns of 2.2. Backfill: `line_type` `PRODUCT`;
    `position` by `(created_at, id)` within the order; `description` and
    `sku` from the product; `uom` and `price_uom` from `uom_primary`; pair 1
@@ -1396,7 +1437,10 @@ exist (recipe step 3).
    entry rule;
    rows without one are applied to the customer's open invoices oldest due
    first, and any amount left becomes an `OPEN` credit memo (reason
-   `migrated deposit application`, no entry: the ledger already moved). A `REFUNDED` deposit
+   `migrated deposit application`, no entry: the ledger already moved), with
+   `source_payment_id` naming the migrated deposit payment and the amount
+   added to that payment's `migrated_excess`, exactly as on the capped path,
+   so the leftover never returns as unapplied cash and `2200` agrees. A `REFUNDED` deposit
    gets a `payment_refunds` row for its unapplied rest. Then
    `amount_unapplied` is computed; the two tables are renamed `*_legacy`.
 4. `invoices.amount_open` and `credit_memos.amount_open` computed from the
@@ -1527,6 +1571,13 @@ events), IN-2.2, IN-2.4, IN-3.2, IN-3.7, IN-5. Tests:
 - delivery completion records a delivered load for a customer now over the
   limit (and for a quote now in exposure), skipping both re-checks with one
   `order.fulfillment_checks_skipped` audit row;
+- the fulfilment request queue: a delivery completed while the tax provider
+  fails leaves its request, which a later attempt bills once the provider
+  answers; a `tax_quote_stale` failure is retried with a fresh price and
+  bills; a request failing 10 times parks, stays readable at
+  `GET /orders/fulfillment-requests?parked=true` with its `last_error`, is
+  never deleted, and bills after the retry route; a delivered status whose
+  request insert fails rolls back with it;
 - a slow tax provider (a stub that sleeps past the timeout) holds no row
   lock: a concurrent confirm on the same products completes while it waits,
   and the act answers 503 having locked nothing; lines changed between the
