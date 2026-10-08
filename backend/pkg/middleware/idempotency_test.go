@@ -222,9 +222,15 @@ func TestIdempotency_ConcurrentSingleWrite(t *testing.T) {
 		return r
 	}
 
-	// The first request holds the claim inside the handler.
+	// The first request holds the claim inside the handler. firstDone gates
+	// every read of firstW and of the table: the completion write happens
+	// after ServeHTTP returns, inside the goroutine.
+	firstDone := make(chan struct{})
 	firstW := httptest.NewRecorder()
-	go mw(h).ServeHTTP(firstW, newReq())
+	go func() {
+		defer close(firstDone)
+		mw(h).ServeHTTP(firstW, newReq())
+	}()
 	<-started
 
 	// Three contenders arrive while the first is in progress.
@@ -251,6 +257,7 @@ func TestIdempotency_ConcurrentSingleWrite(t *testing.T) {
 	}
 
 	close(release)
+	<-firstDone
 	if firstW.Code != http.StatusCreated {
 		t.Fatalf("first request: status = %d, want %d", firstW.Code, http.StatusCreated)
 	}
@@ -690,7 +697,7 @@ func TestIdempotency_OversizedBodyRejected(t *testing.T) {
 
 	handler := countingHandler(&calls, http.StatusCreated, `{}`)
 	w := httptest.NewRecorder()
-	MaxRequestSize(10 << 20)(Idempotency(db))(handler).ServeHTTP(w, r)
+	MaxRequestSize(10 << 20)(Idempotency(db)(handler)).ServeHTTP(w, r)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized body: status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
 	}

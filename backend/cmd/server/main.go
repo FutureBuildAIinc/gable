@@ -497,6 +497,16 @@ func main() {
 
 	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
 
+	// Idempotency retention: purge expired idempotency_keys rows nightly so
+	// completed replays and lapsed claims do not accumulate. On by default
+	// (the middleware writes a row per keyed POST/PUT); opt out with
+	// idempotency.purge_enabled=false in system_settings. Stops in step 3.8
+	// of graceful shutdown, before the DB pool closes.
+	idempotencyScheduler := middleware.NewIdempotencyScheduler(db)
+	if err := idempotencyScheduler.Start(context.Background()); err != nil {
+		logger.Error("idempotency purge scheduler failed to start", "error", err)
+	}
+
 	// Delivery Module
 	deliveryRepo := delivery.NewRepository(db)
 	deliverySvc := delivery.NewService(deliveryRepo)
@@ -817,6 +827,12 @@ func main() {
 	// Cache-Control headers (innermost — runs after auth, before response)
 	finalHandler = middleware.CacheControl(finalHandler)
 
+	// Idempotency keys (POST/PUT with Idempotency-Key). Inside auth so the
+	// claim is keyed on the authenticated principal, and inside the request
+	// size limit so the fingerprint read honours it. Claims live in Postgres
+	// (migration 087), so a replay survives a restart.
+	finalHandler = middleware.Idempotency(db)(finalHandler)
+
 	// Request size limit (10MB default)
 	finalHandler = middleware.MaxRequestSize(10 << 20)(finalHandler)
 
@@ -827,9 +843,6 @@ func main() {
 
 	// CORS — must be outside auth so OPTIONS preflight is handled before auth
 	finalHandler = middleware.CORSMiddleware(finalHandler)
-
-	// Idempotency key caching (POST/PUT — after auth, before rate limiting)
-	finalHandler = middleware.Idempotency()(finalHandler)
 
 	// Rate limiting (120 requests/minute per IP)
 	finalHandler = middleware.RateLimit(120)(finalHandler)
@@ -912,6 +925,13 @@ func main() {
 	logger.Info("Shutdown step 3.7/4: stopping exposure wiring...")
 	exposureWiring.Shutdown(ctx)
 	logger.Info("Shutdown step 3.7/4: exposure wiring stopped")
+
+	// Step 3.8: Stop the idempotency retention cron. Same reasoning as 3.5
+	// and 3.6: no purge statement may start against a draining pool, and an
+	// in-flight batch finishes before step 4 closes it.
+	logger.Info("Shutdown step 3.8/4: stopping idempotency purge scheduler...")
+	idempotencyScheduler.Stop()
+	logger.Info("Shutdown step 3.8/4: idempotency purge scheduler stopped")
 
 	// Step 4: Close database connection pool
 	logger.Info("Shutdown step 4/4: closing database pool...")
