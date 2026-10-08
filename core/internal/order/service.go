@@ -845,7 +845,13 @@ type TransitionBody struct {
 	Reason   string
 	HoldNote string
 	Actor    string
+	// Role is the caller's role; empty when the auth chain set none (an in
+	// process caller, a machine key, dev mode), which the release admits.
+	Role string
 }
+
+// releaseRoles are the roles that may release a hold (ADR 0005 section 5.2).
+var releaseRoles = map[string]bool{"admin": true, "owner": true, "finance": true}
 
 // Transition moves an order along its lifecycle on the client's revision
 // (ADR 0005 section 5.2's table). Anything outside the table is 409
@@ -1013,8 +1019,13 @@ func (s *Service) applyTransition(ctx context.Context, cur *Order, to OrderStatu
 		if cur.Status == StatusDraft {
 			return s.confirm(ctx, cur, body, priced)
 		}
-		// on_hold to confirmed: the release (ADR 0005 section 5.2). It skips
-		// the credit check; the exposure gate and the tax rate still hold.
+		// on_hold to confirmed: the release (ADR 0005 section 5.2), held to
+		// the finance roles under the order's lock. It skips the credit
+		// check; the exposure gate and the tax rate still hold.
+		if body.Role != "" && !releaseRoles[body.Role] {
+			return nil, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+				Message: "releasing a hold needs the admin, owner or finance role"}
+		}
 		if s.exposure != nil {
 			if err := s.exposure.RequireClearForOrder(ctx, cur.ID); err != nil {
 				return nil, err

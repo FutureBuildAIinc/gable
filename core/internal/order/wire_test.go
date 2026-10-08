@@ -1131,3 +1131,55 @@ func TestOrderDiscountErrorNamesTheRequestLine(t *testing.T) {
 		t.Errorf("details = %v, want lines[1].discount_cents (the request's index, not the exploded position 2)", details)
 	}
 }
+
+// roleClaims stands in for authentication: X-Test-Role becomes the claims a
+// JWT would carry.
+func roleClaims(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if role := r.Header.Get("X-Test-Role"); role != "" {
+			claims := &middleware.UserClaims{Role: role, Roles: []string{role}}
+			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RULE (ADR 0005 5.2): releasing a hold is the admin, owner and finance
+// roles' act. The check runs under the order's lock inside the transition
+// (review P3-12), not in the handler before it: a sales caller is refused
+// 403 and the order stays held on its revision with no release event.
+func TestOrderReleaseNeedsAFinanceRole(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	if _, err := db.Pool.Exec(context.Background(), `UPDATE customers SET credit_limit = 50.00 WHERE id = $1`, f.customerID); err != nil {
+		t.Fatal(err)
+	}
+	svc := order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	mux := http.NewServeMux()
+	order.NewHandler(svc).RegisterRoutes(mux)
+	f.srv = httptest.NewServer(middleware.Idempotency(db)(roleClaims(middleware.NewBranchMiddleware(db).Handler(mux))))
+	t.Cleanup(f.srv.Close)
+
+	r := f.create()
+	id := str(t, r.body, "id")
+	r = f.do("POST", "/api/v1/orders/"+id+"/transitions", map[string]any{"to": "confirmed", "revision": 1})
+	if r.status != 200 || str(t, r.body, "status") != "on_hold" {
+		t.Fatalf("credit hold = %d %q: %s", r.status, r.body["status"], r.raw)
+	}
+	r = f.do("POST", "/api/v1/orders/"+id+"/transitions", map[string]any{"to": "confirmed", "revision": 2}, "X-Test-Role", "sales")
+	if r.status != http.StatusForbidden {
+		t.Fatalf("release by a sales role = %d, want 403: %s", r.status, r.raw)
+	}
+	g := f.do("GET", "/api/v1/orders/"+id, nil)
+	if str(t, g.body, "status") != "on_hold" || revision(t, g) != 2 {
+		t.Errorf("the refused release moved the order: %s", g.raw)
+	}
+	if ev := eventsFor(t, db, id); len(ev) != 2 {
+		t.Errorf("events = %v, want only created and hold", ev)
+	}
+	r = f.do("POST", "/api/v1/orders/"+id+"/transitions", map[string]any{"to": "confirmed", "revision": 2}, "X-Test-Role", "finance")
+	if r.status != 200 || str(t, r.body, "status") != "confirmed" {
+		t.Errorf("release by finance = %d %q: %s", r.status, r.body["status"], r.raw)
+	}
+}

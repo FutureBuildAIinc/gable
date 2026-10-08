@@ -19,9 +19,6 @@ import (
 // (ADR 0001 section 2).
 const cursorScope = "orders.created_at_id_desc"
 
-// releaseRoles are the roles that may release a hold (ADR 0005 section 5.2).
-var releaseRoles = map[string]bool{"admin": true, "owner": true, "finance": true}
-
 type Handler struct {
 	service *Service
 }
@@ -333,18 +330,9 @@ func (h *Handler) HandleTransition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The release of a hold is held to the finance roles (ADR 0005 5.2).
-	if to == StatusConfirmed {
-		if cur, err := h.service.GetOrder(r.Context(), id); err == nil && cur.Status == StatusOnHold {
-			if role := callerRole(r); role != "" && !releaseRoles[role] {
-				httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
-					Message: "releasing a hold needs the admin, owner or finance role"})
-				return
-			}
-		}
-	}
-
-	body := TransitionBody{Reason: reason, HoldNote: holdNote, Actor: actor(r)}
+	// The release of a hold is held to the finance roles inside the
+	// transition, under the order lock (ADR 0005 5.2).
+	body := TransitionBody{Reason: reason, HoldNote: holdNote, Actor: actor(r), Role: callerRole(r)}
 	pre := Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}
 	o, err := h.service.Transition(r.Context(), id, to, pre, body)
 	if err != nil {
