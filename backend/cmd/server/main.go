@@ -58,6 +58,7 @@ import (
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/apps"
+	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/metrics"
@@ -824,6 +825,10 @@ func main() {
 	if authMw != nil {
 		finalHandler = authMw.Handler(finalHandler)
 	}
+
+	// Actor identity (agent headers → context for audit attribution). Inside
+	// auth on purpose: it records who acted, it never grants anything.
+	finalHandler = actor.Middleware(finalHandler)
 
 	// CORS — must be outside auth so OPTIONS preflight is handled before auth
 	finalHandler = middleware.CORSMiddleware(finalHandler)

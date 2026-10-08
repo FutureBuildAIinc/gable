@@ -109,26 +109,32 @@ func (s *Service) ProcessPayment(ctx context.Context, invoiceID uuid.UUID, amoun
 			return fmt.Errorf("failed to post to account ledger: %w", err)
 		}
 
-		return s.updateInvoiceStatus(ctx, invoiceID, inv)
+		if err := s.updateInvoiceStatus(ctx, invoiceID, inv); err != nil {
+			return err
+		}
+
+		// Audit log: inside the transaction, so it shares the payment's fate
+		// — a rolled back payment leaves no audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action:     "payment.processed",
+				EntityType: "payment",
+				EntityID:   p.ID,
+				Changes: map[string]interface{}{
+					"invoice_id":   invoiceID,
+					"amount_cents": amountCents,
+					"method":       string(method),
+					"reference":    ref,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+		return nil
 	})
 
 	if err != nil {
 		return nil, err
-	}
-
-	// Audit log: payment processed
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "payment.processed",
-			EntityType: "payment",
-			EntityID:   p.ID,
-			Changes: map[string]interface{}{
-				"invoice_id":   invoiceID,
-				"amount_cents": amountCents,
-				"method":       string(method),
-				"reference":    ref,
-			},
-		})
 	}
 
 	return p, nil
@@ -266,6 +272,24 @@ func (s *Service) RefundPayment(ctx context.Context, paymentID uuid.UUID, amount
 			return fmt.Errorf("failed to post refund to account ledger: %w", err)
 		}
 
+		// Audit log: inside the transaction, so it shares the refund's fate
+		// — a refund that fails to save leaves no audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action:     "payment.refunded",
+				EntityType: "refund",
+				EntityID:   refund.ID,
+				Changes: map[string]interface{}{
+					"payment_id":   paymentID,
+					"amount_cents": amountCents,
+					"reason":       reason,
+					"gateway_id":   result.TransactionID,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+
 		return nil
 	})
 
@@ -278,21 +302,6 @@ func (s *Service) RefundPayment(ctx context.Context, paymentID uuid.UUID, amount
 			"error", err,
 		)
 		return nil, fmt.Errorf("refund processed at gateway but failed to save: %w", err)
-	}
-
-	// Audit log: refund processed
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "payment.refunded",
-			EntityType: "refund",
-			EntityID:   refund.ID,
-			Changes: map[string]interface{}{
-				"payment_id":   paymentID,
-				"amount_cents": amountCents,
-				"reason":       reason,
-				"gateway_id":   result.TransactionID,
-			},
-		})
 	}
 
 	return refund, nil
