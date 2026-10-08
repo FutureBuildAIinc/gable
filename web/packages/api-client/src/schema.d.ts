@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/a2a/purchase-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a signed create_purchase_order event from FB Brain
+         * @description Order of checks, exactly as the receiver runs them. (1) The body is read up to 1 MiB; anything beyond that is silently truncated, which makes the signature fail. (2) X-JWS-Signature must be present, else 401. (3) X-Idempotency-Key must be present, else 400. (4) The signature must be a compact detached JWS (RS256 only) that verifies over the raw request body with Brain's RSA public key, else 401 "invalid JWS signature". (5) The key is looked up in the a2a_inbound_po_log table; a key already logged is a 409 DUPLICATE (the receiver's own check, in addition to the global idempotency layer). (6) The body must be JSON, else 400. (7) An event_type other than create_purchase_order is acknowledged with 200 {"status": "ignored"} and nothing is created. (8) payload must decode into the purchase order payload and its vendor_id must be a UUID, else 400. The purchase order is created through the purchase order service with source A2A, stamped with the branch from the brain_inbound_branch_id system setting (falling back to default_branch_id); a failure is a 500. On success the webhook is logged against the idempotency key (a failure to log is only logged, the answer stays 201) and the answer is 201 {"status":"created","po_id"}. The key is recorded only after a successful creation, so a failed attempt can be retried with the same key. The global idempotency layer (the Idempotency-Key or X-Idempotency-Key header) only claims requests that carry an identifiable principal; this route has no JWT, so outside AUTH_MODE=dev the global layer passes it through uncached, and under AUTH_MODE=dev it claims under the dev principal and may answer 409 (in progress) or 422 (key reused with a different body) in the standard envelope. There is no role guard and no JWT.
+         */
+        post: operations["a2aPurchaseOrderReceive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts/{id}": {
         parameters: {
             query?: never;
@@ -61,6 +81,414 @@ export interface paths {
         post?: never;
         /** Delete an activity */
         delete: operations["activityDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List machine API keys
+         * @description Admin or owner only. Newest first, revoked keys included. Not paginated. Answers null, not an empty array, when there are no keys. Only the 12 character prefix identifies a key; the secret is never retrievable.
+         */
+        get: operations["adminListKeys"];
+        put?: never;
+        /**
+         * Create a machine API key
+         * @description Admin or owner only. The raw key (sk_live_ followed by 43 URL safe base64 characters) is returned here and nowhere else; only its salted Argon2 hash is stored. Success is a 200, not a 201. Neither name nor scopes is validated; omitted scopes are stored as null.
+         */
+        post: operations["adminCreateKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a machine API key
+         * @description Admin or owner only. Sets revoked_at; the row is kept. Unknown ids and already revoked keys are a 204 too (an UPDATE that matches nothing is not an error). A malformed id the database refuses is a 500. DELETE is outside the idempotency layer.
+         */
+        delete: operations["adminRevokeKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/settings/ai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show the OpenRouter key status
+         * @description Admin or owner only. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and is absent when no key is configured. base_url is present only when an admin override is stored, never for the environment or built in default.
+         */
+        get: operations["adminGetAISettings"];
+        /**
+         * Save the OpenRouter key and base URL
+         * @description Admin or owner only. The key is stored and never echoed back. base_url absent or null leaves the stored override alone; an empty string clears the override; any other value must be an absolute https URL (plain http only for loopback hosts) or the call is a 400 and nothing, key included, is saved. A key is required. A 500 also answers when the key store is not wired.
+         */
+        put: operations["adminSaveAISettings"];
+        post?: never;
+        /**
+         * Remove the stored OpenRouter key and base URL override
+         * @description Admin or owner only. Deletes the admin stored key and the base URL override together, so both revert to the environment or default. DELETE is outside the idempotency layer.
+         */
+        delete: operations["adminDeleteAISettings"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/settings/routing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show the OpenRouteService key status
+         * @description Admin or owner only. Same shape and masking as the AI settings, key only: key_hint is the first 10 and last 4 characters (four asterisks for a key of 12 characters or fewer), and base_url is never present.
+         */
+        get: operations["adminGetRoutingSettings"];
+        /**
+         * Save the OpenRouteService key
+         * @description Admin or owner only. The key is stored and never echoed back. A key is required (400). A 500 also answers when the key store is not wired.
+         */
+        put: operations["adminSaveRoutingSettings"];
+        post?: never;
+        /**
+         * Remove the stored OpenRouteService key
+         * @description Admin or owner only. Deletes the admin stored key so the environment value, if any, applies again. DELETE is outside the idempotency layer.
+         */
+        delete: operations["adminDeleteRoutingSettings"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the integration modules and their global flag
+         * @description Admin or owner only. A fixed catalog (today only ai_lm); enabled is true only when the modules.<id>.enabled setting is exactly true.
+         */
+        get: operations["adminListModules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/modules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Switch an integration module on or off globally
+         * @description Admin or owner only. Writes the modules.<id>.enabled setting for any id, known or not, and revokes access for every staff member at once when switched off without deleting grants. The id is not checked against the catalog. The response echoes the id and the new flag with an empty name.
+         */
+        put: operations["adminSetModuleEnabled"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the staff roster
+         * @description Admin or owner only. Ordered by full name, with each member's raw module grants. Not paginated. Never null.
+         */
+        get: operations["adminListStaff"];
+        put?: never;
+        /**
+         * Add a staff member
+         * @description Admin or owner only. Email and full_name are required (400 when empty). Role defaults to staff and active to true. A duplicate email the database refuses surfaces as a 500.
+         */
+        post: operations["adminCreateStaff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a staff member
+         * @description Admin or owner only.
+         */
+        get: operations["adminGetStaff"];
+        /**
+         * Update a staff member
+         * @description Admin or owner only. A partial update: absent or null fields are left unchanged (a null staff_no cannot clear the stored value). An empty body returns the current record, or 404 when the id is unknown.
+         */
+        put: operations["adminUpdateStaff"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant a module to a staff member
+         * @description Admin or owner only. Idempotent at the database (a repeat grant is a no-op) and audit logged. The module id is not checked against the catalog. An unknown staff id is refused by the database and is a 500. When the re-read of the member fails after the grant, the answer is still 200 with the bare status object granted.
+         */
+        post: operations["adminGrantStaffModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/modules/{module_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a module from a staff member
+         * @description Admin or owner only. Idempotent and audit logged; an unknown staff id or a grant that does not exist still succeeds, with the bare status object revoked (the re-read finds no member). DELETE is outside the idempotency layer.
+         */
+        delete: operations["adminRevokeStaffModule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/exposure-scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the price exposure safety net scan now
+         * @description The route guard admits admin, owner and sales; the handler then refuses all but admin and owner with a 403, judging by the first role of the token (the role claim, else the first of the roles array). In dev auth mode the caller is treated as owner. The body is ignored and optional. The scan runs synchronously to completion.
+         */
+        post: operations["adminExposureScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the app catalog with live enablement
+         * @description Any authenticated role (the web client builds its navigation from it); no role guard. The catalog is the union of the compiled in manifests and orphaned database rows, sorted by category then name. An empty catalog on a fresh database triggers one self heal sync, so the list is never null.
+         */
+        get: operations["appsList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/apps/{key}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable an app
+         * @description Admin or owner only (a 403 for any other role). Every app the target depends on must be enabled, except core dependencies which are always treated as enabled; otherwise the answer is a 409 with the blockers. Answers the full catalog after the change. Enabling an already enabled app succeeds again.
+         */
+        post: operations["appsEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/apps/{key}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable an app
+         * @description Admin or owner only (a 403 for any other role). A core app cannot be disabled (409 app_core), and an app that another enabled app depends on cannot be disabled (409 app_dependency_conflict with the dependents as blockers). Disabled apps do not block. Answers the full catalog after the change. The effect on the app's routes follows within the gate cache window.
+         */
+        post: operations["appsDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/configurator/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every configurator rule
+         * @description Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+         */
+        get: operations["configuratorListRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/configurator/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the allowed values of one attribute
+         * @description Admin, owner or sales. Every query parameter other than attribute_type is read as a current selection (attribute type to chosen value, first value wins), for example attribute_type=Grade&Species=SYP. With no selections, or when no rule matches them, the static defaults for the attribute are answered (an empty array for an unknown attribute). Otherwise the order of the options is unspecified.
+         */
+        get: operations["configuratorListOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/configurator/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the active presets
+         * @description Admin, owner or sales. Active presets only, ordered by name. Never null.
+         */
+        get: operations["configuratorListPresets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/configurator/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a set of selections against the rules
+         * @description Admin, owner or sales. The body is capped at 64 KiB; an oversized or malformed body is a 400, as is an empty selections map. A rule conflict is a 200 with valid false and the conflicts listed.
+         */
+        post: operations["configuratorValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/configurator/build-sku": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build a non stock SKU from selections
+         * @description Admin, owner or sales. The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict, and any other service failure including a database fault, answers 400 (never 500). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+         */
+        post: operations["configuratorBuildSku"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -206,6 +634,106 @@ export interface paths {
         };
         /** List price levels */
         get: operations["customerListPriceLevels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dashboard KPIs
+         * @description Roles admin, owner, finance, scoped to the X-Branch-Id branch (all branches for an admin with no header). A failure is a 500.
+         */
+        get: operations["dashboardSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/inventory-alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Products at or below their reorder point
+         * @description Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
+         */
+        get: operations["dashboardInventoryAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/top-customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The top five customers by invoiced revenue in the last 30 days
+         * @description Roles admin, owner, finance, branch scoped. Customers with no invoiced revenue are left out.
+         */
+        get: operations["dashboardTopCustomers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/order-activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The ten newest orders and the 30 day status breakdown
+         * @description Roles admin, owner, finance, branch scoped. An order with no customer shows Walk-In as its customer name.
+         */
+        get: operations["dashboardOrderActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/revenue-trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily collected revenue for the last seven days
+         * @description Roles admin, owner, finance, branch scoped. Oldest day first; a day with no payments is absent, not zero.
+         */
+        get: operations["dashboardRevenueTrend"];
         put?: never;
         post?: never;
         delete?: never;
@@ -621,6 +1149,94 @@ export interface paths {
          * @description Every service failure, such as a deposit not OPEN or an amount over the remainder, answers 400.
          */
         post: operations["depositApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/print/invoice/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Print an invoice as PDF
+         * @description Renders the invoice and its customer to a PDF and answers the bytes inline (Content-Type application/pdf, Content-Disposition "inline; filename=invoice.pdf"). Requires one of the roles admin, owner, sales or finance. A path id that is not a UUID is a 400; an unknown invoice or an unknown customer on the invoice is a 404 (any lookup error maps to 404); a PDF generation failure is a 500.
+         */
+        get: operations["documentsPrintInvoice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/print/pickticket/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Print an order pick ticket as PDF
+         * @description Renders the order and its customer to a pick ticket PDF and answers the bytes inline (Content-Type application/pdf, Content-Disposition "inline; filename=pickticket.pdf"). Requires one of the roles admin, owner, sales or finance. A path id that is not a UUID is a 400; an unknown order or an unknown customer on the order is a 404 (any lookup error maps to 404); a PDF generation failure is a 500.
+         */
+        get: operations["documentsPrintPickticket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/governance/rfcs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List RFCs
+         * @description Admin or owner only. Newest first. Not paginated. Answers null, not an empty array, when there are no RFCs.
+         */
+        get: operations["governanceListRfcs"];
+        put?: never;
+        /**
+         * Draft an RFC
+         * @description Admin or owner only. The content is expanded from a fixed Markdown template (no model is called). The new RFC is always status draft. The request keys are the Go field names matched case insensitively; the snake_case spelling of ProblemStatement, ProposedSolution and AuthorID is ignored without an error.
+         */
+        post: operations["governanceCreateRfc"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/governance/rfcs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get an RFC
+         * @description Admin or owner only. Any lookup failure, including a database fault, answers 404.
+         */
+        get: operations["governanceGetRfc"];
+        /**
+         * Replace an RFC's editable fields
+         * @description Admin or owner only. A full overwrite: title, status, problem statement, proposed solution and content are all set from the body, so an omitted key blanks the stored value. Status is not validated by the handler; a value outside the database's allowed set surfaces as a 500. An unknown id is a 500, not a 404.
+         */
+        put: operations["governanceUpdateRfc"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1267,6 +1883,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/millwork/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the options of a category
+         * @description Admin, owner or sales. Ordered by name. Not paginated. Answers null, not an empty array, when the category has no options.
+         */
+        get: operations["millworkListOptions"];
+        put?: never;
+        /**
+         * Create an option
+         * @description Admin, owner or sales. No field is validated by the handler; a value the table refuses (a category over 50 characters, a name over 100) surfaces as a 500.
+         */
+        post: operations["millworkCreateOption"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders": {
         parameters: {
             query?: never;
@@ -1399,6 +2039,26 @@ export interface paths {
          * @description Records an explicit override with an audit entry. A notes justification of at least ten characters is required; shorter notes are a 400.
          */
         post: operations["orderExposureOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/parsing/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse a material list upload into catalog matched items
+         * @description Accepts multipart/form-data with one file field named file: an image, a PDF, a CSV or an xlsx spreadsheet (a name ending .xlsx or .xls whose sniffed type is octet-stream or zip is treated as a spreadsheet and converted to tab separated text before extraction; an unreadable spreadsheet is a 400). The whole request body is capped at 10 MiB by the server's request size middleware and the file read at 10 MiB; a body over the cap, an unparseable form or a missing file field is a 400. Requires the role admin, owner or sales. Extracted lines are matched against the whole product catalog. When the AI extractor is unavailable (OPENROUTER_API_KEY unset, the default, or the call failed) the response is still 200 but items is a fixed demo list, not the file's contents, and synthetic is true with synthetic_reason filled. source_image is always a base64 data URI of the real upload. A catalog or extraction failure is a 500.
+         */
+        post: operations["parsingUpload"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3092,6 +3752,298 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reporting/builder/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run an ad hoc report definition and return the rows
+         * @description Roles admin, owner, finance. Builds a parameterised query from the definition over one of the entities invoices, orders or inventory and returns at most 1000 rows. A body that is not JSON is a 400. An unknown entity_type, a column, filter or grouping field outside the entity's whitelist, an unsupported aggregation or operator, an empty column list, or a database error are all 500 today. Filter operators are =, !=, >, <, >=, <= and LIKE (matched case insensitively as a contains); aggregations are SUM, COUNT, AVG, MIN and MAX.
+         */
+        post: operations["reportingBuilderPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/builder/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run an ad hoc report definition and download it as CSV or XLSX
+         * @description Roles admin, owner, finance. Runs the same query as the preview, then renders the rows with the requested columns. The query runs before the format is checked, so an unsupported format is a 400 only when the query itself succeeds; a failing query is a 500 whatever the format. The CSV header row uses each column's label (the field when the label is empty). The attachment file name is fixed.
+         */
+        post: operations["reportingBuilderExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/export/{entity}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dump every whitelisted column of an entity as JSON for BI tools
+         * @description Roles admin, owner only. A SELECT of every whitelisted column of the entity with the builder's 1000 row cap, as JSON (not a file). The key order of each row is not stable. An entity outside invoices, orders and inventory is a 400.
+         */
+        get: operations["reportingBiEntityExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save a report definition
+         * @description Roles admin, owner, finance. Answers 200 (not 201) with the stored report. The id and timestamps in the body are ignored; created_by is taken from the token subject when that is a UUID and is the empty string otherwise. A missing definition_json, a name over 128 characters or a database error is a 500.
+         */
+        post: operations["reportingSaveReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/saved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved reports
+         * @description Roles admin, owner, finance. Newest first, unpaged. A bare array that is null when none exist.
+         */
+        get: operations["reportingListSavedReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/saved/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one saved report
+         * @description Roles admin, owner, finance. The id is not validated as a UUID; a malformed id and an id that does not exist are both a 500 today, never a 404.
+         */
+        get: operations["reportingGetSavedReport"];
+        /**
+         * Replace a saved report's name, description, entity and definition
+         * @description Roles admin, owner, finance. Answers 200 with an empty body (the updated report is not returned). Only name, description, entity_type and definition_json are written. An id that does not exist or is not a UUID is a 500, never a 404.
+         */
+        put: operations["reportingUpdateSavedReport"];
+        post?: never;
+        /**
+         * Delete a saved report
+         * @description Roles admin, owner, finance. Not covered by the idempotency layer. Deleting an id that does not exist is still a 204. A report that a schedule still references fails the foreign key and is a 500.
+         */
+        delete: operations["reportingDeleteSavedReport"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/saved/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a saved report now and return its rows
+         * @description Roles admin, owner, finance. Any failure to load the saved report (not found or a malformed id) is a 404. A stored definition that cannot be parsed, or a query that fails, is a 500.
+         */
+        post: operations["reportingRunSavedReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List report schedules and say whether schedules run
+         * @description Roles admin, owner, finance. Newest first, unpaged. The schedules array is never null.
+         */
+        get: operations["reportingListSchedules"];
+        put?: never;
+        /**
+         * Schedule a saved report for emailed delivery
+         * @description Roles admin, owner, finance. report_id, cron_expression and at least one recipient are required (400 otherwise). format defaults to CSV and is case insensitive; anything outside CSV, XLSX and PDF is a 400. The cron expression is six fields with seconds first; a five field expression is a 400. The status in the request is ignored: the row is ACTIVE when a scheduler is attached (the shipped server) and STORED otherwise. A report_id that is not a saved report violates the foreign key and is a 500, as is a scheduler that cannot register the row (the row stays saved).
+         */
+        post: operations["reportingCreateSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reporting/schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a report schedule
+         * @description Roles admin, owner, finance. Not covered by the idempotency layer. Deletes the row, then unregisters the cron entry. An id that does not exist is still a 204; a malformed id is a 500.
+         */
+        delete: operations["reportingDeleteSchedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/daily-till": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Payments collected on one day, by method
+         * @description Roles admin, owner, finance. The date defaults to today in the server's time zone. A date that is not YYYY-MM-DD is a 500. The report is cached for 60 seconds per date.
+         */
+        get: operations["reportsDailyTill"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Invoiced, collected and outstanding totals for a period
+         * @description Roles admin, owner, finance. start defaults to 30 days ago and end to now; end is inclusive of its whole day. A date that is not YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
+         */
+        get: operations["reportsSalesSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/ar-aging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open invoice totals by customer and age bucket
+         * @description Roles admin, owner, finance. Invoices in UNPAID, PARTIAL or OVERDUE status, aged from the due date (the creation date when there is none), largest customer first. Cached for 60 seconds. buckets is null when there are no open invoices.
+         */
+        get: operations["reportsArAging"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/customer-statement/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A customer's ledger lines and balances for a period
+         * @description Roles admin, owner, finance. An id that is not a UUID is a 400. start defaults to one month ago and end to now (inclusive of its whole day); a date that is not YYYY-MM-DD is a 500. A customer that does not exist is not an error: the name is empty and the lines are null. The balances are customer_transactions cents divided by 100 as float dollars. Not cached.
+         */
+        get: operations["reportsCustomerStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/exposure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio rollup of open lumber index exposure
+         * @description Roles admin, owner, sales (registered by internal/pricing). A caller with the sales role and a UUID subject sees only the customers that salesperson owns, and then by_salesperson is empty; every other caller sees the whole portfolio. Only quotes in SENT or ACCEPTED state whose exposure state is not OK count. by_customer is capped at 50 rows. summary=true trims the body to the three totals. The ExposureRow schema of the quote fragment is not used by this route.
+         */
+        get: operations["reportsExposure"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sales-team": {
         parameters: {
             query?: never;
@@ -3184,6 +4136,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vision/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compare blueprint text against configurator selections
+         * @description Takes simulated blueprint text (a JSON string, not an image) and the user's configurator selections, extracts cross section, length, stud length, spacing, species and treatment with regular expressions, and reports mismatches against the selections. The body is capped at 1 MiB; an undecodable or oversize body, or an empty blueprint_text, is a 400. Requires the role admin or owner. The response is always 200 with mismatches an empty array (never null) when nothing disagrees.
+         */
+        post: operations["visionScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3224,6 +4196,52 @@ export interface components {
                 required_action?: string;
                 /** Format: date-time */
                 last_checked_at?: string | null;
+            };
+        };
+        /** @description Go type purchase_order.InboundPOWebhook (github.com/gablelbm/gable/internal/purchase_order), the A2A webhook envelope. No field is validated at this level except that the body is JSON; for event_type create_purchase_order the payload must decode as purchase_order.A2APurchaseOrderPayload (vendor_id, lines, requested_by, project_id, rfq_ref) and vendor_id must be a UUID. Only vendor_id and the line product_id, description, quantity and cost are used to create the order; the other fields are logged or ignored. */
+        A2aInboundPOWebhook: {
+            /** @description Only create_purchase_order is processed; any other value is acknowledged and ignored. */
+            event_type?: string;
+            /** @description For create_purchase_order, purchase_order.A2APurchaseOrderPayload. */
+            payload?: {
+                /** Format: uuid */
+                vendor_id?: string;
+                lines?: components["schemas"]["A2aPurchaseOrderLine"][];
+                requested_by?: string;
+                project_id?: string;
+                rfq_ref?: string;
+            };
+            trace_id?: string;
+            /** @description Carried in the envelope and ignored; the X-Idempotency-Key header is what the receiver uses. */
+            idempotency_key?: string;
+            timestamp?: string;
+            iss?: string;
+        };
+        /** @description Go type purchase_order.A2APurchaseOrderLine (github.com/gablelbm/gable/internal/purchase_order). quantity is a unit quantity and cost a per unit cost in float dollars. */
+        A2aPurchaseOrderLine: {
+            product_id?: string;
+            description?: string;
+            quantity?: number;
+            cost?: number;
+        };
+        /** @description Inline map in ReceiveWebhook with the keys status (created) and po_id. */
+        A2aCreatedResponse: {
+            /** @enum {string} */
+            status: "created";
+            /** Format: uuid */
+            po_id: string;
+        };
+        /** @description Inline map in ReceiveWebhook with the single key status (ignored). */
+        A2aIgnoredResponse: {
+            /** @enum {string} */
+            status: "ignored";
+        };
+        /** @description The receiver's own error body (writeError in a2a_receiver.go): code and message only, no meta object. */
+        A2aError: {
+            error: {
+                /** @enum {string} */
+                code: "VALIDATION_ERROR" | "UNAUTHORIZED" | "DUPLICATE" | "INTERNAL_ERROR";
+                message: string;
             };
         };
         AccountSummary: {
@@ -3299,6 +4317,229 @@ export interface components {
             logged_by?: string;
             /** Format: date-time */
             activity_date?: string;
+        };
+        /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never serialized. prefix is the first 12 characters of the raw key (sk_live_ plus four). */
+        TechAdminKey: {
+            /** @description A database UUID rendered as text. */
+            id: string;
+            name: string;
+            prefix: string;
+            /** @description Null when the key was created without scopes. */
+            scopes: string[] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at: string | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+        };
+        /** @description Go type techadmin.CreateKeyRequest. Nothing is validated. */
+        TechAdminCreateKeyRequest: {
+            name?: string;
+            scopes?: string[];
+        };
+        /** @description Go type techadmin.CreateKeyResponse. */
+        TechAdminCreateKeyResponse: {
+            /** @description The raw secret key, returned this once and never retrievable again. */
+            api_key: string;
+            key: components["schemas"]["TechAdminKey"] | null;
+        };
+        /** @description Go type techadmin.AISettingsResponse, used by both the AI and routing settings. The key itself is never present. key_hint and base_url are omitted when empty. */
+        TechAdminSettingsStatus: {
+            configured: boolean;
+            /**
+             * @description admin when a database override holds the key, env when only the environment does, none when unset.
+             * @enum {string}
+             */
+            source: "admin" | "env" | "none";
+            /** @description First 10 and last 4 characters of the key joined by three dots, or four asterisks for a key of 12 characters or fewer. */
+            key_hint?: string;
+            /** @description The admin override of the OpenRouter base URL; AI settings only. */
+            base_url?: string;
+        };
+        /** @description The anonymous request struct of SaveAISettings. */
+        TechAdminSaveAISettingsRequest: {
+            /** @description The OpenRouter key. Never returned by any route. */
+            api_key: string;
+            /** @description Absent or null leaves the override as is; empty clears it; otherwise an absolute https URL (http only for loopback hosts). */
+            base_url?: string | null;
+        };
+        /** @description The anonymous request struct of SaveRoutingSettings. */
+        TechAdminSaveRoutingSettingsRequest: {
+            /** @description The OpenRouteService key. Never returned by any route. */
+            api_key: string;
+        };
+        /** @description The map literal both save routes answer. */
+        TechAdminSaveResult: {
+            /** @enum {string} */
+            status: "saved";
+        };
+        /** @description Go type staff.Staff. staff_no is a pointer with omitempty, absent when unset. modules is the raw set of granted module ids, not filtered by the global enable flag. */
+        StaffMember: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            full_name: string;
+            staff_no?: string;
+            /** @description A free text label, default staff; it does not govern module access. */
+            role: string;
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            modules: string[];
+        };
+        /** @description Go type staff.CreateStaffInput. Empty email or full_name is a 400. */
+        StaffCreateRequest: {
+            email: string;
+            full_name: string;
+            staff_no?: string | null;
+            /** @description Defaults to staff when empty. */
+            role?: string;
+            /** @description Defaults to true when absent or null. */
+            active?: boolean | null;
+        };
+        /** @description Go type staff.UpdateStaffInput. Absent or null means leave unchanged. */
+        StaffUpdateRequest: {
+            email?: string | null;
+            full_name?: string | null;
+            staff_no?: string | null;
+            role?: string | null;
+            active?: boolean | null;
+        };
+        /** @description The unexported grantModuleRequest struct. An empty module_id is a 400. */
+        StaffGrantModuleRequest: {
+            module_id: string;
+        };
+        /** @description The bare map literal answered when the member re-read fails after a grant or revoke. */
+        StaffModuleStatus: {
+            /** @enum {string} */
+            status: "granted" | "revoked";
+        };
+        /** @description Go type staff.Module. */
+        StaffModule: {
+            id: string;
+            name: string;
+            enabled: boolean;
+        };
+        /** @description The unexported setModuleEnabledRequest struct. An absent flag means false. */
+        StaffSetModuleEnabledRequest: {
+            enabled?: boolean;
+        };
+        /** @description The map literal HandleAdminScan answers. */
+        AdminExposureScanResult: {
+            ok: boolean;
+        };
+        /** @description One catalog entry (Go type apps.Status, which embeds apps.Manifest). orphaned is present, and true, only for registry rows with no compiled in manifest; it is omitted otherwise. */
+        AppsManifestStatus: {
+            key: string;
+            name: string;
+            summary: string;
+            category: string;
+            /** @description Core apps cannot be disabled. */
+            core: boolean;
+            /** @description App keys that must be enabled for this app to be enabled. */
+            depends_on: string[];
+            enabled: boolean;
+            orphaned?: boolean;
+        };
+        /** @description The envelope every apps route answers (a map literal in the handler). */
+        AppsList: {
+            apps: components["schemas"]["AppsManifestStatus"][];
+        };
+        AppsDisabledError: {
+            error: {
+                /** @enum {string} */
+                code: "app_disabled";
+                message: string;
+            };
+        };
+        AppsCoreConflictError: {
+            error: {
+                /** @enum {string} */
+                code: "app_core";
+                /** @description The specific text, for example core apps cannot be disabled followed by the quoted key. */
+                message: string;
+            };
+        };
+        AppsDependencyConflictError: {
+            error: {
+                /** @enum {string} */
+                code: "app_dependency_conflict";
+                message: string;
+                /** @description Sorted keys of the disabled dependencies (on enable) or the enabled dependents (on disable). */
+                blockers: string[];
+            };
+        };
+        /** @description Go type configurator.ConfiguratorRule. error_message is a pointer with omitempty, so it is absent when the database value is null. */
+        ConfiguratorRule: {
+            /** Format: uuid */
+            id: string;
+            attribute_type: string;
+            attribute_value: string;
+            depends_on_type: string;
+            depends_on_value: string;
+            is_allowed: boolean;
+            error_message?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Go type configurator.ConfiguratorPreset. config is a Go byte slice, so it serializes as a base64 string of the stored JSON text, not as a JSON object. description is a pointer with omitempty, absent when null. */
+        ConfiguratorPreset: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description?: string;
+            product_type: string;
+            config: string | null;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Go type configurator.AvailableOption. message is omitted when empty. */
+        ConfiguratorAvailableOption: {
+            value: string;
+            allowed: boolean;
+            /** @description Why the value is disallowed. */
+            message?: string;
+        };
+        /** @description Go type configurator.ValidateConfigRequest. An empty map is a 400. */
+        ConfiguratorValidateRequest: {
+            /** @description Attribute type to chosen value, for example Species to SYP. */
+            selections: {
+                [key: string]: string;
+            };
+        };
+        /** @description Go type configurator.ValidationConflict. */
+        ConfiguratorValidationConflict: {
+            attribute_type: string;
+            attribute_value: string;
+            depends_on_type: string;
+            depends_on_value: string;
+            message: string;
+        };
+        /** @description Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none. */
+        ConfiguratorValidateResponse: {
+            valid: boolean;
+            conflicts?: components["schemas"]["ConfiguratorValidationConflict"][];
+        };
+        /** @description Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400. */
+        ConfiguratorBuildSKURequest: {
+            /** @description Lumber, Door, Trim or Panel map to LBR, DR, TRM and PNL; any other value is upper cased and cut to three characters. */
+            product_type: string;
+            selections: {
+                [key: string]: string;
+            };
+        };
+        /** @description Go type configurator.BuildSKUResponse. */
+        ConfiguratorBuildSKUResponse: {
+            sku: string;
+            description: string;
         };
         Customer: {
             /** Format: uuid */
@@ -3393,6 +4634,85 @@ export interface components {
             logged_by?: string;
             /** Format: date-time */
             activity_date?: string;
+        };
+        /** @description dashboard.DashboardSummary. Money is int64 cents. */
+        DashboardSummary: {
+            /**
+             * Format: int64
+             * @description Cents collected today.
+             */
+            today_revenue: number;
+            /** @description Percentage change against yesterday; 0 when yesterday collected nothing. */
+            today_revenue_change: number;
+            active_orders: number;
+            pending_dispatch: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            outstanding_ar: number;
+            outstanding_ar_count: number;
+        };
+        /** @description dashboard.InventoryAlert. */
+        DashboardInventoryAlert: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            /** @description The product description column. */
+            name: string;
+            current_qty: number;
+            reorder_qty: number;
+            /** @enum {string} */
+            alert_type: "LOW_STOCK" | "OUT_OF_STOCK";
+            /**
+             * Format: uuid
+             * @description Absent when the product has no inventory row.
+             */
+            location_id?: string;
+        };
+        /** @description dashboard.TopCustomer. Money is int64 cents. */
+        DashboardTopCustomer: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total_revenue: number;
+            order_count: number;
+        };
+        /** @description dashboard.RecentOrder. total_amount is int64 cents. */
+        DashboardRecentOrder: {
+            /** Format: uuid */
+            order_id: string;
+            customer_name: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total_amount: number;
+            status: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description dashboard.OrderActivity. */
+        DashboardOrderActivity: {
+            recent_orders: components["schemas"]["DashboardRecentOrder"][];
+            /** @description Order count per status over the last 30 days. */
+            status_breakdown: {
+                [key: string]: number;
+            };
+        };
+        /** @description dashboard.RevenueTrendPoint. revenue is int64 cents. */
+        DashboardRevenueTrendPoint: {
+            /** Format: date */
+            date: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            revenue: number;
         };
         /** @description Transcribed from delivery.Vehicle. The expiry and service dates are stored as dates and serialized as date-times. */
         DeliveryVehicle: {
@@ -3759,6 +5079,41 @@ export interface components {
             amount_cents: number;
             /** Format: uuid */
             invoice_id?: string;
+        };
+        /** @description Go type governance.RFC. */
+        GovernanceRFC: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            /** @enum {string} */
+            status: "draft" | "review" | "approved" | "rejected";
+            problem_statement: string;
+            proposed_solution: string;
+            /** @description Markdown. */
+            content: string;
+            /** Format: uuid */
+            author_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Go type governance.CreateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored. */
+        GovernanceCreateRFCRequest: {
+            Title?: string;
+            ProblemStatement?: string;
+            ProposedSolution?: string;
+            /** Format: uuid */
+            AuthorID?: string | null;
+        };
+        /** @description Go type governance.UpdateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored. Every field is written, so an omitted key becomes the empty string. */
+        GovernanceUpdateRFCRequest: {
+            Title?: string;
+            /** @description Stored as sent; the handler does not check it against the status vocabulary (draft, review, approved, rejected). */
+            Status?: string;
+            ProblemStatement?: string;
+            ProposedSolution?: string;
+            Content?: string;
         };
         HealthReadyOK: {
             /** @enum {string} */
@@ -4205,6 +5560,30 @@ export interface components {
             branch_id: string;
         };
         StringList: string[] | null;
+        /** @description Go type millwork.MillworkOption. */
+        MillworkOption: {
+            /** Format: uuid */
+            id: string;
+            category: string;
+            name: string;
+            /** @description Float dollars today. */
+            price_adjustment: number;
+            /** @description Any JSON value stored as sent (an object in practice); null when the create request omitted it. */
+            attributes: unknown;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Go type millwork.CreateOptionRequest. */
+        MillworkCreateOptionRequest: {
+            category?: string;
+            name?: string;
+            /** @description Float dollars today; absent means 0. */
+            price_adjustment?: number;
+            /** @description Any JSON value; stored as sent. Absent is stored as null. */
+            attributes?: unknown;
+        };
         /** @enum {string} */
         OrderStatus: "DRAFT" | "CONFIRMED" | "FULFILLED" | "CANCELLED" | "ON_HOLD";
         Order: {
@@ -4325,6 +5704,42 @@ export interface components {
             total: number;
             limit: number;
             offset: number;
+        };
+        /** @description Go type parsing.ParseResponse (github.com/gablelbm/gable/internal/parsing). */
+        ParsingParseResponse: {
+            /** @description Null when no line was extracted (an append built slice). */
+            items: components["schemas"]["ParsingParsedItem"][] | null;
+            /** @description A data URI, data:<sniffed content type>;base64,<upload bytes>. */
+            source_image: string;
+            /** Format: int64 */
+            parse_time_ms: number;
+            item_count: number;
+            /** @description True when items is the fixed demo list rather than the upload's contents. */
+            synthetic: boolean;
+            /** @description Present only when synthetic is true. */
+            synthetic_reason?: string;
+        };
+        /** @description Go type parsing.ParsedItem (github.com/gablelbm/gable/internal/parsing). */
+        ParsingParsedItem: {
+            raw_text: string;
+            matched_product?: components["schemas"]["ParsingMatchedProduct"];
+            quantity: number;
+            uom: string;
+            /** @description 0.0 to 1.0. */
+            confidence: number;
+            is_special_order: boolean;
+            /** @description Up to three runner up products; absent when none. */
+            alternatives?: components["schemas"]["ParsingMatchedProduct"][];
+        };
+        /** @description Go type parsing.MatchedProduct (github.com/gablelbm/gable/internal/parsing). */
+        ParsingMatchedProduct: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            uom: string;
+            /** @description Float dollars today. */
+            base_price: number;
         };
         PartnerDashboard: {
             /** @description Float dollars. */
@@ -5793,6 +7208,240 @@ export interface components {
             /** @description Float dollars. */
             estimated_new_total: number;
         };
+        /** @description reporting.ReportColumn (request only). Field must be a whitelisted column of the entity. */
+        ReportingColumn: {
+            field?: string;
+            label?: string;
+            /** @description SUM, COUNT, AVG, MIN or MAX, case insensitive; empty for none. */
+            aggregation?: string;
+        };
+        /** @description reporting.ReportFilter (request only). */
+        ReportingFilter: {
+            field?: string;
+            /** @enum {string} */
+            operator?: "=" | "!=" | ">" | "<" | ">=" | "<=" | "LIKE";
+            /** @description Any JSON value, bound as a query parameter. */
+            value?: unknown;
+        };
+        /** @description reporting.ReportGrouping (request only). */
+        ReportingGrouping: {
+            field?: string;
+        };
+        /** @description reporting.ReportDefinition (request only). */
+        ReportingDefinition: {
+            columns?: components["schemas"]["ReportingColumn"][];
+            filters?: components["schemas"]["ReportingFilter"][];
+            groupings?: components["schemas"]["ReportingGrouping"][];
+        };
+        /** @description The anonymous preview request struct. */
+        ReportingBuilderRequest: {
+            /** @enum {string} */
+            entity_type?: "invoices" | "orders" | "inventory";
+            definition?: components["schemas"]["ReportingDefinition"];
+        };
+        /** @description The anonymous export request struct. */
+        ReportingBuilderExportRequest: {
+            /** @enum {string} */
+            entity_type?: "invoices" | "orders" | "inventory";
+            /**
+             * @description Lower case only; anything else is a 400.
+             * @enum {string}
+             */
+            format?: "csv" | "xlsx";
+            definition?: components["schemas"]["ReportingDefinition"];
+        };
+        /** @description One result row keyed by the requested field names. Values are whatever pgx decodes: strings, numbers (numeric as a JSON number), booleans, RFC 3339 timestamps, null, and a uuid column as an array of 16 integers. */
+        ReportingRow: {
+            [key: string]: unknown;
+        };
+        ReportingRows: components["schemas"]["ReportingRow"][] | null;
+        /** @description reporting.SavedReport read as a request. Only name, description, entity_type and definition_json are used. */
+        ReportingSavedReportInput: {
+            name?: string;
+            description?: string;
+            entity_type?: string;
+            /** @description Required in practice; the column is NOT NULL. */
+            definition_json?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description reporting.SavedReport. The timestamps are Postgres ::text strings. */
+        ReportingSavedReport: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description: string;
+            entity_type: string;
+            definition_json: {
+                [key: string]: unknown;
+            };
+            /** @description A user UUID, or the empty string when no author is recorded. */
+            created_by: string;
+            /** @description Postgres timestamptz text, for example 2026-01-02 03:04:05.678+00. */
+            created_at: string;
+            /** @description Postgres timestamptz text. */
+            updated_at: string;
+        };
+        /** @description reporting.ReportSchedule read as a request. status and the timestamps are ignored. */
+        ReportingScheduleCreate: {
+            /** Format: uuid */
+            report_id: string;
+            /** @description Six fields, seconds first; descriptors such as @daily are accepted. */
+            cron_expression: string;
+            recipients: string[];
+            /** @description CSV, XLSX or PDF, case insensitive; empty means CSV. */
+            format?: string;
+        };
+        /** @description reporting.ReportSchedule. The timestamps are Postgres ::text strings. */
+        ReportingSchedule: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            report_id: string;
+            cron_expression: string;
+            recipients: string[];
+            /** @description ACTIVE when a scheduler is attached, STORED when none is. */
+            status: string;
+            /** @enum {string} */
+            format: "CSV" | "XLSX" | "PDF";
+            /** @description Absent until the first run. Postgres timestamptz text. */
+            last_run_at?: string;
+            /** @description Absent until the first run. Postgres timestamptz text. */
+            next_run_at?: string;
+            /** @description Postgres timestamptz text. */
+            created_at: string;
+            /** @description Postgres timestamptz text. */
+            updated_at: string;
+        };
+        /** @description reporting.ScheduleExecution. */
+        ReportingScheduleExecution: {
+            enabled: boolean;
+            summary: string;
+            /** @description Present only when enabled is false. */
+            blockers?: string[];
+            /** @description Present only when enabled is true. */
+            delivery?: string;
+            cron_dialect: string;
+        };
+        /** @description reporting.ReportScheduleResponse. */
+        ReportingScheduleResponse: {
+            schedule: components["schemas"]["ReportingSchedule"];
+            execution: components["schemas"]["ReportingScheduleExecution"];
+        };
+        /** @description reporting.ReportScheduleListResponse. */
+        ReportingScheduleList: {
+            schedules: components["schemas"]["ReportingSchedule"][];
+            execution: components["schemas"]["ReportingScheduleExecution"];
+        };
+        /** @description reporting.DailyTillReport. Amounts are float dollars. */
+        ReportingDailyTill: {
+            /** Format: date */
+            date: string;
+            total_collected: number;
+            /** @description Dollars collected per payment method. */
+            by_method: {
+                [key: string]: number;
+            };
+            transaction_count: number;
+        };
+        /** @description reporting.SalesSummaryReport. Amounts are float dollars. */
+        ReportingSalesSummary: {
+            /** Format: date */
+            start_date: string;
+            /** Format: date */
+            end_date: string;
+            total_invoiced: number;
+            total_collected: number;
+            outstanding_ar: number;
+            invoice_count: number;
+        };
+        /** @description reporting.ARAgingBucket. Amounts are float dollars. */
+        ReportingArAgingBucket: {
+            /** Format: uuid */
+            customer_id: string;
+            /** @description Unknown when the customer row is missing. */
+            customer_name: string;
+            /** @description 0 to 30 days. */
+            current: number;
+            days_31_60: number;
+            days_61_90: number;
+            over_90: number;
+            total: number;
+        };
+        /** @description reporting.ARAgingReport. Amounts are float dollars. */
+        ReportingArAging: {
+            /** Format: date */
+            as_of_date: string;
+            buckets: components["schemas"]["ReportingArAgingBucket"][] | null;
+            total_current: number;
+            total_31_60: number;
+            total_61_90: number;
+            total_over_90: number;
+            grand_total: number;
+        };
+        /** @description reporting.StatementLine. Amounts are float dollars (ledger cents divided by 100). */
+        ReportingStatementLine: {
+            /** Format: date */
+            date: string;
+            type: string;
+            description: string;
+            debit: number;
+            credit: number;
+            balance: number;
+        };
+        /** @description reporting.CustomerStatement. Balances are float dollars. */
+        ReportingCustomerStatement: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: date */
+            start_date: string;
+            /** Format: date */
+            end_date: string;
+            open_balance: number;
+            close_balance: number;
+            lines: components["schemas"]["ReportingStatementLine"][] | null;
+        };
+        /** @description pricing.PortfolioCustomerRow. exposure_dollars is float dollars. */
+        ReportsExposureCustomerRow: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            quote_count: number;
+            exposure_dollars: number;
+            /** @description Absent when no active escalator exists. */
+            top_index_code?: string;
+            policy: string;
+            /**
+             * Format: date-time
+             * @description 0001-01-01T00:00:00Z when no quote has been checked.
+             */
+            last_activity_at: string;
+        };
+        /** @description pricing.PortfolioSalespersonRow. exposure_dollars is float dollars. */
+        ReportsExposureSalespersonRow: {
+            /** Format: uuid */
+            salesperson_id: string;
+            salesperson_name: string;
+            quote_count: number;
+            exposure_dollars: number;
+            flagged_count: number;
+            ack_required_count: number;
+        };
+        /** @description pricing.PortfolioSummary. exposure_dollars is float dollars. */
+        ReportsExposurePortfolio: {
+            total_exposure_dollars: number;
+            total_quotes: number;
+            total_customers: number;
+            by_customer: components["schemas"]["ReportsExposureCustomerRow"][];
+            by_salesperson: components["schemas"]["ReportsExposureSalespersonRow"][];
+        };
+        /** @description The hand built map the handler writes when summary=true. */
+        ReportsExposureTotals: {
+            total_exposure_dollars: number;
+            total_quotes: number;
+            total_customers: number;
+        };
         SalesPerson: {
             /** Format: uuid */
             id: string;
@@ -5833,6 +7482,34 @@ export interface components {
             contact_email?: string | null;
             phone?: string | null;
             payment_terms?: string | null;
+        };
+        /** @description Go type vision.BlueprintScanRequest (github.com/gablelbm/gable/internal/vision). Unknown fields are ignored. */
+        VisionBlueprintScanRequest: {
+            /** @description Simulated text extracted from a blueprint PDF; empty is a 400. */
+            blueprint_text: string;
+            /** @description The configurator choices, keyed by name. The keys the comparison reads are Species, Dimensions (for example "2x6-10") and Treatment. Absent or null skips the mismatch check. */
+            config_selections?: {
+                [key: string]: string;
+            } | null;
+        };
+        /** @description Go type vision.BlueprintScanResponse (github.com/gablelbm/gable/internal/vision). */
+        VisionBlueprintScanResponse: {
+            /** @description Zero or more of cross_section ("2x4"), length ("10'"), stud_length ("10'"), spacing ("16\" OC"), species (SYP, Douglas Fir, Cedar, SPF, Hem-Fir) and treatment ("Treatable"). */
+            extracted_dimensions: {
+                [key: string]: string;
+            };
+            mismatches: components["schemas"]["VisionMismatch"][];
+            summary: string;
+        };
+        /** @description Go type vision.Mismatch (github.com/gablelbm/gable/internal/vision). */
+        VisionMismatch: {
+            /** @description Species, Dimensions, Length or Treatment. */
+            field: string;
+            blueprint_value: string;
+            config_value: string;
+            /** @enum {string} */
+            severity: "warning" | "error";
+            message: string;
         };
     };
     responses: {
@@ -5935,6 +7612,15 @@ export interface components {
                 "application/json": components["schemas"]["IntegrationError"];
             };
         };
+        /** @description The route belongs to an app that is disabled on this instance. Written by the registry gate before the handler or its role guard runs, in a hand written body with no meta block. Applies to every route of a non core app (millwork and configurator under the millwork key, governance). */
+        AppDisabled: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AppsDisabledError"];
+            };
+        };
         /** @description The body or a parameter is malformed. */
         IntegrationBadRequest: {
             headers: {
@@ -5988,6 +7674,93 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    a2aPurchaseOrderReceive: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description A compact detached JWS (header..signature, empty payload segment) signed RS256 over the exact request body bytes, verifiable with the configured Brain public key. A missing header is a 401, an unparseable or non verifying signature is a 401. */
+                "X-JWS-Signature": string;
+                /** @description The receiver's own duplicate key, checked against the a2a_inbound_po_log table. The same header name is also read by the global idempotency layer as an alias of Idempotency-Key. A missing header is a 400 (after the signature header check, before the signature verification). */
+                "X-Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The signed body; the signature covers these exact bytes, so a re-serialization breaks it. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["A2aInboundPOWebhook"];
+            };
+        };
+        responses: {
+            /** @description The event type is not create_purchase_order; acknowledged and ignored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["A2aIgnoredResponse"];
+                };
+            };
+            /** @description The purchase order was created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["A2aCreatedResponse"];
+                };
+            };
+            /** @description VALIDATION_ERROR: unreadable body, missing X-Idempotency-Key, body not JSON, payload not a purchase order payload, or vendor_id not a UUID. The global idempotency layer can also answer 400 in the standard envelope under AUTH_MODE=dev. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["A2aError"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: missing X-JWS-Signature header, or a signature that does not parse or verify against Brain's public key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["A2aError"];
+                };
+            };
+            /** @description The route is not mounted (FB Brain disabled or no loadable public key): the mux's own plain text 404, not an error envelope. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description DUPLICATE: the X-Idempotency-Key was already processed (the receiver's body), or, under AUTH_MODE=dev only, the global layer's in progress claim in the standard envelope. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["A2aError"] | components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
+            /** @description INTERNAL_ERROR: the idempotency lookup failed or the purchase order could not be created. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["A2aError"];
+                };
+            };
+        };
+    };
     accountSummary: {
         parameters: {
             query?: never;
@@ -6137,6 +7910,766 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    adminListKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every key, or null when none exist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TechAdminKey"][] | null;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminCreateKey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TechAdminCreateKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description The new key record and the raw key, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TechAdminCreateKeyResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminRevokeKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminGetAISettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TechAdminSettingsStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    adminSaveAISettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TechAdminSaveAISettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TechAdminSaveResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminDeleteAISettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminGetRoutingSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TechAdminSettingsStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    adminSaveRoutingSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TechAdminSaveRoutingSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TechAdminSaveResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminDeleteRoutingSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminListModules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The modules. Never null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffModule"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminSetModuleEnabled: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSetModuleEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description The module with its new flag; name is always the empty string here. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffModule"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminListStaff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The roster. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminCreateStaff: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created member, with an empty modules array. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminGetStaff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The member with its raw module grants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminUpdateStaff: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated member. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminGrantStaffModule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffGrantModuleRequest"];
+            };
+        };
+        responses: {
+            /** @description The member with its grants, or the bare status object. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"] | components["schemas"]["StaffModuleStatus"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminRevokeStaffModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                module_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The member with its remaining grants, or the bare status object. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"] | components["schemas"]["StaffModuleStatus"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminExposureScan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scan finished. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminExposureScanResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    appsList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    appsEnable: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The key names no compiled in manifest, or the manifest has no registry row. The standard error envelope with the generic text. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Either a disabled dependency blocks the enable (the hand written app_dependency_conflict body with the blockers), or the idempotency layer reports an in progress claim (the standard envelope). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsDependencyConflictError"] | components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    appsDisable: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The key names no compiled in manifest, or the manifest has no registry row. The standard error envelope with the generic text. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A core app (app_core), a dependent enabled app (app_dependency_conflict), or an idempotency in progress claim (the standard envelope). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsCoreConflictError"] | components["schemas"]["AppsDependencyConflictError"] | components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    configuratorListRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The full rule set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfiguratorRule"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    configuratorListOptions: {
+        parameters: {
+            query: {
+                /** @description The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType. */
+                attribute_type: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The values with their allowed flag. Never null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfiguratorAvailableOption"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    configuratorListPresets: {
+        parameters: {
+            query?: {
+                /** @description Exact match on the preset's product type; absent or empty lists all. */
+                product_type?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The presets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfiguratorPreset"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    configuratorValidate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfiguratorValidateRequest"];
+            };
+        };
+        responses: {
+            /** @description The verdict. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfiguratorValidateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    configuratorBuildSku: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfiguratorBuildSKURequest"];
+            };
+        };
+        responses: {
+            /** @description The generated SKU and description. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfiguratorBuildSKUResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     customerList: {
@@ -6567,6 +9100,141 @@ export interface operations {
                     "application/json": components["schemas"]["PriceLevelList"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    dashboardSummary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The KPIs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    dashboardInventoryAlerts: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The alerts, an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardInventoryAlert"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    dashboardTopCustomers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked customers, an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardTopCustomer"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    dashboardOrderActivity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The activity feed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOrderActivity"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    dashboardRevenueTrend: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The points, an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardRevenueTrendPoint"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -7476,6 +10144,195 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    documentsPrintInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The invoice id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice as a PDF document. */
+            200: {
+                headers: {
+                    /** @description Always "inline; filename=invoice.pdf". */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    documentsPrintPickticket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The order id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pick ticket as a PDF document. */
+            200: {
+                headers: {
+                    /** @description Always "inline; filename=pickticket.pdf". */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    governanceListRfcs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every RFC, or null when none exist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceRFC"][] | null;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    governanceCreateRfc: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GovernanceCreateRFCRequest"];
+            };
+        };
+        responses: {
+            /** @description The drafted RFC. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceRFC"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    governanceGetRfc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The RFC. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceRFC"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The RFC does not exist (or the lookup failed), or the governance app is disabled (the app_disabled body). The standard envelope in the first case. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["AppsDisabledError"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    governanceUpdateRfc: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GovernanceUpdateRFCRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated RFC. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceRFC"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
         };
     };
     healthLive: {
@@ -8595,6 +11452,68 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    millworkListOptions: {
+        parameters: {
+            query: {
+                /** @description Exact match on the category column. An empty or missing value is a 400. */
+                category: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The options, or null when none match. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MillworkOption"][] | null;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    millworkCreateOption: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MillworkCreateOptionRequest"];
+            };
+        };
+        responses: {
+            /** @description The created option. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MillworkOption"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     orderList: {
         parameters: {
             query?: {
@@ -8868,6 +11787,45 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    parsingUpload: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The material list file (image, PDF, CSV or xlsx), at most 10 MiB.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The matched items, or a synthetic demo list when extraction is unavailable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParsingParseResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -11968,6 +14926,486 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    reportingBuilderPreview: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportingBuilderRequest"];
+            };
+        };
+        responses: {
+            /** @description The rows, or null when the query matched nothing. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingRows"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingBuilderExport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportingBuilderExportRequest"];
+            };
+        };
+        responses: {
+            /** @description The rendered report, chosen by the request's format. */
+            200: {
+                headers: {
+                    /** @description attachment; filename="report.csv" or attachment; filename="report.xlsx". */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingBiEntityExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity: "invoices" | "orders" | "inventory";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rows, or null when the entity has none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingRows"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingSaveReport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportingSavedReportInput"];
+            };
+        };
+        responses: {
+            /** @description The saved report as stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingSavedReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingListSavedReports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved reports. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingSavedReport"][] | null;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingGetSavedReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The saved report id; not validated as a UUID by the handler. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingSavedReport"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingUpdateSavedReport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The saved report id; not validated as a UUID by the handler. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportingSavedReportInput"];
+            };
+        };
+        responses: {
+            /** @description Updated; no body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingDeleteSavedReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The saved report id; not validated as a UUID by the handler. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingRunSavedReport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The saved report id; not validated as a UUID by the handler. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rows; an empty array (never null) when nothing matched. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingRow"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingListSchedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The schedules with the execution disclosure block. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingScheduleList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingCreateSchedule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportingScheduleCreate"];
+            };
+        };
+        responses: {
+            /** @description The stored schedule with the execution disclosure block. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingScheduleResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportingDeleteSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportsDailyTill: {
+        parameters: {
+            query?: {
+                /** @description The day, YYYY-MM-DD. */
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The day's collections. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingDailyTill"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportsSalesSummary: {
+        parameters: {
+            query?: {
+                /** @description First day, YYYY-MM-DD. */
+                start?: string;
+                /** @description Last day, YYYY-MM-DD. */
+                end?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The period totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingSalesSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportsArAging: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The aging report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingArAging"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportsCustomerStatement: {
+        parameters: {
+            query?: {
+                /** @description First day, YYYY-MM-DD. */
+                start?: string;
+                /** @description Last day, YYYY-MM-DD. */
+                end?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportingCustomerStatement"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reportsExposure: {
+        parameters: {
+            query?: {
+                /** @description When exactly "true", only the three totals are returned. */
+                summary?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The full portfolio, or only the totals when summary=true. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportsExposurePortfolio"] | components["schemas"]["ReportsExposureTotals"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     salesTeamList: {
         parameters: {
             query?: never;
@@ -12134,6 +15572,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    visionScan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VisionBlueprintScanRequest"];
+            };
+        };
+        responses: {
+            /** @description The extracted dimensions and any mismatches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisionBlueprintScanResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
 }
