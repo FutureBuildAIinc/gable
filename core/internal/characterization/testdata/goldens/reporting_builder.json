@@ -145,6 +145,9 @@
   },
   {
     "name": "reporting.builder.export.xlsx",
+    "mask_fields": {
+      "length": "<xlsx-length>"
+    },
     "request": {
       "method": "POST",
       "path": "/api/v1/reporting/builder/export",
@@ -167,7 +170,7 @@
       "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "body": {
         "binary": {
-          "length": 6140,
+          "length": "<xlsx-length>",
           "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       }

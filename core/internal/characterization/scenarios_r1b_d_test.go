@@ -161,10 +161,15 @@ func r1bDReportingGroups() []groupDef {
 					body: map[string]any{"entity_type": "orders", "format": "csv", "definition": ordersDef}},
 				// One aggregate row: a multi-row sheet's byte length moves with the
 				// GROUP BY row order, which the query leaves unspecified.
+				// The workbook is a zip: its byte length differs between hosts
+				// (it measured 6140 here and 6058 on the CI runner for the same
+				// request), and the text hash is empty for a non PDF, so the
+				// step pins status and content type; the length is masked.
 				{name: "reporting.builder.export.xlsx", method: "POST", path: "/api/v1/reporting/builder/export",
 					body: map[string]any{"entity_type": "orders", "format": "xlsx", "definition": map[string]any{
 						"columns": []any{map[string]any{"field": "id", "label": "Orders", "aggregation": "COUNT"}},
-					}}},
+					}},
+					maskFields: map[string]any{"length": "<xlsx-length>"}},
 				{name: "reporting.builder.export.bad_format", method: "POST", path: "/api/v1/reporting/builder/export",
 					body: map[string]any{"entity_type": "orders", "format": "pdf", "definition": ordersDef}},
 				{name: "reporting.builder.export.bad_body", method: "POST",

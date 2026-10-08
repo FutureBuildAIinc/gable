@@ -243,7 +243,9 @@ each used only where a route needed it.
   the rows tie on the sort key and the placeholder numbering would shift), and
   `name`, `start_date` and `end_date` on the fiscal period list (twelve
   monthly periods of the current calendar year: the year and the dates move
-  with the calendar, ids, status and order stay pinned).
+  with the calendar, ids, status and order stay pinned), and `length` on the
+  xlsx export (a zip whose byte length differs between hosts; the step pins
+  status and content type).
 - **A group can run against its own server** (`serverEnv` on a group): the
   group gets a second `core serve` process on the same database with extra
   variables, stopped when the group ends. The two category pricing groups
