@@ -71,6 +71,12 @@ services:
       #   - key: PORTAL_JWT_SECRET
       #     scope: RUN_TIME
       #     type: SECRET
+      # TRUSTED_PROXIES: comma separated CIDRs of the proxy in front of the
+      # app. Unset, the rate limits key on the TCP peer and ignore
+      # X-Forwarded-For. Set it to your platform's proxy network so each real
+      # client gets its own budget (see README, "Behind a reverse proxy"):
+      #   - key: TRUSTED_PROXIES
+      #     value: 10.0.0.0/8
       - key: DATABASE_URL
         value: ${gable-db.DATABASE_URL}
         scope: RUN_AND_BUILD_TIME

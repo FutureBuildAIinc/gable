@@ -83,6 +83,18 @@ Open <http://localhost:5173>. To wipe and rebuild the dev database, run
 > on your own machine against throwaway data, and must **never** be set on a
 > reachable or production deployment — see [SECURITY.md](./SECURITY.md).
 
+## Behind a reverse proxy
+
+The global and login rate limits key on the caller's address. By default that is
+the TCP peer, and `X-Forwarded-For` is ignored, because any direct caller can
+send it. If a load balancer or reverse proxy fronts the server, set
+`TRUSTED_PROXIES` to a comma separated list of that proxy's networks (CIDRs or
+single addresses, IPv4 or IPv6), for example `TRUSTED_PROXIES=10.0.0.0/8,fd00::/8`.
+When the peer is inside one of them, `X-Forwarded-For` is read from the right,
+trusted hops are skipped, and the first untrusted address is the client.
+Without it, every caller behind the proxy shares the proxy's budget. A malformed
+entry stops the server at boot. `X-Real-IP` is never read.
+
 ## Documentation
 
 | Document | What's in it |
