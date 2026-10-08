@@ -12,6 +12,7 @@
 #      valid values, and every runtime and frontend path exists unless the
 #      manifest marks the entry planned (a planned entry whose path already
 #      exists fails, so a mark cannot go stale);
+#      database.extensions equals the set core/migrations/*.sql creates;
 #   3. CLAUDE.md imports AGENTS.md;
 #   4. every JSON file parses (tsconfig*.json are JSON with comments and
 #      trailing commas, so those are parsed after stripping both);
@@ -52,7 +53,7 @@ stray="$(git ls-files -co --exclude-standard | grep -v / | grep -Ei "$STRAY" || 
 # 2 and 4: manifest and JSON, in python (the manifest parser handles the
 # small YAML subset manifest.yaml is kept to).
 python3 - <<'PY'
-import json, os, re, subprocess, sys
+import glob, json, os, re, subprocess, sys
 
 def fail(msg):
     print("check-shape: FAIL: " + msg, file=sys.stderr)
@@ -144,6 +145,19 @@ for r in runtimes:
             fail("runtime %s is marked planned but %s exists; remove it from planned" % (r, p))
     elif not os.path.exists(p):
         fail("runtime %s: path %s does not exist (mark it planned if it has not landed)" % (r, p))
+
+# database.extensions must equal the set the migrations create.
+migrated = set(re.findall(
+    r"CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?[\"']?([A-Za-z0-9_-]+)",
+    "".join(open(f, encoding="utf-8").read()
+            for f in sorted(glob.glob("core/migrations/*.sql"))),
+    re.IGNORECASE))
+declared = m.get("database", {}).get("extensions")
+if not isinstance(declared, list):
+    fail("manifest.yaml database.extensions must be a list")
+if set(declared) != migrated:
+    fail("manifest.yaml database.extensions %s does not match the extensions core/migrations create %s"
+         % (sorted(declared), sorted(migrated)))
 
 fes = m.get("frontends")
 if not isinstance(fes, list) or not fes:
