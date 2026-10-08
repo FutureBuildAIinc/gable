@@ -6,6 +6,7 @@ package httpx
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -143,5 +144,46 @@ func TestNextDocumentNumberMissingSequence(t *testing.T) {
 	db := testutil.RequireDB(t)
 	if _, err := NextDocumentNumber(context.Background(), db.Pool, "docnum_missing_seq", "Q", 6); err == nil {
 		t.Fatal("missing sequence succeeded, want an error")
+	}
+}
+
+// RULE: the sequence is drawn from many request goroutines at once; every
+// concurrent nextval yields a distinct number, so two concurrent creates
+// never share a document number.
+func TestNextDocumentNumberConcurrent(t *testing.T) {
+	db := testutil.RequireDB(t)
+	createTestSequence(t, db, "docnum_concurrent_seq", 1)
+
+	const workers = 8
+	const each = 25
+	nums := make(chan string, workers*each)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx := context.Background()
+			for i := 0; i < each; i++ {
+				n, err := NextDocumentNumber(ctx, db.Pool, "docnum_concurrent_seq", "Q", 6)
+				if err != nil {
+					t.Errorf("concurrent nextval: %v", err)
+					return
+				}
+				nums <- n
+			}
+		}()
+	}
+	wg.Wait()
+	close(nums)
+
+	seen := make(map[string]bool, workers*each)
+	for n := range nums {
+		if seen[n] {
+			t.Fatalf("document number %s minted twice", n)
+		}
+		seen[n] = true
+	}
+	if len(seen) != workers*each {
+		t.Errorf("%d distinct numbers minted, want %d", len(seen), workers*each)
 	}
 }
