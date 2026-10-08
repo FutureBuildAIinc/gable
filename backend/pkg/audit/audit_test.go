@@ -200,6 +200,32 @@ func TestLog_ActorIDIsResolvedActor_UserIDKeepsLegacyOverride(t *testing.T) {
 	}
 }
 
+func TestLog_UnattributedCallRecordsAnonymous(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+	entityID := uuid.New()
+
+	// No claims, no key, no marker (dev mode, background jobs): the row is
+	// anonymous, not a phantom user — kind 'anonymous', null actor_id.
+	logger.Log(context.Background(), audit.Entry{
+		Action:     "system.swept",
+		EntityType: "anonymous_test",
+		EntityID:   entityID,
+	})
+
+	rows := fetchRows(t, db, entityID)
+	if len(rows) != 1 {
+		t.Fatalf("audit rows = %d, want 1", len(rows))
+	}
+	r := rows[0]
+	if r.ActorKind != actor.KindAnonymous {
+		t.Errorf("actor_kind = %q, want %q", r.ActorKind, actor.KindAnonymous)
+	}
+	if r.ActorID != nil {
+		t.Errorf("actor_id = %v, want NULL (no identity to record)", r.ActorID)
+	}
+}
+
 func TestLog_UserCallRecordsSubject(t *testing.T) {
 	db := testutil.RequireDB(t)
 	logger := audit.NewLogger(db)

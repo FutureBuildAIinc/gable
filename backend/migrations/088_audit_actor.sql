@@ -3,26 +3,29 @@
 
 -- R1-14: record which kind of principal wrote each audit row.
 --
--- actor_kind  'user' (a JWT subject), 'key' (a scoped machine key) or
+-- actor_kind  'user' (a JWT subject), 'key' (a scoped machine key),
 --             'agent' (an agent acting for a user, identified by the
---             X-Acting-As marker).
+--             X-Acting-As marker) or 'anonymous' (no identity behind the
+--             write: dev mode, background jobs).
 -- actor_id    the principal's id: the user's subject or the key's id. For an
 --             agent row this is the user the agent acted for.
 -- acting_as   the agent marker (X-Acting-As) on agent rows; NULL otherwise.
 -- tool        the tool name (X-Agent-Tool) on agent rows; NULL otherwise.
 --
--- Existing rows predate scoped keys (R1-13) and agent traffic, so every one
--- was written under a user's request context or an unattributed system one:
--- 'user' is the truthful backfill, and the legacy user_id attribution moves
--- into actor_id so the two columns agree on old rows.
+-- Existing rows predate scoped keys (R1-13) and agent traffic. Rows a user
+-- wrote backfill to 'user', with the legacy user_id attribution moved into
+-- actor_id; rows with no user at all (system writes) backfill to 'anonymous'
+-- with a null actor_id — under the resolution rule, a row with no identity
+-- behind it never claims a user.
 
 ALTER TABLE audit_log ADD COLUMN actor_kind TEXT NOT NULL DEFAULT 'user';
 
 ALTER TABLE audit_log ADD CONSTRAINT audit_log_actor_kind_check
-    CHECK (actor_kind IN ('user', 'key', 'agent'));
+    CHECK (actor_kind IN ('user', 'key', 'agent', 'anonymous'));
 
 ALTER TABLE audit_log ADD COLUMN actor_id TEXT;
 ALTER TABLE audit_log ADD COLUMN acting_as TEXT;
 ALTER TABLE audit_log ADD COLUMN tool TEXT;
 
-UPDATE audit_log SET actor_id = user_id WHERE actor_id IS NULL;
+UPDATE audit_log SET actor_id = NULLIF(user_id, '') WHERE actor_id IS NULL;
+UPDATE audit_log SET actor_kind = 'anonymous' WHERE actor_id IS NULL;
