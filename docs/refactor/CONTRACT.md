@@ -154,14 +154,14 @@ fails there before the coverage gate ever sees it.
 
 ## The conformance pass, later
 
-The goldens (R1-1) are not merged while part a is written; when they are,
-every golden's response validates against its operation. The seam is
-already built: `core/internal/apicontract` loads the assembled document
-and `Spec.Find(method, concretePath)` resolves a recorded request to its
-operation and extracts the path parameters, exactly as the coverage test
-already uses it. The conformance test will Find each golden's request,
-then validate the golden's response body against the operation's declared
-response schema.
+The goldens (R1-1, `core/internal/characterization`) merged beside this
+item; a later part of R1-7 validates every golden's response against its
+operation. The seam is already built: `core/internal/apicontract` loads
+the assembled document and `Spec.Find(method, concretePath)` resolves a
+recorded request to its operation and extracts the path parameters,
+exactly as the coverage test already uses it. The conformance test will
+Find each golden's request, then validate the golden's response body
+against the operation's declared response schema.
 
 ## The generated client
 
