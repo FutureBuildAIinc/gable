@@ -51,10 +51,19 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	// Explicit attribution on the entry wins for the legacy user_id column
 	// (some callers pass the actor explicitly, e.g. pricing exposure events);
 	// actor_id always records what pkg/actor resolved for the request, so the
-	// kind and the id on a row can never disagree.
+	// kind and the id on a row can never disagree. A machine key is never the
+	// implicit source of user_id: that column meant "a user" until actor_kind
+	// existed, and legacy reports grouping by it would list key ids among
+	// users. The key id lives in actor_id only.
 	userID := entry.UserID
-	if userID == "" {
+	if userID == "" && act.Kind != actor.KindKey {
 		userID = act.ID
+	}
+	// No attribution at all is stored as NULL, the value the 088 backfill
+	// writes for the same rows, rather than an empty string.
+	var userIDVal any
+	if userID != "" {
+		userIDVal = userID
 	}
 	var actorID any
 	if act.ID != "" {
@@ -98,7 +107,7 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 		`INSERT INTO audit_log (action, entity_type, entity_id, user_id, changes, request_id,
 		                        actor_kind, actor_id, acting_as, tool)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		entry.Action, entry.EntityType, entry.EntityID, userID, changesJSON, requestID,
+		entry.Action, entry.EntityType, entry.EntityID, userIDVal, changesJSON, requestID,
 		act.Kind, actorID, actingAs, tool,
 	)
 	if err != nil {

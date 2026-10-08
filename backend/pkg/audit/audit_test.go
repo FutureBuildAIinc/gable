@@ -283,6 +283,12 @@ func TestLog_KeyCallRecordsKeyID(t *testing.T) {
 	if r.ActorID == nil || *r.ActorID != "key-456" {
 		t.Errorf("actor_id = %v, want the key id key-456", r.ActorID)
 	}
+	// user_id meant "a user" until actor_kind existed; a key id in it would
+	// list machine keys among users in every legacy report grouping by it.
+	// The key id lives in actor_id only.
+	if r.UserID != nil {
+		t.Errorf("user_id = %v, want NULL (a key id never lands in the legacy user column)", *r.UserID)
+	}
 }
 
 func TestLog_AgentCallRecordsUserMarkerAndTool(t *testing.T) {
