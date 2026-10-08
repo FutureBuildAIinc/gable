@@ -282,15 +282,19 @@ func TestExtend(t *testing.T) {
 	}
 }
 
-// RULE: a conversion pair with a zero side is not a conversion; it is
-// refused rather than dividing by zero or pricing the line at nothing.
+// RULE (ADR 0001 §7a): both sides of a conversion pair are positive. A zero
+// side is not a conversion, and a negative side would mint a credit through
+// the conversion instead of the line's own kind; both are refused rather
+// than dividing by a sign or pricing the line at nothing.
 func TestExtendRefusesZeroPair(t *testing.T) {
 	one := Quantity(10000)
-	if _, err := Extend(one, 0, one, Price(15000)); err == nil {
-		t.Error("zero sale units extended, want a refusal")
-	}
-	if _, err := Extend(one, one, 0, Price(15000)); err == nil {
-		t.Error("zero price units extended, want a refusal")
+	for _, bad := range []Quantity{0, -1, -one} {
+		if _, err := Extend(one, bad, one, Price(15000)); err == nil {
+			t.Errorf("sale units %d extended, want a refusal", bad)
+		}
+		if _, err := Extend(one, one, bad, Price(15000)); err == nil {
+			t.Errorf("price units %d extended, want a refusal", bad)
+		}
 	}
 }
 

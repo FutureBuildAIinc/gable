@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-// QuantityScale is the fixed scale of quantities and unit conversion
-// factors on the wire: four fraction digits, the scale of the database's
-// quantity columns and of the price (ADR 0001 §7a records why the wire
-// type is fixed now).
+// QuantityScale is the fixed scale of quantities and of both sides of a
+// conversion pair on the wire: four fraction digits, the scale of the
+// database's quantity columns and of the price (ADR 0001 §7a records why the
+// wire type is fixed now).
 const QuantityScale = 4
 
 // Quantity is a quantity or one side of a conversion pair on the wire: a
@@ -125,10 +125,12 @@ const extendScaleDivisor = 1_000_000
 // both sides exactly. The extension is quantity x unit price x priceUomQty
 // / uomQty, rounded once, to cents, half away from zero, exact in big
 // arithmetic until that one rounding; every module prices lines through
-// here and nowhere else. A pair with a zero side is refused: no real
-// conversion has one.
+// here and nowhere else. Both sides of the pair are positive (ADR 0001
+// §7a makes a zero or negative side a 400 validation_failed on that
+// field): a zero side is no conversion, and a negative side would mint a
+// credit through the conversion instead of through the line's own kind.
 func Extend(qty, uomQty, priceUomQty Quantity, price Price) (Cents, error) {
-	if uomQty == 0 || priceUomQty == 0 {
+	if uomQty <= 0 || priceUomQty <= 0 {
 		return 0, errZeroConversion
 	}
 	n := new(big.Int).Mul(big.NewInt(int64(qty)), big.NewInt(int64(priceUomQty)))
