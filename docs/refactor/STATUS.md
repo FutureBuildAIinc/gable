@@ -14,7 +14,7 @@ top of it.
 
 | Item | Branch | Pull request | Review rounds | Head | State |
 |---|---|---|---|---|---|
-| R1-0 | `refactor/r1-0-baseline` | (filled in when the pull request opens) | 0 | (this branch, at the baseline content commit) | in review |
+| R1-0 | `refactor/r1-0-baseline` | https://github.com/FutureBuildAIinc/gable/pull/2 | 0 | `045cc35` | in review |
 | R1-1 | | | | | not started |
 | R1-2 | | | | | not started |
 | R1-3 | | | | | not started |
