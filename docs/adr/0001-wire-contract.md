@@ -67,10 +67,11 @@ Every route that returns a collection returns:
 - `include` is a comma separated list of names, and `total` is the first of
   them; later expansions (an inventory rows' product summary, for example)
   join it as converting modules need them, each name listed in the route's
-  contract. Every list route accepts exactly `cursor`, `limit`, and
-  `include`, so the strict query guard's allowed set is the same three
-  names on every list, and a client never meets a list route that forgets
-  one.
+  contract. Every list route accepts `cursor`, `limit`, and `include`,
+  plus the filters its contract declares (section 5): the strict query
+  guard's allowed set on a list route is those three names plus that
+  route's filters. The three ride on every list route, so a client never
+  meets one that forgets them.
 
 Offset pagination (`offset`, `offset` echoes, bare `data` arrays, `null`
 collections) does not survive module conversion: cursor pagination replaces
@@ -375,7 +376,9 @@ way.
 Every externally addressable document entity (quote, order, invoice,
 purchase order, and the rest as they convert) carries a human-readable
 document number minted from a database sequence dedicated to that entity,
-formatted `<PREFIX>-<zero padded>`, for example `Q-000123`. Prefixes are one
+formatted `<PREFIX>-<zero padded>`, for example `Q-000123`. The wire field
+is `number`, the one name on every document entity, like `status`.
+Prefixes are one
 to four uppercase letters assigned per entity when the module converts
 (quotes `Q` first). The default pad width is 6; a sequence that outgrows the
 width simply produces longer numbers (`Q-1000000`), never truncation or
@@ -387,16 +390,18 @@ its own identifiers). Numbers are unique per entity per database, which is
 the tenancy unit.
 
 An entity may instead declare gapless numbering, minted from a counter row
-locked inside the minting transaction: a rolled back create returns the
-number to the sequence. Whether invoices and credit memos need this is an
-accountant's question, and cycle 2's money design answers it; quotes and
-orders take the gapped sequence.
+locked inside the minting transaction: the rollback undoes the counter's
+increment with it, so no number is lost. Whether invoices and credit memos
+need this is an accountant's question, and cycle 2's money design answers
+it; quotes and orders take the gapped sequence.
 
 The number is stored as text with a unique index, because record URLs look
 documents up by number. A module checks for an existing number column
 before minting a new one (`ap_invoices.invoice_number` exists today) and
 either adopts it or lists the collision in `docs/refactor/CONTRACT-CHANGES.md`.
-The backfill, in one migration: number the existing rows in
+The backfill, in one migration: fill any NULL `created_at` and set the
+column NOT NULL first (the section 2 rule for ordering columns, which
+this numbering order reads), then number the existing rows in
 `(created_at, id)` order from the sequence's start, then add the
 `UNIQUE NOT NULL` constraint, then `setval` past the maximum it reached.
 The series key is the entity; multi-company (cycle 5) may widen it to
@@ -518,10 +523,16 @@ on purpose, so the product never ships two casings on one surface, and
 the events feed's casing change is recorded as a contract change in the
 row of the item that ships that feed.
 
-Timestamps are RFC 3339 UTC with the `Z`. Business dates (delivery, due,
+Timestamps are RFC 3339 UTC with the `Z`, at the value's full precision
+to the microsecond, so a client never has to guess whether a fraction
+was dropped in transit. Business dates (delivery, due,
 expiry) are `YYYY-MM-DD` in the branch's local calendar. Optional fields
 are present with `null`, never omitted: a client reads one shape per
 document, and an absent key is not a third state between set and empty.
+Two exceptions are deliberate and stated here: `total` appears on a list
+page only under `?include=total` (section 1), and `details` appears on
+an error only when there are field reasons or blockers to carry
+(section 3).
 
 ## Alternatives considered
 
@@ -582,14 +593,16 @@ template, then module by module):
    `httpx.WriteError` with collected `Validator` field errors; its route
    registrations wrap every handler with the strict query parameter guard.
 2. Swap the money fields: floats to `_cents` int64, sub-cent unit prices
-   to `_ten_thousandths`, quantities and conversion factors to the
+   to `_ten_thousandths`, quantities and the sides of the conversion pair
+   to the
    package's `Quantity`, converting at the database boundary with the
    package's decimal string helpers, never through float64.
 2b. Widen to scale 4 every unit price column the module exposes as
    `_ten_thousandths` that is still scale 2, in the same change: a module
    may not expose the field against a scale 2 column (section 7).
 3. Add the module's document number sequence migration (a plain numbered
-   SQL file creating the sequence, plus a backfill that numbers existing
+   SQL file creating the sequence, plus a backfill that fills NULL
+   `created_at` and sets it NOT NULL, numbers existing
    rows in `(created_at, id)` order, adds the unique constraint, and moves
    `setval` past the maximum) and mint numbers in the create path.
 4. Lowercase and rename lifecycle state to `status` at the handler
@@ -620,8 +633,9 @@ Routes under `/api/integration/*` are never touched by these steps.
   5's last module converts, and is unsupported until then.
 - The scale-4 unit price forecloses sub-ten-thousandth pricing on the wire;
   if the domain ever needs finer, that is a new suffix and a listed contract
-  change, decided then. The same holds for conversion factors finer than
-  scale 4: cycle 3's units design works within this wire type or reopens it.
+  change, decided then. The same holds for conversion pairs whose sides
+  need more than scale 4: cycle 3's units design works within this wire
+  type or reopens it.
 - The revision precondition breaks every blind write: a client that PUTs
   without reading first takes a 428 and one extra round trip. That is the
   point; the desk pays it once per converting module.
