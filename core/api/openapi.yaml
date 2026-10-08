@@ -436,11 +436,11 @@ paths:
       tags: [health]
       summary: Prometheus metrics
       description: >-
-        The Prometheus scrape endpoint. Serves all registered metrics in Prometheus text exposition format (text/plain; charset=utf-8). Public: listed in the auth middleware PublicPaths so the scrape target can reach it without a token.
+        The Prometheus scrape endpoint. By default serves the Prometheus text exposition format (text/plain; version=0.0.4; charset=utf-8). If the request carries an Accept header for application/openmetrics-text the endpoint serves the OpenMetrics format instead. Public: listed in the auth middleware PublicPaths so the scrape target can reach it without a token.
       security: []
       responses:
         "200":
-          description: Prometheus text exposition format.
+          description: Prometheus text exposition format or OpenMetrics format.
           content:
             text/plain:
               schema:
@@ -1610,14 +1610,14 @@ paths:
       operationId: partnerListQuotes
       tags: [partner]
       summary: The partner's quotes
-      description: The customer's quotes in the ERP's own quote shape; a bare array, never null.
+      description: The customer's quotes in the ERP's own quote shape; a bare array, or null when the customer has no quotes.
       responses:
         "200":
-          description: The quotes, a bare array, never null.
+          description: The quotes, a bare array, or null when the customer has no quotes.
           content:
             application/json:
               schema:
-                type: array
+                type: [array, "null"]
                 items:
                   $ref: "#/components/schemas/Quote"
         "401":
@@ -1636,7 +1636,7 @@ paths:
       tags: [partner]
       summary: One quote
       description: >-
-        The ERP's own quote shape. Every failure, a quote that does not exist, one belonging to another customer, and a repository fault, is the handler's fixed 404.
+        The ERP's own quote shape. Every failure, a quote that does not exist, one belonging to another customer, and a repository fault, is the handler's fixed 404. A malformed UUID is a 400.
       parameters:
         - name: id
           in: path
@@ -1981,6 +1981,7 @@ paths:
         Creates a new DRAFT order from the source order's lines. Every service failure, including a source order the caller does not own, is the handler's fixed 500 today.
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1989,7 +1990,7 @@ paths:
               $ref: "#/components/schemas/PortalReorderRequest"
       responses:
         "201":
-          description: The new draft's id; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+          description: The new draft's id.
           content:
             application/json:
               schema:
@@ -1998,6 +1999,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/orders/{id}/cancel:
@@ -2059,6 +2068,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2078,6 +2088,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/invoices:
@@ -2216,7 +2234,7 @@ paths:
       tags: [portal]
       summary: Ask for a different delivery day
       description: >-
-        202 Accepted, not 200 or 201: the ask is recorded as PENDING, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope. The 202 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+        202 Accepted, not 200 or 201: the ask is recorded as PENDING, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope.
       security:
         - PortalSession: []
       parameters:
@@ -2226,6 +2244,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2246,11 +2265,15 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The stop is history or the truck is rolling; the refusal envelope.
+          description: Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PortalRefusal"
+                oneOf:
+                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/PortalRefusal"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/catalog:
@@ -2406,9 +2429,10 @@ paths:
       tags: [portal]
       summary: Send a scope for the dealer to price
       description: >-
-        A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400. The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+        A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400.
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2428,6 +2452,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/portal/v1/quotes/{id}:
     get:
       operationId: portalGetQuote
@@ -2554,9 +2586,10 @@ paths:
       tags: [portal]
       summary: Add an item to the cart
       description: >-
-        Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+        Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed).
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2574,6 +2607,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/cart/items/{id}:
@@ -2591,6 +2632,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2608,6 +2650,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
     delete:
@@ -2643,9 +2693,10 @@ paths:
       tags: [portal]
       summary: Place an order from the cart
       description: >-
-        Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+        Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed).
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2663,6 +2714,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/users:
@@ -2716,9 +2775,10 @@ paths:
       tags: [portal]
       summary: Invite a team member
       description: >-
-        Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+        Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed).
       security:
         - PortalSession: []
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2738,6 +2798,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/users/{id}/role:
@@ -2756,6 +2824,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2771,6 +2840,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/users/{id}/status:
@@ -2789,6 +2866,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2804,6 +2882,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The idempotency key is already being processed by a concurrent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/products:
@@ -3039,7 +3125,7 @@ paths:
               $ref: "#/components/schemas/ProjectCreateRequest"
       responses:
         "201":
-          description: The created project; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+          description: The created project.
           content:
             application/json:
               schema:
@@ -3358,9 +3444,10 @@ paths:
       tags: [uploads]
       summary: Serve an uploaded file
       description: >-
-        Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404; a missing role is a 403.
+        Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension (go's http.DetectContentType, which checks the extension first and falls back to content sniffing); Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404.
       security:
-        - RequireRole: [admin, owner, user]
+        - BearerJWT: []
+        - MachineKey: []
       responses:
         "200":
           description: The file bytes; Content-Type is derived from the file extension.
@@ -3369,6 +3456,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
@@ -3393,12 +3482,12 @@ components:
       name: portal_token
       description: >-
         The portal JWT issued by POST /api/portal/v1/login, presented as the portal_token cookie (HttpOnly) or as an Authorization: Bearer header; the middleware accepts either, cookie first. Verified against PORTAL_JWT_SECRET (HS256). AUTH_MODE=dev bypasses the check and injects the demo customer's claims instead.
-    RequireRole:
-      type: apiKey
-      in: cookie
-      name: portal_token
+    MachineKey:
+      type: http
+      scheme: bearer
+      bearerFormat: machine-key
       description: >-
-        The portal JWT cookie. Requires one of the roles admin, owner, or user (as set by RequireRole middleware on this route). The same portal_token cookie the portal routes use.
+        A machine key (the sk_live_ shape GenerateKey mints). Validated against the api_keys table; needs scope for the route module, uploads:read for GET and HEAD and uploads:write for other methods. Machine keys are accepted on the same Authorization: Bearer header as the user JWT; the auth layer dispatches by token shape before the JWT parser runs.
   parameters:
     Limit:
       name: limit
@@ -3466,6 +3555,13 @@ components:
             $ref: "#/components/schemas/Error"
     Conflict:
       description: The write conflicts with the resource's current state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnprocessableEntity:
+      description: >-
+        The request is semantically invalid for this operation. Used by the idempotency layer when an Idempotency-Key is reused with a request body that differs from the original.
       content:
         application/json:
           schema:
@@ -5658,7 +5754,7 @@ components:
           type: string
         total_amount:
           type: number
-          description: Float dollars; omitted on delivery items, which carry no money column.
+          description: Float dollars; omitted when zero.
         created_at:
           type: string
           format: date-time

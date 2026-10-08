@@ -488,26 +488,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalDeliveryReschedule"
         "409":
-          description: The idempotency key is already being processed by a concurrent request.
+          description: Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                oneOf:
+                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/PortalRefusal"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
-
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          description: The stop is history or the truck is rolling; the refusal envelope.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PortalRefusal"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/catalog:

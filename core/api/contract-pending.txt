@@ -11,6 +11,7 @@
 # Generated file. Do not edit by hand; regenerate from the Go module root:
 #
 #	go run ./api/tools/merge && go run ./cmd/pending -write
+*	/uploads/
 DELETE	/api/v1/activities/{id}
 DELETE	/api/v1/admin/keys/{id}
 DELETE	/api/v1/admin/settings/ai

@@ -200,7 +200,7 @@ export interface paths {
         };
         /**
          * Prometheus metrics
-         * @description The Prometheus scrape endpoint. Serves all registered metrics in Prometheus text exposition format (text/plain; charset=utf-8). Public: listed in the auth middleware PublicPaths so the scrape target can reach it without a token.
+         * @description The Prometheus scrape endpoint. By default serves the Prometheus text exposition format (text/plain; version=0.0.4; charset=utf-8). If the request carries an Accept header for application/openmetrics-text the endpoint serves the OpenMetrics format instead. Public: listed in the auth middleware PublicPaths so the scrape target can reach it without a token.
          */
         get: operations["metricsPrometheus"];
         put?: never;
@@ -858,7 +858,7 @@ export interface paths {
         };
         /**
          * The partner's quotes
-         * @description The customer's quotes in the ERP's own quote shape; a bare array, never null.
+         * @description The customer's quotes in the ERP's own quote shape; a bare array, or null when the customer has no quotes.
          */
         get: operations["partnerListQuotes"];
         put?: never;
@@ -878,7 +878,7 @@ export interface paths {
         };
         /**
          * One quote
-         * @description The ERP's own quote shape. Every failure, a quote that does not exist, one belonging to another customer, and a repository fault, is the handler's fixed 404.
+         * @description The ERP's own quote shape. Every failure, a quote that does not exist, one belonging to another customer, and a repository fault, is the handler's fixed 404. A malformed UUID is a 400.
          */
         get: operations["partnerGetQuote"];
         put?: never;
@@ -1261,7 +1261,7 @@ export interface paths {
         put?: never;
         /**
          * Ask for a different delivery day
-         * @description 202 Accepted, not 200 or 201: the ask is recorded as PENDING, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope. The 202 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+         * @description 202 Accepted, not 200 or 201: the ask is recorded as PENDING, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope.
          */
         post: operations["portalRequestReschedule"];
         delete?: never;
@@ -1365,7 +1365,7 @@ export interface paths {
         put?: never;
         /**
          * Send a scope for the dealer to price
-         * @description A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400. The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+         * @description A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400.
          */
         post: operations["portalCreateQuote"];
         delete?: never;
@@ -1465,7 +1465,7 @@ export interface paths {
         put?: never;
         /**
          * Add an item to the cart
-         * @description Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+         * @description Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed).
          */
         post: operations["portalAddToCart"];
         delete?: never;
@@ -1509,7 +1509,7 @@ export interface paths {
         put?: never;
         /**
          * Place an order from the cart
-         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed).
          */
         post: operations["portalCheckout"];
         delete?: never;
@@ -1553,7 +1553,7 @@ export interface paths {
         put?: never;
         /**
          * Invite a team member
-         * @description Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed). The 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8.
+         * @description Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed).
          */
         post: operations["portalInviteUser"];
         delete?: never;
@@ -1896,7 +1896,7 @@ export interface paths {
         };
         /**
          * Serve an uploaded file
-         * @description Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404; a missing role is a 403.
+         * @description Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension (go's http.DetectContentType, which checks the extension first and falls back to content sniffing); Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404.
          */
         get: operations["uploadsFile"];
         put?: never;
@@ -3196,7 +3196,7 @@ export interface components {
             /** @enum {string} */
             type: "ORDER" | "DELIVERY" | "INVOICE";
             status: string;
-            /** @description Float dollars; omitted on delivery items, which carry no money column. */
+            /** @description Float dollars; omitted when zero. */
             total_amount?: number;
             /** Format: date-time */
             created_at: string;
@@ -3413,6 +3413,15 @@ export interface components {
         };
         /** @description The write conflicts with the resource's current state. */
         Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The request is semantically invalid for this operation. Used by the idempotency layer when an Idempotency-Key is reused with a request body that differs from the original. */
+        UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
             };
@@ -3968,7 +3977,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Prometheus text exposition format. */
+            /** @description Prometheus text exposition format or OpenMetrics format. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5186,13 +5195,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The quotes, a bare array, never null. */
+            /** @description The quotes, a bare array, or null when the customer has no quotes. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Quote"][];
+                    "application/json": components["schemas"]["Quote"][] | null;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -5570,7 +5579,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The new draft's id; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8. */
+            /** @description The new draft's id. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5581,6 +5590,16 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -5626,7 +5645,10 @@ export interface operations {
     portalSetOrderProject: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -5650,6 +5672,16 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -5783,7 +5815,10 @@ export interface operations {
     portalRequestReschedule: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -5807,15 +5842,16 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The stop is history or the truck is rolling; the refusal envelope. */
+            /** @description Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortalRefusal"];
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["PortalRefusal"];
                 };
             };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -5969,6 +6005,16 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     portalGetQuote: {
@@ -6112,13 +6158,26 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
     portalUpdateCartItem: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -6141,6 +6200,16 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -6193,6 +6262,16 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -6267,13 +6346,26 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
     portalUpdateUserRole: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -6295,13 +6387,26 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
     portalUpdateUserStatus: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -6323,6 +6428,16 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description The idempotency key is already being processed by a concurrent request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -6565,7 +6680,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created project; the 201 body is written without a Content-Type header today, so the wire says text/plain; charset=utf-8. */
+            /** @description The created project. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -6901,6 +7016,7 @@ export interface operations {
                     "application/octet-stream": string;
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
