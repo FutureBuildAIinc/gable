@@ -101,6 +101,22 @@ func (f *fakeRepo) ListLocations(context.Context) ([]Location, error) {
 	return out, nil
 }
 
+func (f *fakeRepo) ListLocationsInBranches(_ context.Context, branches []uuid.UUID) ([]Location, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]Location, 0, len(f.locations))
+	for _, l := range f.locations {
+		for _, b := range branches {
+			if l.BranchID != nil && *l.BranchID == b {
+				out = append(out, *l)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) ListBranches(_ context.Context, includeInactive bool) ([]Location, error) {
 	f.listBranchesArgs = append(f.listBranchesArgs, includeInactive)
 	if f.err != nil {
@@ -503,6 +519,33 @@ func TestListBranches_PassesTheIncludeInactiveFlag(t *testing.T) {
 	}
 	if len(repo.listBranchesArgs) != 2 || repo.listBranchesArgs[0] || !repo.listBranchesArgs[1] {
 		t.Errorf("repository received %v, want [false true]", repo.listBranchesArgs)
+	}
+}
+
+// A bound caller with no grants reaches the list through listScope with an
+// empty, non-nil branch slice: that is no branches and must answer no rows,
+// never every location. The nil slice stays the every-branch case (an
+// administrator without a header, an unbound key, the single-branch switch).
+func TestListLocationsIn_AnEmptyGrantListIsNoRows(t *testing.T) {
+	repo := newFakeRepo()
+	branchID := uuid.New()
+	repo.locations[uuid.New()] = &Location{ID: uuid.New(), Type: LocTypeYard, Code: "Y1", BranchID: &branchID}
+	svc := NewService(repo)
+
+	all, err := svc.ListLocationsIn(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListLocationsIn nil slice: %v", err)
+	}
+	if len(all) != 1 {
+		t.Errorf("nil slice means every branch: %d rows, want 1", len(all))
+	}
+
+	none, err := svc.ListLocationsIn(context.Background(), []uuid.UUID{})
+	if err != nil {
+		t.Fatalf("ListLocationsIn empty slice: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("an empty grant list is no rows: %d rows, want 0", len(none))
 	}
 }
 

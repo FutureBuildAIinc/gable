@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package serve
+
+import (
+	"net/http"
+
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customerguard"
+	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/matching"
+	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/purchase_order"
+	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
+)
+
+// branchWall is the branch wall as serve wires it: the branch middleware that
+// settles a request's branch context, the role-plus-branch composition every
+// scoped route uses, and the guard that holds a branch or location a request
+// body names to that context (ADR 0007 section 2.3). The mount methods below
+// are the only places a route that takes a branch from its body gets its guard,
+// and wire_branch_wall_test.go drives them with the real middleware, so
+// dropping a guard here fails a test.
+type branchWall struct {
+	mw     func(http.Handler) http.Handler
+	guard  *middleware.BranchGuard
+	scoped func(roles ...string) func(http.Handler) http.Handler
+}
+
+func newBranchWall(db *database.DB) *branchWall {
+	w := &branchWall{mw: middleware.NewBranchMiddleware(db).Handler, guard: middleware.NewBranchGuard(db)}
+	w.scoped = func(roles ...string) func(http.Handler) http.Handler {
+		return middleware.Compose(middleware.RequireRole(roles...), w.mw)
+	}
+	return w
+}
+
+// locations mounts the location routes behind the branch middleware: the
+// create writes into a branch's tree, the by-id reads and the list are held
+// to the caller's branches (the branch switcher reads /me/branches, not this
+// list).
+func (w *branchWall) locations(mux *http.ServeMux, h *location.Handler) {
+	h.WithBranchWall(w.guard, w.mw).RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
+}
+
+func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {
+	inventory.NewHandler(svc).WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "warehouse"))
+}
+
+// customers mounts the customer routes: the create takes primary_branch_id from
+// its body, so it is held to the caller's branch context; payment terms writes
+// take the narrower finance guard.
+func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
+	customer.NewHandler(svc.WithBranchGuard(customerguard.New(w.guard))).
+		RegisterRoutes(mux, w.scoped("admin", "owner", "sales"), w.scoped("admin", "owner", "finance"))
+}
+
+func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
+	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+}
+
+// orders mounts the order routes: the create takes branch_id from its body,
+// so it is held to the caller's branch context (ADR 0007 section 2.3).
+func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
+	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+}
+
+func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "purchasing"))
+}
+
+// matching mounts the 3-way match routes: both act on a purchase order
+// addressed by its path id, so they run behind the branch middleware and the
+// purchase order is held to the caller's wall before the matcher runs.
+func (w *branchWall) matching(mux *http.ServeMux, svc *matching.Service) {
+	matching.NewHandler(svc).WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "finance"))
+}
+
+// documents mounts the document print and email routes behind the branch
+// middleware: a print or an email acts on an invoice or an order addressed by
+// its path id, and the invoice and order repositories already filter their
+// reads on the branch the middleware settles, so a caller held to branch A
+// finds branch B's invoice or pick ticket a 404. The handler also holds the
+// loaded record's own branch to the wall, which is what scopes a bound caller
+// with no context branch (default_branch_required=false, no header) to its
+// grants; the repositories' filter never fires for that caller. (The 403
+// record checks on the invoice and order modules' own routes arrive with
+// their seam.)
+func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
+	h.WithBranchWall(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
+}

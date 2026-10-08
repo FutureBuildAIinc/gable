@@ -562,12 +562,21 @@ func Run() {
 	custToBranch := make(map[uuid.UUID]uuid.UUID)
 	allProjectIDs := make([]uuid.UUID, 0)
 
+	// The payment terms master: the migration seeds NET30, NET60, NET90, DUE_ON_RECEIPT
+	// and COD; a customer below uses NET45, so the row exists before it is named.
+	if _, err := db.Exec(`INSERT INTO payment_terms (code, name, kind, net_days) VALUES ('NET45', 'Net 45', 'NET_DAYS', 45)
+		ON CONFLICT (code) DO NOTHING`); err != nil {
+		log.Printf("Payment terms NET45: %v", err)
+	}
+
 	for _, c := range customers {
 		plID := priceLevelIDs[c.PriceLevel]
 		var cid string
-		err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms, price_level_id, primary_branch_id)
-			VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8,$9,$10)
-			ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7, payment_terms=$8, price_level_id=$9, primary_branch_id=$10
+		err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms, payment_terms_id, price_level_id, primary_branch_id)
+			VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8::text,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
+			ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7, payment_terms=$8::text,
+				payment_terms_id=COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),
+				price_level_id=$9, primary_branch_id=$10
 			RETURNING id`, c.Name, c.Acct, c.Email, c.Phone, c.Addr, c.CreditLimit, c.Tier, c.Terms, plID, c.PrimaryBranch).Scan(&cid)
 		if err != nil {
 			log.Printf("Customer %s: %v", c.Name, err)
@@ -577,12 +586,23 @@ func Run() {
 		customerIDs[c.Name] = custID
 		custToBranch[custID] = c.PrimaryBranch
 		custToProjects[custID] = []uuid.UUID{}
+
+		// The customer's main ship-to address, the default for its orders and deliveries.
+		if _, err := db.Exec(`INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
+			VALUES ($1, 'MAIN', $2, $3, TRUE)
+			ON CONFLICT (customer_id, code) DO UPDATE SET name = $2, line1 = $3`, custID, c.Name, c.Addr); err != nil {
+			log.Printf("Ship-to for %s: %v", c.Name, err)
+		}
+
 		for _, pn := range c.Projects {
+			// A customer's jobs are rows of projects, the one job table.
 			var jid string
-			err := db.QueryRow(`INSERT INTO customer_jobs (customer_id, name, is_active) VALUES ($1,$2,true)
-				ON CONFLICT DO NOTHING RETURNING id`, custID, pn).Scan(&jid)
+			err := db.QueryRow(`INSERT INTO projects (id, customer_id, name, status)
+				SELECT $1::uuid, $2::uuid, $3::text, 'Active'
+				WHERE NOT EXISTS (SELECT 1 FROM projects WHERE customer_id = $2::uuid AND name = $3::text)
+				RETURNING id`, uuid.New(), custID, pn).Scan(&jid)
 			if err != nil {
-				db.QueryRow("SELECT id FROM customer_jobs WHERE customer_id=$1 AND name=$2", custID, pn).Scan(&jid)
+				db.QueryRow("SELECT id FROM projects WHERE customer_id=$1 AND name=$2", custID, pn).Scan(&jid)
 			}
 			if jid != "" {
 				pid := uuid.MustParse(jid)
@@ -716,8 +736,11 @@ func Run() {
 			orderDate := recentDate(180)
 			orderID := uuid.New()
 			spID := custSalesperson[custID]
-			_, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, status, salesperson_id, created_at)
-				VALUES ($1,$2,$3,0,$4,$5,$6)`, orderID, custID, branchID, status, spID, orderDate)
+			_, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, salesperson_id, created_at, delivery_type, currency, tax_source)
+				VALUES ($1,$2,$3,0,0,$4,$5,$6,'PICKUP',
+					COALESCE((SELECT c.currency FROM customers c WHERE c.id = $2),
+						(SELECT value FROM system_settings WHERE key = 'currency.default')), 'LEGACY')`,
+				orderID, custID, branchID, status, spID, orderDate)
 			if err != nil {
 				continue
 			}
@@ -729,10 +752,20 @@ func Run() {
 				qty := 1 + rand.Intn(50)
 				lineTotal := float64(qty) * prod.Price
 				orderTotal += lineTotal
-				db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, price_each)
-					VALUES ($1,$2,$3,$4)`, orderID, skuToID[prod.SKU], qty, prod.Price)
+				// The shared line shape (ADR 0005 2.2): the seed writes what
+				// the migration backfilled for history, so seeded rows and
+				// migrated rows agree.
+				db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
+						description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+						quantity_allocated, quantity_fulfilled)
+					SELECT $1, $2, $3, $4, 'PRODUCT', $5,
+						COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
+						CASE WHEN $6 = 'CONFIRMED' THEN $3 ELSE 0 END,
+						CASE WHEN $6 = 'FULFILLED' THEN $3 ELSE 0 END
+					FROM products p WHERE p.id = $2`,
+					orderID, skuToID[prod.SKU], qty, prod.Price, j, status)
 			}
-			db.Exec("UPDATE orders SET total_amount=$1 WHERE id=$2", orderTotal, orderID)
+			db.Exec("UPDATE orders SET total_amount=$1, subtotal=$1 WHERE id=$2", orderTotal, orderID)
 			totalOrders++
 
 			if status == "FULFILLED" {
@@ -812,7 +845,7 @@ func Run() {
 		qDate := recentDate(90)
 		expires := qDate.AddDate(0, 0, 30)
 		var qid string
-		err := db.QueryRow(`INSERT INTO quotes (customer_id, branch_id, job_id, state, total_amount, created_by, expires_at, created_at)
+		err := db.QueryRow(`INSERT INTO quotes (customer_id, branch_id, project_id, state, total_amount, created_by, expires_at, created_at)
 			VALUES ($1,$2,$3,$4,0,$5,$6,$7) RETURNING id`, cid, branchID, jobID, qs.State, demoUserID, expires, qDate).Scan(&qid)
 		if err != nil {
 			continue

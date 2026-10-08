@@ -7,13 +7,12 @@
       "body": {
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
-        "credit_limit": 100000,
+        "credit_limit_cents": 10000000,
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
-        "payment_terms": "NET30",
         "phone": "250-555-0199",
         "primary_branch_id": "<id-1>",
-        "tier": "GOLD"
+        "tier": "gold"
       }
     },
     "response": {
@@ -22,16 +21,30 @@
       "body": {
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
-        "balance_due": 0,
+        "balance_cents": 0,
         "created_at": "<ts+0d>",
-        "credit_limit": 100000,
+        "credit_limit_cents": 10000000,
+        "currency": null,
+        "effective_currency": "USD",
         "email": "goldens@example.com",
         "id": "<id-2>",
-        "is_active": false,
+        "is_active": true,
         "name": "Golden Harness Co",
+        "payment_terms": {
+          "code": "NET30",
+          "id": "<id-3>",
+          "name": "Net 30"
+        },
+        "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
+        "po_required": false,
+        "price_level": null,
+        "price_level_id": null,
         "primary_branch_id": "<id-1>",
-        "tier": "GOLD",
+        "revision": 1,
+        "salesperson_id": null,
+        "salesperson_name": null,
+        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -48,16 +61,30 @@
       "body": {
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
-        "balance_due": 0,
+        "balance_cents": 0,
         "created_at": "<ts+0d>",
-        "credit_limit": 100000,
+        "credit_limit_cents": 10000000,
+        "currency": null,
+        "effective_currency": "USD",
         "email": "goldens@example.com",
         "id": "<id-2>",
-        "is_active": false,
+        "is_active": true,
         "name": "Golden Harness Co",
+        "payment_terms": {
+          "code": "NET30",
+          "id": "<id-3>",
+          "name": "Net 30"
+        },
+        "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
+        "po_required": false,
+        "price_level": null,
+        "price_level_id": null,
         "primary_branch_id": "<id-1>",
-        "tier": "GOLD",
+        "revision": 1,
+        "salesperson_id": null,
+        "salesperson_name": null,
+        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -72,76 +99,234 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "data": [
-          {
-            "account_number": "BWC-001",
-            "address": "5315 Snowload Way, Big White BC",
-            "balance_due": 0,
-            "created_at": "<ts+0d>",
-            "credit_limit": 15000,
-            "email": "jim@bigwhitecabins.ca",
-            "id": "<id-3>",
-            "is_active": true,
-            "name": "Big White Cabin Co",
-            "phone": "250-555-2800",
-            "price_level": {
-              "created_at": "<ts-106751d>",
-              "id": "<id-4>",
-              "multiplier": 0.85,
-              "name": "Contractor",
-              "updated_at": "<ts-106751d>"
-            },
-            "price_level_id": "<id-4>",
-            "primary_branch_id": "<id-1>",
-            "salesperson_id": "<id-5>",
-            "salesperson_name": "Cameron Fraser",
-            "tier": "SILVER",
-            "updated_at": "<ts+0d>"
-          },
-          {
-            "account_number": "GHR-001",
-            "address": "780 Casement Ave, Kelowna BC",
-            "balance_due": 34500,
-            "created_at": "<ts+0d>",
-            "credit_limit": 30000,
-            "email": "pay@glenmoreheritage.ca",
-            "id": "<id-6>",
-            "is_active": true,
-            "name": "Glenmore Heritage Reno",
-            "phone": "250-555-2700",
-            "price_level": {
-              "created_at": "<ts-106751d>",
-              "id": "<id-4>",
-              "multiplier": 0.85,
-              "name": "Contractor",
-              "updated_at": "<ts-106751d>"
-            },
-            "price_level_id": "<id-4>",
-            "primary_branch_id": "<id-1>",
-            "salesperson_id": "<id-7>",
-            "salesperson_name": "Amanda Wong",
-            "tier": "GOLD",
-            "updated_at": "<ts+0d>"
-          },
+        "items": [
           {
             "account_number": "GOLD-001",
             "address": "1 Golden Way, Kelowna BC",
-            "balance_due": 0,
+            "balance_cents": 0,
             "created_at": "<ts+0d>",
-            "credit_limit": 100000,
+            "credit_limit_cents": 10000000,
+            "currency": null,
+            "effective_currency": "USD",
             "email": "goldens@example.com",
             "id": "<id-2>",
-            "is_active": false,
+            "is_active": true,
             "name": "Golden Harness Co",
+            "payment_terms": {
+              "code": "NET30",
+              "id": "<id-3>",
+              "name": "Net 30"
+            },
+            "payment_terms_id": "<id-3>",
             "phone": "250-555-0199",
+            "po_required": false,
+            "price_level": null,
+            "price_level_id": null,
             "primary_branch_id": "<id-1>",
-            "tier": "GOLD",
+            "revision": 1,
+            "salesperson_id": null,
+            "salesperson_name": null,
+            "tier": "gold",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "account_number": "DIY-OKN",
+            "address": "45 Sawhorse Ln, Lake Country BC",
+            "balance_cents": 0,
+            "created_at": "<ts+0d>",
+            "credit_limit_cents": 500000,
+            "currency": null,
+            "effective_currency": "USD",
+            "email": "okanagan.diy@example.com",
+            "id": "<id-4>",
+            "is_active": true,
+            "name": "Okanagan DIY Owner",
+            "payment_terms": {
+              "code": "COD",
+              "id": "<id-5>",
+              "name": "Cash on delivery"
+            },
+            "payment_terms_id": "<id-5>",
+            "phone": "250-555-2310",
+            "po_required": false,
+            "price_level": {
+              "created_at": "<ts+0d>",
+              "id": "<id-6>",
+              "multiplier": 1,
+              "name": "Retail",
+              "updated_at": "<ts+0d>"
+            },
+            "price_level_id": "<id-6>",
+            "primary_branch_id": "<id-7>",
+            "revision": 1,
+            "salesperson_id": "<id-8>",
+            "salesperson_name": "Lucas Pelletier",
+            "tier": "retail",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "account_number": "SRR-001",
+            "address": "200 Ridgecap Rd, Summerland BC",
+            "balance_cents": 0,
+            "created_at": "<ts+0d>",
+            "credit_limit_cents": 4000000,
+            "currency": null,
+            "effective_currency": "USD",
+            "email": "admin@summerlandroofers.ca",
+            "id": "<id-9>",
+            "is_active": true,
+            "name": "Summerland Roofers",
+            "payment_terms": {
+              "code": "NET30",
+              "id": "<id-3>",
+              "name": "Net 30"
+            },
+            "payment_terms_id": "<id-3>",
+            "phone": "250-555-3100",
+            "po_required": false,
+            "price_level": {
+              "created_at": "<ts+0d>",
+              "id": "<id-10>",
+              "multiplier": 0.85,
+              "name": "Contractor",
+              "updated_at": "<ts+0d>"
+            },
+            "price_level_id": "<id-10>",
+            "primary_branch_id": "<id-1>",
+            "revision": 1,
+            "salesperson_id": "<id-11>",
+            "salesperson_name": "Cameron Fraser",
+            "tier": "silver",
             "updated_at": "<ts+0d>"
           }
         ],
         "limit": 3,
-        "offset": 0,
-        "total": 15
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "customer.list.search",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "account_number": "GOLD-001",
+            "address": "1 Golden Way, Kelowna BC",
+            "balance_cents": 0,
+            "created_at": "<ts+0d>",
+            "credit_limit_cents": 10000000,
+            "currency": null,
+            "effective_currency": "USD",
+            "email": "goldens@example.com",
+            "id": "<id-2>",
+            "is_active": true,
+            "name": "Golden Harness Co",
+            "payment_terms": {
+              "code": "NET30",
+              "id": "<id-3>",
+              "name": "Net 30"
+            },
+            "payment_terms_id": "<id-3>",
+            "phone": "250-555-0199",
+            "po_required": false,
+            "price_level": null,
+            "price_level_id": null,
+            "primary_branch_id": "<id-1>",
+            "revision": 1,
+            "salesperson_id": null,
+            "salesperson_name": null,
+            "tier": "gold",
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null,
+        "total": 1
+      }
+    }
+  },
+  {
+    "name": "customer.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers?offset=0"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.list.unsupported_tier",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers?tier=GOLD"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "tier",
+              "message": "must be one of: retail, silver, gold, platinum"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.list.bad_cursor",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers?cursor=garbage"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "cursor",
+              "message": "cursor is malformed"
+            }
+          ],
+          "message": "cursor is malformed"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
       }
     }
   },
@@ -149,60 +334,501 @@
     "name": "price_level.list",
     "request": {
       "method": "GET",
-      "path": "/api/v1/price_levels"
+      "path": "/api/v1/price_levels?limit=2"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-4>",
-          "multiplier": 0.85,
-          "name": "Contractor",
-          "updated_at": "<ts+0d>"
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-15>",
+            "multiplier": 0.75,
+            "name": "VIP Builder",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-10>",
+            "multiplier": 0.85,
+            "name": "Contractor",
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 2,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "price_level.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/price_levels?offset=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
         },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-8>",
-          "multiplier": 1,
-          "name": "Retail",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-9>",
-          "multiplier": 1,
-          "name": "Retail",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-10>",
-          "multiplier": 0.75,
-          "name": "VIP Builder",
-          "updated_at": "<ts+0d>"
+        "meta": {
+          "request_id": "<id-16>"
         }
-      ]
+      }
     }
   },
   {
     "name": "customer.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/customers/<id-11>"
+      "path": "/api/v1/customers/<id-17>"
     },
     "response": {
       "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "customer not found"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-18>"
         }
+      }
+    }
+  },
+  {
+    "name": "customer.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid customer id"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.create.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers",
+      "body": {
+        "credit_limit_cents": -1,
+        "currency": "usd",
+        "email": "not an email",
+        "tier": "GOLD"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "account_number",
+              "message": "is required"
+            },
+            {
+              "field": "name",
+              "message": "is required"
+            },
+            {
+              "field": "email",
+              "message": "must be an email address"
+            },
+            {
+              "field": "tier",
+              "message": "must be one of: retail, silver, gold, platinum"
+            },
+            {
+              "field": "credit_limit_cents",
+              "message": "must not be negative; send null for no limit"
+            },
+            {
+              "field": "currency",
+              "message": "must be an ISO 4217 code of three capital letters, or null for the dealer default"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.create.unknown_field",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers",
+      "body": {
+        "account_number": "GOLD-002",
+        "address": "1 Golden Way, Kelowna BC",
+        "balance_due": 5,
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "phone": "250-555-0199",
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "balance_due",
+              "message": "unknown field"
+            }
+          ],
+          "message": "request body has a field this route does not accept"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.create.duplicate",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/customers",
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "phone": "250-555-0199",
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "duplicate",
+          "details": [
+            {
+              "code": "account_number_taken",
+              "message": "account_number is already used by another customer"
+            }
+          ],
+          "message": "a customer with this account number already exists"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.update.without_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>",
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": false,
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-23>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "credit_limit_cents": 10000000,
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": true,
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "balance_cents": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit_cents": 10000000,
+        "currency": null,
+        "effective_currency": "USD",
+        "email": "goldens@example.com",
+        "id": "<id-2>",
+        "is_active": true,
+        "name": "Golden Harness Co",
+        "payment_terms": {
+          "code": "NET30",
+          "id": "<id-3>",
+          "name": "Net 30"
+        },
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": true,
+        "price_level": null,
+        "price_level_id": null,
+        "primary_branch_id": "<id-1>",
+        "revision": 2,
+        "salesperson_id": null,
+        "salesperson_name": null,
+        "tier": "gold",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "customer.update.stale",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": false,
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-24>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.update.missing_controls",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "phone": "250-555-0199",
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "payment_terms_id",
+              "message": "is required on a PUT: a left out field would reset the customer's terms"
+            },
+            {
+              "field": "po_required",
+              "message": "is required on a PUT: a left out field would clear the purchase order requirement"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.update.primary_branch",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": false,
+        "primary_branch_id": "<id-1>",
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "primary_branch_id",
+              "message": "cannot be changed by an edit: it is fixed when the customer is created"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.update.currency_not_enabled",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "currency": "EUR",
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": false,
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "currency",
+              "message": "is not an enabled currency: USD"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-27>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.get.after_update",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "balance_cents": 0,
+        "created_at": "<ts+0d>",
+        "credit_limit_cents": 10000000,
+        "currency": null,
+        "effective_currency": "USD",
+        "email": "goldens@example.com",
+        "id": "<id-2>",
+        "is_active": true,
+        "name": "Golden Harness Co",
+        "payment_terms": {
+          "code": "NET30",
+          "id": "<id-3>",
+          "name": "Net 30"
+        },
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": true,
+        "price_level": null,
+        "price_level_id": null,
+        "primary_branch_id": "<id-1>",
+        "revision": 2,
+        "salesperson_id": null,
+        "salesperson_name": null,
+        "tier": "gold",
+        "updated_at": "<ts+0d>"
       }
     }
   }

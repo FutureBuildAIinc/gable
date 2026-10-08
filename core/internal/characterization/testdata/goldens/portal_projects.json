@@ -107,6 +107,30 @@
           "name": "Big White Lodge Reno Phase 1",
           "status": "Active",
           "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-9>",
+          "name": "Knox Park Pavilion",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-10>",
+          "name": "Glenmore Lofts",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "id": "<id-11>",
+          "name": "Mission Hill Custom Home",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
         }
       ]
     }
@@ -152,7 +176,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -173,7 +197,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -182,7 +206,7 @@
     "name": "portal_projects.update.unknown",
     "request": {
       "method": "PUT",
-      "path": "/api/portal/v1/projects/<id-11>",
+      "path": "/api/portal/v1/projects/<id-14>",
       "body": {
         "name": "x"
       }
@@ -196,7 +220,7 @@
           "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-15>"
         }
       }
     }

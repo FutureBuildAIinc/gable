@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -71,6 +72,8 @@ func (f *fakeQuoteRepo) ListQuotesByCustomer(_ context.Context, customerID uuid.
 	return f.byCustomer[customerID], nil
 }
 
+func centsPtr(n int64) *httpx.Cents { c := httpx.Cents(n); return &c }
+
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 // --- dashboard -----------------------------------------------------------
@@ -82,7 +85,7 @@ func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 func TestGetDashboard_ReportsTheCustomersOwnFigures(t *testing.T) {
 	id := uuid.New()
 	custRepo := &fakeCustomerRepo{customers: map[uuid.UUID]*customer.Customer{
-		id: {ID: id, Name: "Acme Construction", CreditLimit: 25000.00, BalanceDue: 4873.19},
+		id: {ID: id, Name: "Acme Construction", CreditLimitCents: centsPtr(2500000), BalanceCents: 487319},
 	}}
 	svc := NewService(custRepo, &fakeQuoteRepo{}, testLogger())
 
@@ -107,7 +110,7 @@ func TestGetDashboard_ReportsTheCustomersOwnFigures(t *testing.T) {
 func TestGetDashboard_WireFormatIsDollars(t *testing.T) {
 	id := uuid.New()
 	svc := NewService(&fakeCustomerRepo{customers: map[uuid.UUID]*customer.Customer{
-		id: {ID: id, CreditLimit: 25000, BalanceDue: 73.88},
+		id: {ID: id, CreditLimitCents: centsPtr(2500000), BalanceCents: 7388},
 	}}, &fakeQuoteRepo{}, testLogger())
 
 	dto, err := svc.GetDashboard(context.Background(), id)
@@ -374,8 +377,8 @@ func TestHandleDashboard_UsesTheAuthenticatedCustomerID(t *testing.T) {
 	other := uuid.New()
 
 	custRepo := &fakeCustomerRepo{customers: map[uuid.UUID]*customer.Customer{
-		authed.ID: {ID: authed.ID, CreditLimit: 100, BalanceDue: 10},
-		other:     {ID: other, CreditLimit: 999999, BalanceDue: 888888},
+		authed.ID: {ID: authed.ID, CreditLimitCents: centsPtr(10000), BalanceCents: 1000},
+		other:     {ID: other, CreditLimitCents: centsPtr(99999900), BalanceCents: 88888800},
 	}}
 	mux := newTestMux(NewService(custRepo, &fakeQuoteRepo{}, testLogger()))
 

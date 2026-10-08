@@ -119,7 +119,7 @@ func lineProductID(l *QuoteLine) any {
 // naming it and not a 500 from the database.
 var referenceFields = map[string]string{
 	"quotes_customer_id_fkey":     "customer_id",
-	"quotes_job_id_fkey":          "job_id",
+	"quotes_project_id_fkey":      "job_id",
 	"quotes_vehicle_id_fkey":      "vehicle_id",
 	"quotes_branch_id_fkey":       "branch_id",
 	"quote_lines_product_id_fkey": "lines.product_id",
@@ -160,7 +160,7 @@ func (r *PostgresRepository) InsertQuote(ctx context.Context, q *Quote) error {
 	}
 	_, err := exec.Exec(ctx, `
 		INSERT INTO quotes (
-			id, number, customer_id, job_id, state, total_amount, expires_at, created_at, updated_at,
+			id, number, customer_id, project_id, state, total_amount, expires_at, created_at, updated_at,
 			margin_total, source, original_file, original_filename, original_content_type, parse_map,
 			delivery_type, freight_amount, vehicle_id, branch_id, revision
 		) VALUES ($1, $2, $3, $4, $5, $6::numeric / 100, $7, $8, $8,
@@ -225,7 +225,7 @@ func (r *PostgresRepository) insertLines(ctx context.Context, q *Quote, priorNot
 // summaryColumns and summaryFrom are the one header projection: a list item,
 // a partner list row, and the head of the full document all read it.
 const summaryColumns = `
-	q.id, q.number, q.branch_id, q.customer_id, COALESCE(c.name, ''), q.job_id, q.state::text, q.revision,
+	q.id, q.number, q.branch_id, q.customer_id, COALESCE(c.name, ''), q.project_id, q.state::text, q.revision,
 	ROUND(q.total_amount * 100)::bigint, ROUND(COALESCE(q.freight_amount, 0) * 100)::bigint,
 	ROUND(COALESCE(q.margin_total, 0) * 100)::bigint,
 	COALESCE(q.delivery_type, 'PICKUP'), q.vehicle_id, v.name, COALESCE(q.source, 'manual'),
@@ -361,7 +361,7 @@ func (r *PostgresRepository) ReplaceDraft(ctx context.Context, q *Quote) error {
 
 	_, err := exec.Exec(ctx, `
 		UPDATE quotes
-		SET customer_id = $2, job_id = $3, total_amount = $4::numeric / 100, expires_at = $5,
+		SET customer_id = $2, project_id = $3, total_amount = $4::numeric / 100, expires_at = $5,
 			delivery_type = $6, freight_amount = $7::numeric / 100, vehicle_id = $8,
 			revision = revision + 1, updated_at = NOW()
 		WHERE id = $1`,

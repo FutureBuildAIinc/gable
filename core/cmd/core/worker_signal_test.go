@@ -75,11 +75,21 @@ func TestCoreWorkerStopsCleanlyOnSignal(t *testing.T) {
 		t.Fatalf("start core worker: %v", err)
 	}
 	workerPID := cmd.Process.Pid
+	// One Wait for the whole test: os/exec does not make concurrent Wait
+	// calls safe, and the cleanup may run while the exit goroutine waits.
+	var (
+		waitOnce sync.Once
+		waitErr  error
+	)
+	wait := func() error {
+		waitOnce.Do(func() { waitErr = cmd.Wait() })
+		return waitErr
+	}
 	t.Cleanup(func() {
 		// Belt and braces: anything this test started is stopped by its
 		// own pid before the report.
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = wait()
 	})
 
 	var (
@@ -115,21 +125,32 @@ func TestCoreWorkerStopsCleanlyOnSignal(t *testing.T) {
 	select {
 	case <-started:
 	case <-time.After(30 * time.Second):
-		t.Fatalf("core worker (pid %d) did not report start within 30s; output so far:\n%s", workerPID, strings.Join(append([]string{}, lines...), "\n"))
+		mu.Lock()
+		output := strings.Join(lines, "\n")
+		mu.Unlock()
+		t.Fatalf("core worker (pid %d) did not report start within 30s; output so far:\n%s", workerPID, output)
 	}
 
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatalf("send SIGINT to core worker (pid %d): %v", workerPID, err)
 	}
 
+	// Wait closes the pipes once the process exits, so the readers must reach
+	// EOF first or the last log lines can be lost (os/exec: it is incorrect to
+	// call Wait before all reads from the pipe have completed).
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		wg.Wait()
+		done <- wait()
+	}()
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
-		t.Fatalf("core worker (pid %d) did not exit within 30s of SIGINT; output so far:\n%s", workerPID, strings.Join(lines, "\n"))
+		mu.Lock()
+		output := strings.Join(lines, "\n")
+		mu.Unlock()
+		t.Fatalf("core worker (pid %d) did not exit within 30s of SIGINT; output so far:\n%s", workerPID, output)
 	}
-	wg.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()

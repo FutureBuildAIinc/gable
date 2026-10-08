@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
 	"time"
 
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -20,6 +23,17 @@ import (
 // AutoPOService is an optional interface for triggering purchase orders from accepted quotes.
 type AutoPOService interface {
 	CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error
+}
+
+// OrderCreator is the order module's conversion seam (ADR 0005 section 5.8):
+// PrepareQuoteTax prices the conversion's tax before its transaction opens
+// (nil when the rate resolver will do), CreateFromQuote creates the order
+// inside the caller's transaction, and QuoteHasOrder is the
+// already_converted guard.
+type OrderCreator interface {
+	PrepareQuoteTax(ctx context.Context, src *order.QuoteSource) (*order.ProviderTax, error)
+	CreateFromQuote(ctx context.Context, src *order.QuoteSource, priced *order.ProviderTax) (*order.Order, error)
+	QuoteHasOrder(ctx context.Context, quoteID uuid.UUID) (bool, error)
 }
 
 // EventRecorder writes a domain event into the transactional outbox. The
@@ -34,6 +48,12 @@ type EventRecorder interface {
 // already carries one. *database.DB satisfies it.
 type TxRunner interface {
 	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3).
+// *middleware.BranchGuard satisfies it.
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
 }
 
 // Event types the module writes to the outbox.
@@ -61,6 +81,8 @@ type Service struct {
 	events      EventRecorder // optional; nil records nothing (unit tests)
 	tx          TxRunner      // optional; nil runs each method unwrapped (unit tests)
 	logger      *slog.Logger
+	branches    BranchGuard  // optional; nil leaves a payload branch unchecked (unit tests)
+	orders      OrderCreator // optional; nil refuses the convert (unit tests)
 	now         func() time.Time
 }
 
@@ -83,6 +105,13 @@ func (s *Service) WithSnapshotService(snapshotSvc SnapshotService) {
 // WithOutbox wires the recorder of quote.created and the transition events.
 func (s *Service) WithOutbox(events EventRecorder) *Service {
 	s.events = events
+	return s
+}
+
+// WithBranchGuard makes Create refuse a payload branch the caller may not
+// target. Without it a payload branch is not checked, so serve always sets it.
+func (s *Service) WithBranchGuard(g BranchGuard) *Service {
+	s.branches = g
 	return s
 }
 
@@ -235,6 +264,9 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 // the sequence and stores it, writing quote.created as the transaction's last
 // statement. A create that fails anywhere leaves no quote and no event.
 func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
+	if err := s.checkPayloadBranch(ctx, d); err != nil {
+		return nil, err
+	}
 	var out *Quote
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		q, err := s.priceDraft(ctx, d)
@@ -276,6 +308,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		if err != nil {
 			return notFound(err)
 		}
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
+			return err
+		}
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
@@ -307,6 +342,9 @@ func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
 	q, err := s.repo.GetQuote(ctx, id)
 	if err != nil {
 		return nil, notFound(err)
+	}
+	if err := s.checkQuoteBranch(ctx, q); err != nil {
+		return nil, err
 	}
 	return q, nil
 }
@@ -371,6 +409,9 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 		if err != nil {
 			return notFound(err)
 		}
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
+			return err
+		}
 		if pre != nil {
 			if err := pre.check(cur.Revision); err != nil {
 				return err
@@ -423,59 +464,142 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 	return out, nil
 }
 
-// OrderPayloadFor builds the order creation payload from a quote's lines, or
-// refuses with the 409 invalid_state_transition that names every line an order
-// cannot carry. Orders hold whole cents per sale unit and no conversion pair
-// until cycle 2 (R2-1), so a line whose pair is not 1 to 1, or whose price_uom
-// differs from its uom, cannot be handed over without rounding the money
-// away: that line is a line_not_convertible blocker naming lines[i].
-func OrderPayloadFor(q *Quote) (*OrderPayload, error) {
-	payload := &OrderPayload{CustomerID: q.CustomerID, QuoteID: q.ID, Lines: make([]OrderPayloadLine, 0, len(q.Lines))}
-	var blockers []httpx.FieldError
-	for i, l := range q.Lines {
-		if l.UOMQty != one || l.PriceUOMQty != one || l.PriceUOM != string(l.UOM) {
-			blockers = append(blockers, httpx.Blocker("line_not_convertible", fmt.Sprintf(
-				"lines[%d] is priced per %s but sold in %s: orders take a price per sale unit until the order contract carries the conversion",
-				i, l.PriceUOM, l.UOM)))
-			continue
-		}
-		// The price per sale unit in whole cents, rounded once.
-		each, err := httpx.Extend(10000, l.UOMQty, l.PriceUOMQty, l.UnitPrice)
-		if err != nil {
-			blockers = append(blockers, httpx.Blocker("line_not_convertible", fmt.Sprintf(
-				"lines[%d] has a price the order cannot hold", i)))
-			continue
-		}
-		payload.Lines = append(payload.Lines, OrderPayloadLine{
-			ProductID: l.ProductID, Quantity: l.Quantity, UOM: l.UOM, PriceEachCents: each,
-		})
-	}
-	if len(blockers) > 0 {
-		return nil, httpx.InvalidStateTransition("the quote has lines an order cannot carry yet", blockers...)
-	}
-	return payload, nil
-}
-
-// Convert accepts the quote on the client's revision and returns the order
-// payload for the client to POST to /orders. The payload is built inside the
-// transition's transaction, before the status changes, so a quote with a line
-// an order cannot carry is refused and stays as it was. The payload carries
-// the accepted quote's revision.
-func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (*OrderPayload, error) {
+// Convert accepts the quote and creates the order in ONE transaction
+// (ADR 0005 section 5.8), answering the created order. The quote row is
+// locked first; a quote that already has an order not cancelled is 409
+// already_converted. The lines carry the conversion pair without loss (the
+// R1-15 refusal is lifted); a stocked line sold in another unit than its
+// stocking unit is still refused until cycle 3. Events: quote.accepted, then
+// order.created.
+func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (*order.Order, error) {
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
 	}
-	var payload *OrderPayload
-	q, err := s.transition(ctx, id, QuoteStateAccepted, &pre, func(cur *Quote) error {
-		p, err := OrderPayloadFor(cur)
-		payload = p
+	return s.convert(ctx, id, &pre)
+}
+
+// ConvertInProcess is the convert for in process callers (the frozen
+// integration seam): the same rules and events, no client revision to
+// precondition on. The caller marks itself branchctx.WithSystem, as the
+// seam does (ADR 0007 section 5.5): the record branch rule fails closed for
+// a context with no branch.
+func (s *Service) ConvertInProcess(ctx context.Context, id uuid.UUID) (*order.Order, error) {
+	return s.convert(ctx, id, nil)
+}
+
+func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) (*order.Order, error) {
+	if s.orders == nil {
+		return nil, fmt.Errorf("the order service is not wired")
+	}
+	// The provider, when one is configured, prices the conversion's tax
+	// BEFORE the transaction opens: it is an HTTP call (ADR 0005 section 3).
+	// The record branch rule runs first, so a quote the caller may not
+	// target never reaches the provider.
+	current, err := s.repo.GetQuote(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	if err := s.checkQuoteBranch(ctx, current); err != nil {
+		return nil, err
+	}
+	src := quoteSourceFor(current)
+	priced, err := s.orders.PrepareQuoteTax(ctx, src)
+	if err != nil {
+		return nil, err
+	}
+
+	var created *order.Order
+	var accepted *Quote
+	err = s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockQuote(ctx, id); err != nil {
+			return notFound(err)
+		}
+		cur, err := s.repo.GetQuote(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := s.checkQuoteBranch(ctx, cur); err != nil {
+			return err
+		}
+		if pre != nil {
+			if err := pre.check(cur.Revision); err != nil {
+				return err
+			}
+		}
+		if err := validateStateTransition(cur.Status, QuoteStateAccepted); err != nil {
+			return err
+		}
+		if has, err := s.orders.QuoteHasOrder(ctx, id); err != nil {
+			return err
+		} else if has {
+			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+				Message: "this quote already has an order",
+				Details: []httpx.FieldError{httpx.Blocker("already_converted",
+					"the quote already has an order that is not cancelled")}}
+		}
+		src := quoteSourceFor(cur)
+		from := cur.Status
+		now := httpx.TimestampOf(s.now().UTC())
+		cur.Status = QuoteStateAccepted
+		cur.AcceptedAt = &now
+		if err := s.repo.SetStatus(ctx, cur); err != nil {
+			return err
+		}
+		if cur, err = s.repo.GetQuote(ctx, id); err != nil {
+			return err
+		}
+		if err := s.record(ctx, cur, EventAccepted, from.Status()); err != nil {
+			return err
+		}
+		accepted = cur
+		created, err = s.orders.CreateFromQuote(ctx, src, priced)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	payload.Revision = q.Revision
-	return payload, nil
+	// Auto-PO, as the accept it replaced did: after the commit and best
+	// effort (a failure is logged and never blocks the convert). It stays
+	// outside the transaction because the purchase order service writes
+	// through its own pool connection, and a purchase order the convert's
+	// rollback could not take back would be orphaned.
+	if s.poSvc != nil {
+		s.triggerAutoPO(ctx, accepted)
+	}
+	return created, nil
+}
+
+// WithOrderCreator wires the conversion seam.
+func (s *Service) WithOrderCreator(orders OrderCreator) *Service {
+	s.orders = orders
+	return s
+}
+
+// quoteSourceFor maps a quote onto what the order copies (ADR 0005 5.8's
+// table): the lines with their pair and price exactly, the header's job,
+// delivery type and freight.
+func quoteSourceFor(q *Quote) *order.QuoteSource {
+	src := &order.QuoteSource{
+		QuoteID:      q.ID,
+		BranchID:     q.BranchID,
+		CustomerID:   q.CustomerID,
+		JobID:        q.JobID,
+		FreightCents: q.FreightCents,
+	}
+	switch q.DeliveryType {
+	case DeliveryDelivery:
+		src.DeliveryType = order.DeliveryDelivery
+	default:
+		src.DeliveryType = order.DeliveryPickup
+	}
+	for _, l := range q.Lines {
+		src.Lines = append(src.Lines, order.QuoteSourceLine{
+			QuoteLineID: l.ID, ProductID: l.ProductID, SKU: l.SKU, Description: l.Description,
+			Quantity: l.Quantity, UOM: string(l.UOM), PriceUOM: l.PriceUOM,
+			UOMQty: l.UOMQty, PriceUOMQty: l.PriceUOMQty, UnitPrice: l.UnitPrice,
+		})
+	}
+	return src
 }
 
 // record writes the quote's event into the outbox through the transaction's
@@ -530,6 +654,11 @@ func (s *Service) GetAnalytics(ctx context.Context) (*QuoteAnalytics, error) {
 
 // GetOriginalFile returns the stored upload; a missing quote is a 404.
 func (s *Service) GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error) {
+	// The record branch rule rides on the read: a quote the caller may not
+	// target is refused before any byte of its file leaves.
+	if _, err := s.GetQuote(ctx, id); err != nil {
+		return nil, "", "", err
+	}
 	data, name, ctype, err := s.repo.GetOriginalFile(ctx, id)
 	return data, name, ctype, notFound(err)
 }
@@ -555,4 +684,41 @@ func validateStateTransition(from, to QuoteState) error {
 		}
 	}
 	return httpx.InvalidStateTransition(fmt.Sprintf("cannot transition from %s to %s", from.Status(), to.Status()))
+}
+
+// checkPayloadBranch is the payload branch rule: a branch the body names must
+// be one the caller may target, else 403 forbidden naming branch_id.
+func (s *Service) checkPayloadBranch(ctx context.Context, d *Draft) error {
+	if s.branches == nil || d.BranchID == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, *d.BranchID)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "branch_id is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
+}
+
+// checkQuoteBranch is the record branch rule (ADR 0007 section 2.3) for a
+// quote a path id addresses: the quote's branch must be one the caller may
+// target, the same rule the create applies to the body's branch_id, else 403
+// forbidden naming id. The check fails closed: a caller with no branch
+// context is refused unless it marked itself a system caller with
+// branchctx.WithSystem. The two context-free callers are marked: the portal's
+// quote decision and the integration seam (ADR 0007 section 5.5 admits an
+// unbound key to any branch), so a route mounted without the branch
+// middleware can no longer reach these methods unwalled.
+func (s *Service) checkQuoteBranch(ctx context.Context, q *Quote) error {
+	if s.branches == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, q.BranchID)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "quote is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
 }

@@ -3,7 +3,12 @@
 
 package characterization
 
-import "fmt"
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+	"testing"
+)
 
 // Sales and logistics groups: platform health, product, customer, sales team,
 // CRM, quotes, orders (with the exposure gate), invoices (created through the
@@ -61,6 +66,27 @@ func productGroups() []groupDef {
 }
 
 func customerGroups() []groupDef {
+	// The customer module is on the wire contract (C2-1): lowercase tier,
+	// _cents money with a credit limit that is null for no limit, the list
+	// envelope with filters that filter, and a revision every edit names in
+	// If-Match (the revision of a scripted customer is deterministic: create
+	// 1, then one per write).
+	header := func(extras ...map[string]any) map[string]any {
+		b := map[string]any{
+			"account_number": "GOLD-001", "name": "Golden Harness Co", "email": "goldens@example.com",
+			"phone": "250-555-0199", "address": "1 Golden Way, Kelowna BC", "tier": "gold",
+		}
+		for _, extra := range extras {
+			for k, v := range extra {
+				b[k] = v
+			}
+		}
+		return b
+	}
+	// A PUT carries the controls it must not reset by leaving them out.
+	putHeader := func(extra map[string]any) map[string]any {
+		return header(map[string]any{"payment_terms_id": "{myTerms}", "po_required": false}, extra)
+	}
 	return []groupDef{{
 		name: "customer",
 		steps: []stepDef{
@@ -68,19 +94,51 @@ func customerGroups() []groupDef {
 				name:   "customer.create",
 				method: "POST",
 				path:   "/api/v1/customers",
-				body: map[string]any{
-					"name": "Golden Harness Co", "account_number": "GOLD-001",
-					"email": "goldens@example.com", "phone": "250-555-0199",
-					"address": "1 Golden Way, Kelowna BC", "tier": "GOLD",
-					"payment_terms": "NET30", "credit_limit": 100000, "primary_branch_id": "{branch}",
-				},
-				extract: map[string]string{"myCustomer": "/id"},
+				body: header(map[string]any{
+					"credit_limit_cents": 10000000, "primary_branch_id": "{branch}",
+				}),
+				extract: map[string]string{"myCustomer": "/id", "myTerms": "/payment_terms_id"},
 			},
 			{name: "customer.get", method: "GET", path: "/api/v1/customers/{myCustomer}"},
 			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3"},
-			// Registered by the customer handler; empty list pins null vs [].
-			{name: "price_level.list", method: "GET", path: "/api/v1/price_levels"},
+			// The filters filter; an unsupported parameter, a tier outside the
+			// lowercase vocabulary and a broken cursor are 400s naming the field.
+			{name: "customer.list.search", method: "GET", path: "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"},
+			{name: "customer.list.unsupported_parameter", method: "GET", path: "/api/v1/customers?offset=0"},
+			{name: "customer.list.unsupported_tier", method: "GET", path: "/api/v1/customers?tier=GOLD"},
+			{name: "customer.list.bad_cursor", method: "GET", path: "/api/v1/customers?cursor=garbage"},
+			// Registered by the customer handler; the list envelope now.
+			{name: "price_level.list", method: "GET", path: "/api/v1/price_levels?limit=2"},
+			{name: "price_level.list.unsupported_parameter", method: "GET", path: "/api/v1/price_levels?offset=1"},
 			{name: "customer.get.not_found", method: "GET", path: "/api/v1/customers/00000000-0000-0000-0000-0000000000aa"},
+			{name: "customer.get.bad_id", method: "GET", path: "/api/v1/customers/not-a-uuid"},
+			{
+				name:   "customer.create.invalid",
+				method: "POST",
+				path:   "/api/v1/customers",
+				body:   map[string]any{"tier": "GOLD", "email": "not an email", "credit_limit_cents": -1, "currency": "usd"},
+			},
+			{name: "customer.create.unknown_field", method: "POST", path: "/api/v1/customers",
+				body: header(map[string]any{"account_number": "GOLD-002", "balance_due": 5})},
+			{name: "customer.create.duplicate", method: "POST", path: "/api/v1/customers", body: header(nil)},
+			// An edit names the revision; the first edit moves it to 2.
+			{name: "customer.update.without_revision", method: "PUT", path: "/api/v1/customers/{myCustomer}", body: putHeader(nil)},
+			{
+				name:    "customer.update",
+				method:  "PUT",
+				path:    "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"1"`},
+				body:    putHeader(map[string]any{"credit_limit_cents": 10000000, "po_required": true}),
+			},
+			{name: "customer.update.stale", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"1"`}, body: putHeader(nil)},
+			{name: "customer.update.missing_controls", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"2"`}, body: header(nil)},
+			{name: "customer.update.primary_branch", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"2"`}, body: putHeader(map[string]any{"primary_branch_id": "{branch}"})},
+			{name: "customer.update.currency_not_enabled", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"2"`}, body: putHeader(map[string]any{"currency": "EUR"})},
+			{name: "customer.get.after_update", method: "GET", path: "/api/v1/customers/{myCustomer}"},
 		},
 	}}
 }
@@ -311,14 +369,67 @@ func orderGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/orders",
 				body: map[string]any{
-					"customer_id": "{myCustomer}",
+					"customer_id":   "{myCustomer}",
+					"delivery_type": "pickup",
 					"lines": []map[string]any{
-						{"product_id": "{product}", "quantity": 5, "price_each": 550},
+						{"product_id": "{product}", "quantity": "5"},
 					},
 				},
 				extract: map[string]string{"myOrder": "/id"},
 			},
+			{
+				name:   "order.create.validation",
+				method: "POST",
+				path:   "/api/v1/orders",
+				body: map[string]any{
+					"customer_id": "{myCustomer}", "delivery_type": "pickup",
+					"lines": []map[string]any{{"product_id": "{product}", "quantity": "0"}},
+				},
+			},
+			{
+				name:   "order.create.override_without_reason",
+				method: "POST",
+				path:   "/api/v1/orders",
+				body: map[string]any{
+					"customer_id": "{myCustomer}", "delivery_type": "pickup",
+					"lines": []map[string]any{{"product_id": "{product}", "quantity": "1",
+						"unit_price_ten_thousandths": 100000}},
+				},
+			},
 			{name: "order.get", method: "GET", path: "/api/v1/orders/{myOrder}"},
+			// A draft edit through the PUT, on the revision the create left.
+			{
+				name:   "order.update",
+				method: "PUT",
+				path:   "/api/v1/orders/{myOrder}",
+				body: map[string]any{
+					"customer_id":   "{myCustomer}",
+					"delivery_type": "pickup",
+					"revision":      1,
+					"lines": []map[string]any{
+						{"product_id": "{product}", "quantity": "6"},
+					},
+				},
+				extract: map[string]string{"myOrderRevision": "/revision"},
+			},
+			// The edit rule: a non draft edit is a 409 with order_not_draft,
+			// and a stale revision is a 409 stale_revision. Both refused
+			// writes below carry a revision the order has moved past.
+			{
+				name:   "order.update.stale_revision",
+				method: "PUT",
+				path:   "/api/v1/orders/{myOrder}",
+				body: map[string]any{
+					"customer_id": "{myCustomer}", "delivery_type": "pickup", "revision": 1,
+					"lines": []map[string]any{{"product_id": "{product}", "quantity": "6"}},
+				},
+			},
+			{name: "order.update.missing_precondition", method: "PUT",
+				path: "/api/v1/orders/{myOrder}",
+				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "pickup",
+					"lines": []map[string]any{{"product_id": "{product}", "quantity": "6"}}}},
+			{name: "order.list.status_filter", method: "GET", path: "/api/v1/orders?status=draft&limit=2"},
+			{name: "order.list.unsupported_parameter", method: "GET", path: "/api/v1/orders?customer=none"},
 			// No source quote on this order: the gate fails open.
 			{name: "order.exposure_gate", method: "GET", path: "/api/v1/orders/{myOrder}/exposure-gate"},
 			// Paged list envelope. The demo seed draws each customer's order
@@ -336,18 +447,31 @@ func orderGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/orders",
 				body: map[string]any{
-					"customer_id": "{myCustomer}",
+					"customer_id":   "{myCustomer}",
+					"delivery_type": "pickup",
 					"lines": []map[string]any{
-						{"product_id": "{product}", "quantity": 1, "price_each": 550},
+						{"product_id": "{product}", "quantity": "1"},
 					},
 				},
 				extract: map[string]string{"myCancelOrder": "/id"},
 			},
-			{name: "order.cancel", method: "POST", path: "/api/v1/orders/{myCancelOrder}/cancel",
-				body: map[string]any{"reason": "golden characterisation cancel"}},
+			// The cancel is the transition now (ADR 0005 5.2), on the
+			// revision the create left, and a cancel carries its reason.
+			{name: "order.cancel", method: "POST", path: "/api/v1/orders/{myCancelOrder}/transitions",
+				body: map[string]any{"to": "cancelled", "revision": 1, "reason": "golden characterisation cancel"}},
 			// Cancelling twice: the state machine's 409 refusal.
-			{name: "order.cancel.already_cancelled", method: "POST", path: "/api/v1/orders/{myCancelOrder}/cancel",
-				body: map[string]any{"reason": "second attempt"}},
+			{name: "order.cancel.already_cancelled", method: "POST", path: "/api/v1/orders/{myCancelOrder}/transitions",
+				body: map[string]any{"to": "cancelled", "reason": "second attempt"}},
+			// An edit of a cancelled order: the recipe's edit rule.
+			{name: "order.update.not_draft", method: "PUT", path: "/api/v1/orders/{myCancelOrder}",
+				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "pickup", "revision": 2,
+					"lines": []map[string]any{{"product_id": "{product}", "quantity": "1"}}}},
+			// A forbidden edge of the transition table.
+			{name: "order.transition.forbidden", method: "POST", path: "/api/v1/orders/{myOrder}/transitions",
+				body: map[string]any{"to": "fulfilled", "revision": "{myOrderRevision}", "reason": "not yet"}},
+			// The module's events, read back from the feed (ADR 0003).
+			{name: "order.events", method: "GET", path: "/api/v1/events?entity_type=order&limit=25", sortPrimaryArray: true,
+				maskBody: true},
 			// Owner override of the pre-ship gate on a clear order: the
 			// write succeeds and records the event even without a block.
 			{name: "order.exposure_override", method: "POST", path: "/api/v1/orders/{myOrder}/exposure-override",
@@ -361,10 +485,32 @@ func invoiceGroups() []groupDef {
 	return []groupDef{{
 		name: "invoice",
 		steps: []stepDef{
-			// The invoice module has no direct create route; the ERP mints
-			// invoices on order fulfilment. Both steps are 204 No Content.
-			{name: "order.confirm", method: "POST", path: "/api/v1/orders/{myOrder}/confirm"},
-			{name: "order.fulfill", method: "POST", path: "/api/v1/orders/{myOrder}/fulfill"},
+			// The confirm is the transition now (ADR 0005 5.2): a 200 with
+			// the confirmed order body.
+			{name: "order.confirm", method: "POST", path: "/api/v1/orders/{myOrder}/transitions",
+				body: map[string]any{"to": "confirmed", "revision": "{myOrderRevision}"}},
+			// The ERP mints invoices at fulfilment (ADR 0005 5.6), whose
+			// route lands with C2-2b; until then this step seeds the
+			// fulfilment's invoice directly, in the shape the fulfilment
+			// writes, so the invoice module's characterization keeps
+			// running, and records the count that proves it. C2-2b's PR
+			// replaces the seed with POST
+			// /api/v1/orders/{myOrder}/fulfillments.
+			{
+				name: "order.fulfill",
+				sql:  `SELECT count(*) AS invoices FROM invoices WHERE order_id = '{myOrder}'::uuid`,
+				setup: func(t *testing.T, h *harness) {
+					goldenExec(t, h, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status,
+						total_amount, subtotal, tax_rate, tax_amount, due_date, payment_terms, created_at, updated_at)
+						VALUES (gen_random_uuid(), '{myOrder}'::uuid, '{myCustomer}'::uuid,
+						(SELECT branch_id FROM orders WHERE id = '{myOrder}'::uuid), 'UNPAID',
+						ROUND((SELECT total_amount FROM orders WHERE id = '{myOrder}'::uuid), 2),
+						ROUND((SELECT subtotal FROM orders WHERE id = '{myOrder}'::uuid), 2),
+						COALESCE((SELECT tax_rate FROM orders WHERE id = '{myOrder}'::uuid), 0),
+						ROUND((SELECT tax_amount FROM orders WHERE id = '{myOrder}'::uuid), 2),
+						CURRENT_DATE + 30, 'NET30', NOW(), NOW())`)
+				},
+			},
 			// Newest invoice is the one fulfilment just created.
 			{name: "invoice.list_newest", method: "GET", path: "/api/v1/invoices?limit=1",
 				extract: map[string]string{"myInvoice": "/data/0/id"}},
@@ -614,4 +760,21 @@ func apGroups() []groupDef {
 			{name: "edi.partner.create.missing_name", method: "POST", path: "/api/v1/edi/partners", body: map[string]any{}},
 		},
 	}}
+}
+
+// goldenExec runs one fixture statement for a step's setup hook through the
+// harness's throwaway database, with the step's variables substituted.
+func goldenExec(t *testing.T, h *harness, query string) {
+	t.Helper()
+	db, err := sql.Open("pgx", h.dbURL)
+	if err != nil {
+		t.Fatalf("golden fixture: %v", err)
+	}
+	defer db.Close()
+	for name, val := range h.vars {
+		query = strings.ReplaceAll(query, "{"+name+"}", val)
+	}
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("golden fixture: %v", err)
+	}
 }

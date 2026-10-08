@@ -33,7 +33,7 @@ async function _happy() {
 
   const created = await client.post(
     "/api/v1/orders",
-    { customer_id: customerId, lines: [{ product_id: customerId, quantity: 2, price_each: 199 }] },
+    { customer_id: customerId, delivery_type: "pickup", lines: [{ product_id: customerId, quantity: "2" }] },
     { idempotencyKey: "replay-once" },
   );
   const orderStatus: string | undefined = created.body?.status;
@@ -45,10 +45,32 @@ async function _happy() {
   const vehicles = await integration.get("/api/integration/vehicles");
   const vehicleCount: number = vehicles.body.length;
 
-  const cleared = await client.post("/api/v1/orders/{id}/cancel", undefined, { path: { id: "8f14e45f" } });
-  const noBody: undefined = cleared.body;
+  // The cancel is the transition now (ADR 0005 5.2): it answers with the
+  // cancelled order, not a bare 204.
+  const cancelled = await client.post(
+    "/api/v1/orders/{id}/transitions",
+    { to: "cancelled", revision: 1, reason: "customer moved" },
+    { path: { id: "8f14e45f" } },
+  );
+  const cancelledStatus: string | undefined = cancelled.body?.status;
 
-  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, noBody];
+  const customers = await client.get("/api/v1/customers", { query: { q: "acme", tier: "gold", is_active: true, limit: 20 } });
+  const limit: number | null | undefined = customers.body.items[0]?.credit_limit_cents;
+  const terms: string | undefined = customers.body.items[0]?.payment_terms.code;
+  const shipTo = await client.post(
+    "/api/v1/customers/{id}/ship-tos",
+    { code: "YARD", name: "Lake job", line1: "12 Lake Rd", tax_rate_percent: "8.875" },
+    { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } },
+  );
+  const shipToRevision: number = shipTo.body.revision;
+  const edited = await client.put(
+    "/api/v1/customers/{id}",
+    { account_number: "A-1", name: "Acme", credit_limit_cents: null, po_required: true, payment_terms_id: "8f14e45f-ceea-467f-a830-aacd11a4" },
+    { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" }, headers: { "If-Match": '"3"' } },
+  );
+  const customerRevision: number = edited.body.revision;
+
+  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, limit, terms, shipToRevision, customerRevision];
 }
 
 // Wrong paths: each line must be a compile error --------------------------
@@ -68,6 +90,21 @@ async function _wrong() {
 
   // @ts-expect-error a unit price is an integer in ten thousandths, not a decimal string
   await client.post("/api/v1/quotes", { customer_id: "x", lines: [{ quantity: "1", uom: "PCS", unit_price_ten_thousandths: "5.5" }] });
+
+  // @ts-expect-error the customer list is cursor paged and the tier is lowercase
+  await client.get("/api/v1/customers", { query: { offset: 0, tier: "GOLD" } });
+
+  // @ts-expect-error a customer PUT must carry the controls it must not reset: payment_terms_id and po_required
+  await client.put("/api/v1/customers/{id}", { account_number: "A", name: "n" }, { path: { id: "x" } });
+
+  // @ts-expect-error a contact PUT must carry can_place_orders and the order limit (null for none)
+  await client.put("/api/v1/contacts/{id}", { first_name: "A", last_name: "B" }, { path: { id: "x" } });
+
+  // @ts-expect-error a credit limit is integer cents, never a float dollar amount string
+  await client.put("/api/v1/customers/{id}", { account_number: "A", name: "n", credit_limit_cents: "100.50" }, { path: { id: "x" } });
+
+  // @ts-expect-error a ship-to needs its code, name and line1
+  await client.post("/api/v1/customers/{id}/ship-tos", { name: "only a name" }, { path: { id: "x" } });
 
   // @ts-expect-error path parameter must be a string
   await client.get("/api/v1/quotes/{id}", { path: { id: 123 } });

@@ -7,18 +7,21 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ArrowRight } from 'lucide';
 import { OrderService } from '../../services/OrderService.ts';
-import { type Order, getStatusColor } from '../../types/order.ts';
-import type { OrderStatus } from '../../types/order.ts';
+import { type OrderSummary, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { formatCents } from '../../lib/utils.ts';
+
+const STATUS_FILTERS: (OrderStatus | 'all')[] = ['all', 'draft', 'on_hold', 'confirmed', 'backordered', 'fulfilled', 'cancelled'];
 
 @customElement('gable-order-list')
 export class GableOrderList extends LitElement {
     createRenderRoot() { return this; }
 
-    @state() private orders: Order[] = [];
+    @state() private orders: OrderSummary[] = [];
     @state() private loading = true;
     @state() private error: string | null = null;
+    @state() private status: OrderStatus | 'all' = 'all';
+    @state() private nextCursor: string | null = null;
     private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
@@ -41,14 +44,36 @@ export class GableOrderList extends LitElement {
     private async loadOrders() {
         try {
             this.error = null;
-            const data = await OrderService.listOrders();
-            this.orders = data;
+            const page = await OrderService.listOrders({
+                status: this.status === 'all' ? undefined : this.status,
+                limit: 50,
+            });
+            this.orders = page.items;
+            this.nextCursor = page.next_cursor;
         } catch (err) {
             console.error(err);
             this.error = err instanceof Error ? err.message : 'Failed to load orders';
         } finally {
             this.loading = false;
         }
+    }
+
+    private async loadMore() {
+        if (!this.nextCursor) return;
+        const page = await OrderService.listOrders({
+            status: this.status === 'all' ? undefined : this.status,
+            limit: 50,
+            cursor: this.nextCursor,
+        });
+        this.orders = [...this.orders, ...page.items];
+        this.nextCursor = page.next_cursor;
+    }
+
+    private setStatus(status: OrderStatus | 'all') {
+        if (this.status === status) return;
+        this.status = status;
+        this.loading = true;
+        this.loadOrders();
     }
 
     private getStatusBadgeClass(status: OrderStatus): string {
@@ -82,60 +107,64 @@ export class GableOrderList extends LitElement {
         }
 
         return html`
-            <div class="space-y-6">
+            <div class="space-y-4">
                 <div class="flex items-center justify-between">
-                    <div>
-                        <h1 class="text-3xl font-bold tracking-tight text-white font-mono">Orders</h1>
-                        <p class="text-muted-foreground mt-2">Manage customer orders and fulfillment.</p>
-                    </div>
+                    <h1 class="text-2xl font-bold text-white">Orders</h1>
                 </div>
-
-                <div class="bg-slate-steel border border-white/10 rounded-lg overflow-hidden">
-                    <table class="w-full text-left text-sm" aria-label="Orders list">
-                        <thead>
-                            <tr class="border-b border-white/10 bg-white/5">
-                                <th class="p-4 font-medium text-muted-foreground">Order ID</th>
-                                <th class="p-4 font-medium text-muted-foreground">Date</th>
-                                <th class="p-4 font-medium text-muted-foreground">Customer</th>
-                                <th class="p-4 font-medium text-muted-foreground">Status</th>
-                                <th class="p-4 font-medium text-muted-foreground text-right">Total</th>
-                                <th class="p-4 font-medium text-muted-foreground text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-white/5">
-                            ${this.orders.length === 0 ? html`
+                <div class="flex gap-1 mb-2 border-b border-white/10 flex-wrap">
+                    ${STATUS_FILTERS.map(s => html`
+                        <button
+                            @click=${() => this.setStatus(s)}
+                            class="px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+                                this.status === s ? 'text-gable-green border-gable-green' : 'text-zinc-400 border-transparent hover:text-white'
+                            }"
+                        >
+                            ${s === 'all' ? 'All' : formatOrderStatus(s)}
+                        </button>
+                    `)}
+                </div>
+                ${this.orders.length === 0 ? html`
+                    <div class="text-zinc-400 py-16 text-center">No orders${this.status !== 'all' ? ` in ${formatOrderStatus(this.status as OrderStatus)}` : ''}.</div>
+                ` : html`
+                    <div class="rounded-lg border border-white/10 overflow-hidden">
+                        <table class="w-full text-left text-sm" aria-label="Orders">
+                            <thead class="bg-white/5">
                                 <tr>
-                                    <td colspan="6" class="p-8 text-center text-muted-foreground">
-                                        No active orders found. Create a quote and convert it to start.
-                                    </td>
+                                    <th class="p-4 text-zinc-400 font-medium">Number</th>
+                                    <th class="p-4 text-zinc-400 font-medium">Customer</th>
+                                    <th class="p-4 text-zinc-400 font-medium">Status</th>
+                                    <th class="p-4 text-zinc-400 font-medium text-right">Total</th>
+                                    <th class="p-4 text-zinc-400 font-medium text-right">Created</th>
+                                    <th class="p-4"></th>
                                 </tr>
-                            ` : this.orders.map(order => html`
-                                <tr class="hover:bg-white/5 transition-colors">
-                                    <td class="p-4 font-mono text-white/80">#${order.id.slice(0, 8)}</td>
-                                    <td class="p-4 text-white/80">${new Date(order.created_at).toLocaleDateString()}</td>
-                                    <td class="p-4 text-white font-medium">${order.customer_name || order.customer_id.slice(0, 8)}</td>
-                                    <td class="p-4">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-transparent ${this.getStatusBadgeClass(order.status)}">
-                                            ${order.status}
-                                        </span>
-                                    </td>
-                                    <td class="p-4 font-mono text-right text-gable-green">
-                                        ${formatCents(order.total_amount)}
-                                    </td>
-                                    <td class="p-4 text-right">
-                                        <button
-                                            @click=${() => router.navigate(`/orders/${order.id}`)}
-                                            aria-label="View order ${order.id.slice(0, 8)}"
-                                            class="text-white/50 hover:text-white transition-colors"
-                                        >
-                                            ${icon(ArrowRight, 18)}
-                                        </button>
-                                    </td>
-                                </tr>
-                            `)}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody class="divide-y divide-white/5">
+                                ${this.orders.map(order => html`
+                                    <tr class="hover:bg-white/5 cursor-pointer" @click=${() => router.navigate(`/orders/${order.id}`)}>
+                                        <td class="p-4 font-mono text-white">${order.number}</td>
+                                        <td class="p-4 text-white">${order.customer_name || order.customer_id.slice(0, 8)}</td>
+                                        <td class="p-4">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-transparent ${this.getStatusBadgeClass(order.status)}">
+                                                ${formatOrderStatus(order.status)}
+                                            </span>
+                                            ${order.hold_reason ? html`<span class="ml-2 text-xs text-amber-400">${order.hold_reason === 'credit_limit' ? 'credit hold' : 'held'}</span>` : ''}
+                                        </td>
+                                        <td class="p-4 text-gable-green font-mono text-right">${formatCents(order.total_cents)}</td>
+                                        <td class="p-4 text-zinc-400 text-right">${new Date(order.created_at).toLocaleDateString()}</td>
+                                        <td class="p-4 text-right">${icon(ArrowRight, 16, 'text-zinc-500')}</td>
+                                    </tr>
+                                `)}
+                            </tbody>
+                        </table>
+                    </div>
+                    ${this.nextCursor ? html`
+                        <div class="flex justify-center pt-4">
+                            <button @click=${() => this.loadMore()} class="px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 text-sm">
+                                Load more
+                            </button>
+                        </div>
+                    ` : ''}
+                `}
             </div>
         `;
     }

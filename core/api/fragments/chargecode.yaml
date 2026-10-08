@@ -1,0 +1,236 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The charge code master (ADR 0005 section 2.5, item C2-2), on the contract
+# from birth: the fees a sales document can name on a charge line, each
+# pointing at the revenue account its money posts to. A small table, so the
+# list is the whole master in one array, active rows unless asked otherwise.
+paths:
+  /api/v1/charge-codes:
+    get:
+      operationId: chargeCodeList
+      tags: [charge-codes]
+      summary: List charge codes
+      description: >-
+        The whole master, ordered by code, active rows only unless
+        include_inactive is true.
+      parameters:
+        - name: include_inactive
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["true", "false"]
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The charge codes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: chargeCodeCreate
+      tags: [charge-codes]
+      summary: Create a charge code
+      description: >-
+        The code is one to sixteen capital letters, digits or underscores and
+        never changes once written: documents name it. The revenue account
+        must exist in the chart of accounts.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChargeCodeRequest"
+      responses:
+        "201":
+          description: The created charge code.
+          headers:
+            Location:
+              description: /api/v1/charge-codes/{id} of the created code.
+              schema:
+                type: string
+            ETag:
+              description: The code's revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/charge-codes/{id}:
+    get:
+      operationId: chargeCodeGet
+      tags: [charge-codes]
+      summary: Get one charge code
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The charge code.
+          headers:
+            ETag:
+              description: The code's revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: chargeCodeUpdate
+      tags: [charge-codes]
+      summary: Replace a charge code
+      description: >-
+        The code itself never changes: documents name it. Deactivate through
+        is_active; a code in use is never deleted. The revision precondition
+        applies.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChargeCodeRequest"
+      responses:
+        "200":
+          description: The edited charge code.
+          headers:
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCode"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    ChargeCode:
+      type: object
+      required: [id, code, name, revenue_account_code, taxable, default_unit_price_ten_thousandths, is_active, revision, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]{1,16}$"
+          description: What documents name; never changes once written.
+        name:
+          type: string
+        revenue_account_code:
+          type: string
+          description: The GL account the fee posts to; a line snapshots it at create, so a later edit never moves posted revenue.
+        taxable:
+          type: boolean
+          description: The default; a charge line may override it.
+        default_unit_price_ten_thousandths:
+          type: [integer, "null"]
+          format: int64
+          description: Fills a charge line that sends no price.
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ChargeCodeRequest:
+      type: object
+      required: [name, revenue_account_code]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]{1,16}$"
+          description: Create only; a PUT that sends it is a 400.
+        name:
+          type: string
+        revenue_account_code:
+          type: string
+        taxable:
+          type: boolean
+        default_unit_price_ten_thousandths:
+          type: integer
+          format: int64
+        is_active:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          description: >-
+            PUT only: the precondition, beside If-Match. On create it is a 400.

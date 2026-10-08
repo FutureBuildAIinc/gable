@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,10 +26,12 @@ import (
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/configurator"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/deposit"
@@ -50,6 +53,7 @@ import (
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pim"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
@@ -58,6 +62,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
@@ -216,13 +221,8 @@ func Run() {
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per
 	// the user_locations grant table. Controlled by system_settings keys
 	// `multi_branch_enabled` (kill switch) and `default_branch_required`.
-	branchMw := middleware.NewBranchMiddleware(db).Handler
-
-	// scoped composes a role guard with the branch middleware. Use this for
-	// any module group whose entities carry a branch_id.
-	scoped := func(roles ...string) func(http.Handler) http.Handler {
-		return middleware.Compose(middleware.RequireRole(roles...), branchMw)
-	}
+	wall := newBranchWall(db)
+	scoped := wall.scoped // role guard plus branch middleware, for any module group whose entities carry a branch_id
 
 	// 5. Setup Router & Modules
 	mux := http.NewServeMux()
@@ -281,22 +281,24 @@ func Run() {
 		locationUserRepo,
 		middleware.RequireRole("admin", "owner"),
 	)
-	// Location routes are NOT branch-scoped at the middleware level: the
-	// branch switcher must be able to fetch /me/branches before a branch
-	// is selected, and branch CRUD endpoints don't operate on branch-scoped
-	// data.
-	locationHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
+	// Location routes run behind the branch middleware through
+	// branchWall.locations: POST /locations writes into a branch's tree, the
+	// by-id reads and the list are held to the caller's branches (the branch
+	// switcher reads /me/branches, not the list), and branch CRUD stays
+	// unscoped directory data.
+	wall.locations(mux, locationHandler)
 
 	// Inventory Service needs to be shared to Order Service
 	inventoryRepo := inventory.NewRepository(db)
 	inventorySvc := inventory.NewService(inventoryRepo)
-	inventoryHandler := inventory.NewHandler(inventorySvc)
-	inventoryHandler.RegisterRoutes(mux, scoped("admin", "owner", "warehouse"))
+	wall.inventory(mux, inventorySvc)
 
 	customerRepo := customer.NewRepository(db)
-	customerSvc := customer.NewService(customerRepo)
-	customerHandler := customer.NewHandler(customerSvc)
-	customerHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
+	customerSvc := customer.NewService(customerRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(customeraudit.New(auditLog))
+	wall.customers(mux, customerSvc)
 
 	// Sales Team Module
 	salesTeamRepo := salesteam.NewRepository(db)
@@ -321,8 +323,7 @@ func Run() {
 	quoteSvc := quote.NewService(quoteRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db)
-	quoteHandler := quote.NewHandler(quoteSvc)
-	quoteHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
+	wall.quotes(mux, quoteSvc)
 
 	// GL Module (Full General Ledger)
 	glAdapter := glint.NewMockGLAdapter()
@@ -406,8 +407,7 @@ func Run() {
 	poSvc.WithVelocityRepo(velocityRepo)
 	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc).
 		WithVelocityRepo(velocityRepo)
-	poHandler := purchase_order.NewHandler(poSvc, poRecSvc)
-	poHandler.RegisterRoutes(mux, scoped("admin", "owner", "purchasing"))
+	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
 
 	// Auto-reorder scheduler. Disabled by default; an operator activates it
 	// by setting reorder.enabled=true in system_settings. Stops in step 3.5
@@ -428,10 +428,21 @@ func Run() {
 	ediHandler := edi.NewEDIHandler(ediRepo, bgSvc, ediSvc)
 	ediHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
-	orderSvc := order.NewService(orderRepo, inventorySvc, invoiceSvc, customerSvc, poSvc, db)
-	orderSvc.WithAuditLog(auditLog)
-	orderHandler := order.NewHandler(orderSvc)
-	orderHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
+	// The order module on the wire contract (ADR 0005 section 5): every write
+	// one transaction with its order.* outbox event, the payload branch rule,
+	// the pricing engine wrapped at the boundary, and the tax provider behind
+	// the rate resolver.
+	orderSvc := order.NewService(orderRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAuditLog(auditLog).
+		WithPriceEngine(&priceEngineAdapter{pricing: pricingSvc, customers: customerSvc})
+	wall.orders(mux, orderSvc)
+	// The charge code master (ADR 0005 section 2.5), contract born.
+	chargecode.NewHandler(chargecode.NewService(chargecode.NewRepository(db))).
+		RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"), scoped("admin", "owner", "finance"))
+	// Quote conversion creates the order in one act (ADR 0005 section 5.8).
+	quoteSvc.WithOrderCreator(orderSvc)
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
@@ -439,7 +450,7 @@ func Run() {
 	// Document Module
 	docSvc := document.NewService(productRepo)
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc)
-	docHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
+	wall.documents(mux, docHandler)
 
 	// Sales Tax Module (exemptions + Avalara when configured; wired before
 	// Payment/POS because both consume the tax service).
@@ -457,6 +468,9 @@ func Run() {
 		logger.Info("AVALARA_ACCOUNT_ID not set — POS/invoice tax uses the branch default rate (locations.default_tax_rate)")
 	}
 	taxSvc := tax.NewService(taxExemptionRepo, avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
+	// The configured provider path sits behind the order rate resolver
+	// (ADR 0005 section 3).
+	orderSvc.WithTaxProvider(&taxProviderAdapter{svc: taxSvc})
 	taxHandler := tax.NewHandler(taxSvc)
 	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
@@ -533,8 +547,7 @@ func Run() {
 	// 3-Way PO Matching Module
 	matchingRepo := matching.NewRepository(db)
 	matchingSvc := matching.NewService(db, matchingRepo, poSvc, apSvc, logger)
-	matchingHandler := matching.NewHandler(matchingSvc)
-	matchingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	wall.matching(mux, matchingSvc)
 
 	// Bank Reconciliation Module
 	bankreconRepo := bankrecon.NewRepository(db)
@@ -1124,6 +1137,45 @@ func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Hand
 	})
 }
 
+// priceEngineAdapter wraps today's pricing engine at the order boundary
+// (ADR 0005 section 1): the engine answers in dollars, and its result is
+// converted to a scale 4 price once, here, never inside the order module.
+type priceEngineAdapter struct {
+	pricing   *pricing.Service
+	customers *customer.Service
+}
+
+func (a *priceEngineAdapter) PriceFor(ctx context.Context, customerID, productID uuid.UUID, basePrice httpx.Price, quantity httpx.Quantity, jobID *uuid.UUID) (httpx.Price, error) {
+	cust, err := a.customers.GetCustomer(ctx, customerID)
+	if err != nil {
+		return 0, fmt.Errorf("price engine: customer: %w", err)
+	}
+	base := float64(basePrice) / 10000
+	cp, err := a.pricing.CalculatePriceWithQty(ctx, cust, productID, base, float64(quantity)/10000, jobID)
+	if err != nil {
+		return 0, fmt.Errorf("price engine: %w", err)
+	}
+	return httpx.Price(int64(math.Round(cp.FinalPrice * 10000))), nil
+}
+
+// taxProviderAdapter is the configured provider path behind the rate
+// resolver (ADR 0005 section 3).
+type taxProviderAdapter struct {
+	svc *tax.Service
+}
+
+func (a *taxProviderAdapter) Configured() bool { return a.svc.ProviderConfigured() }
+func (a *taxProviderAdapter) PreviewTax(ctx context.Context, req *tax.TaxPreviewRequest) (*tax.TaxResult, error) {
+	return a.svc.PreviewTax(ctx, req)
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // invoiceServiceAdapter bridges invoice.Service to delivery.InvoiceServiceInterface.
 type invoiceServiceAdapter struct {
 	invoiceSvc *invoice.Service
@@ -1145,13 +1197,29 @@ func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uui
 		return fmt.Errorf("get order for invoice: %w", err)
 	}
 
-	// Build invoice from order — PriceEach is already in cents
+	// Build the invoice from the order's lines. The invoice module still
+	// holds whole cents per sale unit, so a line whose conversion pair is not
+	// 1 to 1 cannot be handed over without rounding its money away: the
+	// adapter refuses it (the recipe's rule for a helper feeding an
+	// unconverted neighbour) until the fulfilment route replaces this path
+	// (ADR 0005 5.5, C2-2b).
 	var lines []invoice.InvoiceLine
-	for _, ol := range ord.Lines {
+	for i := range ord.Lines {
+		ol := &ord.Lines[i]
+		if ol.LineType == salesdoc.LineText || ol.LineType == salesdoc.LineCharge {
+			continue
+		}
+		if ol.UOMQty == nil || ol.PriceUOMQty == nil || *ol.UOMQty != salesdoc.One || *ol.PriceUOMQty != salesdoc.One {
+			return fmt.Errorf("order %s has a line priced per %s: the delivery invoice path cannot carry a conversion pair until the fulfilment route lands",
+				orderID, derefString(ol.PriceUOM))
+		}
+		if ol.ProductID == nil || ol.Quantity == nil || ol.UnitPrice == nil || ol.LineTotal == nil {
+			continue
+		}
 		lines = append(lines, invoice.InvoiceLine{
-			ProductID: ol.ProductID,
-			Quantity:  ol.Quantity,
-			PriceEach: ol.PriceEach,
+			ProductID: *ol.ProductID,
+			Quantity:  float64(*ol.Quantity) / 10000,
+			PriceEach: int64(math.Round(float64(*ol.UnitPrice) / 100)),
 		})
 	}
 

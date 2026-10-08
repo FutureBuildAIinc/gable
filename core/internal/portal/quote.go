@@ -12,6 +12,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -317,7 +318,11 @@ func (s *Service) decideQuote(ctx context.Context, quoteID, customerID uuid.UUID
 	if s.quoteSvc == nil {
 		return nil, fmt.Errorf("quote lifecycle service is not configured")
 	}
-	if err := s.quoteSvc.UpdateState(ctx, quoteID, target); err != nil {
+	// The quote record check fails closed on a branch-free context, and the
+	// portal is its own authority here: it has already proved the customer
+	// owns the quote, so it calls the lifecycle as a system caller rather
+	// than as an unwalled request.
+	if err := s.quoteSvc.UpdateState(branchctx.WithSystem(ctx), quoteID, target); err != nil {
 		return nil, err
 	}
 

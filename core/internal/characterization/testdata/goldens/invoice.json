@@ -3,28 +3,46 @@
     "name": "order.confirm",
     "request": {
       "method": "POST",
-      "path": "/api/v1/orders/<id-1>/confirm"
+      "path": "/api/v1/orders/<id-1>/transitions",
+      "body": {
+        "revision": "2",
+        "to": "confirmed"
+      }
     },
     "response": {
-      "status": 204,
-      "content_type": "",
+      "status": 400,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "revision",
+              "message": "must be an integer (no decimal point, exponent or quotes)"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
       }
     }
   },
   {
     "name": "order.fulfill",
     "request": {
-      "method": "POST",
-      "path": "/api/v1/orders/<id-1>/fulfill"
+      "method": "SQL",
+      "path": "SELECT count(*) AS invoices FROM invoices WHERE order_id = '<id-1>'::uuid"
     },
     "response": {
-      "status": 204,
-      "content_type": "",
-      "body": {
-        "text": ""
-      }
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "invoices": 1
+        }
+      ]
     }
   },
   {
@@ -39,20 +57,20 @@
       "body": {
         "data": [
           {
-            "branch_id": "<id-2>",
+            "branch_id": "<id-3>",
             "created_at": "<ts+0d>",
-            "customer_id": "<id-3>",
+            "customer_id": "<id-4>",
             "customer_name": "Golden Harness Co",
             "due_date": "<ts+30d>",
-            "id": "<id-4>",
+            "id": "<id-5>",
             "order_id": "<id-1>",
             "paid_at": null,
             "payment_terms": "NET30",
             "status": "UNPAID",
-            "subtotal": 2750,
-            "tax_amount": 330,
+            "subtotal": 2805,
+            "tax_amount": 337,
             "tax_rate": 0.12,
-            "total_amount": 3080,
+            "total_amount": 3142,
             "updated_at": "<ts+0d>"
           }
         ],
@@ -66,38 +84,26 @@
     "name": "invoice.get",
     "request": {
       "method": "GET",
-      "path": "/api/v1/invoices/<id-4>"
+      "path": "/api/v1/invoices/<id-5>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-2>",
+        "branch_id": "<id-3>",
         "created_at": "<ts+0d>",
-        "customer_id": "<id-3>",
+        "customer_id": "<id-4>",
         "customer_name": "Golden Harness Co",
         "due_date": "<ts+30d>",
-        "id": "<id-4>",
-        "lines": [
-          {
-            "created_at": "<ts+0d>",
-            "id": "<id-5>",
-            "invoice_id": "<id-4>",
-            "price_each": 550,
-            "product_id": "<id-6>",
-            "product_name": "2x4x8 SPF Premium",
-            "product_sku": "LUM-248-PREM",
-            "quantity": 5
-          }
-        ],
+        "id": "<id-5>",
         "order_id": "<id-1>",
         "paid_at": null,
         "payment_terms": "NET30",
         "status": "UNPAID",
-        "subtotal": 2750,
-        "tax_amount": 330,
+        "subtotal": 2805,
+        "tax_amount": 337,
         "tax_rate": 0.12,
-        "total_amount": 3080,
+        "total_amount": 3142,
         "updated_at": "<ts+0d>"
       }
     }
@@ -106,7 +112,7 @@
     "name": "invoice.credit_memo.create",
     "request": {
       "method": "POST",
-      "path": "/api/v1/invoices/<id-4>/credit-memo",
+      "path": "/api/v1/invoices/<id-5>/credit-memo",
       "body": {
         "amount_cents": 500,
         "reason": "golden characterisation"
@@ -119,9 +125,9 @@
         "amount": 500,
         "applied_at": "<ts+0d>",
         "created_at": "<ts+0d>",
-        "customer_id": "<id-3>",
-        "id": "<id-7>",
-        "invoice_id": "<id-4>",
+        "customer_id": "<id-4>",
+        "id": "<id-6>",
+        "invoice_id": "<id-5>",
         "reason": "golden characterisation",
         "status": "APPLIED"
       }
@@ -131,7 +137,7 @@
     "name": "invoice.credit_memo.list",
     "request": {
       "method": "GET",
-      "path": "/api/v1/credit-memos/<id-3>"
+      "path": "/api/v1/credit-memos/<id-4>"
     },
     "response": {
       "status": 200,
@@ -141,9 +147,9 @@
           "amount": 500,
           "applied_at": "<ts+0d>",
           "created_at": "<ts+0d>",
-          "customer_id": "<id-3>",
-          "id": "<id-7>",
-          "invoice_id": "<id-4>",
+          "customer_id": "<id-4>",
+          "id": "<id-6>",
+          "invoice_id": "<id-5>",
           "reason": "golden characterisation",
           "status": "APPLIED"
         }
@@ -154,7 +160,7 @@
     "name": "invoice.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/invoices/<id-8>"
+      "path": "/api/v1/invoices/<id-7>"
     },
     "response": {
       "status": 404,
@@ -165,7 +171,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-8>"
         }
       }
     }

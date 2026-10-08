@@ -28,7 +28,7 @@ export class GableOmnibar extends LitElement {
     // Pre-fetch data
     Promise.all([
       ProductService.getProducts(),
-      CustomerService.listCustomers(),
+      CustomerService.listAllCustomers(),
     ]).then(([p, c]) => {
       this._products = p;
       this._customers = c;
@@ -118,7 +118,7 @@ export class GableOmnibar extends LitElement {
                      @click=${() => { this._open = false; }}>
                   <div class="flex items-center gap-2">
                     <span>${c.name}</span>
-                    ${c.credit_limit > 0 && c.balance_due > c.credit_limit ? html`
+                    ${c.credit_limit_cents !== null && c.balance_cents > c.credit_limit_cents ? html`
                       <span class="text-red-500 text-[10px] border border-red-500 px-1 rounded uppercase font-bold">Hold</span>
                     ` : nothing}
                   </div>

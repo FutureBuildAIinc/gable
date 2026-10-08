@@ -128,6 +128,13 @@ func (f *fakePO) GetPO(_ context.Context, id uuid.UUID) (*purchase_order.Purchas
 	return f.po, nil
 }
 
+func (f *fakePO) GetPOBranch(_ context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	if f.po == nil || f.po.ID != id {
+		return nil, nil
+	}
+	return &f.po.BranchID, nil
+}
+
 var _ POSource = (*fakePO)(nil)
 
 type approval struct {

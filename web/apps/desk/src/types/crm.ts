@@ -3,24 +3,10 @@
 
 // CRM domain types
 
-export type ContactRole = 'Buyer' | 'AP' | 'Owner' | 'Site Super';
+// Contacts are on the customer contract (types/customer.ts); the activity feed reads the name only.
+export type { Contact } from './customer';
 
 export type ActivityType = 'CALL' | 'MEETING' | 'EMAIL' | 'NOTE';
-
-export interface Contact {
-    id: string;
-    customer_id: string;
-    first_name: string;
-    last_name: string;
-    title?: string;
-    email?: string;
-    phone?: string;
-    role: ContactRole;
-    is_primary: boolean;
-    is_active: boolean;
-    created_at: string;
-    updated_at: string;
-}
 
 export interface Activity {
     id: string;
@@ -32,17 +18,6 @@ export interface Activity {
     activity_date: string; // ISO 8601
     created_at: string;
     updated_at: string;
-}
-
-export interface CreateContactRequest {
-    first_name: string;
-    last_name: string;
-    title?: string;
-    email?: string;
-    phone?: string;
-    role: ContactRole;
-    is_primary: boolean;
-    is_active?: boolean;
 }
 
 export interface CreateActivityRequest {

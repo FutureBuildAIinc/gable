@@ -1,0 +1,468 @@
+[
+  {
+    "name": "payment_terms.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payment-terms?limit=3&include=total"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "code": "NET45",
+            "created_at": "<ts+0d>",
+            "day_of_month": null,
+            "discount_days": null,
+            "discount_percent": null,
+            "id": "<id-1>",
+            "is_active": true,
+            "kind": "net_days",
+            "name": "Net 45",
+            "net_days": 45,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "code": "COD",
+            "created_at": "<ts+0d>",
+            "day_of_month": null,
+            "discount_days": null,
+            "discount_percent": null,
+            "id": "<id-2>",
+            "is_active": true,
+            "kind": "due_on_receipt",
+            "name": "Cash on delivery",
+            "net_days": null,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "code": "DUE_ON_RECEIPT",
+            "created_at": "<ts+0d>",
+            "day_of_month": null,
+            "discount_days": null,
+            "discount_percent": null,
+            "id": "<id-3>",
+            "is_active": true,
+            "kind": "due_on_receipt",
+            "name": "Due on receipt",
+            "net_days": null,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 3,
+        "next_cursor": "<cursor>",
+        "total": 6
+      }
+    }
+  },
+  {
+    "name": "payment_terms.list.kind",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payment-terms?kind=due_on_receipt"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "code": "COD",
+            "created_at": "<ts+0d>",
+            "day_of_month": null,
+            "discount_days": null,
+            "discount_percent": null,
+            "id": "<id-2>",
+            "is_active": true,
+            "kind": "due_on_receipt",
+            "name": "Cash on delivery",
+            "net_days": null,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "code": "DUE_ON_RECEIPT",
+            "created_at": "<ts+0d>",
+            "day_of_month": null,
+            "discount_days": null,
+            "discount_percent": null,
+            "id": "<id-3>",
+            "is_active": true,
+            "kind": "due_on_receipt",
+            "name": "Due on receipt",
+            "net_days": null,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "payment_terms.list.unsupported_kind",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payment-terms?kind=DUE_ON_RECEIPT"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "kind",
+              "message": "must be one of: net_days, day_of_month, due_on_receipt"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment_terms.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payment-terms?offset=0"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment_terms.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payment-terms",
+      "body": {
+        "code": "GOLDEN-NET15",
+        "discount_days": 10,
+        "discount_percent": "2",
+        "kind": "net_days",
+        "name": "Golden net 15",
+        "net_days": 15
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "code": "GOLDEN-NET15",
+        "created_at": "<ts+0d>",
+        "day_of_month": null,
+        "discount_days": 10,
+        "discount_percent": "2",
+        "id": "<id-6>",
+        "is_active": true,
+        "kind": "net_days",
+        "name": "Golden net 15",
+        "net_days": 15,
+        "revision": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "payment_terms.create.day_of_month",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payment-terms",
+      "body": {
+        "code": "GOLDEN-D25",
+        "day_of_month": 25,
+        "kind": "day_of_month",
+        "name": "25th of next month"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "code": "GOLDEN-D25",
+        "created_at": "<ts+0d>",
+        "day_of_month": 25,
+        "discount_days": null,
+        "discount_percent": null,
+        "id": "<id-7>",
+        "is_active": true,
+        "kind": "day_of_month",
+        "name": "25th of next month",
+        "net_days": null,
+        "revision": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "payment_terms.create.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payment-terms",
+      "body": {
+        "code": "bad code",
+        "day_of_month": 32,
+        "discount_percent": "2",
+        "kind": "day_of_month"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "code",
+              "message": "must be capital letters, digits, underscore or hyphen, starting with a letter or digit"
+            },
+            {
+              "field": "name",
+              "message": "is required"
+            },
+            {
+              "field": "day_of_month",
+              "message": "must be between 1 and 31"
+            },
+            {
+              "field": "discount_percent",
+              "message": "discount_percent and discount_days go together: send both or neither"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment_terms.create.duplicate",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payment-terms",
+      "body": {
+        "code": "GOLDEN-NET15",
+        "kind": "net_days",
+        "name": "Golden net 15",
+        "net_days": 15
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "duplicate",
+          "details": [
+            {
+              "code": "terms_code_taken",
+              "message": "code is already used by other payment terms"
+            }
+          ],
+          "message": "payment terms with this code already exist"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment_terms.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payment-terms/<id-6>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "code": "GOLDEN-NET15",
+        "created_at": "<ts+0d>",
+        "day_of_month": null,
+        "discount_days": 10,
+        "discount_percent": "2",
+        "id": "<id-6>",
+        "is_active": true,
+        "kind": "net_days",
+        "name": "Golden net 15",
+        "net_days": 15,
+        "revision": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "payment_terms.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payment-terms/<id-10>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "payment terms not found"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment_terms.update.without_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/payment-terms/<id-6>",
+      "body": {
+        "code": "GOLDEN-NET15",
+        "kind": "net_days",
+        "name": "Golden net 15",
+        "net_days": 15
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment_terms.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/payment-terms/<id-6>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "code": "GOLDEN-NET15",
+        "kind": "net_days",
+        "name": "Golden net 20",
+        "net_days": 20
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "code": "GOLDEN-NET15",
+        "created_at": "<ts+0d>",
+        "day_of_month": null,
+        "discount_days": null,
+        "discount_percent": null,
+        "id": "<id-6>",
+        "is_active": true,
+        "kind": "net_days",
+        "name": "Golden net 20",
+        "net_days": 20,
+        "revision": 2,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "payment_terms.update.stale",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/payment-terms/<id-6>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "code": "GOLDEN-NET15",
+        "kind": "net_days",
+        "name": "Golden net 15",
+        "net_days": 15
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment_terms.update.code_changed",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/payment-terms/<id-6>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "code": "GOLDEN-OTHER",
+        "kind": "net_days",
+        "name": "Golden net 15",
+        "net_days": 15
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "code",
+              "message": "cannot be changed: it is fixed when the terms are created"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  }
+]

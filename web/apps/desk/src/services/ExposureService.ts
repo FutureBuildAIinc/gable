@@ -12,7 +12,6 @@ import type {
   AcknowledgmentRequest,
   OverrideRequest,
   IndexRefreshRequest,
-  CustomerEscalationPolicy,
 } from '../types/exposure';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -103,15 +102,8 @@ export const ExposureService = {
       body: JSON.stringify(req),
     })),
 
-  // ── Customer escalation policy ────────────────────────────────────
-  getEscalationPolicy: async (customerId: string): Promise<CustomerEscalationPolicy> =>
-    json(await fetchWithAuth(`${API_BASE}/api/v1/customers/${customerId}/escalation-policy`)),
-
-  setEscalationPolicy: async (customerId: string, policy: Partial<CustomerEscalationPolicy>) =>
-    json(await fetchWithAuth(`${API_BASE}/api/v1/customers/${customerId}/escalation-policy`, {
-      method: 'PUT',
-      body: JSON.stringify(policy),
-    })),
+  // The per-customer escalation policy moved to CustomerService (the customer contract, lowercase
+  // vocabulary and threshold_percent, written on the customer's revision).
 
   // ── Admin scan trigger (safety-net) ───────────────────────────────
   runScan: async () =>

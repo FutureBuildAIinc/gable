@@ -145,12 +145,3 @@ export interface IndexRefreshRequest {
   source: string;
   notes?: string;
 }
-
-/** Per-customer escalation policy (GET/PUT /customers/{id}/escalation-policy). */
-export interface CustomerEscalationPolicy {
-  customer_id: string;
-  policy: string;
-  threshold_pct: number;
-  agreement_signed_at?: string;
-  agreement_ref?: string;
-}

@@ -8,8 +8,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-
-	"github.com/gablelbm/gable/internal/order"
 )
 
 // Sentinel errors for the capabilities added on top of migration 084.
@@ -56,6 +54,11 @@ var (
 	// ErrInvalidRequest — the payload was syntactically fine and semantically
 	// wrong (a past date, an empty scope, an unknown unit of measure).
 	ErrInvalidRequest = errors.New("invalid request")
+
+	// The ERP state machine's own cancellation refusals, mirrored here so the
+	// portal's error codes stay stable across the order module's conversion.
+	ErrOrderAlreadyCancelled = errors.New("order is already cancelled")
+	ErrOrderNotCancellable   = errors.New("fulfilled order cannot be cancelled")
 )
 
 // refusalReasons maps a sentinel onto a short, customer-safe explanation.
@@ -79,9 +82,9 @@ var refusalReasons = map[error]struct {
 		"This delivery can no longer be rescheduled from the portal — the load is already on a truck or the stop is complete. Call the dealer."},
 	ErrCancelRefused: {"ORDER_IN_MOTION",
 		"This order's goods are already on a dispatched route or delivered. Call the dealer."},
-	order.ErrOrderAlreadyCancelled: {"ORDER_ALREADY_CANCELLED",
+	ErrOrderAlreadyCancelled: {"ORDER_ALREADY_CANCELLED",
 		"This order has already been cancelled."},
-	order.ErrOrderNotCancellable: {"ORDER_NOT_CANCELLABLE",
+	ErrOrderNotCancellable: {"ORDER_NOT_CANCELLABLE",
 		"A fulfilled order cannot be cancelled. Ask the dealer for a credit."},
 }
 
@@ -149,8 +152,8 @@ func statusForPortalError(err error, fallback int) int {
 		// "fulfilled orders cannot be cancelled" are correct answers to a
 		// reasonable question, not server faults, and a client needs to know
 		// that retrying will never help.
-		errors.Is(err, order.ErrOrderAlreadyCancelled),
-		errors.Is(err, order.ErrOrderNotCancellable):
+		errors.Is(err, ErrOrderAlreadyCancelled),
+		errors.Is(err, ErrOrderNotCancellable):
 		return http.StatusConflict
 	case errors.Is(err, ErrInvalidRequest):
 		return http.StatusBadRequest

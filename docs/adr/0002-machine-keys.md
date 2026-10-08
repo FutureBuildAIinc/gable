@@ -208,15 +208,16 @@ Accepted with this record, each named with the later item that narrows it:
 - **A key is not branch bound.** `api_keys` carries no branch, so a key
   reads and writes every branch the module routes expose unless the caller
   itself pins `X-Branch-Id` (section 6); a `quotes:read` key can read every
-  branch's quotes. Branch bound keys narrow this with the confirm gated
-  write scopes of cycle 5, item R5-2.
+  branch's quotes. Branch bound keys narrow this in cycle 5, item C5-2a,
+  per ADR 0007 section 5.5.
 - **`admin` and `users` are broad scopes.** The module is the only
   granularity, so `admin:write` reaches AI settings, routing settings,
   staff and module grants alike, and `users:write` reaches branch grants
   for human users, wider than "per module" sounds. Finer scope names (for
-  example `admin:settings`, `users:grants`) narrow this with the same
-  confirm gated write scopes of cycle 5, item R5-2 (`*:propose`,
-  `*:commit`).
+  example `admin:settings`, `users:grants`) narrow this with the tech admin
+  module's conversion in cycle 5, item C5-1, on its own record: no admin
+  act is a draft, so the confirm gated scopes of ADR 0007 (`*:propose`,
+  `*:commit`) do not take it up.
 - **The prefix lookup is a timing oracle for prefix existence.** A request
   whose 12 character prefix matches a stored key but whose body is wrong
   pays one Argon2id compare; an unknown prefix returns before any hash
