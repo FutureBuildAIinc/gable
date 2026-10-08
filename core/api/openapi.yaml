@@ -1,0 +1,3782 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Gable API contract, assembled by core/api/tools/merge from the fragments
+# in core/api/fragments/. Edit a fragment, never this file; regenerate with:
+#
+#	go run ./api/tools/merge
+#
+# The merge -check drift gate and the internal/apicontract coverage test
+# both fail when this file and the fragments disagree.
+openapi: 3.1.0
+info:
+  title: Gable API
+  version: 1.0.0
+  description: The HTTP surface of the Gable ERP core, transcribed route by route from the handlers as they behave today. Assembled from per module fragments; see docs/refactor/CONTRACT.md. The wire conventions of ADR 0001 land on these routes module by module, and each conversion edits the fragments in the same change.
+security:
+  - BearerJWT: []
+tags:
+  - name: customer
+  - name: integration
+  - name: invoice
+  - name: location
+  - name: order
+  - name: payment
+  - name: product
+  - name: quote
+paths:
+  /api/v1/customers:
+    get:
+      operationId: customerList
+      tags: [customer]
+      summary: List customers
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of customers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: customerCreate
+      tags: [customer]
+      summary: Create a customer
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Customer"
+      responses:
+        "201":
+          description: The created customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/customers/{id}:
+    get:
+      operationId: customerGet
+      tags: [customer]
+      summary: Get one customer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/customers/{id}/salesperson:
+    patch:
+      operationId: customerUpdateSalesperson
+      tags: [customer]
+      summary: Assign or clear the salesperson
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerSalespersonUpdate"
+      responses:
+        "200":
+          description: The updated customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/customers/{id}/escalation-policy:
+    get:
+      operationId: customerGetEscalationPolicy
+      tags: [customer]
+      summary: Get the lumber index escalation policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: customerSetEscalationPolicy
+      tags: [customer]
+      summary: Set the lumber index escalation policy
+      description: >-
+        Validation failures (a missing agreement reference, an invalid policy) are a 400; the reloaded row is returned so server side normalization is visible.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EscalationPolicy"
+      responses:
+        "200":
+          description: The reloaded policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/customers/{customerId}/contacts:
+    get:
+      operationId: customerListContacts
+      tags: [customer]
+      summary: List a customer's contacts
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The contacts, a bare array that is null when the customer has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: customerCreateContact
+      tags: [customer]
+      summary: Create a contact
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Contact"
+      responses:
+        "201":
+          description: The created contact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/contacts/{id}:
+    get:
+      operationId: contactGet
+      tags: [customer]
+      summary: Get one contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The contact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: contactUpdate
+      tags: [customer]
+      summary: Update a contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Contact"
+      responses:
+        "200":
+          description: The updated contact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: contactDelete
+      tags: [customer]
+      summary: Delete a contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/price_levels:
+    get:
+      operationId: customerListPriceLevels
+      tags: [customer]
+      summary: List price levels
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: All price levels, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceLevelList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/integration/products:
+    get:
+      operationId: integrationListProducts
+      tags: [integration]
+      summary: List catalog products with weight and geometry
+      description: >-
+        An unfiltered call is a bulk catalog pull with a raised cap; a filtered call is a typeahead search with a small cap. The two caps are server constants and not visible on the wire.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The products, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationProductList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/quotes/bulk-price:
+    post:
+      operationId: integrationBulkPrice
+      tags: [integration]
+      summary: Price a basket of lines for one customer
+      description: >-
+        Money in and out is cents. Lines whose product cannot be resolved or priced are silently dropped from the response.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationBulkPriceRequest"
+      responses:
+        "200":
+          description: The priced lines, a bare array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationPricedItemList"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "404":
+          $ref: "#/components/responses/IntegrationNotFound"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/quotes:
+    post:
+      operationId: integrationCreateQuote
+      tags: [integration]
+      summary: Create a draft quote from priced lines
+      description: >-
+        Line unit prices arrive in cents and are stored as float dollars inside the quote module; the response total returns cents.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationQuoteRequest"
+      responses:
+        "201":
+          description: The created quote summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationQuoteResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/quotes/{id}/accept-and-convert:
+    post:
+      operationId: integrationAcceptAndConvert
+      tags: [integration]
+      summary: Accept a quote and convert it into a confirmed order
+      description: >-
+        One call creates the order, marks the quote accepted and confirms the order. A confirmation failure answers 409 with the order's id in the message; the order exists in DRAFT and confirmation can be retried.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationOrderResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "409":
+          $ref: "#/components/responses/IntegrationConflict"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/vehicles:
+    get:
+      operationId: integrationListVehicles
+      tags: [integration]
+      summary: List the active fleet
+      security:
+        - IntegrationKey: []
+      responses:
+        "200":
+          description: The vehicles, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationVehicleList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/drivers:
+    get:
+      operationId: integrationListDrivers
+      tags: [integration]
+      summary: List the fleet's drivers
+      security:
+        - IntegrationKey: []
+      responses:
+        "200":
+          description: The drivers, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationDriverList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/locations:
+    get:
+      operationId: integrationListLocations
+      tags: [integration]
+      summary: List the dealer's branches for route rooting
+      description: >-
+        A branch with null coordinates is returned anyway: the caller must see that the yard exists and has never been geocoded.
+      security:
+        - IntegrationKey: []
+      responses:
+        "200":
+          description: The branches, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationLocationList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/orders:
+    get:
+      operationId: integrationListOrders
+      tags: [integration]
+      summary: List orders for a calendar date
+      description: >-
+        Both filters are optional; an unfiltered call returns the whole order book. A malformed date is a 400 rather than a cast failure.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The orders with their lines, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationOrderList"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/delivery-routes:
+    post:
+      operationId: integrationCreateDeliveryRoute
+      tags: [integration]
+      summary: Write an approved delivery plan onto the dispatch board
+      description: >-
+        Idempotent on vehicle and date: a not yet dispatched route for that pair is replaced. The load manifest is opaque JSON persisted verbatim.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationDeliveryRouteRequest"
+      responses:
+        "201":
+          description: The acknowledgement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationDeliveryRouteResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/validate-staff:
+    post:
+      operationId: integrationValidateStaff
+      tags: [integration]
+      summary: Report whether a staff member may use the integration
+      description: >-
+        A well formed request always answers 200: an unknown email is a non entitled result, not an error. The identity fields are omitted for unknown staff so attacker input is not echoed.
+      security:
+        - IntegrationKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationValidateStaffRequest"
+      responses:
+        "200":
+          description: The entitlement result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationValidateStaffResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/v1/invoices:
+    get:
+      operationId: invoiceList
+      tags: [invoice]
+      summary: List invoices
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of invoices.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/invoices/{id}:
+    get:
+      operationId: invoiceGet
+      tags: [invoice]
+      summary: Get one invoice with lines
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The invoice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/invoices/{id}/credit-memo:
+    post:
+      operationId: invoiceCreateCreditMemo
+      tags: [invoice]
+      summary: Create and apply a credit memo against an invoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditMemoCreateRequest"
+      responses:
+        "201":
+          description: The created credit memo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditMemo"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/credit-memos/{customerId}:
+    get:
+      operationId: invoiceListCreditMemos
+      tags: [invoice]
+      summary: List a customer's credit memos
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The credit memos, a bare array that is null when the customer has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditMemoList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/locations:
+    get:
+      operationId: locationList
+      tags: [location]
+      summary: List every location node
+      responses:
+        "200":
+          description: All location nodes, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: locationCreate
+      tags: [location]
+      summary: Create a location node
+      description: The active flag defaults to true when the body does not mention it.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationCreateRequest"
+      responses:
+        "201":
+          description: The created location.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/locations/{id}:
+    get:
+      operationId: locationGet
+      tags: [location]
+      summary: Get one location node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The location.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: locationUpdate
+      tags: [location]
+      summary: Update a location node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Location"
+      responses:
+        "200":
+          description: The updated location.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: locationDelete
+      tags: [location]
+      summary: Soft archive a location node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Archived (active set false).
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/branches:
+    get:
+      operationId: branchList
+      tags: [location]
+      summary: List branches
+      parameters:
+        - name: include_inactive
+          in: query
+          description: Only the literal string true includes archived branches.
+          schema:
+            type: string
+            enum: ["true"]
+      responses:
+        "200":
+          description: The branches, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: branchCreate
+      tags: [location]
+      summary: Create a branch
+      description: Creates a location node with type BRANCH and no parent.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationCreateRequest"
+      responses:
+        "201":
+          description: The created branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/branches/{id}:
+    get:
+      operationId: branchGet
+      tags: [location]
+      summary: Get one branch
+      description: A node that exists but is not a branch is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: branchUpdate
+      tags: [location]
+      summary: Update a branch
+      description: Reuses the location update; the type column is not mutable here.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Location"
+      responses:
+        "200":
+          description: The updated branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: branchDelete
+      tags: [location]
+      summary: Soft archive a branch
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Archived (active set false).
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/branches/{id}/tree:
+    get:
+      operationId: branchTree
+      tags: [location]
+      summary: Get a branch's location tree
+      description: The branch with its children nested.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The tree, a bare array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/branches/{id}/users:
+    get:
+      operationId: branchListUsers
+      tags: [location]
+      summary: List the users granted to a branch
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The grants, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserLocationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me/branches:
+    get:
+      operationId: myBranches
+      tags: [location]
+      summary: List the caller's branches
+      description: >-
+        The caller's grants with the home flag. Without auth claims (dev mode) every active branch is returned with the first marked home.
+      responses:
+        "200":
+          description: The branch summaries, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchSummaryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users:
+    get:
+      operationId: locationListKnownUsers
+      tags: [location]
+      summary: List known user subjects
+      description: The union of distinct user subjects from grants and the audit log; feeds the admin user picker.
+      responses:
+        "200":
+          description: The subject strings, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StringList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{sub}/branches:
+    get:
+      operationId: userBranches
+      tags: [location]
+      summary: List a user's branch grants
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The branch summaries, a bare array that is null when the user has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchSummaryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: userGrantBranch
+      tags: [location]
+      summary: Grant a branch to a user
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserBranchGrant"
+      responses:
+        "204":
+          description: Granted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{sub}/branches/{branch_id}:
+    delete:
+      operationId: userRevokeBranch
+      tags: [location]
+      summary: Revoke a user's branch grant
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{sub}/home-branch:
+    put:
+      operationId: userSetHomeBranch
+      tags: [location]
+      summary: Set a user's home branch
+      description: The user must already hold a grant on the branch.
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HomeBranchSet"
+      responses:
+        "204":
+          description: Set.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/orders:
+    get:
+      operationId: orderList
+      tags: [order]
+      summary: List orders
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of orders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: orderCreate
+      tags: [order]
+      summary: Create an order
+      description: >-
+        Money is cents on this route. A missing customer_id or an unknown product surfaces as a 500 today, not a 400.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderCreateRequest"
+      responses:
+        "201":
+          description: The created order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/orders/{id}:
+    get:
+      operationId: orderGet
+      tags: [order]
+      summary: Get one order with lines
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/orders/{id}/confirm:
+    post:
+      operationId: orderConfirm
+      tags: [order]
+      summary: Confirm a draft order
+      description: >-
+        Bare 204 on success; side effects (stock depletion for stocked lines) are not represented. A blocked exposure gate is the raw exposure 409 payload.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Confirmed.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The lumber index exposure gate blocks this order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureBlock"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/orders/{id}/fulfill:
+    post:
+      operationId: orderFulfill
+      tags: [order]
+      summary: Fulfill a confirmed order
+      description: >-
+        Bare 204 on success. Fulfilling creates an invoice, posts GL and AR and depletes stock; none of that is represented in the response.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Fulfilled.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The lumber index exposure gate blocks this order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureBlock"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/orders/{id}/cancel:
+    post:
+      operationId: orderCancel
+      tags: [order]
+      summary: Cancel an order
+      description: >-
+        A refusal from the state machine (already cancelled, not cancellable) is a 409. The reason is optional; an empty body is accepted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderCancelRequest"
+      responses:
+        "204":
+          description: Cancelled.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/orders/{id}/exposure-gate:
+    get:
+      operationId: orderExposureGate
+      tags: [order]
+      summary: Check the pre ship exposure gate
+      description: 200 with blocked false when clear; the raw exposure payload with 409 when blocked.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Not blocked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderExposureClear"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Blocked by unresolved index exposure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExposureBlock"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/orders/{id}/exposure-override:
+    post:
+      operationId: orderExposureOverride
+      tags: [order]
+      summary: Override the exposure gate
+      description: >-
+        Records an explicit override with an audit entry. A notes justification of at least ten characters is required; shorter notes are a 400.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderExposureOverrideRequest"
+      responses:
+        "200":
+          description: Overridden.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderExposureOverridden"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments:
+    post:
+      operationId: paymentCreate
+      tags: [payment]
+      summary: Record a non card payment
+      description: Cash, check or account payments against an invoice.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCreateRequest"
+      responses:
+        "200":
+          description: The recorded payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/intent:
+    post:
+      operationId: paymentIntent
+      tags: [payment]
+      summary: Get the gateway public key for tokenization
+      description: The frontend calls this before showing the card input form; it creates nothing.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentIntentRequest"
+      responses:
+        "200":
+          description: The public key and the echoed invoice and amount.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/payments/card:
+    post:
+      operationId: paymentCard
+      tags: [payment]
+      summary: Charge a tokenized card
+      description: >-
+        A charge captured at the gateway whose persistence then fails is a generic 402; the token is never echoed back.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardPaymentRequest"
+      responses:
+        "200":
+          description: The processed payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "402":
+          $ref: "#/components/responses/PaymentRequired"
+  /api/v1/payments/refund:
+    post:
+      operationId: paymentRefund
+      tags: [payment]
+      summary: Refund a card payment in part or full
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundRequest"
+      responses:
+        "200":
+          description: The processed refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/invoices/{id}/payments:
+    get:
+      operationId: paymentHistory
+      tags: [payment]
+      summary: List an invoice's payments
+      description: Registered by the payment module on the invoice's path.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The payments, a bare array that is null when the invoice has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products:
+    get:
+      operationId: productList
+      tags: [product]
+      summary: List products
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: The page of products.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: productCreate
+      tags: [product]
+      summary: Create a product
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Product"
+      responses:
+        "201":
+          description: The created product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/reorder-alerts:
+    get:
+      operationId: productReorderAlerts
+      tags: [product]
+      summary: List products below their reorder point
+      description: >-
+        The alert rows omit on order quantity, velocity and lead time; they carry the deficit only.
+      responses:
+        "200":
+          description: The alerts, a bare array that is null when nothing is below its reorder point.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReorderAlertList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}:
+    get:
+      operationId: productGet
+      tags: [product]
+      summary: Get one product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/products/{id}/margins:
+    patch:
+      operationId: productUpdateMarginRules
+      tags: [product]
+      summary: Set the target margin and commission rate
+      description: A bare 200 with no body on success.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductMarginUpdate"
+      responses:
+        "200":
+          description: Updated; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/dimensions:
+    patch:
+      operationId: productUpdateDimensions
+      tags: [product]
+      summary: Set the PIM parametric geometry
+      description: >-
+        All fields are nullable: an omitted or explicitly null field clears the column to no geometry recorded, while a real zero is a recorded zero dimension. The persisted geometry is returned.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Geometry"
+      responses:
+        "200":
+          description: The persisted geometry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Geometry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/lead-time:
+    patch:
+      operationId: productUpdateLeadTime
+      tags: [product]
+      summary: Set the dealer side lead time
+      description: >-
+        The lead time in days published to the portal catalog. A null clears it back to unpublished; zero asserts same day availability. The request is echoed as the response.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductLeadTimeUpdate"
+      responses:
+        "200":
+          description: The echoed request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductLeadTimeUpdate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/quotes:
+    get:
+      operationId: quoteList
+      tags: [quote]
+      summary: List quotes
+      description: >-
+        Offset paged quote list. No filters are implemented; any query parameter other than limit and offset is silently ignored.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of quotes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: quoteCreate
+      tags: [quote]
+      summary: Create a quote
+      description: >-
+        Decodes the full quote shape (lines included) and the optional base64 original upload. Validation is loose: a line without a unit of measure fails at the database cast and surfaces as a 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteCreateRequest"
+      responses:
+        "201":
+          description: The created quote, echoed with server filled fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/analytics:
+    get:
+      operationId: quoteAnalytics
+      tags: [quote]
+      summary: Quote analytics aggregates
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Aggregated quote analytics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteAnalytics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}:
+    get:
+      operationId: quoteGet
+      tags: [quote]
+      summary: Get one quote with lines
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: quoteUpdate
+      tags: [quote]
+      summary: Replace a draft quote
+      description: >-
+        Full replace. Only a DRAFT quote can be edited; any other state is a 400. Lines are replaced; a line whose id survives keeps its customer note.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteCreateRequest"
+      responses:
+        "200":
+          description: The updated quote with lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/state:
+    put:
+      operationId: quoteUpdateState
+      tags: [quote]
+      summary: Change the quote lifecycle state
+      description: >-
+        Sets the state directly; the service refuses transitions it does not allow and the handler reports that refusal as a 400. Returns the updated quote.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteStateUpdate"
+      responses:
+        "200":
+          description: The updated quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/convert:
+    post:
+      operationId: quoteConvertToOrderPayload
+      tags: [quote]
+      summary: Mark accepted and return the order creation payload
+      description: >-
+        Marks the quote ACCEPTED and returns the body the client is expected to POST to /api/v1/orders itself; no order is created here. The returned price_each is in float dollars, while POST /api/v1/orders expects cents: the client converts.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order creation payload for the client to POST.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteOrderPayload"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/file:
+    get:
+      operationId: quoteDownloadOriginalFile
+      tags: [quote]
+      summary: Download the original uploaded file
+      description: >-
+        Streams the stored original upload of an AI sourced quote. The stored content type is echoed; the filename in Content-Disposition is sanitized. A quote with no stored file is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The file bytes; the stored content type is echoed.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    BearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        The user JWT the auth middleware verifies against the configured JWKS issuer. Role guards run per module (the census column in ROUTES.txt names the registering module; cmd/server/main.go names the roles each module registers with). AUTH_MODE=dev disables verification entirely.
+    IntegrationKey:
+      type: apiKey
+      in: header
+      name: X-Integration-Key
+      description: >-
+        The shared integration key of the AI load management seam, compared in constant time. When no key is configured the whole seam answers 503 before the handler runs.
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: >-
+        Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      description: >-
+        Page offset. Unparseable or negative values are silently ignored and the default applies.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    XBranchId:
+      name: X-Branch-Id
+      in: header
+      required: false
+      description: >-
+        Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403.
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+  responses:
+    BadRequest:
+      description: >-
+        The request cannot be consumed. The body is the standard error envelope; the message is the generic status text, and the handler's specific message goes to the server log only.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: No or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: The caller's roles do not include one the route requires.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: The addressed resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: The write conflicts with the resource's current state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PaymentRequired:
+      description: The card charge or its persistence failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Unexpected server fault (also today's status for most service level validation failures).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: A dependency the route needs is not configured.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    IntegrationUnauthorized:
+      description: The X-Integration-Key is missing or wrong (the integration seam's own error body, not the standard envelope).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationUnavailable:
+      description: No integration key is configured, so the whole seam is closed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationBadRequest:
+      description: The body or a parameter is malformed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationNotFound:
+      description: The addressed resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationConflict:
+      description: The order was created but could not be confirmed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationServerError:
+      description: The handler failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+  schemas:
+    Error:
+      type: object
+      required: [error, meta]
+      description: >-
+        The standard error envelope written by httputil.RespondError. The message is always the generic status text; the handler's specific message is server log only. request_id echoes the X-Request-ID response header.
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, UNPROCESSABLE_ENTITY, PAYMENT_REQUIRED, INTERNAL_ERROR]
+            message:
+              type: string
+              description: Generic status text such as "Bad Request".
+        meta:
+          type: object
+          required: [request_id]
+          properties:
+            request_id:
+              type: string
+    IntegrationError:
+      type: object
+      required: [error]
+      description: The integration seam's own error body, a bare message string.
+      properties:
+        error:
+          type: string
+    ExposureBlock:
+      type: object
+      required: [error, code, exposure]
+      description: >-
+        The raw 409 payload the order module writes when the lumber index exposure gate blocks a confirm, fulfill or gate check. This is not the standard error envelope.
+      properties:
+        error:
+          type: string
+          enum: [unresolved index exposure on source quote]
+        code:
+          type: string
+          enum: [UNRESOLVED_EXPOSURE]
+        exposure:
+          type: object
+          required: [quote_id, state, exposure_dollars, indexes]
+          properties:
+            quote_id:
+              type: string
+              format: uuid
+            quote_short_id:
+              type: string
+            state:
+              type: string
+              description: The exposure state vocabulary (ACK_REQUIRED, BLOCKED and neighbors).
+            exposure_dollars:
+              type: number
+            indexes:
+              type: array
+              items:
+                type: string
+            salesperson_id:
+              type: [string, "null"]
+              format: uuid
+            salesperson_name:
+              type: [string, "null"]
+            required_action:
+              type: string
+            last_checked_at:
+              type: [string, "null"]
+              format: date-time
+    Customer:
+      type: object
+      required: [id, primary_branch_id, name, account_number, tier, credit_limit, balance_due, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        primary_branch_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        account_number:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        tier:
+          type: string
+          enum: [RETAIL, SILVER, GOLD, PLATINUM]
+        price_level_id:
+          type: string
+          format: uuid
+        price_level:
+          $ref: "#/components/schemas/PriceLevel"
+        salesperson_id:
+          type: string
+          format: uuid
+        salesperson_name:
+          type: string
+        credit_limit:
+          type: number
+          description: Float dollars.
+        balance_due:
+          type: number
+          description: Float dollars. The account module carries the same fact in cents.
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerPage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    CustomerSalespersonUpdate:
+      type: object
+      required: [salesperson_id]
+      properties:
+        salesperson_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson to assign, or null to clear.
+    PriceLevel:
+      type: object
+      required: [id, name, multiplier, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        multiplier:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PriceLevelList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/PriceLevel"
+    EscalationPolicy:
+      type: object
+      required: [customer_id, policy, threshold_pct]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        policy:
+          type: string
+          description: The policy name; an unknown name is a 400 on set.
+        threshold_pct:
+          type: number
+        agreement_signed_at:
+          type: string
+          format: date-time
+        agreement_ref:
+          type: string
+          description: Required by the set validation for the policies that need a signed agreement.
+    Contact:
+      type: object
+      required: [id, customer_id, first_name, last_name, role, is_primary, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        title:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [Buyer, AP, Owner, Site Super]
+        is_primary:
+          type: boolean
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ContactList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/Contact"
+    IntegrationProduct:
+      type: object
+      required: [id, sku, name, category, uom, price, weight_lbs, geometry_source]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        uom:
+          type: string
+        price:
+          type: integer
+          format: int64
+          description: Cents.
+        weight_lbs:
+          type: number
+          description: Per unit weight; zero means unknown.
+        length_in:
+          type: [number, "null"]
+          description: Inches; null when the PIM has no geometry.
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: string
+    IntegrationProductList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationProduct"
+    IntegrationBulkPriceRequest:
+      type: object
+      required: [customer_id, items]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity]
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+    IntegrationPricedItem:
+      type: object
+      required: [product_id, product_name, sku, quantity, unit_price, total_price, uom]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        product_name:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          type: integer
+          format: int64
+          description: Cents.
+        total_price:
+          type: integer
+          format: int64
+          description: Cents.
+        uom:
+          type: string
+    IntegrationPricedItemList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationPricedItem"
+    IntegrationQuoteRequest:
+      type: object
+      required: [customer_id, lines]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        lines:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity, unit_price]
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+              unit_price:
+                type: integer
+                format: int64
+                description: Cents.
+    IntegrationQuoteResponse:
+      type: object
+      required: [id, customer_id, total, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        total:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+          enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]
+    IntegrationOrderResponse:
+      type: object
+      required: [id, quote_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          description: The order status after conversion and confirmation.
+    IntegrationVehicle:
+      type: object
+      required: [id, name, vehicle_type]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        vehicle_type:
+          type: string
+        license_plate:
+          type: string
+        capacity_weight_lbs:
+          type: [integer, "null"]
+          description: Null when the rating was never recorded.
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+    IntegrationVehicleList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationVehicle"
+    IntegrationDriver:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, ON_LEAVE]
+    IntegrationDriverList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationDriver"
+    IntegrationLocation:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        address:
+          type: string
+          description: The composed street, city, state zip form.
+        latitude:
+          type: [number, "null"]
+          description: Null when the branch was never geocoded.
+        longitude:
+          type: [number, "null"]
+    IntegrationLocationList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationLocation"
+    IntegrationOrderLine:
+      type: object
+      required: [product_id, sku, quantity, weight_lbs]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        quantity:
+          type: number
+        weight_lbs:
+          type: number
+          description: Per unit catalog weight, not the line total.
+    IntegrationOrder:
+      type: object
+      required: [id, status, branch_id, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+          description: The yard the order ships from; never empty.
+        customer_name:
+          type: string
+        address:
+          type: string
+        latitude:
+          type: [number, "null"]
+        longitude:
+          type: [number, "null"]
+        scheduled_date:
+          type: string
+          description: The date the row matched, echoed back.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntegrationOrderLine"
+    IntegrationOrderList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationOrder"
+    IntegrationDeliveryRouteRequest:
+      type: object
+      required: [vehicle_id, scheduled_date, stops]
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+        driver_id:
+          type: string
+          format: uuid
+          description: Optional; omitted for an unassigned truck.
+        scheduled_date:
+          type: string
+          format: date
+        notes:
+          type: string
+        stops:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [order_id, sequence]
+            properties:
+              order_id:
+                type: string
+                format: uuid
+              sequence:
+                type: integer
+              lat:
+                type: [number, "null"]
+              lng:
+                type: [number, "null"]
+        load_manifest:
+          description: Opaque JSON, persisted verbatim.
+    IntegrationDeliveryRouteResponse:
+      type: object
+      required: [route_id, stop_count, created, replaced]
+      properties:
+        route_id:
+          type: string
+          format: uuid
+        stop_count:
+          type: integer
+        created:
+          type: boolean
+        replaced:
+          type: boolean
+          description: True when a prior plan for this vehicle and date was superseded.
+    IntegrationValidateStaffRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        staff_no:
+          type: string
+          description: Accepted for badge and kiosk callers.
+    IntegrationValidateStaffResponse:
+      type: object
+      required: [entitled, roles, modules]
+      properties:
+        staff_id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        entitled:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+          description: Never null.
+        modules:
+          type: array
+          items:
+            type: string
+          description: Never null.
+    InvoiceStatus:
+      type: string
+      enum: [UNPAID, PARTIAL, PAID, VOID, OVERDUE]
+    PaymentTerms:
+      type: string
+      enum: [COD, DUE_ON_RECEIPT, NET30, NET60, NET90]
+    Invoice:
+      type: object
+      required: [id, branch_id, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount, payment_terms, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/InvoiceStatus"
+        subtotal:
+          type: integer
+          format: int64
+          description: Cents.
+        tax_rate:
+          type: number
+          description: "A fraction such as 0.0825 for 8.25 percent."
+        tax_amount:
+          type: integer
+          format: int64
+          description: Cents.
+        total_amount:
+          type: integer
+          format: int64
+          description: Cents, subtotal plus tax.
+        payment_terms:
+          $ref: "#/components/schemas/PaymentTerms"
+        due_date:
+          type: string
+          format: date-time
+        paid_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceLine"
+    InvoiceLine:
+      type: object
+      required: [id, invoice_id, product_id, quantity, price_each, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        product_sku:
+          type: string
+        product_name:
+          type: string
+        quantity:
+          type: number
+        price_each:
+          type: integer
+          format: int64
+          description: Cents.
+        created_at:
+          type: string
+          format: date-time
+    InvoicePage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invoice"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    CreditMemo:
+      type: object
+      required: [id, customer_id, amount, reason, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPLIED, VOID]
+        created_at:
+          type: string
+          format: date-time
+        applied_at:
+          type: string
+          format: date-time
+    CreditMemoCreateRequest:
+      type: object
+      required: [amount_cents, reason]
+      properties:
+        amount_cents:
+          type: integer
+          format: int64
+          description: Cents; must be positive.
+        reason:
+          type: string
+    CreditMemoList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/CreditMemo"
+    LocationType:
+      type: string
+      enum: [BRANCH, ZONE, AISLE, RACK, SHELF, BIN, YARD]
+    Location:
+      type: object
+      required: [id, path, type, code, active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        type:
+          $ref: "#/components/schemas/LocationType"
+        code:
+          type: string
+        description:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        phone:
+          type: string
+        tax_jurisdiction_code:
+          type: string
+        default_tax_rate:
+          type: [number, "null"]
+        timezone:
+          type: string
+        active:
+          type: boolean
+        branch_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+    LocationCreateRequest:
+      type: object
+      description: The location shape with the active flag told apart from an explicit false.
+      required: [path, type, code]
+      properties:
+        parent_id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        type:
+          $ref: "#/components/schemas/LocationType"
+        code:
+          type: string
+        description:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        phone:
+          type: string
+        tax_jurisdiction_code:
+          type: string
+        default_tax_rate:
+          type: number
+        timezone:
+          type: string
+        active:
+          type: [boolean, "null"]
+          description: Defaults to true when absent; an explicit false is honored.
+    LocationList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/Location"
+    BranchSummary:
+      type: object
+      required: [id, code, name, active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        active:
+          type: boolean
+        is_home:
+          type: boolean
+        timezone:
+          type: string
+    BranchSummaryList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/BranchSummary"
+    UserLocation:
+      type: object
+      required: [user_sub, branch_id, is_home, granted_at]
+      properties:
+        user_sub:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+        is_home:
+          type: boolean
+        granted_at:
+          type: string
+          format: date-time
+        granted_by:
+          type: string
+    UserLocationList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/UserLocation"
+    UserBranchGrant:
+      type: object
+      required: [branch_id, is_home]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        is_home:
+          type: boolean
+    HomeBranchSet:
+      type: object
+      required: [branch_id]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+    StringList:
+      type: [array, "null"]
+      items:
+        type: string
+    OrderStatus:
+      type: string
+      enum: [DRAFT, CONFIRMED, FULFILLED, CANCELLED, ON_HOLD]
+    Order:
+      type: object
+      required: [id, branch_id, customer_id, status, total_amount, created_at, updated_at, total_cost, total_margin, margin_percent, total_commission]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        quote_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        total_amount:
+          type: integer
+          format: int64
+          description: Cents.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        salesperson_id:
+          type: string
+          format: uuid
+        salesperson_name:
+          type: string
+        total_cost:
+          type: integer
+          format: int64
+          description: Cents.
+        total_margin:
+          type: integer
+          format: int64
+          description: Cents.
+        margin_percent:
+          type: number
+          description: Percentage, kept as float.
+        total_commission:
+          type: integer
+          format: int64
+          description: Cents.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderLine"
+    OrderLine:
+      type: object
+      required: [id, order_id, product_id, quantity, price_each, unit_cost, commission_rate, is_special_order]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        product_sku:
+          type: string
+        product_name:
+          type: string
+        quantity:
+          type: number
+        price_each:
+          type: integer
+          format: int64
+          description: Cents. The quote module's convert payload carries float dollars; the client converts.
+        unit_cost:
+          type: integer
+          format: int64
+          description: Cents.
+        commission_rate:
+          type: number
+          description: Percentage, kept as float.
+        is_special_order:
+          type: boolean
+        vendor_id:
+          type: string
+          format: uuid
+        special_order_cost:
+          type: integer
+          format: int64
+          description: Cents.
+    OrderCreateRequest:
+      type: object
+      required: [customer_id, lines]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderLineRequest"
+    OrderLineRequest:
+      type: object
+      required: [product_id, quantity, price_each]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+        price_each:
+          type: integer
+          format: int64
+          description: Cents.
+        is_special_order:
+          type: boolean
+        vendor_id:
+          type: string
+          format: uuid
+        special_order_cost:
+          type: integer
+          format: int64
+          description: Cents.
+    OrderCancelRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+    OrderExposureClear:
+      type: object
+      required: [blocked]
+      properties:
+        blocked:
+          type: boolean
+          enum: [false]
+    OrderExposureOverrideRequest:
+      type: object
+      required: [notes]
+      properties:
+        notes:
+          type: string
+          minLength: 10
+          description: The justification recorded with the override and its audit entry.
+    OrderExposureOverridden:
+      type: object
+      required: [overridden]
+      properties:
+        overridden:
+          type: boolean
+          enum: [true]
+    OrderPage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    PaymentMethod:
+      type: string
+      enum: [CASH, CARD, CHECK, ACCOUNT]
+    Payment:
+      type: object
+      required: [id, invoice_id, amount, method, reference, notes, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        method:
+          $ref: "#/components/schemas/PaymentMethod"
+        reference:
+          type: string
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        gateway_tx_id:
+          type: string
+        gateway_status:
+          type: string
+        card_last4:
+          type: string
+        card_brand:
+          type: string
+        auth_code:
+          type: string
+    PaymentCreateRequest:
+      type: object
+      required: [invoice_id, amount, method]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        method:
+          $ref: "#/components/schemas/PaymentMethod"
+        reference:
+          type: string
+        notes:
+          type: string
+    PaymentIntentRequest:
+      type: object
+      required: [invoice_id, amount]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+    PaymentIntentResponse:
+      type: object
+      required: [public_key, invoice_id, amount_cents]
+      properties:
+        public_key:
+          type: string
+        invoice_id:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+          description: "Cents, echoed from the request's amount field under this name."
+    CardPaymentRequest:
+      type: object
+      required: [invoice_id, token_id, amount]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        token_id:
+          type: string
+          description: The Runner.js tokenization result; required.
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        notes:
+          type: string
+    RefundRequest:
+      type: object
+      required: [payment_id, amount]
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents, partial or full.
+        reason:
+          type: string
+    Refund:
+      type: object
+      required: [id, payment_id, amount, reason, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        reason:
+          type: string
+        gateway_refund_id:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, COMPLETE, FAILED]
+        created_at:
+          type: string
+          format: date-time
+    PaymentList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/Payment"
+    UOM:
+      type: string
+      description: The database unit of measure vocabulary, verbatim.
+      enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
+    Product:
+      type: object
+      required: [id, sku, description, uom_primary, base_price, weight_lbs, reorder_point, reorder_qty, total_quantity, total_allocated, average_unit_cost, target_margin, commission_rate, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        uom_primary:
+          $ref: "#/components/schemas/UOM"
+        base_price:
+          type: number
+          description: Float dollars.
+        vendor:
+          type: [string, "null"]
+          description: Denormalized display name.
+        vendor_id:
+          type: [string, "null"]
+          format: uuid
+        upc:
+          type: [string, "null"]
+        weight_lbs:
+          type: number
+        length_in:
+          type: [number, "null"]
+          description: Inches; null when the PIM has no geometry for the SKU.
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+        reorder_point:
+          type: number
+        reorder_qty:
+          type: number
+        total_quantity:
+          type: number
+          description: Aggregated from inventory.
+        total_allocated:
+          type: number
+        average_unit_cost:
+          type: number
+          description: Float dollars.
+        target_margin:
+          type: number
+        commission_rate:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductPage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    Geometry:
+      type: object
+      description: The mutable parametric geometry slice; every field nullable on purpose.
+      properties:
+        length_in:
+          type: [number, "null"]
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+    ReorderAlert:
+      type: object
+      required: [product_id, sku, description, reorder_point, reorder_qty, current_stock, deficit]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        vendor:
+          type: [string, "null"]
+        vendor_id:
+          type: [string, "null"]
+          format: uuid
+        reorder_point:
+          type: number
+        reorder_qty:
+          type: number
+        current_stock:
+          type: number
+        deficit:
+          type: number
+    ReorderAlertList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/ReorderAlert"
+    ProductMarginUpdate:
+      type: object
+      required: [target_margin, commission_rate]
+      properties:
+        target_margin:
+          type: number
+        commission_rate:
+          type: number
+    ProductLeadTimeUpdate:
+      type: object
+      required: [lead_time_days]
+      properties:
+        lead_time_days:
+          type: [integer, "null"]
+          description: Days; null clears to unpublished, zero asserts same day.
+    QuoteState:
+      type: string
+      enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]
+      description: "Today's lifecycle vocabulary: the field is named state and the values are UPPERCASE."
+    Quote:
+      type: object
+      required: [id, branch_id, customer_id, state, total_amount, created_at, updated_at, delivery_type, freight_amount, margin_total, source, exposure_state, exposure_dollars]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        job_id:
+          type: string
+          format: uuid
+        state:
+          $ref: "#/components/schemas/QuoteState"
+        total_amount:
+          type: number
+          description: Float dollars. The order and invoice modules carry cents; this module does not.
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        sent_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+        rejected_at:
+          type: string
+          format: date-time
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+        freight_amount:
+          type: number
+          description: Float dollars.
+        vehicle_id:
+          type: string
+          format: uuid
+        vehicle_name:
+          type: string
+        margin_total:
+          type: number
+        source:
+          type: string
+          enum: [manual, ai]
+        original_filename:
+          type: string
+        original_content_type:
+          type: string
+        parse_map:
+          description: The AI parse mapping, arbitrary JSON.
+        exposure_state:
+          type: string
+          description: The price protection rollup state; OK when no escalator is active.
+        exposure_dollars:
+          type: number
+        exposure_last_checked_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteLine"
+    QuoteLine:
+      type: object
+      required: [id, quote_id, product_id, sku, description, quantity, uom, unit_price, unit_cost, line_total, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        customer_note:
+          type: string
+          description: What a portal user asked for when requesting this line.
+        quantity:
+          type: number
+        uom:
+          type: string
+          enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
+        unit_price:
+          type: number
+          description: Float dollars per the line's uom.
+        unit_cost:
+          type: number
+          description: Float dollars.
+        line_total:
+          type: number
+          description: Float dollars.
+        created_at:
+          type: string
+          format: date-time
+    QuoteCreateRequest:
+      type: object
+      description: >-
+        The create and update body: the full quote shape plus the base64 original upload. Decoding is lenient and validation happens late, so most invalid payloads surface as 500 today.
+      required: [customer_id]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        job_id:
+          type: string
+          format: uuid
+        state:
+          $ref: "#/components/schemas/QuoteState"
+        total_amount:
+          type: number
+        expires_at:
+          type: string
+          format: date-time
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+        freight_amount:
+          type: number
+        vehicle_id:
+          type: string
+          format: uuid
+        vehicle_name:
+          type: string
+        source:
+          type: string
+          enum: [manual, ai]
+        original_file:
+          type: string
+          description: Base64 of the original upload; over 5 MiB decoded is a 400.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteLineInput"
+    QuoteLineInput:
+      type: object
+      required: [product_id, quantity, uom, unit_price]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: number
+        uom:
+          type: string
+          enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
+        unit_price:
+          type: number
+        unit_cost:
+          type: number
+        customer_note:
+          type: string
+    QuoteStateUpdate:
+      type: object
+      required: [state]
+      properties:
+        state:
+          $ref: "#/components/schemas/QuoteState"
+    QuoteOrderPayload:
+      type: object
+      required: [customer_id, quote_id, lines]
+      description: What POST /api/v1/orders expects, except price_each here is float dollars while the order route expects cents.
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        lines:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity, price_each]
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: number
+              price_each:
+                type: number
+                description: Float dollars.
+    QuotePage:
+      type: object
+      required: [data, total, limit, offset]
+      description: Today's offset page envelope; data is never null on this route (the handler substitutes an empty array).
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Quote"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    QuoteAnalytics:
+      type: object
+      required: [total_quotes, draft_count, sent_count, accepted_count, rejected_count, expired_count, conversion_rate, avg_margin_accepted, avg_margin_rejected, avg_days_to_close, total_quote_value, total_accepted_value, ai_sourced_count, ai_conversion_rate, manual_conversion_rate, trend_data]
+      properties:
+        total_quotes:
+          type: integer
+        draft_count:
+          type: integer
+        sent_count:
+          type: integer
+        accepted_count:
+          type: integer
+        rejected_count:
+          type: integer
+        expired_count:
+          type: integer
+        conversion_rate:
+          type: number
+        avg_margin_accepted:
+          type: number
+        avg_margin_rejected:
+          type: number
+        avg_days_to_close:
+          type: number
+        total_quote_value:
+          type: number
+        total_accepted_value:
+          type: number
+        ai_sourced_count:
+          type: integer
+        ai_conversion_rate:
+          type: number
+        manual_conversion_rate:
+          type: number
+        trend_data:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteAnalyticsTrend"
+    QuoteAnalyticsTrend:
+      type: object
+      required: [date, created, accepted, rejected, total_value, accepted_value]
+      properties:
+        date:
+          type: string
+        created:
+          type: integer
+        accepted:
+          type: integer
+        rejected:
+          type: integer
+        total_value:
+          type: number
+        accepted_value:
+          type: number
+

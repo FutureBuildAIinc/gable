@@ -1,0 +1,216 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Shared wire shapes every module fragment reuses. These are TODAY's shapes,
+# transcribed from core/pkg/httputil, core/pkg/pagination, core/pkg/middleware
+# and core/internal/integrations/handler.go as they behave at the base; the
+# conversions of ADR 0001 replace them module by module, each replacement
+# editing this fragment in the same change. Underscore prefixed fragments
+# carry components only (no paths).
+paths: {}
+components:
+  securitySchemes:
+    BearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        The user JWT the auth middleware verifies against the configured JWKS
+        issuer. Role guards run per module (the census column in ROUTES.txt
+        names the registering module; cmd/server/main.go names the roles each
+        module registers with). AUTH_MODE=dev disables verification entirely.
+    IntegrationKey:
+      type: apiKey
+      in: header
+      name: X-Integration-Key
+      description: >-
+        The shared integration key of the AI load management seam, compared in
+        constant time. When no key is configured the whole seam answers 503
+        before the handler runs.
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: >-
+        Page size. Unparseable, non positive or over maximum values are
+        silently ignored and the default applies; the value is never refused
+        today.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      description: >-
+        Page offset. Unparseable or negative values are silently ignored and
+        the default applies.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    XBranchId:
+      name: X-Branch-Id
+      in: header
+      required: false
+      description: >-
+        Branch scope for modules registered behind the branch middleware
+        (quote, customer, order, invoice in this fragment set). A missing
+        header passes for admins and in dev mode; with default_branch_required
+        on, a non admin without it is refused. A non UUID value is a 400 and a
+        branch the caller has no grant for is a 403.
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Opt in idempotent replay for POST, PUT and PATCH. The legacy name
+        X-Idempotency-Key addresses the same claim. Claims are stored in
+        Postgres and survive a restart; only 2xx and 3xx responses are stored.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+  responses:
+    BadRequest:
+      description: >-
+        The request cannot be consumed. The body is the standard error
+        envelope; the message is the generic status text, and the handler's
+        specific message goes to the server log only.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: No or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: The caller's roles do not include one the route requires.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: The addressed resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: The write conflicts with the resource's current state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PaymentRequired:
+      description: The card charge or its persistence failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Unexpected server fault (also today's status for most service level validation failures).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: A dependency the route needs is not configured.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    IntegrationUnauthorized:
+      description: The X-Integration-Key is missing or wrong (the integration seam's own error body, not the standard envelope).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationUnavailable:
+      description: No integration key is configured, so the whole seam is closed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+  schemas:
+    Error:
+      type: object
+      required: [error, meta]
+      description: >-
+        The standard error envelope written by httputil.RespondError. The
+        message is always the generic status text; the handler's specific
+        message is server log only. request_id echoes the X-Request-ID
+        response header.
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, UNPROCESSABLE_ENTITY, PAYMENT_REQUIRED, INTERNAL_ERROR]
+            message:
+              type: string
+              description: Generic status text such as "Bad Request".
+        meta:
+          type: object
+          required: [request_id]
+          properties:
+            request_id:
+              type: string
+    IntegrationError:
+      type: object
+      required: [error]
+      description: The integration seam's own error body, a bare message string.
+      properties:
+        error:
+          type: string
+    ExposureBlock:
+      type: object
+      required: [error, code, exposure]
+      description: >-
+        The raw 409 payload the order module writes when the lumber index
+        exposure gate blocks a confirm, fulfill or gate check. This is not
+        the standard error envelope.
+      properties:
+        error:
+          type: string
+          enum: [unresolved index exposure on source quote]
+        code:
+          type: string
+          enum: [UNRESOLVED_EXPOSURE]
+        exposure:
+          type: object
+          required: [quote_id, state, exposure_dollars, indexes]
+          properties:
+            quote_id:
+              type: string
+              format: uuid
+            quote_short_id:
+              type: string
+            state:
+              type: string
+              description: The exposure state vocabulary (ACK_REQUIRED, BLOCKED and neighbors).
+            exposure_dollars:
+              type: number
+            indexes:
+              type: array
+              items:
+                type: string
+            salesperson_id:
+              type: [string, "null"]
+              format: uuid
+            salesperson_name:
+              type: [string, "null"]
+            required_action:
+              type: string
+            last_checked_at:
+              type: [string, "null"]
+              format: date-time

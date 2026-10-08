@@ -1,0 +1,661 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The AI load management integration seam, transcribed from
+# internal/integrations/handler.go and ailm.go as they behave today. This
+# seam keeps its own published contract: X-Integration-Key authentication,
+# a bare {error: string} body on faults, and list endpoints that answer
+# bare JSON arrays, never null. The wire shapes mirror the AI load
+# management service's own client, field for field, and a machine checked
+# contract test on that side fails a build when either drifts.
+paths:
+  /api/integration/products:
+    get:
+      operationId: integrationListProducts
+      tags: [integration]
+      summary: List catalog products with weight and geometry
+      description: >-
+        An unfiltered call is a bulk catalog pull with a raised cap; a
+        filtered call is a typeahead search with a small cap. The two caps
+        are server constants and not visible on the wire.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The products, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationProductList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/quotes/bulk-price:
+    post:
+      operationId: integrationBulkPrice
+      tags: [integration]
+      summary: Price a basket of lines for one customer
+      description: >-
+        Money in and out is cents. Lines whose product cannot be resolved or
+        priced are silently dropped from the response.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationBulkPriceRequest"
+      responses:
+        "200":
+          description: The priced lines, a bare array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationPricedItemList"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "404":
+          $ref: "#/components/responses/IntegrationNotFound"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/quotes:
+    post:
+      operationId: integrationCreateQuote
+      tags: [integration]
+      summary: Create a draft quote from priced lines
+      description: >-
+        Line unit prices arrive in cents and are stored as float dollars
+        inside the quote module; the response total returns cents.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationQuoteRequest"
+      responses:
+        "201":
+          description: The created quote summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationQuoteResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/quotes/{id}/accept-and-convert:
+    post:
+      operationId: integrationAcceptAndConvert
+      tags: [integration]
+      summary: Accept a quote and convert it into a confirmed order
+      description: >-
+        One call creates the order, marks the quote accepted and confirms
+        the order. A confirmation failure answers 409 with the order's id in
+        the message; the order exists in DRAFT and confirmation can be
+        retried.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationOrderResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "409":
+          $ref: "#/components/responses/IntegrationConflict"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/vehicles:
+    get:
+      operationId: integrationListVehicles
+      tags: [integration]
+      summary: List the active fleet
+      security:
+        - IntegrationKey: []
+      responses:
+        "200":
+          description: The vehicles, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationVehicleList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/drivers:
+    get:
+      operationId: integrationListDrivers
+      tags: [integration]
+      summary: List the fleet's drivers
+      security:
+        - IntegrationKey: []
+      responses:
+        "200":
+          description: The drivers, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationDriverList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/locations:
+    get:
+      operationId: integrationListLocations
+      tags: [integration]
+      summary: List the dealer's branches for route rooting
+      description: >-
+        A branch with null coordinates is returned anyway: the caller must
+        see that the yard exists and has never been geocoded.
+      security:
+        - IntegrationKey: []
+      responses:
+        "200":
+          description: The branches, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationLocationList"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/orders:
+    get:
+      operationId: integrationListOrders
+      tags: [integration]
+      summary: List orders for a calendar date
+      description: >-
+        Both filters are optional; an unfiltered call returns the whole
+        order book. A malformed date is a 400 rather than a cast failure.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The orders with their lines, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationOrderList"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/delivery-routes:
+    post:
+      operationId: integrationCreateDeliveryRoute
+      tags: [integration]
+      summary: Write an approved delivery plan onto the dispatch board
+      description: >-
+        Idempotent on vehicle and date: a not yet dispatched route for that
+        pair is replaced. The load manifest is opaque JSON persisted
+        verbatim.
+      security:
+        - IntegrationKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationDeliveryRouteRequest"
+      responses:
+        "201":
+          description: The acknowledgement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationDeliveryRouteResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+  /api/integration/validate-staff:
+    post:
+      operationId: integrationValidateStaff
+      tags: [integration]
+      summary: Report whether a staff member may use the integration
+      description: >-
+        A well formed request always answers 200: an unknown email is a non
+        entitled result, not an error. The identity fields are omitted for
+        unknown staff so attacker input is not echoed.
+      security:
+        - IntegrationKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationValidateStaffRequest"
+      responses:
+        "200":
+          description: The entitlement result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationValidateStaffResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationBadRequest"
+        "401":
+          $ref: "#/components/responses/IntegrationUnauthorized"
+        "500":
+          $ref: "#/components/responses/IntegrationServerError"
+        "503":
+          $ref: "#/components/responses/IntegrationUnavailable"
+components:
+  responses:
+    IntegrationBadRequest:
+      description: The body or a parameter is malformed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationNotFound:
+      description: The addressed resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationConflict:
+      description: The order was created but could not be confirmed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+    IntegrationServerError:
+      description: The handler failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/IntegrationError"
+  schemas:
+    IntegrationProduct:
+      type: object
+      required: [id, sku, name, category, uom, price, weight_lbs, geometry_source]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        uom:
+          type: string
+        price:
+          type: integer
+          format: int64
+          description: Cents.
+        weight_lbs:
+          type: number
+          description: Per unit weight; zero means unknown.
+        length_in:
+          type: [number, "null"]
+          description: Inches; null when the PIM has no geometry.
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: string
+    IntegrationProductList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationProduct"
+    IntegrationBulkPriceRequest:
+      type: object
+      required: [customer_id, items]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity]
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+    IntegrationPricedItem:
+      type: object
+      required: [product_id, product_name, sku, quantity, unit_price, total_price, uom]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        product_name:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          type: integer
+          format: int64
+          description: Cents.
+        total_price:
+          type: integer
+          format: int64
+          description: Cents.
+        uom:
+          type: string
+    IntegrationPricedItemList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationPricedItem"
+    IntegrationQuoteRequest:
+      type: object
+      required: [customer_id, lines]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        lines:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity, unit_price]
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+              unit_price:
+                type: integer
+                format: int64
+                description: Cents.
+    IntegrationQuoteResponse:
+      type: object
+      required: [id, customer_id, total, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        total:
+          type: integer
+          format: int64
+          description: Cents.
+        status:
+          type: string
+          enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]
+    IntegrationOrderResponse:
+      type: object
+      required: [id, quote_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          description: The order status after conversion and confirmation.
+    IntegrationVehicle:
+      type: object
+      required: [id, name, vehicle_type]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        vehicle_type:
+          type: string
+        license_plate:
+          type: string
+        capacity_weight_lbs:
+          type: [integer, "null"]
+          description: Null when the rating was never recorded.
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+    IntegrationVehicleList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationVehicle"
+    IntegrationDriver:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, ON_LEAVE]
+    IntegrationDriverList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationDriver"
+    IntegrationLocation:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        address:
+          type: string
+          description: The composed street, city, state zip form.
+        latitude:
+          type: [number, "null"]
+          description: Null when the branch was never geocoded.
+        longitude:
+          type: [number, "null"]
+    IntegrationLocationList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationLocation"
+    IntegrationOrderLine:
+      type: object
+      required: [product_id, sku, quantity, weight_lbs]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        quantity:
+          type: number
+        weight_lbs:
+          type: number
+          description: Per unit catalog weight, not the line total.
+    IntegrationOrder:
+      type: object
+      required: [id, status, branch_id, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+          description: The yard the order ships from; never empty.
+        customer_name:
+          type: string
+        address:
+          type: string
+        latitude:
+          type: [number, "null"]
+        longitude:
+          type: [number, "null"]
+        scheduled_date:
+          type: string
+          description: The date the row matched, echoed back.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntegrationOrderLine"
+    IntegrationOrderList:
+      type: array
+      items:
+        $ref: "#/components/schemas/IntegrationOrder"
+    IntegrationDeliveryRouteRequest:
+      type: object
+      required: [vehicle_id, scheduled_date, stops]
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+        driver_id:
+          type: string
+          format: uuid
+          description: Optional; omitted for an unassigned truck.
+        scheduled_date:
+          type: string
+          format: date
+        notes:
+          type: string
+        stops:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [order_id, sequence]
+            properties:
+              order_id:
+                type: string
+                format: uuid
+              sequence:
+                type: integer
+              lat:
+                type: [number, "null"]
+              lng:
+                type: [number, "null"]
+        load_manifest:
+          description: Opaque JSON, persisted verbatim.
+    IntegrationDeliveryRouteResponse:
+      type: object
+      required: [route_id, stop_count, created, replaced]
+      properties:
+        route_id:
+          type: string
+          format: uuid
+        stop_count:
+          type: integer
+        created:
+          type: boolean
+        replaced:
+          type: boolean
+          description: True when a prior plan for this vehicle and date was superseded.
+    IntegrationValidateStaffRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        staff_no:
+          type: string
+          description: Accepted for badge and kiosk callers.
+    IntegrationValidateStaffResponse:
+      type: object
+      required: [entitled, roles, modules]
+      properties:
+        staff_id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        entitled:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+          description: Never null.
+        modules:
+          type: array
+          items:
+            type: string
+          description: Never null.

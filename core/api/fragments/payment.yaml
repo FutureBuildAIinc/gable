@@ -1,0 +1,289 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The payment module, transcribed from internal/payment/handler.go and
+# model.go as they behave today: cents money, a card charge whose gateway
+# call succeeded but persistence failed answers a generic 402, and the
+# intent response echoing amount under a cents name while the request
+# carries it under a bare name.
+paths:
+  /api/v1/payments:
+    post:
+      operationId: paymentCreate
+      tags: [payment]
+      summary: Record a non card payment
+      description: Cash, check or account payments against an invoice.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCreateRequest"
+      responses:
+        "200":
+          description: The recorded payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/intent:
+    post:
+      operationId: paymentIntent
+      tags: [payment]
+      summary: Get the gateway public key for tokenization
+      description: The frontend calls this before showing the card input form; it creates nothing.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentIntentRequest"
+      responses:
+        "200":
+          description: The public key and the echoed invoice and amount.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/payments/card:
+    post:
+      operationId: paymentCard
+      tags: [payment]
+      summary: Charge a tokenized card
+      description: >-
+        A charge captured at the gateway whose persistence then fails is a
+        generic 402; the token is never echoed back.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardPaymentRequest"
+      responses:
+        "200":
+          description: The processed payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "402":
+          $ref: "#/components/responses/PaymentRequired"
+  /api/v1/payments/refund:
+    post:
+      operationId: paymentRefund
+      tags: [payment]
+      summary: Refund a card payment in part or full
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundRequest"
+      responses:
+        "200":
+          description: The processed refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/invoices/{id}/payments:
+    get:
+      operationId: paymentHistory
+      tags: [payment]
+      summary: List an invoice's payments
+      description: Registered by the payment module on the invoice's path.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The payments, a bare array that is null when the invoice has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    PaymentMethod:
+      type: string
+      enum: [CASH, CARD, CHECK, ACCOUNT]
+    Payment:
+      type: object
+      required: [id, invoice_id, amount, method, reference, notes, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        method:
+          $ref: "#/components/schemas/PaymentMethod"
+        reference:
+          type: string
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        gateway_tx_id:
+          type: string
+        gateway_status:
+          type: string
+        card_last4:
+          type: string
+        card_brand:
+          type: string
+        auth_code:
+          type: string
+    PaymentCreateRequest:
+      type: object
+      required: [invoice_id, amount, method]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        method:
+          $ref: "#/components/schemas/PaymentMethod"
+        reference:
+          type: string
+        notes:
+          type: string
+    PaymentIntentRequest:
+      type: object
+      required: [invoice_id, amount]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+    PaymentIntentResponse:
+      type: object
+      required: [public_key, invoice_id, amount_cents]
+      properties:
+        public_key:
+          type: string
+        invoice_id:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+          description: "Cents, echoed from the request's amount field under this name."
+    CardPaymentRequest:
+      type: object
+      required: [invoice_id, token_id, amount]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        token_id:
+          type: string
+          description: The Runner.js tokenization result; required.
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        notes:
+          type: string
+    RefundRequest:
+      type: object
+      required: [payment_id, amount]
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents, partial or full.
+        reason:
+          type: string
+    Refund:
+      type: object
+      required: [id, payment_id, amount, reason, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        reason:
+          type: string
+        gateway_refund_id:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, COMPLETE, FAILED]
+        created_at:
+          type: string
+          format: date-time
+    PaymentList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/Payment"
