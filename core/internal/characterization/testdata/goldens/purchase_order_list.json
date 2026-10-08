@@ -1,0 +1,202 @@
+[
+  {
+    "name": "purchase_order.list",
+    "sort_primary_array": true,
+    "mask_fields": {
+      "vendor_id": "<vendor>"
+    },
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/purchase-orders"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-2>",
+          "line_count": 1,
+          "source": "MANUAL",
+          "status": "DRAFT",
+          "total_cost": 480,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-3>",
+          "line_count": 2,
+          "source": "MANUAL",
+          "status": "RECEIVED",
+          "total_cost": 1720,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-4>",
+          "line_count": 3,
+          "source": "MANUAL",
+          "status": "RECEIVED",
+          "total_cost": 14058,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-5>",
+          "created_at": "<ts+0d>",
+          "id": "<id-6>",
+          "line_count": 3,
+          "source": "MANUAL",
+          "status": "SENT",
+          "total_cost": 16646.7,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-7>",
+          "line_count": 3,
+          "source": "MANUAL",
+          "status": "SENT",
+          "total_cost": 293.7,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-8>",
+          "line_count": 3,
+          "source": "MANUAL",
+          "status": "SENT",
+          "total_cost": 3280,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-5>",
+          "created_at": "<ts+0d>",
+          "id": "<id-9>",
+          "line_count": 3,
+          "source": "MANUAL",
+          "status": "SENT",
+          "total_cost": 6541.86,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-10>",
+          "created_at": "<ts+0d>",
+          "id": "<id-11>",
+          "line_count": 4,
+          "source": "MANUAL",
+          "status": "DRAFT",
+          "total_cost": 13500,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-10>",
+          "created_at": "<ts+0d>",
+          "id": "<id-12>",
+          "line_count": 4,
+          "source": "MANUAL",
+          "status": "PARTIAL",
+          "total_cost": 14231,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-13>",
+          "line_count": 5,
+          "source": "MANUAL",
+          "status": "RECEIVED",
+          "total_cost": 9425.5,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-10>",
+          "created_at": "<ts+0d>",
+          "id": "<id-14>",
+          "line_count": 6,
+          "source": "MANUAL",
+          "status": "RECEIVED",
+          "total_cost": 28110.25,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-10>",
+          "created_at": "<ts+0d>",
+          "id": "<id-15>",
+          "line_count": 6,
+          "source": "MANUAL",
+          "status": "SENT",
+          "total_cost": 18741.95,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-10>",
+          "created_at": "<ts+0d>",
+          "id": "<id-16>",
+          "line_count": 6,
+          "source": "MANUAL",
+          "status": "SENT",
+          "total_cost": 21811.92,
+          "updated_at": "<ts+0d>",
+          "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-17>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-18>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-19>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-20>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-21>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  }
+]

@@ -69,6 +69,7 @@ func allGroups() []groupDef {
 		r1bPlatformGroups(),
 		r1bAGroups(),
 		r1bBGroups(),
+		r1bCGroups(),
 	)
 }
 

@@ -1,0 +1,395 @@
+[
+  {
+    "name": "pos.return.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/returns",
+      "body": {
+        "lines": [
+          {
+            "description": "returned lumber",
+            "product_id": "<id-1>",
+            "quantity": 2,
+            "unit_price": 12.5
+          }
+        ],
+        "reason": "r1b c wrong size",
+        "refund_method": "CASH",
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "cashier_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "lines": [
+          {
+            "description": "returned lumber",
+            "id": "<id-5>",
+            "line_total": 2500,
+            "product_id": "<id-1>",
+            "quantity": 2,
+            "restock": true,
+            "return_id": "<id-4>",
+            "unit_price": 1250,
+            "uom": "EA"
+          }
+        ],
+        "reason": "r1b c wrong size",
+        "refund_method": "CASH",
+        "register_id": "REG-01",
+        "status": "COMPLETED",
+        "subtotal": 2500,
+        "tax_amount": 300,
+        "till_session_id": "<id-6>",
+        "total": 2800
+      }
+    }
+  },
+  {
+    "name": "pos.return.create.account",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/returns",
+      "body": {
+        "customer_id": "<id-7>",
+        "lines": [
+          {
+            "product_id": "<id-8>",
+            "quantity": 1,
+            "restock": false,
+            "unit_price": 30
+          }
+        ],
+        "refund_method": "ACCOUNT",
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "cashier_id": "<id-9>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-7>",
+        "gl_entry_id": "<id-10>",
+        "id": "<id-11>",
+        "lines": [
+          {
+            "description": "",
+            "id": "<id-12>",
+            "line_total": 3000,
+            "product_id": "<id-8>",
+            "quantity": 1,
+            "restock": false,
+            "return_id": "<id-11>",
+            "unit_price": 3000,
+            "uom": "EA"
+          }
+        ],
+        "reason": "",
+        "refund_method": "ACCOUNT",
+        "register_id": "REG-01",
+        "status": "COMPLETED",
+        "subtotal": 3000,
+        "tax_amount": 0,
+        "till_session_id": "<id-6>",
+        "total": 3000
+      }
+    }
+  },
+  {
+    "name": "pos.return.create.account_no_customer",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/returns",
+      "body": {
+        "lines": [
+          {
+            "product_id": "<id-1>",
+            "quantity": 1,
+            "unit_price": 5
+          }
+        ],
+        "refund_method": "ACCOUNT",
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.return.create.no_lines",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/returns",
+      "body": {
+        "lines": [],
+        "refund_method": "CASH",
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.return.create.bad_method",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/returns",
+      "body": {
+        "lines": [
+          {
+            "product_id": "<id-1>",
+            "quantity": 1,
+            "unit_price": 5
+          }
+        ],
+        "refund_method": "BARTER",
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.return.create.zero_quantity",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/returns",
+      "body": {
+        "lines": [
+          {
+            "product_id": "<id-1>",
+            "quantity": 0,
+            "unit_price": 5
+          }
+        ],
+        "refund_method": "CASH",
+        "register_id": "REG-01"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.return.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/returns",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.return.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/returns/<id-4>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "cashier_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "lines": [
+          {
+            "description": "returned lumber",
+            "id": "<id-5>",
+            "line_total": 2500,
+            "product_id": "<id-1>",
+            "quantity": 2,
+            "restock": true,
+            "return_id": "<id-4>",
+            "unit_price": 1250,
+            "uom": "EA"
+          }
+        ],
+        "reason": "r1b c wrong size",
+        "refund_method": "CASH",
+        "register_id": "REG-01",
+        "status": "COMPLETED",
+        "subtotal": 2500,
+        "tax_amount": 300,
+        "till_session_id": "<id-6>",
+        "total": 2800
+      }
+    }
+  },
+  {
+    "name": "pos.return.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/returns/<id-18>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.return.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/returns/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.return.list",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/returns?register_id=REG-01"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "returns": [
+          {
+            "cashier_id": "<id-9>",
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-7>",
+            "gl_entry_id": "<id-10>",
+            "id": "<id-11>",
+            "reason": "",
+            "refund_method": "ACCOUNT",
+            "register_id": "REG-01",
+            "status": "COMPLETED",
+            "subtotal": 3000,
+            "tax_amount": 0,
+            "till_session_id": "<id-6>",
+            "total": 3000
+          },
+          {
+            "cashier_id": "<id-2>",
+            "created_at": "<ts+0d>",
+            "gl_entry_id": "<id-3>",
+            "id": "<id-4>",
+            "reason": "r1b c wrong size",
+            "refund_method": "CASH",
+            "register_id": "REG-01",
+            "status": "COMPLETED",
+            "subtotal": 2500,
+            "tax_amount": 300,
+            "till_session_id": "<id-6>",
+            "total": 2800
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "pos.return.list.other_day",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/returns?register_id=REG-01&date=<day-30>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "returns": null
+      }
+    }
+  },
+  {
+    "name": "pos.return.list.unknown_register",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/returns?register_id=REG-NONE"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "returns": null
+      }
+    }
+  }
+]
