@@ -140,6 +140,20 @@ func TestSubMuxMountsFailUnlessAllowListed(t *testing.T) {
 	}
 }
 
+// TestShadowedPatternNameIsUnresolved pins the fix for the review's F4: a
+// pattern name bound as a parameter or short variable in the enclosing
+// function is unresolved, not silently resolved to the package constant it
+// shadows.
+func TestShadowedPatternNameIsUnresolved(t *testing.T) {
+	result := collectFixture(t, "shadow")
+	if len(result.Routes) != 0 {
+		t.Fatalf("a shadowed name must not resolve to the package constant, got %+v", result.Routes)
+	}
+	if len(result.Unresolved) != 2 {
+		t.Fatalf("want 2 unresolved registrations (parameter and variable shadow), got %+v", result.Unresolved)
+	}
+}
+
 // diffRoutes compares two rendered censuses by route key and returns one
 // human line per added and removed route.
 func diffRoutes(oldRender, newRender string) (added, removed []string) {

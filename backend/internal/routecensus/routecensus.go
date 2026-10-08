@@ -369,6 +369,14 @@ func Collect(moduleRoot string) (Result, error) {
 					return eval(fu, fn, vs.Values[0])
 				}
 			}
+			// The name may be bound in this function as a receiver,
+			// parameter, named result, variable or short variable
+			// declaration, shadowing any package constant of the same name;
+			// the call would use the shadowing binding, whose value the
+			// census cannot know. Resolve only when no such binding exists.
+			if shadows(fn, name) {
+				return "", false
+			}
 		}
 		return evalPkgConst(fu.relDir, name)
 	}
@@ -623,6 +631,57 @@ func isGatedRouterMethod(fd *ast.FuncDecl) bool {
 	}
 	ident, ok := t.(*ast.Ident)
 	return ok && ident.Name == "gatedRouter"
+}
+
+// shadows reports whether name is bound inside fn as a receiver,
+// parameter, named result, variable or short variable declaration, so a
+// use of name inside fn resolves to that binding instead of any package
+// constant of the same name.
+func shadows(fn *ast.FuncDecl, name string) bool {
+	for _, fields := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
+		if fields == nil {
+			continue
+		}
+		for _, field := range fields.List {
+			for _, id := range field.Names {
+				if id.Name == name {
+					return true
+				}
+			}
+		}
+	}
+	bound := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch t := n.(type) {
+		case *ast.AssignStmt:
+			if t.Tok == token.DEFINE {
+				for _, e := range t.Lhs {
+					if id, ok := e.(*ast.Ident); ok && id.Name == name {
+						bound = true
+						return false
+					}
+				}
+			}
+		case *ast.GenDecl:
+			if t.Tok != token.VAR {
+				return true
+			}
+			for _, spec := range t.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for _, id := range vs.Names {
+					if id.Name == name {
+						bound = true
+						return false
+					}
+				}
+			}
+		}
+		return true
+	})
+	return bound
 }
 
 // isRouterMethod reports whether name is one of the mux registration
