@@ -418,28 +418,37 @@ one.
 
 The stored scope is the principal and the key. The principal is the
 caller each auth chain identifies: the user behind the session on the
-desk routes, the portal customer on the portal routes, the integration
-tenant on the integration routes. The stored fingerprint adds the
-method, the path, the query string sorted by key then value, and a hash
-of the raw request body bytes.
+desk routes, the portal customer and customer user on the portal routes,
+the integration tenant on the integration routes. A caller the auth
+chain does not identify is served without idempotency (outside
+`AUTH_MODE=dev`, where it is the fixed `dev` principal). The stored
+fingerprint adds the method, the path, the query string sorted by key
+then value, and a hash of the raw request body bytes.
 
 The contract: the first request with a key executes and its response is
 stored against it; a retry with the same key, the same fingerprint, and
 the same body hash returns the stored response rather than executing
-again, marked by a replay response header and carrying the stored
-status, `Content-Type`, `Location` when the original had one, and body.
-Only 2xx and 3xx responses are stored: a 4xx or 5xx releases the key,
-so a corrected request, and a retry after a server fault, execute
-afresh instead of replaying the failure. The same key reused against a
+again, marked by the `Idempotency-Replayed: true` response header and
+carrying the stored status, `Content-Type`, `Location` when the original
+had one, and body. Only 2xx and 3xx responses are stored: a 4xx or 5xx
+releases the key, so a corrected request, and a retry after a server
+fault, execute afresh instead of replaying the failure. A stored body is
+capped at 1 MiB: a larger outcome is served but not stored, so its retry
+executes again. A request body past the route's size bound answers 413
+`payload_too_large` (the section 3 table) and is never stored. If the
+store is unreachable, the request is served uncached: a storage fault
+must not fail a request that would otherwise succeed, at the price of
+the retry executing again. The same key reused against a
 different fingerprint or body hash is 422 `idempotency_key_reused`; a
 second request with the same key while the first is still executing is
 409 `idempotency_in_progress`. Storage is durable across restarts, for a
 retention window of 24 hours past the stored response.
 
-The canonical header name is `Idempotency-Key`; the existing
-`X-Idempotency-Key` spelling keeps working until the middleware item
-lands the durable store (R1-11), after which the legacy spelling is
-removed, both steps listed as contract changes.
+The canonical header name is `Idempotency-Key`. `X-Idempotency-Key`
+remains an alias addressing the same claim: a request carrying both is
+claimed under `Idempotency-Key`. Removing the alias is a later listed
+contract change, made once the desk and every known caller send the
+canonical name.
 
 ### 10. The in place rule
 
