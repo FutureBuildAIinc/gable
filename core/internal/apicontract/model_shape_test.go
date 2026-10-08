@@ -97,7 +97,8 @@ var modelBoundSchemas = []struct {
 	{"PimMedia", pim.PIMMedia{}},
 	{"PimCollateral", pim.PIMCollateral{}},
 	{"ProductDetail", pim.ProductDetail{}},
-	{"ProductLeadTimeUpdate", product.LeadTimeRequest{}},
+	{"ProductView", product.View{}},
+	{"ProductReorderAlert", product.ReorderAlert{}},
 	// location
 	{"Location", location.Location{}},
 	{"BranchSummary", location.BranchSummary{}},

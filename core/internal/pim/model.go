@@ -6,6 +6,7 @@ package pim
 import (
 	"time"
 
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/google/uuid"
 )
 
@@ -62,28 +63,14 @@ type PIMCollateral struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
-// ProductDetail is the aggregate returned for the detail page
+// ProductDetail is the aggregate returned for the detail page. The product
+// summary it embeds is the converted product wire (ADR 0006 7.1: PIM's
+// product detail carries the same product summary), so the two cannot drift.
 type ProductDetail struct {
-	ID              uuid.UUID       `json:"id"`
-	SKU             string          `json:"sku"`
-	Description     string          `json:"description"`
-	UOMPrimary      string          `json:"uom_primary"`
-	BasePrice       float64         `json:"base_price"`
-	Vendor          *string         `json:"vendor"`
-	UPC             *string         `json:"upc"`
-	WeightLbs       float64         `json:"weight_lbs"`
-	ReorderPoint    float64         `json:"reorder_point"`
-	ReorderQty      float64         `json:"reorder_qty"`
-	TotalQuantity   float64         `json:"total_quantity"`
-	TotalAllocated  float64         `json:"total_allocated"`
-	AverageUnitCost float64         `json:"average_unit_cost"`
-	TargetMargin    float64         `json:"target_margin"`
-	CommissionRate  float64         `json:"commission_rate"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	Content         *PIMContent     `json:"content"`
-	Media           []PIMMedia      `json:"media"`
-	Collateral      []PIMCollateral `json:"collateral"`
+	Product   product.View    `json:"product"`
+	Content   *PIMContent     `json:"content"`
+	Media     []PIMMedia      `json:"media"`
+	Collateral []PIMCollateral `json:"collateral"`
 }
 
 // --- Request/Response types ---

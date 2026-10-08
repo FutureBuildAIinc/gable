@@ -396,15 +396,16 @@ func (f *fakeProductRepo) CreateProduct(context.Context, *product.Product) error
 func (f *fakeProductRepo) ListProducts(context.Context) ([]product.Product, error) {
 	return nil, nil
 }
-func (f *fakeProductRepo) ListProductsPaginated(context.Context, int, int) ([]product.Product, int, error) {
-	return nil, 0, nil
+func (f *fakeProductRepo) ListProductsPage(context.Context, *time.Time, *uuid.UUID, int) ([]product.Product, error) {
+	return nil, nil
 }
+func (f *fakeProductRepo) CountProducts(context.Context) (int64, error) { return 0, nil }
 func (f *fakeProductRepo) ListBelowReorder(context.Context) ([]product.ReorderAlert, error) {
 	return nil, nil
 }
 func (f *fakeProductRepo) UpdateAverageCost(context.Context, uuid.UUID, float64) error { return nil }
-func (f *fakeProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64) error {
-	return nil
+func (f *fakeProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64, int64) (int64, error) {
+	return 0, nil
 }
 func (f *fakeProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float64, float64) error {
 	return nil
@@ -412,10 +413,12 @@ func (f *fakeProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float
 func (f *fakeProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uuid.UUID) error {
 	return nil
 }
-func (f *fakeProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry) error {
-	return nil
+func (f *fakeProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry, int64) (int64, error) {
+	return 0, nil
 }
-func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int) error { return nil }
+func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64) (int64, error) {
+	return 0, nil
+}
 
 type fakePricingRepo struct {
 	contracts map[uuid.UUID]httpx.Price // productID -> contract price

@@ -5,9 +5,12 @@ package product
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/google/uuid"
 )
@@ -36,10 +39,20 @@ func (s *Service) WithVendorService(v *vendor.Service) *Service {
 // drift out of sync.
 func (s *Service) CreateProduct(ctx context.Context, p *Product) error {
 	if p.SKU == "" {
-		return fmt.Errorf("sku is required")
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "sku", Message: "is required"})
 	}
 	if p.Description == "" {
-		return fmt.Errorf("description is required")
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "description", Message: "is required"})
+	}
+	if !ValidUOM(p.UOMPrimary) {
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "stock_uom", Message: "must be one of the unit codes the catalogue holds"})
+	}
+	if p.BasePriceScaled < 0 {
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "base_price_ten_thousandths", Message: "a unit price is never negative"})
 	}
 
 	if p.VendorID == nil && p.Vendor != nil && *p.Vendor != "" && s.vendorSvc != nil {
@@ -63,14 +76,29 @@ func (s *Service) CreateProduct(ctx context.Context, p *Product) error {
 	return s.repo.CreateProduct(ctx, p)
 }
 
-// ListProducts returns all products
+// ListProducts returns all products (the reorder scheduler's read)
 func (s *Service) ListProducts(ctx context.Context) ([]Product, error) {
 	return s.repo.ListProducts(ctx)
 }
 
-// ListProductsPaginated returns products with pagination
-func (s *Service) ListProductsPaginated(ctx context.Context, limit, offset int) ([]Product, int, error) {
-	return s.repo.ListProductsPaginated(ctx, limit, offset)
+// ListProductsPage is the list's keyset page: after is nil for the first
+// page, and limit+1 rows are read so the handler knows whether another page
+// exists.
+func (s *Service) ListProductsPage(ctx context.Context, after *time.Time, afterID *uuid.UUID, limit int) ([]Product, bool, error) {
+	rows, err := s.repo.ListProductsPage(ctx, after, afterID, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
+	}
+	return rows, more, nil
+}
+
+// CountProducts is the include=total count.
+func (s *Service) CountProducts(ctx context.Context) (int64, error) {
+	return s.repo.CountProducts(ctx)
 }
 
 // GetProduct retrieves a product by its ID
@@ -88,9 +116,25 @@ func (s *Service) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost f
 	return s.repo.UpdateAverageCost(ctx, id, avgCost)
 }
 
+// resolveRevision turns a repository write refusal into the boundary error:
+// a missing row is 404, a stale revision is 409 (ADR 0001 section 11).
+func resolveRevision(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNotFound):
+		return httpx.NotFound("no such product")
+	case errors.Is(err, ErrStaleRevision):
+		return httpx.StaleRevision("the product was changed after this revision was read; reload and retry")
+	default:
+		return err
+	}
+}
+
 // UpdateMarginRules updates the target margin and commission rate for a product
-func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error {
-	return s.repo.UpdateMarginRules(ctx, id, targetMargin, commissionRate)
+func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64, revision int64) (int64, error) {
+	newRevision, err := s.repo.UpdateMarginRules(ctx, id, targetMargin, commissionRate, revision)
+	return newRevision, resolveRevision(err)
 }
 
 // UpdateReorderTargets writes new reorder_point and reorder_qty for a product.
@@ -106,11 +150,13 @@ func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorde
 // renders as JSON null, and it must stay distinguishable from a published 0.
 // Guessing a plausible number here would be worse than publishing nothing —
 // a crew gets scheduled around a lead time.
-func (s *Service) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error {
+func (s *Service) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error) {
 	if leadTimeDays != nil && *leadTimeDays < 0 {
-		return fmt.Errorf("lead_time_days must be zero or positive")
+		return 0, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "lead_time_days", Message: "must be zero or positive"})
 	}
-	return s.repo.UpdateLeadTime(ctx, id, leadTimeDays)
+	newRevision, err := s.repo.UpdateLeadTime(ctx, id, leadTimeDays, revision)
+	return newRevision, resolveRevision(err)
 }
 
 // UpdateDimensions writes the parametric 3D geometry (inches) for a product.
@@ -131,7 +177,7 @@ func (s *Service) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays
 //
 // Nothing else is defaulted. In particular a nil dimension is passed through as
 // nil rather than coerced to 0 — see the Geometry doc comment.
-func (s *Service) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error {
+func (s *Service) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry, revision int64) (int64, error) {
 	if g.GeometrySource != nil && strings.TrimSpace(*g.GeometrySource) == "" {
 		g.GeometrySource = nil
 	}
@@ -142,5 +188,6 @@ func (s *Service) UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry
 		src := GeometrySourceParametric
 		g.GeometrySource = &src
 	}
-	return s.repo.UpdateDimensions(ctx, id, g)
+	newRevision, err := s.repo.UpdateDimensions(ctx, id, g, revision)
+	return newRevision, resolveRevision(err)
 }

@@ -5,6 +5,7 @@ package pim
 
 import (
 	"context"
+	"time"
 	"encoding/json"
 	"errors"
 	"io"
@@ -28,15 +29,16 @@ func (r *stubProductRepo) GetProduct(context.Context, uuid.UUID) (*product.Produ
 	return r.p, nil
 }
 func (r *stubProductRepo) ListProducts(context.Context) ([]product.Product, error) { return nil, nil }
-func (r *stubProductRepo) ListProductsPaginated(context.Context, int, int) ([]product.Product, int, error) {
-	return nil, 0, nil
+func (r *stubProductRepo) ListProductsPage(context.Context, *time.Time, *uuid.UUID, int) ([]product.Product, error) {
+	return nil, nil
 }
+func (r *stubProductRepo) CountProducts(context.Context) (int64, error) { return 0, nil }
 func (r *stubProductRepo) ListBelowReorder(context.Context) ([]product.ReorderAlert, error) {
 	return nil, nil
 }
 func (r *stubProductRepo) UpdateAverageCost(context.Context, uuid.UUID, float64) error { return nil }
-func (r *stubProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64) error {
-	return nil
+func (r *stubProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64, int64) (int64, error) {
+	return 0, nil
 }
 func (r *stubProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float64, float64) error {
 	return nil
@@ -44,11 +46,11 @@ func (r *stubProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float
 func (r *stubProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uuid.UUID) error {
 	return nil
 }
-func (r *stubProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry) error {
-	return nil
+func (r *stubProductRepo) UpdateDimensions(context.Context, uuid.UUID, product.Geometry, int64) (int64, error) {
+	return 0, nil
 }
-func (r *stubProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int) error {
-	return nil
+func (r *stubProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64) (int64, error) {
+	return 0, nil
 }
 
 type stubPIMRepo struct {

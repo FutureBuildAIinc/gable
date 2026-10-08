@@ -113,9 +113,12 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 		}
 
 		for _, item := range items {
-			qty := item.ReorderQty
+			// The reorder targets are scale 4 quantities on the product wire
+			// (C3-1); the unconverted PO line still carries a float quantity,
+			// so the conversion happens here at the boundary.
+			qty := product.QtyFloat(item.ReorderQty)
 			if qty <= 0 {
-				qty = item.Deficit
+				qty = product.QtyFloat(item.Deficit)
 			}
 			if qty <= 0 {
 				qty = 1
