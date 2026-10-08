@@ -84,7 +84,8 @@ func (w *idempotencyResponseWriter) Unwrap() http.ResponseWriter {
 //     wraps inside it and reads the claims it injects.
 //   - the integration API authenticates a shared key and identifies the
 //     caller by its tenant (the X-Tenant-ID header). A tenantless caller
-//     behaves like an anonymous one: dev principal under AUTH_MODE=dev,
+//     behaves like an anonymous one: its own dev:integration principal under
+//     AUTH_MODE=dev, so it never shares the global layer's dev namespace,
 //     uncached outside it.
 func globalIdempotencyPrincipal(r *http.Request) string {
 	if claims := ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
@@ -108,7 +109,11 @@ func integrationIdempotencyPrincipal(r *http.Request) string {
 		return "tenant:" + tenant
 	}
 	if devAuthMode() {
-		return "dev"
+		// Its own principal, never the global layer's dev: the two layers
+		// share the one claim table, and a shared namespace would let an
+		// integration retry meet the ERP layer's stored answer (or collide
+		// with it) under the same key.
+		return "dev:integration"
 	}
 	return ""
 }
@@ -133,13 +138,13 @@ func skipIdempotencyOwnedPrefix(r *http.Request) bool {
 }
 
 // Idempotency returns the global idempotency layer: it covers the ERP API's
-// POST/PUT routes, whose principal (the JWT subject) the auth middleware
+// POST/PUT/PATCH routes, whose principal (the JWT subject) the auth middleware
 // outside it establishes. Portal and integration routes are NOT covered here:
 // their principals are established inside their own auth chains, so they
 // carry IdempotencyForPortalAuth and IdempotencyForIntegrationAuth there, and
 // this layer skips their prefixes so nothing runs twice.
 //
-// Scope rules: POST and PUT only; 2xx and 3xx responses are stored and
+// Scope rules: POST, PUT and PATCH only; 2xx and 3xx responses are stored and
 // replayed (a 4xx or 5xx releases the claim so the client can retry);
 // requests without a key pass through.
 //
@@ -173,8 +178,9 @@ func IdempotencyForPortalAuth(db *database.DB) func(http.Handler) http.Handler {
 // IdempotencyForIntegrationAuth is the integration surface's idempotency
 // layer. Wire it INSIDE the integration auth chain (after the
 // X-Integration-Key check): the claim is scoped on the caller's tenant (the
-// X-Tenant-ID header). Under AUTH_MODE=dev a tenantless caller joins the
-// fixed dev principal; outside dev it passes through uncached.
+// X-Tenant-ID header). Under AUTH_MODE=dev a tenantless caller gets its own
+// dev:integration principal, never the global layer's dev; outside dev it
+// passes through uncached.
 func IdempotencyForIntegrationAuth(db *database.DB) func(http.Handler) http.Handler {
 	return idempotencyLayer(db, integrationIdempotencyPrincipal, nil)
 }
@@ -198,7 +204,7 @@ func idempotencyLayer(db *database.DB, principalOf func(*http.Request) string, s
 			}
 
 			// Only mutating methods participate, as before.
-			if r.Method != http.MethodPost && r.Method != http.MethodPut {
+			if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -233,7 +239,7 @@ func idempotencyLayer(db *database.DB, principalOf func(*http.Request) string, s
 				// a malformed body) and answers 400.
 				var maxBytes *http.MaxBytesError
 				if errors.As(err, &maxBytes) {
-					respondIdempotencyError(w, r, http.StatusRequestEntityTooLarge, codeRequestTooLarge,
+					respondIdempotencyError(w, r, http.StatusRequestEntityTooLarge, codePayloadTooLarge,
 						"Request body exceeds the size limit")
 				} else {
 					respondIdempotencyError(w, r, http.StatusBadRequest, codeBadRequest,
@@ -398,7 +404,7 @@ const (
 	codeIdempotencyKeyReused  = "idempotency_key_reused"
 	codeValidationFailed      = "validation_failed"
 	codeBadRequest            = "bad_request"
-	codeRequestTooLarge       = "request_too_large"
+	codePayloadTooLarge       = "payload_too_large"
 )
 
 // respondIdempotencyError answers with the wire contract's error envelope,
