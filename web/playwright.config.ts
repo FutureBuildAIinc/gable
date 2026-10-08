@@ -4,20 +4,14 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright end-to-end tests for the Gable web stack.
+ * Playwright end-to-end tests for the Gable web stack, run against the real
+ * stack: web/nginx.conf serving the real built bundles on one origin, proxying
+ * /api to `core serve` (AUTH_MODE=dev) over a migrated and seeded Postgres.
  *
- * Two bundles are served by the test server (test-server.js):
- *   http://localhost:5000/        → front-door (micro-app selector)
- *   http://localhost:5000/app/*  → desk (ERP workspace)
- *
- * The test server proxies /api/* to the Go backend (TEST_API_TARGET).
- * Screenshots are written to SHOTS_DIR/r1-8/ (default
- * /home/colton/Desktop/FBHQ/gable-v1/shots/r1-8/).
- *
- * Run with:
- *   BASE_URL=http://localhost:5000 TEST_API_TARGET=http://localhost:8083 \
- *     node test-server.js &
- *   npx playwright test
+ * web/scripts/e2e-stack.sh brings that stack up and down; the CI job runs the
+ * same script. BASE_URL names the nginx origin. SHOTS_DIR is where the
+ * screenshots land. The browser is Playwright's own default install
+ * (`npx playwright install chromium`); no path is hardcoded here.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -25,11 +19,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list']],
+  outputDir: process.env.PW_OUTPUT_DIR ?? 'test-results',
 
   use: {
-    baseURL: process.env.BASE_URL ?? 'http://localhost:5000',
-    trace: 'on-first-retry',
+    baseURL: process.env.BASE_URL ?? 'http://127.0.0.1:18080',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     viewport: { width: 1440, height: 900 },
   },
@@ -39,12 +34,11 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // Use the cached Chromium binary rather than downloading a new headless shell.
-        launchOptions: {
-          executablePath:
-            process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ??
-            '/home/colton/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',
-        },
+        viewport: { width: 1440, height: 900 },
+        // Only when set: a machine whose cache holds a different Chromium revision points here.
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } }
+          : {}),
       },
     },
   ],

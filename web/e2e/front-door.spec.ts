@@ -1,131 +1,147 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 
 /**
- * End-to-end tests for the Gable web stack:
- *   /            → front-door (micro-app selector)
- *   /app/*      → desk (ERP workspace)
- *
- * Tests are run against TEST_BASE_URL (default http://localhost:5000) which
- * serves both bundles from the same origin so sessionStorage auth handoff
- * works exactly as in production.
- *
- * Screenshots are written to SHOTS_DIR/r1-8/ (default
- * /home/colton/Desktop/FBHQ/gable-v1/shots/r1-8/).
+ * End to end against the real stack (see playwright.config.ts):
+ *   exactly /      the front door
+ *   everything else the desk (/home, /quotes/{id}, ...)
+ * Both bundles share one origin, so the sessionStorage handoff works as in
+ * production. The core runs AUTH_MODE=dev over the seeded database.
  */
 
-const BASE_URL = process.env.TEST_BASE_URL ?? 'http://localhost:5000';
-const SHOTS_DIR = process.env.SHOTS_DIR ?? '/home/colton/Desktop/FBHQ/gable-v1/shots/r1-8';
-
-// Ensure screenshots directory exists
+const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
 fs.mkdirSync(SHOTS_DIR, { recursive: true });
 
+interface CatalogApp {
+  key: string;
+  name: string;
+  enabled: boolean;
+}
+
+/** Sign in on the door with the dev sign-in and return the catalog the door fetched. */
+async function signInOnDoor(page: Page, name: string): Promise<CatalogApp[]> {
+  await page.goto('/');
+  await page.getByLabel('Display name').fill(name);
+  const catalog = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/apps' && r.ok());
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  const body = (await (await catalog).json()) as { apps: CatalogApp[] };
+  await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
+  return body.apps;
+}
+
 test.describe('Front door', () => {
-  test('sign-in with test auth, tiles render, desk opens from tile', async ({ page }) => {
-    // ── 1. Front door: sign in with dev auth ────────────────────────────
-    await page.goto(BASE_URL);
-    await expect(page).toHaveTitle(/Gable/i);
+  test('signed out: the sign in card, then tiles that come from GET /api/v1/apps', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveTitle(/Front Door/);
+    await expect(page.getByRole('heading', { name: 'Sign in to Gable' })).toBeVisible();
+    await expect(page.getByLabel('Display name')).toBeVisible();
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'door-signed-out.png') });
 
-    // Wait for the sign-in card to be visible
-    const signInHeading = page.getByRole('heading', { name: /sign in to gable/i });
-    await expect(signInHeading).toBeVisible({ timeout: 10_000 });
+    const apps = await signInOnDoor(page, 'Playwright Door');
 
-    // In dev mode the build shows a display-name input (not a token textarea)
-    const nameInput = page.getByLabel(/display name/i);
-    await expect(nameInput).toBeVisible();
+    // The pinned desk tile, then one tile per enabled app the door knows an entry for.
+    await expect(page.getByRole('button', { name: 'Open Gable Desk' })).toBeVisible();
+    const quote = apps.find((a) => a.key === 'quote');
+    const inventory = apps.find((a) => a.key === 'inventory');
+    expect(quote?.enabled, 'the seeded stack has the quote app enabled').toBe(true);
+    expect(inventory?.enabled, 'the seeded stack has the inventory app enabled').toBe(true);
+    await expect(page.getByRole('button', { name: `Open ${quote!.name}` })).toBeVisible();
+    await expect(page.getByRole('button', { name: `Open ${inventory!.name}` })).toBeVisible();
 
-    await nameInput.fill('Playwright E2E Test');
-    await page.getByRole('button', { name: /sign in/i }).click();
+    // Every tile on the page is the desk tile or comes from the response.
+    const expected = new Set(['Gable Desk', ...apps.filter((a) => a.enabled).map((a) => a.name)]);
+    const labels = await page.getByRole('button', { name: /^Open / }).evaluateAll((els) =>
+      els.map((e) => (e.getAttribute('aria-label') ?? '').replace(/^Open /, '')),
+    );
+    expect(labels.length).toBeGreaterThan(5);
+    for (const l of labels) expect(expected.has(l), `tile "${l}" is in the catalog response`).toBe(true);
 
-    // ── 2. Tiles render ────────────────────────────────────────────────
-    // After sign-in the page shows a greeting and a grid of app tiles
-    const greeting = page.getByText(/good to see you/i);
-    await expect(greeting).toBeVisible({ timeout: 10_000 });
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'door-signed-in.png') });
+  });
 
-    // The desk tile is always pinned first
-    const deskTile = page.getByRole('button', { name: /open gable desk/i });
-    await expect(deskTile).toBeVisible();
+  test('the desk tile opens /home and the desk shell renders', async ({ page }) => {
+    await signInOnDoor(page, 'Playwright Desk');
+    await page.getByRole('button', { name: 'Open Gable Desk' }).click();
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(page.locator('gable-app-shell')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Apps' })).toBeVisible();
+    // The door's session survived the full page navigation: no sign in card, a launcher grid.
+    await expect(page.getByRole('button', { name: 'Open Quotes' })).toBeVisible();
+  });
 
-    // At least one other tile should be present (apps that are enabled)
-    const tiles = page.getByRole('button', { name: /^open /i });
+  test('a tile for an app opens that app inside the desk', async ({ page }) => {
+    const apps = await signInOnDoor(page, 'Playwright Tile');
+    const quote = apps.find((a) => a.key === 'quote')!;
+    await page.getByRole('button', { name: `Open ${quote.name}` }).click();
+    await expect(page).toHaveURL(/\/quotes$/);
+    await expect(page.locator('gable-app-shell')).toBeVisible();
+  });
+
+  test('tiles are filtered by the roles in the session', async ({ page }) => {
+    // A token session for a sales user (unsigned: the client never verifies, and the
+    // catalog is stubbed, so no core call depends on it).
+    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const token = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: 'sales-user', email: 'sales@example.test', roles: ['sales'], exp })}.sig`;
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('gable.auth.session.v1', JSON.stringify({ v: 1, kind: 'token', token: t }));
+    }, token);
+    await page.route('**/api/v1/apps', (route) =>
+      route.fulfill({
+        json: {
+          apps: [
+            { key: 'quote', name: 'Quotes', summary: '', category: 'Sales', core: true, enabled: true, depends_on: [] },
+            { key: 'pos', name: 'Point of Sale', summary: '', category: 'Front of House', core: true, enabled: true, depends_on: [] },
+            { key: 'techadmin', name: 'Tech Admin', summary: '', category: 'Platform', core: true, enabled: true, depends_on: [] },
+          ],
+        },
+      }),
+    );
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Open Gable Desk' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Quotes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Point of Sale' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open Tech Admin' })).toHaveCount(0);
+  });
+});
+
+test.describe('Desk', () => {
+  test('/home renders the launcher grid at 1440x900', async ({ page }) => {
+    await signInOnDoor(page, 'Playwright Home');
+    await page.goto('/home');
+    await expect(page.locator('gable-app-shell')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Apps' })).toHaveAttribute('aria-selected', 'true');
+    const tiles = page.getByRole('button', { name: /^Open / });
     await expect(tiles.first()).toBeVisible();
-
-    // ── 3. Open desk from its tile ──────────────────────────────────────
-    await deskTile.click();
-
-    // The desk is at /app/ so we should end up there
-    await expect(page).toHaveURL(/\/app\//);
-
-    // The desk home page should render something recognisable
-    // (the home grid shows module cards — at minimum the page should load)
-    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {
-      // Network may not go idle if the app polls — the URL check is sufficient
-    });
-
-    // ── 4. Screenshot: front door after sign-in ──────────────────────────
-    await page.screenshot({
-      path: path.join(SHOTS_DIR, 'front-door-signed-in.png'),
-      fullPage: true,
-    });
+    expect(await tiles.count()).toBeGreaterThan(5);
+    await expect(page.getByRole('button', { name: 'Open Quotes' })).toBeVisible();
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'desk-home.png') });
   });
 
-  test('record URL opens directly without going through home first', async ({ page }) => {
-    // Pre-condition: sign in first so the desk has an authenticated session.
-    await page.goto(BASE_URL);
-    const nameInput = page.getByLabel(/display name/i);
-    await expect(nameInput).toBeVisible();
-    await nameInput.fill('Record Route E2E');
-    await page.getByRole('button', { name: /sign in/i }).click();
-    await expect(page.getByText(/good to see you/i)).toBeVisible({ timeout: 10_000 });
+  test('/quotes/<seeded id> opens directly and renders that quote', async ({ page, request }) => {
+    const list = await request.get('/api/v1/quotes?limit=5');
+    expect(list.ok()).toBe(true);
+    const quotes = (await list.json()).data as { id: string; customer_name: string }[];
+    expect(quotes.length).toBeGreaterThan(0);
+    const q = quotes[0];
 
-    // Navigate directly to a quote record URL — this is the SPA deep-link
-    // that the nginx SPA fallback makes work in production.
-    await page.goto(`${BASE_URL}/app/quotes/1`);
-
-    // The desk should render this record without a full-page reload.
-    // Either we see the quote page (exact content varies by what demo data
-    // the seeded DB contains) or we see the desk shell with some content.
-    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
-    await expect(page).toHaveURL(/\/app\/quotes\/1/);
-
-    // The desk shell should be present (sidebar nav, top bar, or main content)
-    const body = page.locator('body');
-    await expect(body).not.toBeEmpty();
-
-    // ── Screenshot: record route ────────────────────────────────────────
-    await page.screenshot({
-      path: path.join(SHOTS_DIR, 'desk-quote-record.png'),
-      fullPage: true,
-    });
+    await signInOnDoor(page, 'Playwright Record');
+    await page.goto(`/quotes/${q.id}`);
+    await expect(page).toHaveURL(new RegExp(`/quotes/${q.id}$`));
+    await expect(page.getByRole('heading', { name: `Quote #${q.id.slice(0, 8)}` })).toBeVisible();
+    if (q.customer_name) await expect(page.getByText(q.customer_name).first()).toBeVisible();
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'desk-quote-record.png') });
   });
 
-  test('desk /home is reachable and shows the home grid', async ({ page }) => {
-    // Sign in via the front door
-    await page.goto(BASE_URL);
-    const nameInput = page.getByLabel(/display name/i);
-    await expect(nameInput).toBeVisible();
-    await nameInput.fill('Home Grid E2E');
-    await page.getByRole('button', { name: /sign in/i }).click();
-    await expect(page.getByText(/good to see you/i)).toBeVisible({ timeout: 10_000 });
-
-    // Navigate to the desk home
-    await page.goto(`${BASE_URL}/app/home`);
-    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
-    await expect(page).toHaveURL(/\/app\/home/);
-
-    // The desk home should show module cards (the grid that replaces the
-    // old monolithic home page).
-    const body = page.locator('body');
-    await expect(body).not.toBeEmpty();
-
-    // ── Screenshot: desk home ────────────────────────────────────────────
-    await page.screenshot({
-      path: path.join(SHOTS_DIR, 'desk-home.png'),
-      fullPage: true,
-    });
+  test('a record URL opened cold, with no session, does not 404 at the server', async ({ page, request }) => {
+    const q = ((await (await request.get('/api/v1/quotes?limit=1')).json()).data as { id: string }[])[0];
+    const res = await page.goto(`/quotes/${q.id}`);
+    expect(res?.status()).toBe(200);
+    await expect(page.locator('gable-app-shell, gable-not-found').first()).toBeVisible();
+    await expect(page.locator('gable-not-found')).toHaveCount(0);
   });
 });
