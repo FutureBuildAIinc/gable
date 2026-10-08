@@ -8,6 +8,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
+	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
@@ -71,4 +72,15 @@ func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handle
 // purchase order is held to the caller's wall before the matcher runs.
 func (w *branchWall) matching(mux *http.ServeMux, svc *matching.Service) {
 	matching.NewHandler(svc).WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "finance"))
+}
+
+// documents mounts the document print and email routes behind the branch
+// middleware: a print or an email acts on an invoice or an order addressed by
+// its path id, and the invoice and order repositories already filter their
+// reads on the branch the middleware settles, so a caller held to branch A
+// finds branch B's invoice or pick ticket a 404. (The record checks proper,
+// 403 on a foreign record, arrive with the invoice and order seam; the
+// missing header case rides with it.)
+func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
+	h.RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
 }

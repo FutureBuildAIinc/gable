@@ -435,7 +435,7 @@ func Run() {
 	// Document Module
 	docSvc := document.NewService(productRepo)
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc)
-	docHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
+	wall.documents(mux, docHandler)
 
 	// Sales Tax Module (exemptions + Avalara when configured; wired before
 	// Payment/POS because both consume the tax service).

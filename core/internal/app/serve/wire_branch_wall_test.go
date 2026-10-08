@@ -21,11 +21,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/gl"
+	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
+	"github.com/gablelbm/gable/internal/notification"
+	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -68,6 +76,9 @@ type wallFixture struct {
 	vendorID         uuid.UUID
 	poA, poB         uuid.UUID
 	poLineA, poLineB uuid.UUID
+	docCust          uuid.UUID
+	orderA, orderB   uuid.UUID
+	invA, invB       uuid.UUID
 	db               *database.DB
 }
 
@@ -75,7 +86,8 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	t.Helper()
 	ctx := context.Background()
 	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New(),
-		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New()}
+		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
+		docCust: uuid.New(), orderA: uuid.New(), orderB: uuid.New(), invA: uuid.New(), invB: uuid.New()}
 	for _, r := range []struct {
 		id     uuid.UUID
 		typ    string
@@ -109,6 +121,35 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 			t.Fatalf("seed purchase order line: %v", err)
 		}
 	}
+	// One invoice and one pick ticket per branch (an invoice rides its
+	// order), so the document print and email routes act on real records of
+	// each branch. The customer carries an email so the email route reaches
+	// its 202 on the caller's own branch.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, email, primary_branch_id)
+		VALUES ($1, 'wall doc cust', $2, 'wall-doc@example.com', $3)`,
+		f.docCust, "WLDOC-"+f.docCust.String()[:8], f.branchA); err != nil {
+		t.Fatalf("seed document customer: %v", err)
+	}
+	// The customer read the document routes make is branch walled through
+	// customer_branches, so the link row is part of the seed.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`,
+		f.docCust, f.branchA); err != nil {
+		t.Fatalf("seed document customer branch: %v", err)
+	}
+	for _, r := range []struct{ order, inv, branch uuid.UUID }{
+		{f.orderA, f.invA, f.branchA}, {f.orderB, f.invB, f.branchB},
+	} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount) VALUES ($1, $2, $3, 'CONFIRMED', 10)`,
+			r.order, f.docCust, r.branch); err != nil {
+			t.Fatalf("seed order: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO invoices (id, order_id, customer_id, status, total_amount, branch_id) VALUES ($1, $2, $3, 'UNPAID', 10, $4)`,
+			r.inv, r.order, f.docCust, r.branch); err != nil {
+			t.Fatalf("seed invoice: %v", err)
+		}
+	}
 	for _, sub := range []string{"u-a"} {
 		if _, err := db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, sub, f.branchA); err != nil {
 			t.Fatalf("seed grant: %v", err)
@@ -116,6 +157,10 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'u-a'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoices WHERE id IN ($1, $2)`, f.invA, f.invB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id IN ($1, $2)`, f.orderA, f.orderB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, f.docCust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, f.docCust)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id IN ($1, $2)`, f.poA, f.poB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id IN ($1, $2)`, f.poA, f.poB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, f.vendorID)
@@ -137,6 +182,13 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.purchaseOrders(mux, purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil))
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
+	docSvc := document.NewService(product.NewRepository(db))
+	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
+	accountSvc := account.NewService(account.NewRepository(db), db, slog.Default())
+	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db)
+	orderSvc := order.NewService(order.NewRepository(db), inventory.NewService(inventory.NewRepository(db)), nil, customer.NewService(customer.NewRepository(db)), nil, db)
+	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))
+	wall.documents(mux, docHandler)
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -502,6 +554,36 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 		{"transition foreign quote, no header", "POST", "/api/v1/quotes/" + quoteB + "/transitions", `{"to":"sent","revision":1}`, "sales", "u-a", "", no},
 	} {
 		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// The document print and email routes run behind the branch middleware, so
+// the branch filters the invoice and order repositories already carry apply
+// to every caller: a sales or finance user held to branch A finds branch B's
+// invoice or pick ticket a 404 and can read, print and email only its own
+// branch's.
+func TestBranchWall_DocumentRoutes(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	const ok = http.StatusOK
+	for _, c := range []struct {
+		name, method, path, role, sub, header string
+		want                                  int
+	}{
+		{"sales prints foreign invoice", "GET", "/api/v1/documents/print/invoice/" + f.invB.String(), "sales", "u-a", A, http.StatusNotFound},
+		{"finance emails foreign invoice", "POST", "/api/v1/invoices/" + f.invB.String() + "/email", "finance", "u-a", A, http.StatusNotFound},
+		{"sales prints foreign pick ticket", "GET", "/api/v1/documents/print/pickticket/" + f.orderB.String(), "sales", "u-a", A, http.StatusNotFound},
+		{"finance prints foreign pick ticket", "GET", "/api/v1/documents/print/pickticket/" + f.orderB.String(), "finance", "u-a", A, http.StatusNotFound},
+		{"sales prints own invoice", "GET", "/api/v1/documents/print/invoice/" + f.invA.String(), "sales", "u-a", A, ok},
+		{"finance emails own invoice", "POST", "/api/v1/invoices/" + f.invA.String() + "/email", "finance", "u-a", A, http.StatusAccepted},
+		{"sales prints own pick ticket", "GET", "/api/v1/documents/print/pickticket/" + f.orderA.String(), "sales", "u-a", A, ok},
+		{"admin prints foreign invoice", "GET", "/api/v1/documents/print/invoice/" + f.invB.String(), "admin", "boss", "", ok},
+	} {
+		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
 	}
