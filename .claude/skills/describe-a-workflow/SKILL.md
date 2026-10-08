@@ -33,7 +33,7 @@ grep -rn "status" core/internal/order/model.go | head -30
 Useful orientation reads:
 
 - [`docs/architecture.md`](../../../docs/architecture.md) § 3 "Module Boundaries (as built)"
-- [`CLAUDE.md`](../../../CLAUDE.md) § "Tier 1 Backlog" — the current candidate work items
+- [`AGENTS.md`](../../../AGENTS.md) § "Tier 1 Backlog" — the current candidate work items
   (will-call, pick lists, credit holds are all live candidates; if their workflow matches one,
   say so and reference it)
 - The relevant module's `model.go` for the statuses and fields that already exist
@@ -112,7 +112,7 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 **Contributed by:** <name / role / yard type — "counter lead, 3-location independent, BC">
 **Date:** <yyyy-mm-dd>
 **Closest existing module:** `core/internal/<module>` (or "none — greenfield")
-**Related backlog item:** <CLAUDE.md Tier 1 item, or "none">
+**Related backlog item:** <AGENTS.md Tier 1 item, or "none">
 
 ## 1 · What this is, in one paragraph
 Plain language. No jargon a maintainer in another country wouldn't know. Define the local

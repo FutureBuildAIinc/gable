@@ -5,7 +5,7 @@
 
 @AGENTS.md
 
-Everything an agent needs to know about this repository is in `AGENTS.md`, imported above. This file holds only what is specific to Claude Code.
+Everything an agent needs to know about this repository is in `AGENTS.md`, imported above: the stack, conventions, pre-flight checks, the money convention and other gotchas, and the backlog. Cite those sections as `AGENTS.md`. This file holds only what is specific to Claude Code.
 
 ## Contributor Agent Kit (`.claude/`)
 

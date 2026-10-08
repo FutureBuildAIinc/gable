@@ -45,7 +45,7 @@ already covered it:
 3. **`customer`** — the credit-limit gate feeds order blocking.
 4. **`quote`** — line totals, discounts, expiry.
 5. **`portal`** — the dollars-vs-cents boundary with the ERP side (see the money table in
-   `CLAUDE.md`); a test here guards a bug class that has already shipped once.
+   `AGENTS.md`); a test here guards a bug class that has already shipped once.
 6. **Frontend pages and services** — `web/apps/desk/src/lib/utils.ts` (`formatCents`), the router, and
    `fetchClient` already have suites; the page components and the remaining services under
    `web/apps/desk/src/services/` do not.

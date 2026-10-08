@@ -23,7 +23,7 @@ The docs surface:
 |---|---|
 | `README.md` | The project pitch, stack table, quickstart, licensing, contributing pointers |
 | `CONTRIBUTING.md` | Build & run, branch model, PR workflow, pre-flight, CLA |
-| `CLAUDE.md` | Stack, conventions, gotchas, money conventions, backlog. The deepest doc. |
+| `AGENTS.md` | Stack, conventions, gotchas, money conventions, backlog. The deepest doc. |
 | `SECURITY.md` | Private disclosure, supported branches, the `AUTH_MODE=dev` warning |
 | `LICENSE-MAP.md` | Directory → license mapping |
 | `CODE_OF_CONDUCT.md` | Contributor Covenant |
@@ -93,12 +93,12 @@ These are real inconsistencies that a docs contributor can legitimately fix:
   **not implemented** — no NATS client is imported in Go code. Anything describing the event
   bus as working is wrong. `docs/architecture.md` labels its forward-looking sections; if you
   find one that isn't labelled, label it.
-- **Money conventions.** `CLAUDE.md` says money-as-cents is *the target, not current reality*
+- **Money conventions.** `AGENTS.md` says money-as-cents is *the target, not current reality*
   — ERP orders/invoices and `account` use `int64` cents while portal, quotes, and DailyTill
   use `float64` dollars. Any doc that states "money is cents" flatly is overstating it.
 - **Branch target.** `CONTRIBUTING.md`, the PR template, and `README.md` all say contributions
-  target **`staging`**. `CLAUDE.md`'s branch table still says "Community PRs target
-  [`community`]". That's stale — but `CLAUDE.md` is a high-traffic file, so fix it in its own
+  target **`staging`**. `AGENTS.md`'s branch table still says "Community PRs target
+  [`community`]". That's stale — but `AGENTS.md` is a high-traffic file, so fix it in its own
   small PR with the evidence, don't bundle it.
 - **Coverage claims.** Check them against reality rather than repeating them:
   `find web/apps/desk/src -name '*.test.ts' | wc -l` and, for the backend,
