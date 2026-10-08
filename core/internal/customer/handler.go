@@ -31,15 +31,28 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers every route behind the first guard. A second guard,
+// when given, replaces it on the writes of the payment terms master (creating
+// and editing terms is a finance act, choosing them is a sales one).
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
-	guard := func(handler http.HandlerFunc) http.HandlerFunc {
-		if len(roleGuard) > 0 && roleGuard[0] != nil {
+	guardWith := func(g func(http.Handler) http.Handler) func(http.HandlerFunc) http.HandlerFunc {
+		return func(handler http.HandlerFunc) http.HandlerFunc {
+			if g == nil {
+				return handler
+			}
 			return func(w http.ResponseWriter, r *http.Request) {
-				roleGuard[0](handler).ServeHTTP(w, r)
+				g(handler).ServeHTTP(w, r)
 			}
 		}
-		return handler
 	}
+	var first, second func(http.Handler) http.Handler
+	if len(roleGuard) > 0 {
+		first, second = roleGuard[0], roleGuard[0]
+	}
+	if len(roleGuard) > 1 && roleGuard[1] != nil {
+		second = roleGuard[1]
+	}
+	guard, termsWrite := guardWith(first), guardWith(second)
 
 	mux.HandleFunc("GET /api/v1/customers", guard(h.HandleListCustomers))
 	mux.HandleFunc("POST /api/v1/customers", guard(h.HandleCreateCustomer))
@@ -56,9 +69,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PUT /api/v1/ship-tos/{id}", guard(h.HandleUpdateShipTo))
 
 	mux.HandleFunc("GET /api/v1/payment-terms", guard(h.HandleListTerms))
-	mux.HandleFunc("POST /api/v1/payment-terms", guard(h.HandleCreateTerms))
+	mux.HandleFunc("POST /api/v1/payment-terms", termsWrite(h.HandleCreateTerms))
 	mux.HandleFunc("GET /api/v1/payment-terms/{id}", guard(h.HandleGetTerms))
-	mux.HandleFunc("PUT /api/v1/payment-terms/{id}", guard(h.HandleUpdateTerms))
+	mux.HandleFunc("PUT /api/v1/payment-terms/{id}", termsWrite(h.HandleUpdateTerms))
 
 	mux.HandleFunc("GET /api/v1/customers/{customerId}/contacts", guard(h.HandleListContacts))
 	mux.HandleFunc("POST /api/v1/customers/{customerId}/contacts", guard(h.HandleCreateContact))

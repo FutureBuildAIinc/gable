@@ -298,7 +298,7 @@ func Run() {
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db)
 	customerHandler := customer.NewHandler(customerSvc)
-	customerHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
+	customerHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"), scoped("admin", "owner", "finance"))
 
 	// Sales Team Module
 	salesTeamRepo := salesteam.NewRepository(db)

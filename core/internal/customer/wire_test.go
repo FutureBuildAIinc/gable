@@ -1391,3 +1391,52 @@ func TestMachineKeyVocabularyNamesEveryCustomerRoute(t *testing.T) {
 	}
 	_ = httpx.CodeConflict
 }
+
+// Every route sits behind the guard the module is registered with, and the
+// writes of the payment terms master behind the second, narrower one.
+func TestRegisterRoutes_GuardsWrapEveryRoute(t *testing.T) {
+	svc := customer.NewService(nil)
+	h := customer.NewHandler(svc)
+	record := func(label string, seen map[string]string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen[r.Method+" "+r.URL.Path] = label
+				w.WriteHeader(http.StatusTeapot)
+			})
+		}
+	}
+	seen := map[string]string{}
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux, record("sales", seen), record("finance", seen))
+
+	id := uuid.NewString()
+	for _, route := range []struct{ method, path, want string }{
+		{"GET", "/api/v1/customers", "sales"},
+		{"POST", "/api/v1/customers", "sales"},
+		{"GET", "/api/v1/customers/" + id, "sales"},
+		{"PUT", "/api/v1/customers/" + id, "sales"},
+		{"PATCH", "/api/v1/customers/" + id + "/salesperson", "sales"},
+		{"GET", "/api/v1/customers/" + id + "/escalation-policy", "sales"},
+		{"PUT", "/api/v1/customers/" + id + "/escalation-policy", "sales"},
+		{"GET", "/api/v1/price_levels", "sales"},
+		{"GET", "/api/v1/customers/" + id + "/ship-tos", "sales"},
+		{"POST", "/api/v1/customers/" + id + "/ship-tos", "sales"},
+		{"GET", "/api/v1/ship-tos/" + id, "sales"},
+		{"PUT", "/api/v1/ship-tos/" + id, "sales"},
+		{"GET", "/api/v1/payment-terms", "sales"},
+		{"GET", "/api/v1/payment-terms/" + id, "sales"},
+		{"POST", "/api/v1/payment-terms", "finance"},
+		{"PUT", "/api/v1/payment-terms/" + id, "finance"},
+		{"GET", "/api/v1/customers/" + id + "/contacts", "sales"},
+		{"POST", "/api/v1/customers/" + id + "/contacts", "sales"},
+		{"GET", "/api/v1/contacts/" + id, "sales"},
+		{"PUT", "/api/v1/contacts/" + id, "sales"},
+		{"DELETE", "/api/v1/contacts/" + id, "sales"},
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
+		if rec.Code != http.StatusTeapot || seen[route.method+" "+route.path] != route.want {
+			t.Errorf("%s %s: status %d, guarded by %q, want the %s guard", route.method, route.path, rec.Code, seen[route.method+" "+route.path], route.want)
+		}
+	}
+}
