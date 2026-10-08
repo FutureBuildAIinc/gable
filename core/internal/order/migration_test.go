@@ -313,3 +313,129 @@ func TestMigration092_BackfillsRowsThatExist(t *testing.T) {
 		t.Errorf("walk-in order currency after the second apply = %q, want CAD", got)
 	}
 }
+
+// RULE (ADR 0005 section 13: every step is idempotent): 092 applies a second
+// time on a migrated database without error and without clobbering what the
+// first apply and the application have written since: a provider priced
+// order keeps its null rate, an allocation the engine made stays, the
+// subledger type CHECK is still there, and the constraint names exist once.
+// ADR 0005 5.1 gives the new column defaults: tax_source BRANCH_RATE, and
+// order_lines.description is NOT NULL (2.2).
+func TestMigration092_IsIdempotent(t *testing.T) {
+	conn, _ := scratchDB(t)
+	before, target := migrationFiles(t)
+	for _, f := range before {
+		apply(t, conn, f)
+	}
+	ctx := context.Background()
+	branch := `(SELECT id FROM locations LIMIT 1)`
+	seed := fmt.Sprintf(`
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+			VALUES ('00000000-0000-0000-0000-00000000ca02','Usd Co','MIG2',%[1]s);
+		INSERT INTO products (id, sku, description, uom_primary, base_price)
+			VALUES ('00000000-0000-0000-0000-00000000de01','MIG-STUD','2x4 stud','PCS',5.50);
+		INSERT INTO orders (id, customer_id, status, total_amount, created_at, branch_id) VALUES
+			('00000000-0000-0000-0000-00000000cc01','00000000-0000-0000-0000-00000000ca02','CONFIRMED',110,now(),%[1]s);
+		INSERT INTO order_lines (id, order_id, product_id, quantity, price_each, created_at)
+			VALUES ('00000000-0000-0000-0000-00000000e001','00000000-0000-0000-0000-00000000cc01','00000000-0000-0000-0000-00000000de01',10,5.50,now());
+	`, branch)
+	if _, err := conn.Exec(ctx, seed); err != nil {
+		t.Fatalf("legacy rows: %v", err)
+	}
+	apply(t, conn, target)
+
+	// What the application writes after the first apply.
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO orders (id, customer_id, status, total_amount, branch_id, tax_source, tax_rate, delivery_type, currency)
+			VALUES ('00000000-0000-0000-0000-00000000cc02','00000000-0000-0000-0000-00000000ca02','CONFIRMED',110,`+branch+`,'PROVIDER',NULL,'PICKUP','USD');
+		UPDATE order_lines SET quantity_allocated = 3 WHERE id = '00000000-0000-0000-0000-00000000e001'`); err != nil {
+		t.Fatalf("post migration writes: %v", err)
+	}
+
+	apply(t, conn, target) // the second apply
+
+	if rate := scalar[*string](t, conn, `SELECT tax_rate::text FROM orders WHERE id = '00000000-0000-0000-0000-00000000cc02'`); rate != nil {
+		t.Errorf("a provider priced order's tax_rate = %q after the second apply, want null", *rate)
+	}
+	if alloc := scalar[string](t, conn, `SELECT quantity_allocated::text FROM order_lines WHERE id = '00000000-0000-0000-0000-00000000e001'`); alloc != "3.0000" {
+		t.Errorf("an allocation reads %s after the second apply, want the 3.0000 the engine wrote", alloc)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pg_constraint WHERE conname = 'customer_transactions_type_check' AND conrelid = 'customer_transactions'::regclass`); n != 1 {
+		t.Errorf("%d customer_transactions_type_check constraints after the second apply, want 1", n)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO customer_transactions (customer_id, type, amount, balance_after)
+		VALUES ('00000000-0000-0000-0000-00000000ca02', 'BOGUS', 1, 1)`); err == nil {
+		t.Error("the subledger accepted a type outside the eight values after the second apply")
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM pg_constraint WHERE conname = 'orders_number_key'`); n != 1 {
+		t.Errorf("%d orders_number_key constraints, want 1", n)
+	}
+	if n := scalar[int](t, conn, `SELECT count(*) FROM orders`); n != 2 {
+		t.Errorf("%d orders after the second apply, want the 2 written", n)
+	}
+
+	// 5.1: the DEFAULT for a raw writer is BRANCH_RATE; history is LEGACY.
+	if _, err := conn.Exec(ctx, `INSERT INTO orders (id, customer_id, status, total_amount, branch_id, delivery_type, currency)
+		VALUES ('00000000-0000-0000-0000-00000000cc03','00000000-0000-0000-0000-00000000ca02','DRAFT',0,`+branch+`,'PICKUP','USD')`); err != nil {
+		t.Fatalf("a raw order insert: %v", err)
+	}
+	if src := scalar[string](t, conn, `SELECT tax_source FROM orders WHERE id = '00000000-0000-0000-0000-00000000cc03'`); src != "BRANCH_RATE" {
+		t.Errorf("a raw writer's tax_source = %s, want the 5.1 default BRANCH_RATE", src)
+	}
+	if src := scalar[string](t, conn, `SELECT tax_source FROM orders WHERE id = '00000000-0000-0000-0000-00000000cc01'`); src != "LEGACY" {
+		t.Errorf("a historic order's tax_source = %s, want LEGACY", src)
+	}
+	// 2.2: description is NOT NULL on every line.
+	if nullable := scalar[string](t, conn, `SELECT is_nullable FROM information_schema.columns WHERE table_name = 'order_lines' AND column_name = 'description'`); nullable != "NO" {
+		t.Errorf("order_lines.description is_nullable = %s, want NO", nullable)
+	}
+}
+
+// RULE (review P3-15): a legacy order line the new shape cannot hold (a
+// quantity of zero or below, a negative price) stops 092 with a message that
+// names the rows and the remedy, not a bare order_lines_shape violation, and
+// the whole migration rolls back.
+func TestMigration092_NamesLegacyLinesItCannotHold(t *testing.T) {
+	conn, _ := scratchDB(t)
+	before, target := migrationFiles(t)
+	for _, f := range before {
+		apply(t, conn, f)
+	}
+	ctx := context.Background()
+	branch := `(SELECT id FROM locations LIMIT 1)`
+	if _, err := conn.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+			VALUES ('00000000-0000-0000-0000-00000000ca02','Usd Co','MIG2',%[1]s);
+		INSERT INTO products (id, sku, description, uom_primary, base_price)
+			VALUES ('00000000-0000-0000-0000-00000000de01','MIG-STUD','2x4 stud','PCS',5.50);
+		INSERT INTO orders (id, customer_id, status, total_amount, created_at, branch_id) VALUES
+			('00000000-0000-0000-0000-00000000cc01','00000000-0000-0000-0000-00000000ca02','DRAFT',0,now(),%[1]s);
+		INSERT INTO order_lines (id, order_id, product_id, quantity, price_each, created_at) VALUES
+			('00000000-0000-0000-0000-00000000e001','00000000-0000-0000-0000-00000000cc01','00000000-0000-0000-0000-00000000de01',0,5.50,now()),
+			('00000000-0000-0000-0000-00000000e002','00000000-0000-0000-0000-00000000cc01','00000000-0000-0000-0000-00000000de01',2,-1.00,now());
+	`, branch)); err != nil {
+		t.Fatalf("legacy rows: %v", err)
+	}
+	sql, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(ctx, string(sql))
+	_ = tx.Rollback(ctx)
+	if err == nil {
+		t.Fatal("092 applied over a zero quantity line")
+	}
+	msg := err.Error()
+	for _, want := range []string{"092", "order_lines", "quantity", "00000000-0000-0000-0000-00000000e001", "price", "00000000-0000-0000-0000-00000000e002"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the error does not name %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "order_lines_shape") {
+		t.Errorf("the error is the bare shape violation, not the preflight: %s", msg)
+	}
+}

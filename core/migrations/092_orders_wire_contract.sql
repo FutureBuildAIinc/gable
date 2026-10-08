@@ -35,8 +35,30 @@
 --      product_id drops NOT NULL behind the per type CHECKs.
 --   8  the keyset index for the list's ordering.
 --
--- Every step is idempotent; every backfill reads only columns an earlier step
--- made NOT NULL.
+-- Every step is idempotent: a second apply changes nothing the first apply
+-- or the application wrote since (the one time backfills of section 7 run
+-- only on the apply that adds their columns); every backfill reads only
+-- columns an earlier step made NOT NULL.
+
+-- 0. Preflight. The new line shape (ADR 0005 2.2) needs a quantity above
+-- zero and a price of zero or more on every product line. The old service
+-- refused anything else but the database never did, so a legacy row can hold
+-- one; the bare order_lines_shape violation it would end in names nothing.
+-- This stops the migration, rolled back whole, naming the rows.
+DO $$
+DECLARE bad TEXT;
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = 'order_lines' AND column_name = 'price_each') THEN
+        SELECT string_agg(b.id::text || ' (quantity ' || b.quantity::text || ', price ' || b.price_each::text || ')', '; ' ORDER BY b.id)
+        INTO bad
+        FROM (SELECT id, quantity, price_each FROM order_lines
+              WHERE quantity <= 0 OR price_each < 0 ORDER BY id LIMIT 20) b;
+        IF bad IS NOT NULL THEN
+            RAISE EXCEPTION '092: order_lines rows that the new line shape cannot hold (a quantity of zero or below, or a negative price): %. The old service refused these but the database did not. Correct or delete them, then migrate again.', bad;
+        END IF;
+    END IF;
+END $$;
 
 -- 1. created_at and revision.
 UPDATE orders SET created_at = COALESCE(updated_at, NOW()) WHERE created_at IS NULL;
@@ -71,7 +93,10 @@ SELECT setval('order_number_seq',
 
 ALTER TABLE orders ALTER COLUMN number SET DEFAULT order_next_number();
 ALTER TABLE orders ALTER COLUMN number SET NOT NULL;
-ALTER TABLE orders ADD CONSTRAINT orders_number_key UNIQUE (number);
+DO $$ BEGIN
+    ALTER TABLE orders ADD CONSTRAINT orders_number_key UNIQUE (number);
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
 
 -- 3. Currency and the ledger vocabulary.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS currency CHAR(3);
@@ -107,16 +132,22 @@ ALTER TABLE gl_journal_entries ADD CONSTRAINT gl_journal_entries_source_check
 
 -- customer_transactions.type: the enum cannot grow inside the transaction
 -- that would use its new value, so the CHECK becomes text (ADR 0005 9.3).
-ALTER TABLE customer_transactions RENAME COLUMN type TO type_old;
-ALTER TABLE customer_transactions ADD COLUMN IF NOT EXISTS type TEXT;
-UPDATE customer_transactions SET type = type_old::text WHERE type IS NULL;
-ALTER TABLE customer_transactions ALTER COLUMN type SET NOT NULL;
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = 'customer_transactions'
+                 AND column_name = 'type' AND udt_name = 'transaction_type') THEN
+        ALTER TABLE customer_transactions RENAME COLUMN type TO type_old;
+        ALTER TABLE customer_transactions ADD COLUMN type TEXT;
+        UPDATE customer_transactions SET type = type_old::text;
+        ALTER TABLE customer_transactions ALTER COLUMN type SET NOT NULL;
+        ALTER TABLE customer_transactions DROP COLUMN type_old;
+    END IF;
+END $$;
 DO $$ BEGIN
     ALTER TABLE customer_transactions ADD CONSTRAINT customer_transactions_type_check
         CHECK (type IN ('INVOICE','PAYMENT','ADJUSTMENT','REFUND','CREDIT_MEMO','DISCOUNT','WRITE_OFF','REVERSAL'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-ALTER TABLE customer_transactions DROP COLUMN type_old;
 DROP TYPE IF EXISTS transaction_type;
 -- The subledger's existing writers (account.PostTransaction) do not name a
 -- currency yet; the column takes the dealer default until the AR core
@@ -130,7 +161,8 @@ BEGIN
     END IF;
     EXECUTE format('ALTER TABLE customer_transactions ADD COLUMN IF NOT EXISTS currency CHAR(3) NOT NULL DEFAULT %L', default_code);
 END $$;
-UPDATE customer_transactions SET currency = (SELECT value FROM system_settings WHERE key = 'currency.default');
+-- (the DEFAULT above fills every existing row; no UPDATE, which a second apply
+-- would turn into a clobber of the currencies written since)
 ALTER TABLE customer_transactions ADD COLUMN IF NOT EXISTS source_kind TEXT;
 
 -- 4. delivery_type: DELIVERY where a deliveries row or a scheduled date
@@ -164,7 +196,10 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS subtotal NUMERIC(12, 2) NOT NULL DEF
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(9, 6);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_exempt BOOLEAN NOT NULL DEFAULT FALSE;
+-- Historic rows take LEGACY from the column's first DEFAULT; the DEFAULT a
+-- raw writer gets afterwards is BRANCH_RATE (ADR 0005 5.1).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_source TEXT NOT NULL DEFAULT 'LEGACY';
+ALTER TABLE orders ALTER COLUMN tax_source SET DEFAULT 'BRANCH_RATE';
 DO $$ BEGIN
     ALTER TABLE orders ADD CONSTRAINT orders_tax_source_check
         CHECK (tax_source IN ('EXEMPT', 'PROVIDER', 'SHIP_TO_RATE', 'BRANCH_RATE', 'LEGACY'));
@@ -175,8 +210,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 -- Historic rows carry no tax estimate (nothing computed one): the subtotal
 -- is what the total was, tax 0, and the source says LEGACY so no rule is
 -- read from a stored zero.
-UPDATE orders SET subtotal = total_amount WHERE subtotal = 0 AND tax_amount = 0;
-UPDATE orders SET tax_rate = 0 WHERE tax_rate IS NULL;
+UPDATE orders SET subtotal = total_amount WHERE subtotal = 0 AND tax_amount = 0 AND tax_source = 'LEGACY';
+UPDATE orders SET tax_rate = 0 WHERE tax_rate IS NULL AND tax_source = 'LEGACY';
 
 ALTER TABLE orders ALTER COLUMN total_amount TYPE NUMERIC(12, 2);
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
@@ -233,6 +268,15 @@ FROM (VALUES
 ON CONFLICT (code) DO NOTHING;
 
 -- 7. order_lines: the shared line shape of ADR 0005 2.2.
+-- The backfills that read history (positions, the QUOTE source, the
+-- allocation quantities) run on the apply that adds their columns only: a
+-- second apply must not overwrite what the application has written since.
+DROP TABLE IF EXISTS _m092_first_apply;
+CREATE TEMP TABLE _m092_first_apply AS
+SELECT NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema() AND table_name = 'order_lines'
+                     AND column_name = 'quantity_allocated') AS first_apply;
+
 UPDATE order_lines SET created_at = NOW() WHERE created_at IS NULL;
 ALTER TABLE order_lines ALTER COLUMN created_at SET NOT NULL;
 
@@ -264,7 +308,12 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS quantity_fulfilled NUMERIC(12, 
 -- price_each becomes unit_price, widened to the wire's scale 4: the value
 -- keeps its meaning (per sale unit, which the pair holds as the price unit
 -- while it is 1 and 1).
-ALTER TABLE order_lines RENAME COLUMN price_each TO unit_price;
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = 'order_lines' AND column_name = 'price_each') THEN
+        ALTER TABLE order_lines RENAME COLUMN price_each TO unit_price;
+    END IF;
+END $$;
 ALTER TABLE order_lines ALTER COLUMN unit_price TYPE NUMERIC(12, 4);
 ALTER TABLE order_lines ALTER COLUMN quantity TYPE NUMERIC(12, 4);
 ALTER TABLE order_lines ALTER COLUMN special_order_cost TYPE NUMERIC(12, 4);
@@ -289,14 +338,21 @@ UPDATE order_lines SET line_total = ROUND(quantity * unit_price, 2) WHERE line_t
 UPDATE order_lines l
 SET price_source = 'QUOTE'
 FROM orders o
-WHERE l.order_id = o.id AND o.quote_id IS NOT NULL AND l.price_source = 'PRICE_LIST';
+WHERE l.order_id = o.id AND o.quote_id IS NOT NULL AND l.price_source = 'PRICE_LIST'
+  AND (SELECT first_apply FROM _m092_first_apply);
+
+-- description is on every line (ADR 0005 2.2): the backfill above filled it
+-- from the product, a line with neither takes the empty string.
+UPDATE order_lines SET description = '' WHERE description IS NULL;
+ALTER TABLE order_lines ALTER COLUMN description SET NOT NULL;
 
 -- position by (created_at, id) within the order, so lines keep their order.
 WITH ordered AS (
     SELECT id, row_number() OVER (PARTITION BY order_id ORDER BY created_at, id) - 1 AS n
     FROM order_lines
 )
-UPDATE order_lines l SET position = o.n FROM ordered o WHERE l.id = o.id;
+UPDATE order_lines l SET position = o.n FROM ordered o
+WHERE l.id = o.id AND (SELECT first_apply FROM _m092_first_apply);
 
 -- Today's confirm allocates the whole order in one act and FULFILLED means
 -- it left: an existing CONFIRMED order with no invoice holds its quantity
@@ -306,11 +362,13 @@ UPDATE order_lines l
 SET quantity_allocated = l.quantity
 FROM orders o
 WHERE l.order_id = o.id AND o.status = 'CONFIRMED'
-  AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id);
+  AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+  AND (SELECT first_apply FROM _m092_first_apply);
 UPDATE order_lines l
 SET quantity_fulfilled = l.quantity
 FROM orders o
-WHERE l.order_id = o.id AND o.status = 'FULFILLED';
+WHERE l.order_id = o.id AND o.status = 'FULFILLED'
+  AND (SELECT first_apply FROM _m092_first_apply);
 
 -- product_id drops NOT NULL behind the per type CHECKs of ADR 0005 2.2.
 ALTER TABLE order_lines ALTER COLUMN product_id DROP NOT NULL;
@@ -383,3 +441,5 @@ END $$;
 
 -- 8. The keyset index for the list's ordering.
 CREATE INDEX IF NOT EXISTS idx_orders_created_id ON orders (created_at DESC, id DESC);
+
+DROP TABLE _m092_first_apply;

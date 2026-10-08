@@ -736,10 +736,10 @@ func Run() {
 			orderDate := recentDate(180)
 			orderID := uuid.New()
 			spID := custSalesperson[custID]
-			_, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, salesperson_id, created_at, delivery_type, currency)
+			_, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, salesperson_id, created_at, delivery_type, currency, tax_source)
 				VALUES ($1,$2,$3,0,0,$4,$5,$6,'PICKUP',
 					COALESCE((SELECT c.currency FROM customers c WHERE c.id = $2),
-						(SELECT value FROM system_settings WHERE key = 'currency.default')))`,
+						(SELECT value FROM system_settings WHERE key = 'currency.default')), 'LEGACY')`,
 				orderID, custID, branchID, status, spID, orderDate)
 			if err != nil {
 				continue

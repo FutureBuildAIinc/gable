@@ -532,10 +532,10 @@ func seedDispatchDay(
 			spID = sp
 		}
 		if _, err := db.Exec(`INSERT INTO orders
-			(id, customer_id, branch_id, total_amount, subtotal, status, salesperson_id, created_at, scheduled_delivery_date, delivery_type, currency)
+			(id, customer_id, branch_id, total_amount, subtotal, status, salesperson_id, created_at, scheduled_delivery_date, delivery_type, currency, tax_source)
 			VALUES ($1,$2,$3,0,0,'CONFIRMED',$4,$5,$6::date,'DELIVERY',
 				COALESCE((SELECT c.currency FROM customers c WHERE c.id = $2),
-					(SELECT value FROM system_settings WHERE key = 'currency.default')))`,
+					(SELECT value FROM system_settings WHERE key = 'currency.default')), 'LEGACY')`,
 			orderID, custID, branchID, spID, createdAt, date.Format("2006-01-02")); err != nil {
 			log.Printf("seedDispatchDay: order for %s: %v", s.Customer, err)
 			continue
