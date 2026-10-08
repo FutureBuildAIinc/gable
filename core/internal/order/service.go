@@ -220,6 +220,23 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 			return fmt.Errorf("failed to update order status: %w", err)
 		}
 
+		// Audit log: inside the transaction, so it shares the confirmation's
+		// fate — a rolled back confirmation leaves no audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(txCtx, audit.Entry{
+				Action:     "order.confirmed",
+				EntityType: "order",
+				EntityID:   id,
+				Changes: map[string]interface{}{
+					"customer_id":  o.CustomerID,
+					"total_amount": o.TotalAmount,
+					"line_count":   len(o.Lines),
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+
 		return nil
 	}
 
@@ -232,20 +249,6 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 		if err := txFn(ctx); err != nil {
 			return err
 		}
-	}
-
-	// Audit log: order confirmed (non-transactional, after commit)
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "order.confirmed",
-			EntityType: "order",
-			EntityID:   id,
-			Changes: map[string]interface{}{
-				"customer_id":  o.CustomerID,
-				"total_amount": o.TotalAmount,
-				"line_count":   len(o.Lines),
-			},
-		})
 	}
 
 	return nil
@@ -329,6 +332,25 @@ func (s *Service) CancelOrder(ctx context.Context, id uuid.UUID, reason string) 
 		if err := s.repo.UpdateStatus(txCtx, id, StatusCancelled); err != nil {
 			return fmt.Errorf("failed to update order status: %w", err)
 		}
+
+		// Audit log: inside the transaction, so it shares the cancellation's
+		// fate — a rolled back cancellation leaves no audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(txCtx, audit.Entry{
+				Action:     "order.cancelled",
+				EntityType: "order",
+				EntityID:   id,
+				Changes: map[string]interface{}{
+					"customer_id":     o.CustomerID,
+					"previous_status": string(o.Status),
+					"total_amount":    o.TotalAmount,
+					"stock_released":  releaseStock,
+					"reason":          reason,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
 		return nil
 	}
 
@@ -341,21 +363,6 @@ func (s *Service) CancelOrder(ctx context.Context, id uuid.UUID, reason string) 
 		if err := txFn(ctx); err != nil {
 			return err
 		}
-	}
-
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "order.cancelled",
-			EntityType: "order",
-			EntityID:   id,
-			Changes: map[string]interface{}{
-				"customer_id":     o.CustomerID,
-				"previous_status": string(o.Status),
-				"total_amount":    o.TotalAmount,
-				"stock_released":  releaseStock,
-				"reason":          reason,
-			},
-		})
 	}
 
 	return nil
@@ -523,6 +530,26 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 			return fmt.Errorf("failed to update order status: %w", err)
 		}
 
+		// Audit log: inside the transaction. This is the money-moving step —
+		// it issues the invoice, posts AR/GL, and depletes stock — so it
+		// belongs in the financial audit trail alongside order.confirmed, and
+		// shares the fulfilment's fate: a rolled back fulfilment leaves no
+		// audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(txCtx, audit.Entry{
+				Action:     "order.fulfilled",
+				EntityType: "order",
+				EntityID:   id,
+				Changes: map[string]interface{}{
+					"customer_id":  o.CustomerID,
+					"total_amount": o.TotalAmount,
+					"line_count":   len(o.Lines),
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+
 		return nil
 	}
 
@@ -535,22 +562,6 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 		if err := txFn(ctx); err != nil {
 			return err
 		}
-	}
-
-	// Audit log: order fulfilled (after commit). This is the money-moving step
-	// — it issues the invoice, posts AR/GL, and depletes stock — so it belongs
-	// in the financial audit trail alongside order.confirmed.
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "order.fulfilled",
-			EntityType: "order",
-			EntityID:   id,
-			Changes: map[string]interface{}{
-				"customer_id":  o.CustomerID,
-				"total_amount": o.TotalAmount,
-				"line_count":   len(o.Lines),
-			},
-		})
 	}
 
 	return nil

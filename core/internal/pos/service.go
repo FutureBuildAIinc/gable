@@ -340,6 +340,24 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 		tx.Tenders = txTenders
 		result = tx
 
+		// Audit log: inside the transaction, so it shares the sale's fate —
+		// a rolled back sale leaves no audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action:     "pos.transaction.completed",
+				EntityType: "pos_transaction",
+				EntityID:   txID,
+				Changes: map[string]interface{}{
+					"total_cents": tx.Total,
+					"register_id": tx.RegisterID,
+					"customer_id": tx.CustomerID,
+					"tenders":     len(tenders),
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+
 		s.logger.Info("POS transaction completed",
 			"id", txID,
 			"total_cents", tx.Total,
@@ -382,20 +400,6 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 				s.logger.Error("failed to post POS sale to GL", "transaction_id", txID, "error", err)
 			}
 		}
-	}
-
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "pos.transaction.completed",
-			EntityType: "pos_transaction",
-			EntityID:   txID,
-			Changes: map[string]interface{}{
-				"total_cents": result.Total,
-				"register_id": result.RegisterID,
-				"customer_id": result.CustomerID,
-				"tenders":     len(tenders),
-			},
-		})
 	}
 
 	return result, nil
@@ -482,24 +486,29 @@ func (s *Service) VoidTransaction(ctx context.Context, txID uuid.UUID) (*POSTran
 			return err
 		}
 
+		// Audit log: inside the transaction, so it shares the void's fate —
+		// and only a void that actually changes state writes one: the early
+		// return above for an already-voided transaction writes no row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action:     "pos.transaction.voided",
+				EntityType: "pos_transaction",
+				EntityID:   txID,
+				Changes: map[string]interface{}{
+					"total_cents": tx.Total,
+					"register_id": tx.RegisterID,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+
 		result = tx
 		return nil
 	})
 
 	if err != nil {
 		return nil, err
-	}
-
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "pos.transaction.voided",
-			EntityType: "pos_transaction",
-			EntityID:   txID,
-			Changes: map[string]interface{}{
-				"total_cents": result.Total,
-				"register_id": result.RegisterID,
-			},
-		})
 	}
 
 	s.logger.Info("POS transaction voided", "id", txID)

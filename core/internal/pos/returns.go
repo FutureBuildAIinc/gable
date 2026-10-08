@@ -212,6 +212,24 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, req Retur
 				return fmt.Errorf("restock failed for product %s: %w", l.ProductID, err)
 			}
 		}
+		// Audit log: inside the transaction, so it shares the return's fate
+		// — a rolled back return leaves no audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action:     "pos.return.completed",
+				EntityType: "pos_return",
+				EntityID:   ret.ID,
+				Changes: map[string]interface{}{
+					"register_id":   ret.RegisterID,
+					"refund_method": ret.RefundMethod,
+					"total_cents":   ret.Total,
+					"customer_id":   ret.CustomerID,
+					"line_count":    len(ret.Lines),
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -236,20 +254,6 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, req Retur
 		}
 	}
 
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "pos.return.completed",
-			EntityType: "pos_return",
-			EntityID:   ret.ID,
-			Changes: map[string]interface{}{
-				"register_id":   ret.RegisterID,
-				"refund_method": ret.RefundMethod,
-				"total_cents":   ret.Total,
-				"customer_id":   ret.CustomerID,
-				"line_count":    len(ret.Lines),
-			},
-		})
-	}
 	s.logger.Info("POS return completed", "id", ret.ID, "register", ret.RegisterID, "method", ret.RefundMethod, "total_cents", ret.Total)
 	return ret, nil
 }
