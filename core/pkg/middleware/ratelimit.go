@@ -4,12 +4,11 @@
 package middleware
 
 import (
-	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/httputil"
 )
 
@@ -29,7 +28,9 @@ type visitor struct {
 
 // RateLimit returns middleware that enforces a per-IP request limit within a
 // sliding window. Requests exceeding the limit receive 429 Too Many Requests.
-func RateLimit(requestsPerMinute int) func(http.Handler) http.Handler {
+// The caller is the TCP peer; X-Forwarded-For is believed only when the peer
+// is inside the trusted proxy networks (the zero value trusts none).
+func RateLimit(requestsPerMinute int, trusted clientip.Trusted) func(http.Handler) http.Handler {
 	rl := &rateLimiter{
 		visitors: make(map[string]*visitor),
 		rate:     requestsPerMinute,
@@ -53,7 +54,7 @@ func RateLimit(requestsPerMinute int) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := extractIP(r)
+			ip := trusted.Of(r)
 
 			rl.mu.Lock()
 			now := time.Now()
@@ -85,23 +86,6 @@ func RateLimit(requestsPerMinute int) func(http.Handler) http.Handler {
 // StrictRateLimit returns middleware that enforces a stricter per-IP request
 // limit, intended for sensitive endpoints like login. It maintains its own
 // visitor map so counts are independent of the global rate limiter.
-func StrictRateLimit(requestsPerMinute int) func(http.Handler) http.Handler {
-	return RateLimit(requestsPerMinute)
-}
-
-func extractIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		// Use leftmost IP -- the original client.
-		// X-Forwarded-For: client, proxy1, proxy2
-		ip := strings.TrimSpace(parts[0])
-		if ip != "" {
-			return ip
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+func StrictRateLimit(requestsPerMinute int, trusted clientip.Trusted) func(http.Handler) http.Handler {
+	return RateLimit(requestsPerMinute, trusted)
 }

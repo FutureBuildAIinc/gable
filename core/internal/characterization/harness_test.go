@@ -346,6 +346,9 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 		"LOG_LEVEL":      "ERROR",
 		"EDI_OUTPUT_DIR": filepath.Join(srvDir, "edi_out"),
 		"TZ":             "Etc/UTC",
+		// The harness client is the loopback peer and rotates
+		// X-Forwarded-For (see do()), so loopback is its trusted proxy.
+		"TRUSTED_PROXIES": "127.0.0.1/32,::1/128",
 	})
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -589,7 +592,7 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 	}
 
 	// The global rate limiter is per client IP (120/min). The script is
-	// sequential and short, but rotating X-Forwarded-For keeps the count per
+	// sequential and short, but rotating X-Forwarded-For (honoured because the harness server trusts loopback) keeps the count per
 	// window well clear of the limit on slow CI machines, so a 429 can never
 	// leak into a golden as a timing artefact.
 	h.reqCount++

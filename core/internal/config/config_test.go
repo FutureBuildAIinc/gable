@@ -38,3 +38,32 @@ func TestLoad_AcceptsSecureBaseURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_TrustedProxies(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+
+	t.Setenv("TRUSTED_PROXIES", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TRUSTED_PROXIES empty must trust nothing, got %v", cfg.TrustedProxies)
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8, fd00::/8")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxies) != 2 {
+		t.Errorf("want 2 trusted networks, got %v", cfg.TrustedProxies)
+	}
+
+	for _, v := range []string{"10.0.0.0/99", "not-a-network"} {
+		t.Setenv("TRUSTED_PROXIES", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load() must fail closed on TRUSTED_PROXIES=%q", v)
+		}
+	}
+}
