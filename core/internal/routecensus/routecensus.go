@@ -664,7 +664,7 @@ var allowMounts = map[string]bool{
 // router. The list is repeated in docs/refactor/ROUTE-CENSUS.md. A binding
 // not on this list fails the census.
 var allowMethodValues = map[string]bool{
-	"cmd/server/wire_exposure.go notifier.Handle": true, // event bus subscriber, not a mux
+	"internal/app/serve/wire_exposure.go notifier.Handle": true, // event bus subscriber, not a mux
 }
 
 // httpMethodConsts resolves the net/http method constants a pattern might
