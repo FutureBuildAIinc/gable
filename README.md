@@ -60,6 +60,10 @@ DEMO_SEED=1 make seed
 # 4. Run backend and frontend in two terminals
 cd core && AUTH_MODE=dev go run ./cmd/server   # API on :8080
 cd web/apps/desk && npm install && npm run dev              # SPA on :5173
+
+# 5. Run the background jobs in a third terminal (the idempotency retention
+#    purge; the server does not start it)
+cd core && go run ./cmd/core worker
 ```
 
 Open <http://localhost:5173>. To wipe and rebuild the dev database, run

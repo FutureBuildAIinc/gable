@@ -105,6 +105,30 @@ services:
     routes:
       - path: /
 
+workers:
+  # The background jobs run here, not inside the backend service: today that
+  # is the nightly purge of expired idempotency_keys rows. `core serve` does
+  # not start it, so a deployment without this component accumulates expired
+  # rows without bound. Same core/Dockerfile image as the backend; no routes,
+  # no port, and `run_command` selects the worker role (run_command
+  # exec-splits on whitespace into argv, so ./core worker needs no sh -c
+  # wrapper).
+  - name: worker
+    dockerfile_path: core/Dockerfile
+    source_dir: /
+    github:
+      repo: your-org/gable
+      branch: main
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    run_command: ./core worker
+    envs:
+      - key: DATABASE_URL
+        value: ${gable-db.DATABASE_URL}
+        scope: RUN_TIME
+        type: SECRET
+
 jobs:
   # The seed TRUNCATEs the transactional tables (orders, deliveries, routes,
   # quotes, the general ledger) with RESTART IDENTITY CASCADE before writing
