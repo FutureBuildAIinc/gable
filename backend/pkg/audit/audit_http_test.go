@@ -14,8 +14,8 @@ import (
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/audit"
-	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/metrics"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
