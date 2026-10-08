@@ -1,0 +1,139 @@
+[
+  {
+    "name": "portal.config",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/config"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "dealer_name": "Gable Lumber & Supply",
+        "id": "<id-1>",
+        "logo_url": "",
+        "primary_color": "#00FFA3",
+        "support_email": "support@gablelumber.ca",
+        "support_phone": "250-555-1000",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "portal.login",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/login",
+      "body": {
+        "email": "demo@kelbrook.ca",
+        "password": "password"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "config": {
+          "created_at": "<ts+0d>",
+          "dealer_name": "Gable Lumber & Supply",
+          "id": "<id-1>",
+          "logo_url": "",
+          "primary_color": "#00FFA3",
+          "support_email": "support@gablelumber.ca",
+          "support_phone": "250-555-1000",
+          "updated_at": "<ts+0d>"
+        },
+        "user": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-2>",
+          "email": "demo@kelbrook.ca",
+          "id": "<id-3>",
+          "name": "Sam Kelbrook",
+          "role": "Admin",
+          "status": "Active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "portal.catalog",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/catalog?q=LUM-248"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "available": 380,
+          "base_price": 5.5,
+          "category": "Lumber",
+          "category_id": "<id-4>",
+          "category_path": "lumber",
+          "category_slug": "lumber",
+          "customer_price": 4.75,
+          "grade": "",
+          "id": "<id-5>",
+          "image_url": "",
+          "in_stock": true,
+          "lead_time_days": null,
+          "name": "2x4x8 SPF Premium",
+          "price_source": "CONTRACT",
+          "sku": "LUM-248-PREM",
+          "species": "",
+          "uom": "PCS"
+        }
+      ]
+    }
+  },
+  {
+    "name": "portal.cart.add",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/cart/items",
+      "body": {
+        "product_id": "<id-5>",
+        "quantity": 2
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "text/plain; charset=utf-8",
+      "body": {
+        "text": "{\"id\":\"<id-6>\",\"items\":[{\"id\":\"<id-7>\",\"product_id\":\"<id-5>\",\"product_sku\":\"LUM-248-PREM\",\"product_name\":\"2x4x8 SPF Premium\",\"image_url\":\"\",\"quantity\":2,\"unit_price\":4.75,\"line_total\":9.5,\"available\":0}],\"item_count\":1,\"subtotal\":9.5}\n"
+      }
+    }
+  },
+  {
+    "name": "portal.cart.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/cart"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "id": "<id-6>",
+        "item_count": 1,
+        "items": [
+          {
+            "available": 0,
+            "id": "<id-7>",
+            "image_url": "",
+            "line_total": 9.5,
+            "product_id": "<id-5>",
+            "product_name": "2x4x8 SPF Premium",
+            "product_sku": "LUM-248-PREM",
+            "quantity": 2,
+            "unit_price": 4.75
+          }
+        ],
+        "subtotal": 9.5
+      }
+    }
+  }
+]

@@ -1,0 +1,46 @@
+[
+  {
+    "name": "matching.config.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/matching/config"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "auto_approve_on_match": true,
+        "dollar_tolerance": 500000,
+        "id": "<id-1>",
+        "price_tolerance_pct": 2,
+        "qty_tolerance_pct": 0,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "matching.config.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/matching/config",
+      "body": {
+        "auto_approve_on_match": true,
+        "dollar_tolerance": 10,
+        "price_tolerance_pct": 1.5,
+        "qty_tolerance_pct": 2.5
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "auto_approve_on_match": true,
+        "dollar_tolerance": 1000,
+        "id": "<id-1>",
+        "price_tolerance_pct": 1.5,
+        "qty_tolerance_pct": 2.5,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  }
+]

@@ -1,0 +1,95 @@
+[
+  {
+    "name": "edi.partner.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/edi/partners",
+      "body": {
+        "isa_receiver_id": "GOLDRECEIVER",
+        "isa_sender_id": "GOLDSENDER",
+        "name": "Golden EDI Partner"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "edi_version": "004010",
+        "gs_receiver_id": "",
+        "gs_sender_id": "",
+        "id": "<id-1>",
+        "is_active": false,
+        "isa_receiver_id": "GOLDRECEIVER",
+        "isa_receiver_qualifier": "",
+        "isa_sender_id": "GOLDSENDER",
+        "isa_sender_qualifier": "",
+        "name": "Golden EDI Partner",
+        "notes": "",
+        "supported_documents": [
+          "832",
+          "846",
+          "850"
+        ],
+        "transport_config": "{}",
+        "transport_type": "SFTP",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "edi.partner.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/edi/partners/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "catalog_count": 0,
+        "created_at": "<ts+0d>",
+        "edi_version": "004010",
+        "gs_receiver_id": "",
+        "gs_sender_id": "",
+        "id": "<id-1>",
+        "is_active": false,
+        "isa_receiver_id": "GOLDRECEIVER",
+        "isa_receiver_qualifier": "",
+        "isa_sender_id": "GOLDSENDER",
+        "isa_sender_qualifier": "",
+        "name": "Golden EDI Partner",
+        "notes": "",
+        "supported_documents": [
+          "832",
+          "846",
+          "850"
+        ],
+        "transport_config": "{}",
+        "transport_type": "SFTP",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "edi.partner.create.missing_name",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/edi/partners",
+      "body": {}
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,74 @@
+[
+  {
+    "name": "payment.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount": 1000,
+        "invoice_id": "<id-1>",
+        "method": "CASH",
+        "reference": "GOLD-PAY-1"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount": 1000,
+        "created_at": "<ts+0d>",
+        "id": "<id-2>",
+        "invoice_id": "<id-1>",
+        "method": "CASH",
+        "notes": "",
+        "reference": "GOLD-PAY-1"
+      }
+    }
+  },
+  {
+    "name": "payment.history",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices/<id-1>/payments"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "amount": 1000,
+          "created_at": "<ts+0d>",
+          "id": "<id-2>",
+          "invoice_id": "<id-1>",
+          "method": "CASH",
+          "notes": "",
+          "reference": "GOLD-PAY-1"
+        }
+      ]
+    }
+  },
+  {
+    "name": "payment.intent.no_gateway",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/intent",
+      "body": {
+        "amount": 100,
+        "invoice_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 503,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  }
+]
