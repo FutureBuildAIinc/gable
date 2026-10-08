@@ -1223,10 +1223,10 @@ export interface components {
             /** @description Per unit weight; zero means unknown. */
             weight_lbs: number;
             /** @description Inches; null when the PIM has no geometry. */
-            length_in?: number | null;
-            width_in?: number | null;
-            height_in?: number | null;
-            stackable?: boolean | null;
+            length_in: number | null;
+            width_in: number | null;
+            height_in: number | null;
+            stackable: boolean | null;
             geometry_source: string;
         };
         IntegrationProductList: components["schemas"]["IntegrationProduct"][];
@@ -1428,10 +1428,16 @@ export interface components {
              */
             total_amount: number;
             payment_terms: components["schemas"]["PaymentTerms"];
-            /** Format: date-time */
-            due_date?: string;
-            /** Format: date-time */
-            paid_at?: string;
+            /**
+             * Format: date-time
+             * @description Null while the terms set no date.
+             */
+            due_date: string | null;
+            /**
+             * Format: date-time
+             * @description Null until a payment completes the invoice.
+             */
+            paid_at: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1799,17 +1805,17 @@ export interface components {
             /** @description Float dollars. */
             base_price: number;
             /** @description Denormalized display name. */
-            vendor?: string | null;
+            vendor: string | null;
             /** Format: uuid */
-            vendor_id?: string | null;
-            upc?: string | null;
+            vendor_id: string | null;
+            upc: string | null;
             weight_lbs: number;
             /** @description Inches; null when the PIM has no geometry for the SKU. */
-            length_in?: number | null;
-            width_in?: number | null;
-            height_in?: number | null;
-            stackable?: boolean | null;
-            geometry_source?: string | null;
+            length_in: number | null;
+            width_in: number | null;
+            height_in: number | null;
+            stackable: boolean | null;
+            geometry_source: string | null;
             reorder_point: number;
             reorder_qty: number;
             /** @description Aggregated from inventory. */
@@ -1830,22 +1836,22 @@ export interface components {
             limit: number;
             offset: number;
         };
-        /** @description The mutable parametric geometry slice; every field nullable on purpose. */
+        /** @description The mutable parametric geometry slice; every field is always present and nullable on purpose (nil means not recorded, zero is a recorded zero). */
         Geometry: {
-            length_in?: number | null;
-            width_in?: number | null;
-            height_in?: number | null;
-            stackable?: boolean | null;
-            geometry_source?: string | null;
+            length_in: number | null;
+            width_in: number | null;
+            height_in: number | null;
+            stackable: boolean | null;
+            geometry_source: string | null;
         };
         ReorderAlert: {
             /** Format: uuid */
             product_id: string;
             sku: string;
             description: string;
-            vendor?: string | null;
+            vendor: string | null;
             /** Format: uuid */
-            vendor_id?: string | null;
+            vendor_id: string | null;
             reorder_point: number;
             reorder_qty: number;
             current_stock: number;

@@ -216,7 +216,7 @@ components:
       enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
     Product:
       type: object
-      required: [id, sku, description, uom_primary, base_price, weight_lbs, reorder_point, reorder_qty, total_quantity, total_allocated, average_unit_cost, target_margin, commission_rate, created_at, updated_at]
+      required: [id, sku, description, uom_primary, base_price, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, reorder_point, reorder_qty, total_quantity, total_allocated, average_unit_cost, target_margin, commission_rate, created_at, updated_at]
       properties:
         id:
           type: string
@@ -289,7 +289,11 @@ components:
           type: integer
     Geometry:
       type: object
-      description: The mutable parametric geometry slice; every field nullable on purpose.
+      description: >-
+        The mutable parametric geometry slice; every field is always present
+        and nullable on purpose (nil means not recorded, zero is a recorded
+        zero).
+      required: [length_in, width_in, height_in, stackable, geometry_source]
       properties:
         length_in:
           type: [number, "null"]
@@ -303,7 +307,7 @@ components:
           type: [string, "null"]
     ReorderAlert:
       type: object
-      required: [product_id, sku, description, reorder_point, reorder_qty, current_stock, deficit]
+      required: [product_id, sku, description, vendor, vendor_id, reorder_point, reorder_qty, current_stock, deficit]
       properties:
         product_id:
           type: string

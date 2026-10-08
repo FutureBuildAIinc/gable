@@ -3,7 +3,8 @@
 #
 # The invoice module, transcribed from internal/invoice/handler.go and
 # model.go as they behave today: cents money, an UPPERCASE status
-# vocabulary, and credit memo lists as a bare nullable array.
+# vocabulary, due_date and paid_at always present and null while unset,
+# and credit memo lists as a bare nullable array.
 paths:
   /api/v1/invoices:
     get:
@@ -130,7 +131,7 @@ components:
       enum: [COD, DUE_ON_RECEIPT, NET30, NET60, NET90]
     Invoice:
       type: object
-      required: [id, branch_id, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount, payment_terms, created_at, updated_at]
+      required: [id, branch_id, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount, payment_terms, due_date, paid_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -166,11 +167,13 @@ components:
         payment_terms:
           $ref: "#/components/schemas/PaymentTerms"
         due_date:
-          type: string
+          type: [string, "null"]
           format: date-time
+          description: Null while the terms set no date.
         paid_at:
-          type: string
+          type: [string, "null"]
           format: date-time
+          description: Null until a payment completes the invoice.
         created_at:
           type: string
           format: date-time

@@ -340,7 +340,7 @@ components:
   schemas:
     IntegrationProduct:
       type: object
-      required: [id, sku, name, category, uom, price, weight_lbs, geometry_source]
+      required: [id, sku, name, category, uom, price, weight_lbs, length_in, width_in, height_in, stackable, geometry_source]
       properties:
         id:
           type: string
