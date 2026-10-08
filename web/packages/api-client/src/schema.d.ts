@@ -4765,7 +4765,7 @@ export interface paths {
         get: operations["productKitComponentsGet"];
         /**
          * Replace a kit's component list
-         * @description Replaces the whole list. A product with a non empty list becomes a kit (is_kit); an empty list clears the definition. A kit cannot contain a kit and cannot contain itself. Until the products module converts there is no product revision to precondition on: last write wins, as ADR 0005 section 2.6 states.
+         * @description Replaces the whole list in one transaction at the product's revision (If-Match or the body revision, as every write): the delete, the inserts and the is_kit update with the revision bump are one database act, with the audit row and a product.updated event (parts kit_components) in the same transaction, so a fault partway leaves the kit unchanged. A product with a non empty list becomes a kit (is_kit); an empty list clears the definition. A kit cannot contain a kit, cannot contain itself and lists a component once.
          */
         put: operations["productKitComponentsPut"];
         post?: never;
@@ -10186,6 +10186,11 @@ export interface components {
             /** Format: uuid */
             kit_product_id: string;
             components: components["schemas"]["KitComponent"][];
+            /**
+             * Format: int64
+             * @description The product's current revision; send it (or If-Match) on the next write.
+             */
+            revision: number;
         };
         /**
          * @description The database unit of measure vocabulary, verbatim.
@@ -21388,6 +21393,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted product revision; required unless the body carries it. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -21397,6 +21404,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /**
+                     * Format: int64
+                     * @description The product revision this write builds on (If-Match carries it too; the write needs one of them).
+                     */
+                    revision?: number;
                     components: {
                         /** Format: uuid */
                         component_product_id: string;
@@ -21407,9 +21419,10 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The replaced component list. */
+            /** @description The replaced component list, with the product's new revision and its ETag. */
             200: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21420,8 +21433,10 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };
