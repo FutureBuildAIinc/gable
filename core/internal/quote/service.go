@@ -22,7 +22,9 @@ import (
 
 // AutoPOService is an optional interface for triggering purchase orders from accepted quotes.
 type AutoPOService interface {
-	CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error
+	// productID is nil for a line that carries no product on its purchase
+	// order line (the plain accept path, whose lines are inert on receipt).
+	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error
 }
 
 // OrderCreator is the order module's conversion seam (ADR 0005 section 5.8):
@@ -450,7 +452,7 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 
 	// Auto-PO: when accepted, trigger POs for special-order items.
 	if to == QuoteStateAccepted && s.poSvc != nil {
-		s.triggerAutoPO(ctx, out)
+		s.triggerAutoPO(ctx, out, nil)
 	}
 	// Price-protection: when sent, snapshot index baselines for commodity
 	// lines. Best-effort: a pricing-module failure must never block a send.
@@ -564,7 +566,7 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 	// through its own pool connection, and a purchase order the convert's
 	// rollback could not take back would be orphaned.
 	if s.poSvc != nil {
-		s.triggerAutoPO(ctx, accepted)
+		s.triggerAutoPO(ctx, accepted, created)
 	}
 	return created, nil
 }
@@ -628,14 +630,46 @@ func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus st
 	})
 }
 
-// triggerAutoPO creates purchase orders for special-order quote lines.
-// This is fire-and-forget: failures are logged but don't block acceptance.
-func (s *Service) triggerAutoPO(ctx context.Context, q *Quote) {
+// triggerAutoPO creates purchase order lines for the SPECIAL ORDER lines of
+// an accepted quote, and only those: an ordinary stocked line is served from
+// the stock it allocated, and a product carrying purchase order line for it
+// would put its receipt on hand and re-average the cost of stock the dealer
+// already holds (PR 40 round 2 P3-2, PR 43 review round 1 P3-3). On the
+// convert the gate is the ORDER line the quote line became
+// (order_lines.is_special_order); a converted quote line is never a special
+// order line, so the convert creates none. This is fire-and-forget: failures
+// are logged but don't block acceptance. The purchase order line links to the
+// ORDER line (order_lines.quote_line_id; its linked_so_line_id is a foreign
+// key to order_lines), so a line that has no order line (no order was
+// created, as on the plain transition) links the quote line itself and
+// carries no product, the base's inert line only its own tests use.
+func (s *Service) triggerAutoPO(ctx context.Context, q *Quote, created *order.Order) {
+	orderLine := map[uuid.UUID]*order.OrderLine{}
+	if created != nil {
+		for i := range created.Lines {
+			if created.Lines[i].QuoteLineID != nil {
+				orderLine[*created.Lines[i].QuoteLineID] = &created.Lines[i]
+			}
+		}
+	}
 	for _, line := range q.Lines {
 		// Only create POs for lines that have a unit cost (special order indicator)
 		if line.UnitCost > 0 && line.ProductID != nil {
+			linked := line.ID
+			product := (*uuid.UUID)(nil)
+			if ol, ok := orderLine[line.ID]; ok {
+				if !ol.IsSpecialOrder {
+					continue
+				}
+				linked = ol.ID
+				pid := *line.ProductID
+				product = &pid
+			} else if created != nil {
+				s.logger.Info("auto-PO skipped: the quote line has no order line", "quote_id", q.ID, "line_id", line.ID)
+				continue
+			}
 			err := s.poSvc.CreatePOFromSpecialOrderLine(
-				ctx, *line.ProductID, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, line.ID,
+				ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked,
 			)
 			if err != nil {
 				s.logger.Warn("auto-PO failed for quote line",

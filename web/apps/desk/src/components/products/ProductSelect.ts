@@ -8,6 +8,7 @@ import { Search } from 'lucide';
 import type { Product } from '../../types/product';
 import { ProductService } from '../../services/product.service';
 import { ToastService } from '../../lib/toast-service';
+import { formatPrice4 } from '../../lib/utils';
 
 @customElement('gable-product-select')
 export class GableProductSelect extends LitElement {
@@ -27,8 +28,8 @@ export class GableProductSelect extends LitElement {
 
   private async _fetchProducts() {
     try {
-      const data = await ProductService.getProducts();
-      this._products = data;
+      // Filtered on the client, so every page through the cursor (capped at LIST_ALL_PRODUCTS_CAP products).
+      this._products = await ProductService.listAllProducts();
     } catch (error) {
       console.error('Failed to load products', error);
       ToastService.show('Failed to load products', 'error');
@@ -97,7 +98,7 @@ export class GableProductSelect extends LitElement {
                     <div class="text-white font-mono text-sm group-hover:text-[#00FFA3] transition-colors">${product.sku}</div>
                     <div class="text-xs text-gray-500 truncate max-w-[300px]">${product.description}</div>
                   </div>
-                  <div class="text-xs text-right text-gray-500 font-mono">$${product.base_price.toFixed(2)}</div>
+                  <div class="text-xs text-right text-gray-500 font-mono">${formatPrice4(product.base_price_ten_thousandths)}</div>
                 </div>
               `) : nothing}
             </div>

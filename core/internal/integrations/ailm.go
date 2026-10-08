@@ -32,6 +32,7 @@ package integrations
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -375,6 +376,10 @@ func (h *Handler) CreateDeliveryRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := h.ailm.ReplaceDeliveryRoute(r.Context(), req)
+	if errors.Is(err, ErrPickupOrder) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		slog.Error("integration: create delivery route", "error", err, "method", r.Method, "path", r.URL.Path)
 		writeError(w, http.StatusInternalServerError, "failed to create delivery route")

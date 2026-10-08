@@ -5,19 +5,28 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons';
 import { X, Save, Trash2, AlertTriangle, Clock, User } from 'lucide';
-import { categoryPricingService } from '../../../services/CategoryPricingService';
-import type { CategoryPricingRule, CategoryRuleType, CategoryPricingAudit } from '../../../types/category-pricing';
+import { categoryPricingService, percentInputText, ruleValueInputText, ruleValuesFromInput } from '../../../services/CategoryPricingService';
+import { apiErrorMessage } from '../../../services/apiError';
+import { dollarsToTenThousandths, parseScaled, scaleTenThousandths } from '../../../lib/money';
+import { formatPrice4 } from '../../../lib/utils';
+import type { CategoryPricingRule, CategoryRuleType, CategoryPricingAudit, CategoryRuleValues, TargetType } from '../../../types/category-pricing';
 import type { Customer } from '../../../types/customer';
 import { cn } from '../../../lib/utils';
 import { ToastService } from '../../../lib/toast-service';
 import '../../../components/customers/CustomerSelect.ts';
 
 const RULE_TYPES: { value: CategoryRuleType; label: string; unit: string; description: string }[] = [
-  { value: 'MARKDOWN', label: 'Discount from List', unit: '%', description: 'Sell = List x (1 - X%)' },
-  { value: 'MARKUP', label: 'Markup from Cost', unit: '%', description: 'Sell = Cost x (1 + X%)' },
-  { value: 'MARGIN', label: 'Target Margin', unit: '%', description: 'Sell = Cost / (1 - X%)' },
-  { value: 'FIXED', label: 'Fixed Price', unit: '$', description: 'Sell = $X.XX' },
+  { value: 'markdown', label: 'Discount from List', unit: '%', description: 'Sell = List x (1 - X%)' },
+  { value: 'markup', label: 'Markup from Cost', unit: '%', description: 'Sell = Cost x (1 + X%)' },
+  { value: 'margin', label: 'Target Margin', unit: '%', description: 'Sell = Cost / (1 - X%)' },
+  { value: 'fixed', label: 'Fixed Price', unit: '$', description: 'Sell = $X.XX' },
 ];
+
+/** What the drawer hands the page on save: the values the form owns, and the customer picked on an account rule. */
+export interface RuleSaveDetail {
+  values: CategoryRuleValues;
+  customerId?: string;
+}
 
 const ACTION_COLORS: Record<string, string> = {
   CREATE: 'bg-gable-green/20 text-gable-green',
@@ -32,17 +41,18 @@ export class GableRuleDrawer extends LitElement {
   @property({ type: Object }) rule: Partial<CategoryPricingRule> | null = null;
   @property({ type: String, attribute: 'category-name' }) categoryName = '';
   @property({ type: String, attribute: 'tier-name' }) tierName = '';
-  @property({ type: String, attribute: 'target-type' }) targetType?: 'TIER' | 'ACCOUNT';
+  @property({ type: String, attribute: 'target-type' }) targetType?: TargetType;
 
-  @state() private _ruleType: CategoryRuleType = 'MARKDOWN';
+  @state() private _ruleType: CategoryRuleType = 'markdown';
   @state() private _ruleValue = '';
   @state() private _marginFloor = '';
   @state() private _showDelete = false;
   @state() private _auditEntries: CategoryPricingAudit[] = [];
   @state() private _selectedCustomerId?: string;
+  @state() private _formError = '';
 
   private get _isEditing() { return !!this.rule?.id; }
-  private get _isAccountMode() { return this.targetType === 'ACCOUNT'; }
+  private get _isAccountMode() { return this.targetType === 'account'; }
 
   connectedCallback() {
     super.connectedCallback();
@@ -57,36 +67,34 @@ export class GableRuleDrawer extends LitElement {
 
   private _syncFromRule() {
     const rule = this.rule;
-    this._ruleType = rule?.rule_type || 'MARKDOWN';
-    this._ruleValue = rule?.rule_value?.toString() || '';
-    this._marginFloor = rule?.margin_floor_pct?.toString() || '';
+    this._ruleType = rule?.rule_type || 'markdown';
+    this._ruleValue = ruleValueInputText(rule);
+    this._marginFloor = percentInputText(rule?.margin_floor_pct);
     this._showDelete = false;
-    this._selectedCustomerId = rule?.customer_id;
+    this._formError = '';
+    this._selectedCustomerId = rule?.customer_id ?? undefined;
 
     if (rule?.id) {
       categoryPricingService.getRuleAudit(rule.id)
         .then(data => { this._auditEntries = data; })
-        .catch((err) => { console.error('Failed to load audit trail:', err); ToastService.show('Failed to load audit trail', 'error'); });
+        .catch((err) => { console.error('Failed to load audit trail:', err); ToastService.show(apiErrorMessage(err, 'Failed to load audit trail'), 'error'); });
     } else {
       this._auditEntries = [];
     }
   }
 
   private _handleSave() {
-    const value = parseFloat(this._ruleValue);
-    if (isNaN(value)) return;
-
-    this.dispatchEvent(new CustomEvent('save-rule', {
-      detail: {
-        ...this.rule,
-        rule_type: this._ruleType,
-        rule_value: value,
-        margin_floor_pct: this._marginFloor ? parseFloat(this._marginFloor) : undefined,
-        ...(this._isAccountMode && this._selectedCustomerId ? { customer_id: this._selectedCustomerId, target_type: 'ACCOUNT' } : {}),
-      },
-      bubbles: true,
-      composed: true,
-    }));
+    const parsed = ruleValuesFromInput(this._ruleType, this._ruleValue, this._marginFloor);
+    if (!parsed.ok) {
+      this._formError = parsed.message;
+      return;
+    }
+    this._formError = '';
+    const detail: RuleSaveDetail = {
+      values: parsed.values,
+      ...(this._isAccountMode && this._selectedCustomerId ? { customerId: this._selectedCustomerId } : {}),
+    };
+    this.dispatchEvent(new CustomEvent('save-rule', { detail, bubbles: true, composed: true }));
   }
 
   private _handleClose() {
@@ -118,21 +126,29 @@ export class GableRuleDrawer extends LitElement {
 
   private _renderPreview() {
     if (!this._ruleValue) return nothing;
-    const val = parseFloat(this._ruleValue || '0');
+    // Illustration only, in integer ten thousandths: a $100.00 list, a $50.00 cost. The percentage is
+    // read at four decimals (units of a millionth of the base); a value that does not parse shows nothing.
+    const MILLION = 1_000_000;
+    const fixed = dollarsToTenThousandths(this._ruleValue);
+    const pct = parseScaled(this._ruleValue, 4);
+    if (this._ruleType === 'fixed' ? fixed === null : pct === null) return nothing;
+    const money = (tt: number) => html`<span class="text-gable-green font-mono font-semibold">${formatPrice4(tt)}</span>`;
 
     let previewContent;
     switch (this._ruleType) {
-      case 'MARKDOWN':
-        previewContent = html`<p>Base $100.00 <span class="text-slate-500">&rarr;</span> <span class="text-gable-green font-mono font-semibold">$${(100 * (1 - val / 100)).toFixed(2)}</span></p>`;
+      case 'markdown':
+        previewContent = html`<p>Base $100.00 <span class="text-slate-500">&rarr;</span> ${money(scaleTenThousandths(1_000_000, MILLION - (pct ?? 0), MILLION))}</p>`;
         break;
-      case 'MARKUP':
-        previewContent = html`<p>Cost $50.00 <span class="text-slate-500">&rarr;</span> <span class="text-gable-green font-mono font-semibold">$${(50 * (1 + val / 100)).toFixed(2)}</span></p>`;
+      case 'markup':
+        previewContent = html`<p>Cost $50.00 <span class="text-slate-500">&rarr;</span> ${money(scaleTenThousandths(500_000, MILLION + (pct ?? 0), MILLION))}</p>`;
         break;
-      case 'MARGIN':
-        previewContent = html`<p>Cost $50.00 <span class="text-slate-500">&rarr;</span> <span class="text-gable-green font-mono font-semibold">$${(50 / (1 - val / 100)).toFixed(2)}</span></p>`;
+      case 'margin':
+        previewContent = (pct ?? 0) >= MILLION
+          ? html`<p>Cost $50.00 <span class="text-slate-500">&rarr;</span> <span class="text-slate-500">no price at 100% or more</span></p>`
+          : html`<p>Cost $50.00 <span class="text-slate-500">&rarr;</span> ${money(scaleTenThousandths(500_000, MILLION, MILLION - (pct ?? 0)))}</p>`;
         break;
-      case 'FIXED':
-        previewContent = html`<p>Fixed at <span class="text-gable-green font-mono font-semibold">$${val.toFixed(2)}</span></p>`;
+      case 'fixed':
+        previewContent = html`<p>Fixed at ${money(fixed ?? 0)}</p>`;
         break;
     }
 
@@ -212,21 +228,21 @@ export class GableRuleDrawer extends LitElement {
             </label>
             <div class="relative">
               <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">
-                ${this._ruleType === 'FIXED' ? '$' : ''}
+                ${this._ruleType === 'fixed' ? '$' : ''}
               </span>
               <input
                 type="number"
-                step="0.01"
+                step="0.0001"
                 .value=${this._ruleValue}
                 @input=${(e: Event) => { this._ruleValue = (e.target as HTMLInputElement).value; }}
                 class=${cn(
                   'w-full bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white font-mono text-lg',
                   'placeholder-slate-500 focus:outline-none focus:border-gable-green transition-colors',
-                  this._ruleType === 'FIXED' ? 'pl-7' : ''
+                  this._ruleType === 'fixed' ? 'pl-7' : ''
                 )}
-                placeholder=${this._ruleType === 'FIXED' ? '0.00' : '0.00'}
+                placeholder="0.00"
               />
-              ${this._ruleType !== 'FIXED' ? html`
+              ${this._ruleType !== 'fixed' ? html`
                 <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">%</span>
               ` : nothing}
             </div>
@@ -238,7 +254,7 @@ export class GableRuleDrawer extends LitElement {
             <div class="relative">
               <input
                 type="number"
-                step="0.01"
+                step="0.0001"
                 .value=${this._marginFloor}
                 @input=${(e: Event) => { this._marginFloor = (e.target as HTMLInputElement).value; }}
                 class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-gable-green transition-colors"
@@ -251,6 +267,10 @@ export class GableRuleDrawer extends LitElement {
 
           <!-- Preview -->
           ${this._renderPreview()}
+
+          ${this._formError ? html`
+            <div class="text-sm text-red-400" role="alert">${this._formError}</div>
+          ` : nothing}
 
           <!-- Delete -->
           ${this._isEditing ? html`

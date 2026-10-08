@@ -32,7 +32,7 @@ export class GableStockAdjustmentModal extends LitElement {
 
   private async _loadLocations() {
     try {
-      const data = await LocationService.listLocations();
+      const data = await LocationService.listAllLocations();
       this._locations = data;
       if (data.length > 0) this._selectedLocationId = data[0].id;
     } catch (error) {
@@ -87,14 +87,14 @@ export class GableStockAdjustmentModal extends LitElement {
               >
                 ${this._locations.map(loc => html`
                   <option value=${loc.id}>
-                    ${loc.path || loc.code} (${loc.type})
+                    ${loc.path || loc.code} (${loc.type.toUpperCase()})
                   </option>
                 `)}
               </select>
             </div>
 
             <div>
-              <label class="block text-xs uppercase tracking-wider text-gray-500 mb-1">Quantity (${this.product.uom_primary})</label>
+              <label class="block text-xs uppercase tracking-wider text-gray-500 mb-1">Quantity (${this.product.stock_uom})</label>
               <input
                 type="number"
                 step="any"

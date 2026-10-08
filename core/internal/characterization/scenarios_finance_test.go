@@ -85,8 +85,8 @@ func pricingGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/pricing/rules",
 				body: map[string]any{
-					"name": "Golden quantity break", "rule_type": "QUANTITY_BREAK",
-					"product_id": "{product}", "discount_pct": 5.0, "min_quantity": 100,
+					"name": "Golden quantity break", "rule_type": "quantity_break",
+					"product_id": "{product}", "discount_pct": "5", "min_quantity": "100",
 					"priority": 5,
 				},
 				extract: map[string]string{"myPricingRule": "/id"},
@@ -97,6 +97,20 @@ func pricingGroups() []groupDef {
 				path:   "/api/v1/pricing/calculate?customer_id={myCustomer}&product_id={product}&quantity=10",
 			},
 			{name: "pricing.calculate.missing_params", method: "GET", path: "/api/v1/pricing/calculate"},
+			// A quantity or job id that does not parse is a 400 naming it (the
+			// base answered with the default quantity and no job).
+			{name: "pricing.calculate.bad_quantity", method: "GET",
+				path: "/api/v1/pricing/calculate?customer_id={myCustomer}&product_id={product}&quantity=ten"},
+			{name: "pricing.calculate.bad_job_id", method: "GET",
+				path: "/api/v1/pricing/calculate?customer_id={myCustomer}&product_id={product}&job_id=not-a-uuid"},
+			{name: "pricing.calculate.unsupported_parameter", method: "GET",
+				path: "/api/v1/pricing/calculate?customer_id={myCustomer}&product_id={product}&uom=PCS"},
+			{name: "pricing.rule.create.invalid", method: "POST", path: "/api/v1/pricing/rules",
+				body: map[string]any{"name": "", "rule_type": "QUANTITY_BREAK", "discount_pct": "150"}},
+			{name: "pricing.rule.create.unknown_field", method: "POST", path: "/api/v1/pricing/rules",
+				body: map[string]any{"name": "x", "rule_type": "promotional", "discount_pct": "5", "tier": "GOLD"}},
+			{name: "pricing.rules.list_after", method: "GET", path: "/api/v1/pricing/rules?limit=2&include=total"},
+			{name: "pricing.rules.list.unsupported_parameter", method: "GET", path: "/api/v1/pricing/rules?offset=1"},
 		},
 	}}
 }

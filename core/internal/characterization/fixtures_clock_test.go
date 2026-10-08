@@ -111,8 +111,12 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 			'NET30', $4, NULL, $5, $5,
 			COALESCE(NULL::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 			inv.id, fixtureCustomer, inv.total, at, at)
-		mustExec(t, db, `INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at)
-			VALUES ($1, $2, $3, 1, $4, $5)`,
+		// The shared line shape (ADR 0005 2.2): the fixture writes what the
+		// invoice repository writes for a legacy line.
+		mustExec(t, db, `INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at,
+				sku, description, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total)
+			SELECT $1, $2, $3, 1, $4, $5, p.sku, COALESCE(p.description, p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, $4
+			FROM products p WHERE p.id = $3`,
 			inv.lineID, inv.id, productID, inv.total, at)
 	}
 

@@ -6,23 +6,23 @@ import { customElement, property } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Package, Weight, BarChart3, DollarSign, Layers, Tag, Pencil } from 'lucide';
 import type { ProductDetail, PIMMedia } from '../../../types/pim.ts';
+import type { Product } from '../../../types/product.ts';
+import { formatPrice4 } from '../../../lib/utils.ts';
+import { formatQuantity, isPositiveQuantity } from '../../../lib/money.ts';
 
 @customElement('gable-product-overview-tab')
 export class GableProductOverviewTab extends LitElement {
     createRenderRoot() { return this; }
 
-    @property({ attribute: false }) product!: ProductDetail;
+    /** The PIM aggregate: the product wire nested under `product`, then content, media and collateral. */
+    @property({ attribute: false }) detail!: ProductDetail;
 
-    private get available(): number {
-        return (this.product.total_quantity || 0) - (this.product.total_allocated || 0);
+    private get product(): Product {
+        return this.detail.product;
     }
 
     private get primaryImage(): PIMMedia | undefined {
-        return this.product.media?.find((m: PIMMedia) => m.is_primary) || this.product.media?.[0];
-    }
-
-    private get visiblePrice(): number {
-        return this.product.base_price || 0;
+        return this.detail.media?.find((m: PIMMedia) => m.is_primary) || this.detail.media?.[0];
     }
 
     private get margin(): number {
@@ -58,12 +58,12 @@ export class GableProductOverviewTab extends LitElement {
         `;
     }
 
-    private _renderStockCard(label: string, value: number, color = 'white') {
+    private _renderStockCard(label: string, value: string, color = 'white') {
         return html`
             <div class="bg-zinc-900 border border-white/10 rounded-lg p-4 text-center">
                 <div class="text-xs text-zinc-500 mb-1">${label}</div>
                 <div class="text-2xl font-mono font-bold ${this._getStockColorClass(color)}">
-                    ${value.toLocaleString()}
+                    ${formatQuantity(value)}
                 </div>
             </div>
         `;
@@ -96,11 +96,11 @@ export class GableProductOverviewTab extends LitElement {
                     <!-- Info Grid -->
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         ${this._renderInfoCard(Tag, 'SKU', this.product.sku)}
-                        ${this._renderInfoCard(Layers, 'UOM', this.product.uom_primary)}
+                        ${this._renderInfoCard(Layers, 'UOM', this.product.stock_uom)}
                         ${this._renderInfoCard(Package, 'Vendor', this.product.vendor || 'N/A')}
                         ${this._renderInfoCard(Weight, 'Weight', `${(this.product.weight_lbs || 0).toFixed(1)} lbs`)}
-                        ${this._renderInfoCard(DollarSign, 'Avg Cost', `$${(this.product.average_unit_cost || 0).toFixed(2)}`, 'emerald')}
-                        ${this._renderInfoCard(DollarSign, 'Base Price', `$${this.visiblePrice.toFixed(2)}`, 'green')}
+                        ${this._renderInfoCard(DollarSign, 'Avg Cost', formatPrice4(this.product.average_unit_cost_ten_thousandths), 'emerald')}
+                        ${this._renderInfoCard(DollarSign, 'Base Price', formatPrice4(this.product.base_price_ten_thousandths), 'green')}
 
                         <!-- Margin / Commission card -->
                         <div class="bg-zinc-900 border border-white/10 rounded-lg p-3 col-span-2 sm:col-span-1">
@@ -131,34 +131,34 @@ export class GableProductOverviewTab extends LitElement {
                     <div>
                         <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">Stock Summary</h3>
                         <div class="grid grid-cols-3 gap-4">
-                            ${this._renderStockCard('On Hand', this.product.total_quantity || 0)}
-                            ${this._renderStockCard('Allocated', this.product.total_allocated || 0, 'amber')}
-                            ${this._renderStockCard('Available', this.available, this.available < 100 ? 'rose' : 'emerald')}
+                            ${this._renderStockCard('On Hand', this.product.on_hand)}
+                            ${this._renderStockCard('Allocated', this.product.allocated, 'amber')}
+                            ${this._renderStockCard('Available', this.product.available, Number(this.product.available) < 100 ? 'rose' : 'emerald')}
                         </div>
                     </div>
 
                     <!-- Reorder Info -->
-                    ${(this.product.reorder_point || 0) > 0 ? html`
+                    ${isPositiveQuantity(this.product.reorder_point) ? html`
                         <div class="bg-zinc-900 border border-white/10 rounded-xl p-4">
                             <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-2">Reorder Settings</h3>
                             <div class="flex gap-6 text-sm">
                                 <div>
                                     <span class="text-zinc-500">Reorder Point: </span>
-                                    <span class="text-white font-mono">${(this.product.reorder_point || 0).toLocaleString()}</span>
+                                    <span class="text-white font-mono">${formatQuantity(this.product.reorder_point)}</span>
                                 </div>
                                 <div>
                                     <span class="text-zinc-500">Reorder Qty: </span>
-                                    <span class="text-white font-mono">${(this.product.reorder_qty || 0).toLocaleString()}</span>
+                                    <span class="text-white font-mono">${formatQuantity(this.product.reorder_qty)}</span>
                                 </div>
                             </div>
                         </div>
                     ` : nothing}
 
                     <!-- PIM Content Preview -->
-                    ${this.product.content?.short_description ? html`
+                    ${this.detail.content?.short_description ? html`
                         <div class="bg-zinc-900 border border-white/10 rounded-xl p-4">
                             <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-2">Description</h3>
-                            <p class="text-zinc-300 text-sm">${this.product.content.short_description}</p>
+                            <p class="text-zinc-300 text-sm">${this.detail.content.short_description}</p>
                         </div>
                     ` : nothing}
                 </div>

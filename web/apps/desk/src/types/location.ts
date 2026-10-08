@@ -1,56 +1,19 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-export type LocationType = 'BRANCH' | 'ZONE' | 'AISLE' | 'RACK' | 'SHELF' | 'BIN' | 'YARD';
+// The location and branch wire types come from the generated contract (core/api/fragments/location.yaml
+// through @gable/api-client); nothing here restates a field by hand. The type is lowercase on the wire,
+// optional fields are present as null, and every row carries the revision a write must name (If-Match).
+// BranchSummary and UserLocation belong to the user grant routes, which keep bare arrays.
 
-export interface Location {
-    id: string;
-    parent_id?: string;
-    branch_id?: string;
-    path: string;
-    type: LocationType;
-    code: string;
-    description?: string;
-    name?: string;
-    address?: string;
-    city?: string;
-    state?: string;
-    zip?: string;
-    phone?: string;
-    tax_jurisdiction_code?: string;
-    default_tax_rate?: number;
-    timezone?: string;
-    active?: boolean;
-    created_at: string;
-    updated_at: string;
-    children?: Location[];
-}
+import type { components } from '@gable/api-client';
 
-export interface CreateLocationRequest {
-    parent_id?: string;
-    type: LocationType;
-    code: string;
-    description?: string;
-    name?: string;
-}
+type Schemas = components['schemas'];
 
-/**
- * BranchSummary mirrors the backend BranchSummary returned by
- * `GET /api/v1/me/branches` and `GET /api/v1/users/{sub}/branches`.
- */
-export interface BranchSummary {
-    id: string;
-    code: string;
-    name: string;
-    active: boolean;
-    is_home: boolean;
-    timezone?: string;
-}
-
-export interface UserLocation {
-    user_sub: string;
-    branch_id: string;
-    is_home: boolean;
-    granted_at: string;
-    granted_by?: string;
-}
+export type LocationType = Schemas['LocationType'];
+export type Location = Schemas['Location'];
+export type LocationPage = Schemas['LocationPage'];
+export type LocationUpdate = Schemas['LocationUpdate'];
+export type CreateLocationRequest = Schemas['LocationCreateRequest'];
+export type BranchSummary = Schemas['BranchSummary'] & { is_home: boolean };
+export type UserLocation = Schemas['UserLocation'];

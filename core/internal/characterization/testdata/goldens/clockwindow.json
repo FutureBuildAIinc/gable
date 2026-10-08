@@ -267,7 +267,7 @@
             "created_at": "<ts+0d>",
             "customer_name": "<customer>",
             "order_id": "<id-4>",
-            "status": "DRAFT",
+            "status": "FULFILLED",
             "total_amount": 3142
           },
           {
@@ -323,8 +323,8 @@
         "status_breakdown": {
           "CANCELLED": 3,
           "CONFIRMED": 15,
-          "DRAFT": 6,
-          "FULFILLED": 8
+          "DRAFT": 5,
+          "FULFILLED": 9
         }
       }
     }
@@ -348,8 +348,32 @@
           "debit": 35000
         },
         {
-          "account_code": "2200",
+          "account_code": "1020",
           "account_id": "<id-13>",
+          "account_name": "Accounts Receivable",
+          "account_type": "ASSET",
+          "credit": 0,
+          "debit": 3142
+        },
+        {
+          "account_code": "1030",
+          "account_id": "<id-14>",
+          "account_name": "Inventory",
+          "account_type": "ASSET",
+          "credit": 2100,
+          "debit": 0
+        },
+        {
+          "account_code": "2020",
+          "account_id": "<id-15>",
+          "account_name": "Sales Tax Payable",
+          "account_type": "LIABILITY",
+          "credit": 337,
+          "debit": 0
+        },
+        {
+          "account_code": "2200",
+          "account_id": "<id-16>",
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "credit": 25000,
@@ -357,11 +381,19 @@
         },
         {
           "account_code": "4010",
-          "account_id": "<id-14>",
+          "account_id": "<id-17>",
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
-          "credit": 10000,
+          "credit": 12805,
           "debit": 0
+        },
+        {
+          "account_code": "5010",
+          "account_id": "<id-18>",
+          "account_name": "Cost of Goods Sold",
+          "account_type": "EXPENSE",
+          "credit": 0,
+          "debit": 2100
         }
       ]
     }
@@ -376,23 +408,30 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "cogs": [],
+        "cogs": [
+          {
+            "account_code": "5010",
+            "account_id": "<id-18>",
+            "account_name": "Cost of Goods Sold",
+            "amount": 2100
+          }
+        ],
         "end_date": "<day+0>",
         "expenses": [],
-        "gross_profit": 10000,
-        "net_income": 10000,
+        "gross_profit": 10705,
+        "net_income": 10705,
         "revenue": [
           {
             "account_code": "4010",
-            "account_id": "<id-14>",
+            "account_id": "<id-17>",
             "account_name": "Sales Revenue",
-            "amount": 10000
+            "amount": 12805
           }
         ],
         "start_date": "<day-30>",
-        "total_cogs": 0,
+        "total_cogs": 2100,
         "total_expenses": 0,
-        "total_revenue": 10000
+        "total_revenue": 12805
       }
     }
   },
@@ -413,21 +452,39 @@
             "account_id": "<id-12>",
             "account_name": "Cash",
             "amount": 35000
+          },
+          {
+            "account_code": "1020",
+            "account_id": "<id-13>",
+            "account_name": "Accounts Receivable",
+            "amount": 3142
+          },
+          {
+            "account_code": "1030",
+            "account_id": "<id-14>",
+            "account_name": "Inventory",
+            "amount": -2100
           }
         ],
         "equity": [],
         "liabilities": [
           {
+            "account_code": "2020",
+            "account_id": "<id-15>",
+            "account_name": "Sales Tax Payable",
+            "amount": 337
+          },
+          {
             "account_code": "2200",
-            "account_id": "<id-13>",
+            "account_id": "<id-16>",
             "account_name": "Customer Deposits",
             "amount": 25000
           }
         ],
-        "retained_earnings": 10000,
-        "total_assets": 35000,
-        "total_equity": 10000,
-        "total_liabilities": 25000
+        "retained_earnings": 10705,
+        "total_assets": 36042,
+        "total_equity": 10705,
+        "total_liabilities": 25337
       }
     }
   }

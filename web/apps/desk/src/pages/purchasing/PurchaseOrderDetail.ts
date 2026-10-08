@@ -38,7 +38,7 @@ export class PurchaseOrderDetail extends LitElement {
         if (this.routeId) {
             this._loadPO(this.routeId);
             this._loadFreightCharges(this.routeId);
-            LocationService.listLocations().then(l => this.locations = l).catch(() => this.locations = []);
+            LocationService.listAllLocations().then(l => this.locations = l).catch(() => this.locations = []);
         }
     }
 

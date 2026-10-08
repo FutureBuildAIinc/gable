@@ -9,7 +9,7 @@
         "description": "item fixture",
         "name": "Golden A Yard",
         "parent_id": "<id-1>",
-        "type": "YARD"
+        "type": "yard"
       }
     },
     "response": {
@@ -17,17 +17,25 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "address": null,
         "branch_id": "<id-1>",
+        "city": null,
         "code": "GOLD-A-YARD",
         "created_at": "<ts+0d>",
+        "default_tax_rate": null,
         "description": "item fixture",
         "id": "<id-2>",
         "name": "Golden A Yard",
         "parent_id": "<id-1>",
         "path": "",
+        "phone": null,
+        "revision": 1,
+        "state": null,
+        "tax_jurisdiction_code": null,
         "timezone": "America/New_York",
-        "type": "YARD",
-        "updated_at": "<ts+0d>"
+        "type": "yard",
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },
@@ -40,7 +48,7 @@
         "code": "GOLD-A-BIN",
         "name": "Golden A Bin",
         "parent_id": "<id-2>",
-        "type": "BIN"
+        "type": "bin"
       }
     },
     "response": {
@@ -48,16 +56,25 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "address": null,
         "branch_id": "<id-1>",
+        "city": null,
         "code": "GOLD-A-BIN",
         "created_at": "<ts+0d>",
+        "default_tax_rate": null,
+        "description": null,
         "id": "<id-3>",
         "name": "Golden A Bin",
         "parent_id": "<id-2>",
         "path": "",
+        "phone": null,
+        "revision": 1,
+        "state": null,
+        "tax_jurisdiction_code": null,
         "timezone": "America/New_York",
-        "type": "BIN",
-        "updated_at": "<ts+0d>"
+        "type": "bin",
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },
@@ -71,107 +88,166 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "active": true,
-          "address": "2450 Enterprise Way",
-          "branch_id": "<id-1>",
-          "city": "Kelowna",
-          "code": "KEL-MAIN",
-          "created_at": "<ts+0d>",
-          "default_tax_rate": 0.12,
-          "description": "Kelowna Main Yard",
-          "id": "<id-1>",
-          "name": "Kelowna Main Yard",
-          "path": "KEL-MAIN",
-          "phone": "250-555-1000",
-          "state": "BC",
-          "tax_jurisdiction_code": "BC",
-          "timezone": "America/Vancouver",
-          "type": "BRANCH",
-          "updated_at": "<ts+0d>",
-          "zip": "V1X 7K2"
-        },
-        {
-          "active": true,
-          "branch_id": "<id-1>",
-          "code": "GOLD-A-BIN",
-          "created_at": "<ts+0d>",
-          "id": "<id-3>",
-          "name": "Golden A Bin",
-          "parent_id": "<id-2>",
-          "path": "",
-          "timezone": "America/New_York",
-          "type": "BIN",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "active": true,
-          "branch_id": "<id-1>",
-          "code": "GOLD-A-YARD",
-          "created_at": "<ts+0d>",
-          "description": "item fixture",
-          "id": "<id-2>",
-          "name": "Golden A Yard",
-          "parent_id": "<id-1>",
-          "path": "",
-          "timezone": "America/New_York",
-          "type": "YARD",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "active": true,
-          "branch_id": "<id-1>",
-          "code": "KEL-A",
-          "created_at": "<ts+0d>",
-          "description": "Lumber Storage Zone A",
-          "id": "<id-4>",
-          "parent_id": "<id-1>",
-          "path": "KEL-A",
-          "timezone": "America/New_York",
-          "type": "ZONE",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "active": true,
-          "branch_id": "<id-1>",
-          "code": "KEL-B",
-          "created_at": "<ts+0d>",
-          "description": "Sheet Goods Zone B",
-          "id": "<id-5>",
-          "parent_id": "<id-1>",
-          "path": "KEL-B",
-          "timezone": "America/New_York",
-          "type": "ZONE",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "active": true,
-          "branch_id": "<id-1>",
-          "code": "KEL-C",
-          "created_at": "<ts+0d>",
-          "description": "Hardware & Fasteners Zone C",
-          "id": "<id-6>",
-          "parent_id": "<id-1>",
-          "path": "KEL-C",
-          "timezone": "America/New_York",
-          "type": "ZONE",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "active": true,
-          "branch_id": "<id-1>",
-          "code": "KEL-D",
-          "created_at": "<ts+0d>",
-          "description": "Roofing & Insulation Zone D",
-          "id": "<id-7>",
-          "parent_id": "<id-1>",
-          "path": "KEL-D",
-          "timezone": "America/New_York",
-          "type": "ZONE",
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "active": true,
+            "address": null,
+            "branch_id": "<id-1>",
+            "city": null,
+            "code": "GOLD-A-YARD",
+            "created_at": "<ts+0d>",
+            "default_tax_rate": null,
+            "description": "item fixture",
+            "id": "<id-2>",
+            "name": "Golden A Yard",
+            "parent_id": "<id-1>",
+            "path": "",
+            "phone": null,
+            "revision": 1,
+            "state": null,
+            "tax_jurisdiction_code": null,
+            "timezone": "America/New_York",
+            "type": "yard",
+            "updated_at": "<ts+0d>",
+            "zip": null
+          },
+          {
+            "active": true,
+            "address": null,
+            "branch_id": "<id-1>",
+            "city": null,
+            "code": "GOLD-A-BIN",
+            "created_at": "<ts+0d>",
+            "default_tax_rate": null,
+            "description": null,
+            "id": "<id-3>",
+            "name": "Golden A Bin",
+            "parent_id": "<id-2>",
+            "path": "",
+            "phone": null,
+            "revision": 1,
+            "state": null,
+            "tax_jurisdiction_code": null,
+            "timezone": "America/New_York",
+            "type": "bin",
+            "updated_at": "<ts+0d>",
+            "zip": null
+          },
+          {
+            "active": true,
+            "address": null,
+            "branch_id": "<id-1>",
+            "city": null,
+            "code": "KEL-A",
+            "created_at": "<ts+0d>",
+            "default_tax_rate": null,
+            "description": "Lumber Storage Zone A",
+            "id": "<id-4>",
+            "name": null,
+            "parent_id": "<id-1>",
+            "path": "KEL-A",
+            "phone": null,
+            "revision": 1,
+            "state": null,
+            "tax_jurisdiction_code": null,
+            "timezone": "America/New_York",
+            "type": "zone",
+            "updated_at": "<ts+0d>",
+            "zip": null
+          },
+          {
+            "active": true,
+            "address": null,
+            "branch_id": "<id-1>",
+            "city": null,
+            "code": "KEL-B",
+            "created_at": "<ts+0d>",
+            "default_tax_rate": null,
+            "description": "Sheet Goods Zone B",
+            "id": "<id-5>",
+            "name": null,
+            "parent_id": "<id-1>",
+            "path": "KEL-B",
+            "phone": null,
+            "revision": 1,
+            "state": null,
+            "tax_jurisdiction_code": null,
+            "timezone": "America/New_York",
+            "type": "zone",
+            "updated_at": "<ts+0d>",
+            "zip": null
+          },
+          {
+            "active": true,
+            "address": null,
+            "branch_id": "<id-1>",
+            "city": null,
+            "code": "KEL-C",
+            "created_at": "<ts+0d>",
+            "default_tax_rate": null,
+            "description": "Hardware & Fasteners Zone C",
+            "id": "<id-6>",
+            "name": null,
+            "parent_id": "<id-1>",
+            "path": "KEL-C",
+            "phone": null,
+            "revision": 1,
+            "state": null,
+            "tax_jurisdiction_code": null,
+            "timezone": "America/New_York",
+            "type": "zone",
+            "updated_at": "<ts+0d>",
+            "zip": null
+          },
+          {
+            "active": true,
+            "address": null,
+            "branch_id": "<id-1>",
+            "city": null,
+            "code": "KEL-D",
+            "created_at": "<ts+0d>",
+            "default_tax_rate": null,
+            "description": "Roofing & Insulation Zone D",
+            "id": "<id-7>",
+            "name": null,
+            "parent_id": "<id-1>",
+            "path": "KEL-D",
+            "phone": null,
+            "revision": 1,
+            "state": null,
+            "tax_jurisdiction_code": null,
+            "timezone": "America/New_York",
+            "type": "zone",
+            "updated_at": "<ts+0d>",
+            "zip": null
+          },
+          {
+            "active": true,
+            "address": "2450 Enterprise Way",
+            "branch_id": "<id-1>",
+            "city": "Kelowna",
+            "code": "KEL-MAIN",
+            "created_at": "<ts+0d>",
+            "default_tax_rate": 0.12,
+            "description": "Kelowna Main Yard",
+            "id": "<id-1>",
+            "name": "Kelowna Main Yard",
+            "parent_id": null,
+            "path": "KEL-MAIN",
+            "phone": "250-555-1000",
+            "revision": 1,
+            "state": "BC",
+            "tax_jurisdiction_code": "BC",
+            "timezone": "America/Vancouver",
+            "type": "branch",
+            "updated_at": "<ts+0d>",
+            "zip": "V1X 7K2"
+          }
+        ],
+        "limit": 0,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -183,7 +259,11 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": {
+        "items": [],
+        "limit": 0,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -197,11 +277,76 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
           "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "location.update.without_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/locations/<id-2>",
+      "body": {
+        "active": true,
+        "code": "GOLD-A-YARD",
+        "name": "Golden A Yard Renamed"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "location.update.type_refused",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/locations/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "code": "GOLD-A-YARD",
+        "name": "Golden A Yard Renamed",
+        "type": "yard"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "type",
+              "message": "unknown field"
+            }
+          ],
+          "message": "request body has a field this route does not accept"
+        },
+        "meta": {
+          "request_id": "<id-11>"
         }
       }
     }
@@ -211,13 +356,14 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/locations/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "active": true,
         "code": "GOLD-A-YARD",
         "description": "renamed",
-        "name": "Golden A Yard Renamed",
-        "parent_id": "<id-1>",
-        "type": "YARD"
+        "name": "Golden A Yard Renamed"
       }
     },
     "response": {
@@ -225,17 +371,52 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "address": null,
         "branch_id": "<id-1>",
+        "city": null,
         "code": "GOLD-A-YARD",
         "created_at": "<ts+0d>",
+        "default_tax_rate": null,
         "description": "renamed",
         "id": "<id-2>",
         "name": "Golden A Yard Renamed",
         "parent_id": "<id-1>",
         "path": "",
+        "phone": null,
+        "revision": 2,
+        "state": null,
+        "tax_jurisdiction_code": null,
         "timezone": "America/New_York",
-        "type": "YARD",
-        "updated_at": "<ts+0d>"
+        "type": "yard",
+        "updated_at": "<ts+0d>",
+        "zip": null
+      }
+    }
+  },
+  {
+    "name": "location.update.stale",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/locations/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "code": "GOLD-A-YARD",
+        "name": "Golden A Yard Stale"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
       }
     }
   },
@@ -250,17 +431,25 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "address": null,
         "branch_id": "<id-1>",
+        "city": null,
         "code": "GOLD-A-YARD",
         "created_at": "<ts+0d>",
+        "default_tax_rate": null,
         "description": "renamed",
         "id": "<id-2>",
         "name": "Golden A Yard Renamed",
         "parent_id": "<id-1>",
         "path": "",
+        "phone": null,
+        "revision": 2,
+        "state": null,
+        "tax_jurisdiction_code": null,
         "timezone": "America/New_York",
-        "type": "YARD",
-        "updated_at": "<ts+0d>"
+        "type": "yard",
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },
@@ -276,11 +465,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -299,11 +488,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -316,8 +511,7 @@
       "body": {
         "active": true,
         "code": "GHOST",
-        "name": "Ghost",
-        "type": "YARD"
+        "name": "Ghost"
       }
     },
     "response": {
@@ -325,11 +519,31 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "no such location"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "location.delete.without_revision",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/locations/<id-3>"
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-16>"
         }
       }
     }
@@ -338,7 +552,10 @@
     "name": "location.delete",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/locations/<id-3>"
+      "path": "/api/v1/locations/<id-3>",
+      "headers": {
+        "If-Match": "\"1\""
+      }
     },
     "response": {
       "status": 204,
@@ -359,16 +576,25 @@
       "content_type": "application/json",
       "body": {
         "active": false,
+        "address": null,
         "branch_id": "<id-1>",
+        "city": null,
         "code": "GOLD-A-BIN",
         "created_at": "<ts+0d>",
+        "default_tax_rate": null,
+        "description": null,
         "id": "<id-3>",
         "name": "Golden A Bin",
         "parent_id": "<id-2>",
         "path": "",
+        "phone": null,
+        "revision": 2,
+        "state": null,
+        "tax_jurisdiction_code": null,
         "timezone": "America/New_York",
-        "type": "BIN",
-        "updated_at": "<ts+0d>"
+        "type": "bin",
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },
@@ -376,7 +602,10 @@
     "name": "location.delete.again",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/locations/<id-3>"
+      "path": "/api/v1/locations/<id-3>",
+      "headers": {
+        "If-Match": "\"2\""
+      }
     },
     "response": {
       "status": 204,
@@ -397,11 +626,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "no such location"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-17>"
         }
       }
     }
@@ -417,11 +646,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-18>"
         }
       }
     }

@@ -185,13 +185,14 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 		ex := r.db.GetExecutor(ctx)
 
 		queryHeader := `
-			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+				COALESCE(NULLIF($11::text, ''), (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'))
 			RETURNING entry_number
 		`
 		if err := ex.QueryRow(ctx, queryHeader,
 			entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID,
-			entry.Status, entry.PostedBy, entry.ReversesEntryID, entry.CreatedAt, entry.UpdatedAt,
+			entry.Status, entry.PostedBy, entry.ReversesEntryID, entry.CreatedAt, entry.UpdatedAt, entry.Currency,
 		).Scan(&entry.EntryNumber); err != nil {
 			return fmt.Errorf("failed to insert journal entry: %w", err)
 		}

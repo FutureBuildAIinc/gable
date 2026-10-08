@@ -1,82 +1,34 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-export interface ProductCategory {
-  id: string;
-  name: string;
-  slug: string;
-  path: string;
-  parent_id: string | null;
-  sort_order: number;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-  children?: ProductCategory[];
-}
+// The category pricing wire types come from the generated contract (core/api/fragments/pricing.yaml
+// through @gable/api-client); nothing here restates a field by hand. The target and rule types are
+// lowercase, a rule's value is value_ten_thousandths (a fixed rule, an integer price at scale 4) or
+// value_pct (every other type, a decimal string), and every rule carries the revision a write must
+// name (If-Match). Tier names stay the uppercase vocabulary the matrix answers with.
 
-export type TargetType = 'ACCOUNT' | 'TIER';
-export type CategoryRuleType = 'MARKUP' | 'MARKDOWN' | 'FIXED' | 'MARGIN';
+import type { components } from '@gable/api-client';
 
-export interface CategoryPricingRule {
-  id: string;
-  target_type: TargetType;
-  customer_id?: string;
-  tier?: string;
-  category_id: string;
-  rule_type: CategoryRuleType;
-  rule_value: number;
-  margin_floor_pct?: number;
-  starts_at?: string;
-  expires_at?: string;
-  is_active: boolean;
-  priority: number;
-  created_by?: string;
-  created_at: string;
-  updated_at: string;
-  category_name?: string;
-  category_path?: string;
-  customer_name?: string;
-}
+type Schemas = components['schemas'];
 
-export interface MatrixCell {
-  category_id: string;
-  category_name: string;
-  category_path: string;
-  tier: string;
-  rule?: CategoryPricingRule;
-  inherited: boolean;
-  source_path?: string;
-}
+export type ProductCategory = Schemas['PricingProductCategory'];
+export type CategoryWrite = Schemas['PricingProductCategoryWrite'];
+export type CategoryPricingRule = Schemas['PricingCategoryRule'];
+export type CategoryPricingRulePage = Schemas['PricingCategoryRulePage'];
+export type CategoryRuleValues = Schemas['PricingCategoryRuleValues'];
+export type CategoryRuleCreate = Schemas['PricingCategoryRuleCreateRequest'];
+export type CategoryRuleBulkItem = Schemas['PricingCategoryRuleBulkItem'];
+export type CategoryRuleUpdate = Schemas['PricingCategoryRuleUpdateRequest'];
+export type MatrixCell = Schemas['PricingMatrixCell'];
+export type ResolvedCategoryPrice = Schemas['PricingResolvedCategoryPrice'];
+export type CategoryPricingAudit = Schemas['PricingCategoryRuleAudit'];
 
+export type TargetType = CategoryPricingRule['target_type'];
+export type CategoryRuleType = CategoryPricingRule['rule_type'];
+
+/** The matrix with its three lists made arrays (the wire sends null for an empty list). */
 export interface MatrixResponse {
   categories: ProductCategory[];
   tiers: string[];
   cells: MatrixCell[];
-}
-
-export interface ResolvedCategoryPrice {
-  rule?: CategoryPricingRule;
-  match_type: string;
-  category_path: string;
-}
-
-export interface CategoryPricingAudit {
-  id: string;
-  rule_id: string;
-  action: 'CREATE' | 'UPDATE' | 'DELETE';
-  old_values?: Record<string, unknown>;
-  new_values?: Record<string, unknown>;
-  performed_by: string;
-  performed_at: string;
-  category_id?: string;
-  target_type?: string;
-  tier?: string;
-  customer_id?: string;
-}
-
-export interface PaginatedRulesResponse {
-  data: CategoryPricingRule[];
-  total: number;
-  limit: number;
-  offset: number;
 }

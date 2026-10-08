@@ -6,6 +6,7 @@ package purchase_order
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/google/uuid"
@@ -41,8 +42,11 @@ func (f *fakeProductRepo) GetProduct(_ context.Context, id uuid.UUID) (*product.
 func (f *fakeProductRepo) ListProducts(_ context.Context) ([]product.Product, error) {
 	return f.products, nil
 }
-func (f *fakeProductRepo) ListProductsPaginated(_ context.Context, _, _ int) ([]product.Product, int, error) {
-	return f.products, len(f.products), nil
+func (f *fakeProductRepo) ListProductsPage(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]product.Product, error) {
+	return f.products, nil
+}
+func (f *fakeProductRepo) CountProducts(_ context.Context) (int64, error) {
+	return int64(len(f.products)), nil
 }
 func (f *fakeProductRepo) ListBelowReorder(_ context.Context) ([]product.ReorderAlert, error) {
 	return nil, nil
@@ -50,8 +54,8 @@ func (f *fakeProductRepo) ListBelowReorder(_ context.Context) ([]product.Reorder
 func (f *fakeProductRepo) UpdateAverageCost(_ context.Context, _ uuid.UUID, _ float64) error {
 	return nil
 }
-func (f *fakeProductRepo) UpdateMarginRules(_ context.Context, _ uuid.UUID, _, _ float64) error {
-	return nil
+func (f *fakeProductRepo) UpdateMarginRules(_ context.Context, _ uuid.UUID, _, _ float64, _ int64) (int64, error) {
+	return 0, nil
 }
 func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, id uuid.UUID, point, qty float64) error {
 	if f.updates == nil {
@@ -63,11 +67,11 @@ func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, id uuid.UUID, 
 func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }
-func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry) error {
-	return nil
+func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry, _ int64) (int64, error) {
+	return 0, nil
 }
-func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int) error {
-	return nil
+func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {
+	return 0, nil
 }
 
 // TestRefreshReorderTargets_Math pins the reorder-point formula
