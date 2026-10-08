@@ -50,3 +50,62 @@ func TestResponsesSortedAscending(t *testing.T) {
 		}
 	}
 }
+
+// TestTemplatedPathCollisions pins the collision rule: two spellings of one
+// templated shape collide when they share a method, and ServeMux's habit of
+// letting GET also match HEAD makes a GET beside a HEAD collide too.
+func TestTemplatedPathCollisions(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths string
+		want  int
+	}{
+		{"same method, different parameter name", `
+/x/{id}:
+  get: {}
+/x/{other}:
+  get: {}
+`, 1},
+		{"different method, same shape", `
+/x/{id}:
+  get: {}
+/x/{other}:
+  delete: {}
+`, 0},
+		{"GET beside HEAD on one shape", `
+/x/{id}:
+  get: {}
+/x/{other}:
+  head: {}
+`, 1},
+		{"HEAD beside GET on one shape", `
+/x/{id}:
+  head: {}
+/x/{other}:
+  get: {}
+`, 1},
+		{"POST beside HEAD on one shape", `
+/x/{id}:
+  post: {}
+/x/{other}:
+  head: {}
+`, 0},
+		{"one path with several methods", `
+/x/{id}:
+  get: {}
+  delete: {}
+`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc yaml.Node
+			if err := yaml.Unmarshal([]byte(tc.paths), &doc); err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			got := templateCollisions(doc.Content[0])
+			if len(got) != tc.want {
+				t.Fatalf("want %d collisions, got %d: %v", tc.want, len(got), got)
+			}
+		})
+	}
+}
