@@ -19,11 +19,16 @@ import (
 type Service struct {
 	repo      Repository
 	vendorSvc *vendor.Service // Optional: when set, CreateProduct auto-resolves vendor name -> vendor_id
+	kits      KitStore        // the kit component routes' store, when the repo can serve it
 }
 
 // NewService creates a new Product Service
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+	s := &Service{repo: repo}
+	if ks, ok := any(repo).(KitStore); ok {
+		s.kits = ks
+	}
+	return s
 }
 
 // WithVendorService attaches the vendor service so CreateProduct can resolve

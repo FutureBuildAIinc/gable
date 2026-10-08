@@ -186,23 +186,5 @@ type QuoteAnalyticsTrend struct {
 	AcceptedValueCents httpx.Cents `json:"accepted_value_cents"`
 }
 
-// OrderPayload is what POST /quotes/{id}/convert hands back for the client to
-// POST to /orders. The orders route is not converted yet: it reads a numeric
-// quantity and price_each in cents, so the client maps these fields onto it.
-type OrderPayload struct {
-	CustomerID uuid.UUID          `json:"customer_id"`
-	QuoteID    uuid.UUID          `json:"quote_id"`
-	Revision   int64              `json:"revision"` // the accepted quote's revision, also the response ETag
-	Lines      []OrderPayloadLine `json:"lines"`
-}
-
-// OrderPayloadLine is one quote line as an order line request.
-type OrderPayloadLine struct {
-	ProductID      *uuid.UUID     `json:"product_id"`
-	Quantity       httpx.Quantity `json:"quantity"`
-	UOM            product.UOM    `json:"uom"`
-	PriceEachCents httpx.Cents    `json:"price_each_cents"`
-}
-
 // productUOM converts the stored unit code to the typed unit.
 func productUOM(code string) product.UOM { return product.UOM(code) }

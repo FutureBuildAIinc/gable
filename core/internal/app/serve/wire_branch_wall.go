@@ -12,6 +12,7 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
@@ -70,6 +71,12 @@ func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+}
+
+// orders mounts the order routes: the create takes branch_id from its body,
+// so it is held to the caller's branch context (ADR 0007 section 2.3).
+func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
+	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

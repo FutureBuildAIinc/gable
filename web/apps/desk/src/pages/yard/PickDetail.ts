@@ -43,14 +43,12 @@ export class PickDetail extends LitElement {
 
     private async _handleFulfill() {
         if (!this.routeId || !this._allPicked) return;
+        // The ERP fulfilment route (which bills the order) lands with C2-2b
+        // (ADR 0005 5.6); until then the pick completes here and the desk
+        // bills the order when the route arrives.
         this.fulfilling = true;
-        try {
-            await OrderService.fulfillOrder(this.routeId);
-            router.replace('/yard');
-        } catch {
-            ToastService.show('Failed to fulfill order', 'error');
-            this.fulfilling = false;
-        }
+        ToastService.show('Pick recorded. Billing returns with the fulfilment route (C2-2b)', 'info');
+        router.replace('/yard');
     }
 
     private get _lines(): OrderLine[] { return this.order?.lines || []; }
@@ -126,10 +124,10 @@ export class PickDetail extends LitElement {
                                     <!-- Item Info -->
                                     <div class="flex-1 min-w-0">
                                         <div class="font-medium text-sm ${isPicked ? 'text-zinc-400 line-through' : 'text-white'}">
-                                            ${line.product_name || 'Product'}
+                                            ${line.description || 'Product'}
                                         </div>
                                         <div class="text-xs text-zinc-500 font-mono mt-0.5">
-                                            ${line.product_sku || '-'}
+                                            ${line.sku || '-'}
                                         </div>
                                     </div>
 
@@ -138,7 +136,7 @@ export class PickDetail extends LitElement {
                                         ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                                         : 'bg-amber-400/10 text-amber-400 border border-amber-400/20'
                                     }">
-                                        x${line.quantity}
+                                        x${line.quantity ?? '-'}
                                     </div>
                                 </div>
                             </div>

@@ -193,10 +193,23 @@
         },
         {
           "balance": 0,
+          "code": "4030",
+          "created_at": "<ts+0d>",
+          "description": "Restocking and other fees (ADR 0005 2.5)",
+          "id": "<id-15>",
+          "is_active": true,
+          "name": "Fees and Charges Revenue",
+          "normal_balance": "CREDIT",
+          "subtype": "",
+          "type": "REVENUE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "balance": 0,
           "code": "5010",
           "created_at": "<ts+0d>",
           "description": "Direct cost of materials sold",
-          "id": "<id-15>",
+          "id": "<id-16>",
           "is_active": true,
           "name": "Cost of Goods Sold",
           "normal_balance": "DEBIT",
@@ -209,7 +222,7 @@
           "code": "5020",
           "created_at": "<ts+0d>",
           "description": "Rent, utilities, wages, and general overhead",
-          "id": "<id-16>",
+          "id": "<id-17>",
           "is_active": true,
           "name": "Operating Expenses",
           "normal_balance": "DEBIT",
@@ -222,7 +235,7 @@
           "code": "5030",
           "created_at": "<ts+0d>",
           "description": "Till drawer counting variances (short = expense, over = credit)",
-          "id": "<id-17>",
+          "id": "<id-18>",
           "is_active": true,
           "name": "Cash Over/Short",
           "normal_balance": "DEBIT",
@@ -264,23 +277,23 @@
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
         "entry_number": 1,
-        "id": "<id-18>",
+        "id": "<id-19>",
         "lines": [
           {
             "account_id": "<id-1>",
             "credit": 0,
             "debit": 10000,
             "description": "golden debit",
-            "id": "<id-19>",
-            "journal_entry_id": "<id-18>"
+            "id": "<id-20>",
+            "journal_entry_id": "<id-19>"
           },
           {
             "account_id": "<id-13>",
             "credit": 10000,
             "debit": 0,
             "description": "golden credit",
-            "id": "<id-20>",
-            "journal_entry_id": "<id-18>"
+            "id": "<id-21>",
+            "journal_entry_id": "<id-19>"
           }
         ],
         "memo": "golden characterisation entry",
@@ -297,7 +310,7 @@
     "name": "gl.journal_entry.post",
     "request": {
       "method": "POST",
-      "path": "/api/v1/gl/journal-entries/<id-18>/post"
+      "path": "/api/v1/gl/journal-entries/<id-19>/post"
     },
     "response": {
       "status": 200,
@@ -334,7 +347,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-21>"
+          "request_id": "<id-22>"
         }
       }
     }

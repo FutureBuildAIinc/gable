@@ -155,6 +155,42 @@ func Extend(qty, uomQty, priceUomQty Quantity, price Price) (Cents, error) {
 	return Cents(cents), nil
 }
 
+// percentFactor is the power of ten the percent side of a percent discount
+// carries: a percent arrives at scale 4 like every quantity (10 percent is
+// 100000), and the factor the exact product is scaled by is
+// (1000000 - p) / 1000000.
+const percentFactor = 1_000_000
+
+// ExtendDiscounted prices one line with a percent discount (ADR 0005 section
+// 2.4): the exact product of Extend multiplied by (1000000 - p) / 1000000,
+// where p is the percent at scale 4, before the one rounding to cents, half
+// away from zero. One multiplication, one rounding: a discount folded into
+// the unit price would round twice and lose the record of what was given.
+func ExtendDiscounted(qty, uomQty, priceUomQty Quantity, price Price, percent Quantity) (Cents, error) {
+	if uomQty <= 0 || priceUomQty <= 0 {
+		return 0, errZeroConversion
+	}
+	n := new(big.Int).Mul(big.NewInt(int64(qty)), big.NewInt(int64(priceUomQty)))
+	n.Mul(n, big.NewInt(int64(price)))
+	n.Mul(n, big.NewInt(percentFactor-int64(percent)))
+	div := new(big.Int).Mul(big.NewInt(int64(uomQty)), big.NewInt(extendScaleDivisor))
+	div.Mul(div, big.NewInt(percentFactor))
+	neg := n.Sign() < 0
+
+	var mag big.Int
+	mag.Abs(n)
+	mag.Add(&mag, new(big.Int).Rsh(div, 1))
+	mag.Div(&mag, div)
+	if !mag.IsInt64() {
+		return 0, errOverflow
+	}
+	cents := mag.Int64()
+	if neg {
+		cents = -cents
+	}
+	return Cents(cents), nil
+}
+
 // CheckLineSign enforces the sign rule of ADR 0001 §7a: a quantity is
 // negative only on a return or credit line, and a unit price is never
 // negative. The rule itself belongs to the converting module's validator,

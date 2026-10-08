@@ -202,7 +202,7 @@ func (r *PostgresRepository) ListOrdersByCustomer(ctx context.Context, customerI
 // getOrderLines fetches line items for an order.
 func (r *PostgresRepository) getOrderLines(ctx context.Context, orderID uuid.UUID) ([]PortalLineDTO, error) {
 	query := `
-		SELECT ol.product_id, COALESCE(p.sku, ''), COALESCE(p.description, ''), ol.quantity, ol.price_each
+		SELECT ol.product_id, COALESCE(p.sku, ''), COALESCE(p.description, ''), ol.quantity, ol.unit_price
 		FROM order_lines ol
 		LEFT JOIN products p ON ol.product_id = p.id
 		WHERE ol.order_id = $1
@@ -446,27 +446,50 @@ func (r *PostgresRepository) CreateReorder(ctx context.Context, customerID, sour
 	now := time.Now()
 
 	err = r.db.RunInTx(ctx, func(txCtx context.Context) error {
-		// 1. Create new DRAFT order
+		// 1. Create new DRAFT order, carrying the source's branch, delivery
+		//    type and currency; the number comes from the column DEFAULT.
 		_, err := r.db.GetExecutor(txCtx).Exec(txCtx, `
-			INSERT INTO orders (id, customer_id, status, total_amount, created_at, updated_at)
-			SELECT $1, $2, 'DRAFT',
-			       COALESCE(SUM(ol.quantity * ol.price_each), 0),
-			       $3, $3
-			FROM order_lines ol WHERE ol.order_id = $4
+			INSERT INTO orders (id, customer_id, status, total_amount, subtotal, created_at, updated_at,
+				branch_id, delivery_type, currency, project_id)
+			SELECT $1, $2, 'DRAFT', 0, 0, $3, $3,
+				o.branch_id, o.delivery_type, o.currency, o.project_id
+			FROM orders o WHERE o.id = $4
 		`, newOrderID, customerID, now, sourceOrderID)
 		if err != nil {
 			return fmt.Errorf("failed to create reorder: %w", err)
 		}
 
-		// 2. Copy lines with fresh UUIDs and current product prices
+		// 2. Copy the billable lines with fresh UUIDs and current product
+		//    prices, in the shared line shape (ADR 0005 2.2). A product line
+		//    is re-quoted as the list price per sale unit (the pair normalised
+		//    to 1 and 1 with the price unit the sale unit, so a line the quote
+		//    carried per MBF does not silently change meaning); charge lines
+		//    and kit components keep their own price.
 		_, err = r.db.GetExecutor(txCtx).Exec(txCtx, `
-			INSERT INTO order_lines (id, order_id, product_id, quantity, price_each, is_special_order, vendor_id, special_order_cost)
-			SELECT gen_random_uuid(), $1, ol.product_id, ol.quantity,
-			       COALESCE(p.base_price, ol.price_each),
-			       ol.is_special_order, ol.vendor_id, ol.special_order_cost
-			FROM order_lines ol
-			LEFT JOIN products p ON ol.product_id = p.id
-			WHERE ol.order_id = $2
+			INSERT INTO order_lines (id, order_id, position, line_type, product_id, quantity, unit_price,
+				description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source,
+				line_total, taxable, is_special_order, vendor_id, special_order_cost)
+			SELECT gen_random_uuid(), $1,
+				c.position, c.line_type, c.product_id, c.quantity, c.unit_price,
+				c.description, c.sku, c.uom, c.price_uom, c.uom_qty, c.price_uom_qty, c.priced_unit_price, c.price_source,
+				ROUND(c.quantity * c.unit_price, 2), c.taxable, c.is_special_order, c.vendor_id, c.special_order_cost
+			FROM (
+				SELECT
+					ROW_NUMBER() OVER (ORDER BY ol.position, ol.id) - 1 AS position,
+					ol.line_type, ol.product_id, ol.quantity,
+					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN p.base_price ELSE ol.unit_price END AS unit_price,
+					ol.description, ol.sku, ol.uom,
+					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN ol.uom ELSE ol.price_uom END AS price_uom,
+					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 1 ELSE ol.uom_qty END AS uom_qty,
+					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 1 ELSE ol.price_uom_qty END AS price_uom_qty,
+					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN p.base_price ELSE ol.priced_unit_price END AS priced_unit_price,
+					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 'PRICE_LIST' ELSE ol.price_source END AS price_source,
+					ol.taxable, ol.is_special_order, ol.vendor_id, ol.special_order_cost
+				FROM order_lines ol
+				LEFT JOIN products p ON ol.product_id = p.id
+				WHERE ol.order_id = $2
+				  AND ol.line_type <> 'TEXT'
+			) c
 		`, newOrderID, sourceOrderID)
 		if err != nil {
 			return fmt.Errorf("failed to copy order lines: %w", err)
@@ -475,7 +498,10 @@ func (r *PostgresRepository) CreateReorder(ctx context.Context, customerID, sour
 		// 3. Recalculate total with current prices
 		_, err = r.db.GetExecutor(txCtx).Exec(txCtx, `
 			UPDATE orders SET total_amount = (
-				SELECT COALESCE(SUM(quantity * price_each), 0)
+				SELECT COALESCE(SUM(line_total), 0)
+				FROM order_lines WHERE order_id = $1
+			), subtotal = (
+				SELECT COALESCE(SUM(line_total), 0)
 				FROM order_lines WHERE order_id = $1
 			) WHERE id = $1
 		`, newOrderID)

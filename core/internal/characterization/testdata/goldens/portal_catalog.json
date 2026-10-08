@@ -171,7 +171,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "available": 368,
+        "available": 385,
         "base_price": 5.5,
         "category": "Lumber",
         "category_id": "<id-7>",

@@ -57,7 +57,7 @@ func TestGetOrderActivity_TiedCreatedAtHasStableOrder(t *testing.T) {
 		// created_at is left to its default, now(), which is the transaction
 		// start time: identical for every row inserted here.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount) VALUES ($1, $2, $3, 'CONFIRMED', 10)`,
+			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency) VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`,
 			id, customerID, branchID); err != nil {
 			_ = tx.Rollback(ctx)
 			t.Fatalf("seed order: %v", err)

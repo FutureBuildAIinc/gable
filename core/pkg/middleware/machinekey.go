@@ -128,6 +128,7 @@ var machineKeyModules = map[string]struct{}{
 	"reports":         {},
 	"reporting":       {},
 	"sales-team":      {},
+	"charge-codes":    {},
 	"ship-tos":        {},
 	"tax":             {},
 	"users":           {},

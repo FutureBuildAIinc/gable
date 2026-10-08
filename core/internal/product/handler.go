@@ -41,6 +41,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PATCH /api/v1/products/{id}/margins", guard(h.HandleUpdateMarginRules))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/dimensions", guard(h.HandleUpdateDimensions))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/lead-time", guard(h.HandleUpdateLeadTime))
+	// Kit components (ADR 0005 2.6), on the contract from birth.
+	mux.HandleFunc("GET /api/v1/products/{id}/kit-components", guard(h.HandleGetKitComponents))
+	mux.HandleFunc("PUT /api/v1/products/{id}/kit-components", guard(h.HandlePutKitComponents))
 }
 
 // productsOrdering is the list's ordering scope: created_at DESC, id DESC,

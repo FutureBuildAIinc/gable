@@ -7,11 +7,10 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, Sparkles, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
-import { QuoteService, QuoteApiError, quoteErrorMessage, orderRequestFromQuotePayload } from '../../services/QuoteService.ts';
+import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 import { extensionCents, dollarsToCents } from '../../lib/money.ts';
-import { OrderService } from '../../services/OrderService.ts';
 import '../../components/quotes/exposure-banner.ts';
 
 type Tab = 'details' | 'original' | 'mapping';
@@ -90,8 +89,7 @@ export class GableQuoteDetail extends LitElement {
         if (!this.quote) return;
         this.processing = true;
         try {
-            const orderPayload = await QuoteService.convert(this.quote.id, this.quote.revision);
-            const order = await OrderService.createOrder(orderRequestFromQuotePayload(orderPayload));
+            const order = await QuoteService.convert(this.quote.id, this.quote.revision);
             ToastService.show('Quote converted to order', 'success');
             router.navigate(`/orders/${order.id}`);
         } catch (error) {
@@ -146,10 +144,13 @@ export class GableQuoteDetail extends LitElement {
 
     private renderDetailsTab(quote: Quote) {
         const lines = quote.lines || [];
-        // All money here is integer cents. The line cost is the unit cost (ten
-        // thousandths) times the quantity through the line's conversion pair, rounded once
-        // like the line total.
-        const lineCostCents = (l: Quote['lines'][number]) => extensionCents(l.quantity, l.unit_cost_ten_thousandths, l.uom_qty, l.price_uom_qty);
+        // All money here is integer cents. The line cost is the quantity times
+        // the unit cost (ten thousandths) with NO conversion pair: the cost is
+        // per the product's own unit (its stocking unit, which is also the
+        // sale unit), so the pair that converts the PRICE unit never applies
+        // to it. 187.5 PCS stocked and costed per piece, priced per MBF.
+        const lineCostCents = (l: Quote['lines'][number]) =>
+            extensionCents(l.quantity, l.unit_cost_ten_thousandths);
         const totalRevenue = lines.reduce((s, l) => s + l.line_total_cents, 0);
         const baseCost = lines.reduce((s, l) => s + lineCostCents(l), 0);
         const baseMargin = totalRevenue - baseCost;

@@ -51,9 +51,9 @@ func newFeedFixture(t *testing.T, n int, updatedAt func(i int) time.Time) (*Post
 	for i := 0; i < n; i++ {
 		id := uuid.New()
 		ids = append(ids, id)
-		exec(`INSERT INTO orders (id, customer_id, status, total_amount, branch_id, created_at, updated_at)
+		exec(`INSERT INTO orders (id, customer_id, status, total_amount, branch_id, created_at, updated_at, delivery_type, currency)
 		      VALUES ($1, $2, 'CONFIRMED', 100.00,
-		              (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), $3, $4)`,
+		              (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), $3, $4, 'PICKUP', 'USD')`,
 			id, customerID, base.Add(time.Duration(i)*time.Hour), updatedAt(i))
 	}
 

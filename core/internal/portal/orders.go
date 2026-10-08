@@ -114,7 +114,15 @@ func (s *Service) CancelOrder(ctx context.Context, orderID, customerID uuid.UUID
 	if s.orderSvc == nil {
 		return nil, fmt.Errorf("order service is not configured")
 	}
-	if err := s.orderSvc.CancelOrder(ctx, orderID, reason); err != nil {
+	// The ERP state machine's own refusals, answered here so the portal keeps
+	// its stable error codes for them: a second cancel and a fulfilled order.
+	switch previous {
+	case "CANCELLED":
+		return nil, ErrOrderAlreadyCancelled
+	case "FULFILLED":
+		return nil, ErrOrderNotCancellable
+	}
+	if _, err := s.orderSvc.CancelInProcess(ctx, orderID, reason); err != nil {
 		return nil, err
 	}
 

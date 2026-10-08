@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/configurator"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
@@ -43,6 +44,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/routecensus"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/tax"
@@ -66,8 +68,11 @@ var modelBoundSchemas = []struct {
 	{"Quote", quote.Quote{}},
 	{"QuoteSummary", quote.QuoteSummary{}},
 	{"QuoteLine", quote.QuoteLine{}},
-	{"QuoteOrderPayload", quote.OrderPayload{}},
-	{"QuoteOrderPayloadLine", quote.OrderPayloadLine{}},
+	// order
+	{"Order", order.Order{}},
+	{"OrderSummary", order.OrderSummary{}},
+	{"SalesLine", salesdoc.Line{}},
+	{"ChargeCode", chargecode.Code{}},
 	{"QuoteAnalytics", quote.QuoteAnalytics{}},
 	{"QuoteAnalyticsTrend", quote.QuoteAnalyticsTrend{}},
 	// customer

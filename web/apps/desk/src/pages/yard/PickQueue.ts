@@ -8,22 +8,22 @@ import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { ClipboardList, ChevronRight, Package, Clock, User } from 'lucide';
 import { OrderService } from '../../services/OrderService';
-import type { Order } from '../../types/order';
+import type { OrderSummary } from '../../types/order';
 import { formatCents } from '../../lib/utils.ts';
 
 @customElement('gable-pick-queue')
 export class PickQueue extends LitElement {
     createRenderRoot() { return this; }
 
-    @state() private orders: Order[] = [];
+    @state() private orders: OrderSummary[] = [];
     @state() private loading = true;
 
     connectedCallback() {
         super.connectedCallback();
-        OrderService.listOrders()
+        OrderService.allOrders()
             .then(data => {
-                const confirmed = data.filter((o: Order) => o.status === 'CONFIRMED');
-                confirmed.sort((a: Order, b: Order) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                const confirmed = data.filter((o: OrderSummary) => o.status === 'confirmed');
+                confirmed.sort((a: OrderSummary, b: OrderSummary) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
                 this.orders = confirmed;
             })
             .catch(() => { this.orders = []; ToastService.show('Failed to load pick queue', 'error'); })
@@ -74,7 +74,7 @@ export class PickQueue extends LitElement {
                                             </span>
                                         ` : nothing}
                                         <span class="text-xs font-mono text-zinc-500">
-                                            #${order.id.slice(-6).toUpperCase()}
+                                            #${order.number}
                                         </span>
                                     </div>
                                     ${icon(ChevronRight, 16, 'text-zinc-600')}
@@ -91,10 +91,10 @@ export class PickQueue extends LitElement {
                                     <div class="flex items-center gap-3">
                                         <div class="flex items-center gap-1.5 text-xs text-zinc-300 font-mono bg-white/5 px-2 py-1 rounded">
                                             ${icon(Package, 12, 'text-amber-400')}
-                                            ${order.lines?.length || '?'} items
+                                            ${order.invoice_ids.length === 0 ? '—' : `${order.invoice_ids.length} invoice${order.invoice_ids.length === 1 ? '' : 's'}`}
                                         </div>
                                         <div class="text-xs font-mono text-zinc-400">
-                                            ${formatCents(order.total_amount)}
+                                            ${formatCents(order.total_cents)}
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-1 text-[10px] text-zinc-500">

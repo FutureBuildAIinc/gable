@@ -108,19 +108,19 @@
             "total": 5894.12
           },
           {
-            "current": 30.8,
+            "current": 31.42,
             "customer_id": "<customer>",
             "customer_name": "<customer>",
             "days_31_60": 0,
             "days_61_90": 0,
             "over_90": 0,
-            "total": 30.8
+            "total": 31.42
           }
         ],
-        "grand_total": 99842.15,
+        "grand_total": 99842.76999999999,
         "total_31_60": 8994.43,
         "total_61_90": 12373.56,
-        "total_current": 58866.3,
+        "total_current": 58866.92,
         "total_over_90": 19607.86
       }
     }
@@ -137,10 +137,10 @@
       "body": {
         "end_date": "<day+0>",
         "invoice_count": 11,
-        "outstanding_ar": 23324.14,
+        "outstanding_ar": 23324.76,
         "start_date": "<day-30>",
         "total_collected": 308657,
-        "total_invoiced": 76390.52
+        "total_invoiced": 76391.14
       }
     }
   },
@@ -155,7 +155,7 @@
       "content_type": "application/json",
       "body": {
         "active_orders": 21,
-        "outstanding_ar": 9984215,
+        "outstanding_ar": 9984277,
         "outstanding_ar_count": 15,
         "pending_dispatch": 28,
         "today_revenue": 30623276,
@@ -254,77 +254,77 @@
             "customer_name": "<customer>",
             "order_id": "<id-2>",
             "status": "CONFIRMED",
-            "total_amount": 6600
+            "total_amount": 7392
           },
           {
             "created_at": "<ts+0d>",
             "customer_name": "<customer>",
             "order_id": "<id-3>",
             "status": "CANCELLED",
-            "total_amount": 550
+            "total_amount": 524
           },
           {
             "created_at": "<ts+0d>",
             "customer_name": "<customer>",
             "order_id": "<id-4>",
-            "status": "FULFILLED",
-            "total_amount": 2750
+            "status": "DRAFT",
+            "total_amount": 3142
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-5>",
+            "status": "DRAFT",
+            "total_amount": 12320
           },
           {
             "created_at": "<ts-1d>",
             "customer_name": "<customer>",
-            "order_id": "<id-5>",
+            "order_id": "<id-6>",
             "status": "DRAFT",
             "total_amount": 1022502
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-6>",
+            "order_id": "<id-7>",
             "status": "FULFILLED",
             "total_amount": 1820808
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-7>",
+            "order_id": "<id-8>",
             "status": "CONFIRMED",
             "total_amount": 341800
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-8>",
+            "order_id": "<id-9>",
             "status": "CONFIRMED",
             "total_amount": 348500
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-9>",
+            "order_id": "<id-10>",
             "status": "CONFIRMED",
             "total_amount": 169450
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-10>",
-            "status": "CONFIRMED",
-            "total_amount": 186600
-          },
-          {
-            "created_at": "<ts-2d>",
-            "customer_name": "<customer>",
             "order_id": "<id-11>",
             "status": "CONFIRMED",
-            "total_amount": 219400
+            "total_amount": 186600
           }
         ],
         "status_breakdown": {
           "CANCELLED": 3,
           "CONFIRMED": 15,
-          "DRAFT": 4,
-          "FULFILLED": 9
+          "DRAFT": 6,
+          "FULFILLED": 8
         }
       }
     }
@@ -348,16 +348,8 @@
           "debit": 35000
         },
         {
-          "account_code": "1020",
-          "account_id": "<id-13>",
-          "account_name": "Accounts Receivable",
-          "account_type": "ASSET",
-          "credit": 0,
-          "debit": 3080
-        },
-        {
           "account_code": "2200",
-          "account_id": "<id-14>",
+          "account_id": "<id-13>",
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "credit": 25000,
@@ -365,10 +357,10 @@
         },
         {
           "account_code": "4010",
-          "account_id": "<id-15>",
+          "account_id": "<id-14>",
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
-          "credit": 13080,
+          "credit": 10000,
           "debit": 0
         }
       ]
@@ -387,20 +379,20 @@
         "cogs": [],
         "end_date": "<day+0>",
         "expenses": [],
-        "gross_profit": 13080,
-        "net_income": 13080,
+        "gross_profit": 10000,
+        "net_income": 10000,
         "revenue": [
           {
             "account_code": "4010",
-            "account_id": "<id-15>",
+            "account_id": "<id-14>",
             "account_name": "Sales Revenue",
-            "amount": 13080
+            "amount": 10000
           }
         ],
         "start_date": "<day-30>",
         "total_cogs": 0,
         "total_expenses": 0,
-        "total_revenue": 13080
+        "total_revenue": 10000
       }
     }
   },
@@ -421,26 +413,20 @@
             "account_id": "<id-12>",
             "account_name": "Cash",
             "amount": 35000
-          },
-          {
-            "account_code": "1020",
-            "account_id": "<id-13>",
-            "account_name": "Accounts Receivable",
-            "amount": 3080
           }
         ],
         "equity": [],
         "liabilities": [
           {
             "account_code": "2200",
-            "account_id": "<id-14>",
+            "account_id": "<id-13>",
             "account_name": "Customer Deposits",
             "amount": 25000
           }
         ],
-        "retained_earnings": 13080,
-        "total_assets": 38080,
-        "total_equity": 13080,
+        "retained_earnings": 10000,
+        "total_assets": 35000,
+        "total_equity": 10000,
         "total_liabilities": 25000
       }
     }

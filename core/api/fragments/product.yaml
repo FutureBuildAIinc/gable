@@ -723,13 +723,134 @@ paths:
           $ref: '#/components/responses/WireConflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '428':
           $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
-
+  /api/v1/products/{id}/kit-components:
+    get:
+      operationId: productKitComponentsGet
+      tags: [product]
+      summary: A kit's component list
+      description: >-
+        The kit's definition (ADR 0005 section 2.6): what it contains, per one
+        kit, in each component's own stocking unit.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The component list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitComponentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: productKitComponentsPut
+      tags: [product]
+      summary: Replace a kit's component list
+      description: >-
+        Replaces the whole list. A product with a non empty list becomes a kit
+        (is_kit); an empty list clears the definition. A kit cannot contain a
+        kit and cannot contain itself. Until the products module converts
+        there is no product revision to precondition on: last write wins,
+        as ADR 0005 section 2.6 states.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [components]
+              properties:
+                components:
+                  type: array
+                  items:
+                    type: object
+                    required: [component_product_id, quantity]
+                    properties:
+                      component_product_id:
+                        type: string
+                        format: uuid
+                      quantity:
+                        type: string
+                        description: Per one kit, in the component's stocking unit; a decimal string greater than zero.
+      responses:
+        "200":
+          description: The replaced component list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitComponentList"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   schemas:
+    KitComponent:
+      type: object
+      required: [component_product_id, sku, description, quantity, uom, position]
+      properties:
+        component_product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: string
+          description: Per one kit, in the component's stocking unit.
+        uom:
+          type: string
+        position:
+          type: integer
+    KitComponentList:
+      type: object
+      required: [kit_product_id, components]
+      properties:
+        kit_product_id:
+          type: string
+          format: uuid
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitComponent"
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.

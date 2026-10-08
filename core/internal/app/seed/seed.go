@@ -736,8 +736,11 @@ func Run() {
 			orderDate := recentDate(180)
 			orderID := uuid.New()
 			spID := custSalesperson[custID]
-			_, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, status, salesperson_id, created_at)
-				VALUES ($1,$2,$3,0,$4,$5,$6)`, orderID, custID, branchID, status, spID, orderDate)
+			_, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, salesperson_id, created_at, delivery_type, currency, tax_source)
+				VALUES ($1,$2,$3,0,0,$4,$5,$6,'PICKUP',
+					COALESCE((SELECT c.currency FROM customers c WHERE c.id = $2),
+						(SELECT value FROM system_settings WHERE key = 'currency.default')), 'LEGACY')`,
+				orderID, custID, branchID, status, spID, orderDate)
 			if err != nil {
 				continue
 			}
@@ -749,10 +752,20 @@ func Run() {
 				qty := 1 + rand.Intn(50)
 				lineTotal := float64(qty) * prod.Price
 				orderTotal += lineTotal
-				db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, price_each)
-					VALUES ($1,$2,$3,$4)`, orderID, skuToID[prod.SKU], qty, prod.Price)
+				// The shared line shape (ADR 0005 2.2): the seed writes what
+				// the migration backfilled for history, so seeded rows and
+				// migrated rows agree.
+				db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
+						description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+						quantity_allocated, quantity_fulfilled)
+					SELECT $1, $2, $3, $4, 'PRODUCT', $5,
+						COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
+						CASE WHEN $6 = 'CONFIRMED' THEN $3 ELSE 0 END,
+						CASE WHEN $6 = 'FULFILLED' THEN $3 ELSE 0 END
+					FROM products p WHERE p.id = $2`,
+					orderID, skuToID[prod.SKU], qty, prod.Price, j, status)
 			}
-			db.Exec("UPDATE orders SET total_amount=$1 WHERE id=$2", orderTotal, orderID)
+			db.Exec("UPDATE orders SET total_amount=$1, subtotal=$1 WHERE id=$2", orderTotal, orderID)
 			totalOrders++
 
 			if status == "FULFILLED" {
