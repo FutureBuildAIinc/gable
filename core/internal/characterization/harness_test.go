@@ -41,7 +41,7 @@ var updateGoldens = flag.Bool("update", false, "rewrite characterisation golden 
 const skipReason = "postgres unavailable: set DATABASE_URL to run integration tests"
 
 // harness owns the whole throwaway environment: a database it creates and
-// drops itself, the three cmd binaries built from the working tree, and one
+// drops itself, the one core binary built from the working tree, and one
 // server subprocess stopped by its process group.
 type harness struct {
 	t           *testing.T
@@ -227,9 +227,11 @@ func newHarness(t *testing.T, freshURL string) *harness {
 	backendRoot := filepath.Join(charDir, "..", "..")
 
 	buildDir := t.TempDir()
+	// The one core binary, once: every role the harness runs (migrate, seed,
+	// serve) is a subcommand of it, so the goldens exercise cmd/core's
+	// dispatch and the exact entry point the image runs.
 	run(t, backendRoot, subprocessEnv(nil), "go", "",
-		"build", "-o", buildDir+string(os.PathSeparator),
-		"./cmd/migrate", "./cmd/seed", "./cmd/server")
+		"build", "-o", buildDir+string(os.PathSeparator), "./cmd/core")
 
 	// The seed draws demo data through the global math/rand source. Go
 	// auto-seeds it randomly at startup, which would make two runs of the
@@ -239,14 +241,14 @@ func newHarness(t *testing.T, freshURL string) *harness {
 	// over at the same instant on every machine.
 	run(t, backendRoot, subprocessEnv(map[string]string{
 		"DATABASE_URL": freshURL,
-	}), buildDir+"/migrate", "")
+	}), buildDir+"/core", "", "migrate")
 
 	run(t, backendRoot, subprocessEnv(map[string]string{
 		"DATABASE_URL": freshURL,
 		"DEMO_SEED":    "1",
 		"GODEBUG":      "randautoseed=0",
 		"TZ":           "Etc/UTC",
-	}), buildDir+"/seed", "")
+	}), buildDir+"/core", "", "seed")
 
 	seedClockWindowFixtures(t, freshURL)
 
@@ -313,12 +315,13 @@ func run(t *testing.T, dir string, env []string, name string, stdin string, args
 	}
 }
 
-// startServer runs the real server binary as a subprocess on a free port.
-// The whole wiring in cmd/server/main.go (middleware order, schedulers,
-// adapters) is the behaviour under characterisation, so the harness exercises
-// the production entry point rather than reconstructing the handler in
-// process. The subprocess gets its own process group and is stopped by that
-// group number, even on failure.
+// startServer runs the real server as a subprocess on a free port: the
+// serve role of the one core binary built above. The whole wiring in
+// internal/app/serve (middleware order, schedulers, adapters) is the
+// behaviour under characterisation, so the harness exercises the
+// production entry point rather than reconstructing the handler in
+// process. The subprocess gets its own process group and is stopped by
+// that group number, even on failure.
 func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 	t.Helper()
 
@@ -334,7 +337,7 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string) {
 		t.Fatalf("create server log: %v", err)
 	}
 
-	cmd := exec.Command(filepath.Join(buildDir, "server"))
+	cmd := exec.Command(filepath.Join(buildDir, "core"), "serve")
 	cmd.Dir = srvDir
 	cmd.Env = subprocessEnv(map[string]string{
 		"PORT":           strconv.Itoa(port),
