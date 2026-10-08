@@ -52,19 +52,19 @@ type PutKitComponentsRequest struct {
 
 // GetKitComponents reads a kit's definition.
 func (s *Service) GetKitComponents(ctx context.Context, kitID uuid.UUID) (*KitComponentList, error) {
-	prod, err := s.repo.GetProduct(ctx, kitID)
-	if err != nil {
+	if _, err := s.repo.GetProduct(ctx, kitID); err != nil {
 		return nil, kitNotFound(err)
 	}
-	rows, err := s.repo.ListKitComponents(ctx, kitID)
+	if s.kits == nil {
+		return nil, &httpx.Error{Status: http.StatusServiceUnavailable, Code: httpx.CodeUnavailable,
+			Message: "this deployment's product store cannot serve kit definitions"}
+	}
+	rows, err := s.kits.ListKitComponents(ctx, kitID)
 	if err != nil {
 		return nil, err
 	}
 	out := &KitComponentList{KitProductID: kitID, Components: []KitComponent{}}
-	for _, c := range rows {
-		out.Components = append(out.Components, c)
-	}
-	_ = prod
+	out.Components = append(out.Components, rows...)
 	return out, nil
 }
 
@@ -93,11 +93,15 @@ func (s *Service) ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, req
 			continue
 		}
 		v.Check(qty > 0, path+".quantity", "must be greater than zero")
+		if s.kits == nil {
+			return nil, &httpx.Error{Status: http.StatusServiceUnavailable, Code: httpx.CodeUnavailable,
+				Message: "this deployment's product store cannot serve kit definitions"}
+		}
 		var comp struct {
 			SKU, Description, UOM string
 			IsKit                 bool
 		}
-		err := s.repo.ProductKitRef(ctx, id, &comp.SKU, &comp.Description, &comp.UOM, &comp.IsKit)
+		err := s.kits.ProductKitRef(ctx, id, &comp.SKU, &comp.Description, &comp.UOM, &comp.IsKit)
 		if err != nil {
 			v.Check(false, path+".component_product_id", "no such product")
 			continue
@@ -112,7 +116,7 @@ func (s *Service) ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, req
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.repo.ReplaceKitComponents(ctx, kitID, draft); err != nil {
+	if err := s.kits.ReplaceKitComponents(ctx, kitID, draft); err != nil {
 		return nil, err
 	}
 	sort.Slice(draft, func(i, j int) bool { return draft[i].Position < draft[j].Position })

@@ -6,41 +6,27 @@ package order
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
-	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
-	"github.com/gablelbm/gable/pkg/pagination"
 	"github.com/google/uuid"
 )
 
-// unresolvedExposure is the duck-typed interface pricing.ErrUnresolvedExposure
-// satisfies. Detecting it lets the handler render a structured 409 without the
-// order package importing pricing.
-type unresolvedExposure interface {
-	UnresolvedExposurePayload() map[string]any
-}
+// cursorScope names the list's ordering: created_at then id, newest first
+// (ADR 0001 section 2).
+const cursorScope = "orders.created_at_id_desc"
 
-// writeExposureBlock renders the 409 body when err is an unresolved-exposure
-// gate error; returns false if err is some other (or nil) error.
-func writeExposureBlock(w http.ResponseWriter, err error) bool {
-	var ue unresolvedExposure
-	if errors.As(err, &ue) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(ue.UnresolvedExposurePayload())
-		return true
-	}
-	return false
-}
+// releaseRoles are the roles that may release a hold (ADR 0005 section 5.2).
+var releaseRoles = map[string]bool{"admin": true, "owner": true, "finance": true}
 
 type Handler struct {
 	service *Service
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
-}
+func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
 	guard := func(handler http.HandlerFunc) http.HandlerFunc {
@@ -52,188 +38,394 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		return handler
 	}
 
-	mux.HandleFunc("POST /api/v1/orders", guard(h.HandleCreateOrder))
 	mux.HandleFunc("GET /api/v1/orders", guard(h.HandleListOrders))
+	mux.HandleFunc("POST /api/v1/orders", guard(h.HandleCreateOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}", guard(h.HandleGetOrder))
-	mux.HandleFunc("POST /api/v1/orders/{id}/confirm", guard(h.HandleConfirmOrder))
-	mux.HandleFunc("POST /api/v1/orders/{id}/fulfill", guard(h.HandleFulfillOrder))
-	mux.HandleFunc("POST /api/v1/orders/{id}/cancel", guard(h.HandleCancelOrder))
+	mux.HandleFunc("PUT /api/v1/orders/{id}", guard(h.HandleUpdateOrder))
+	mux.HandleFunc("POST /api/v1/orders/{id}/transitions", guard(h.HandleTransition))
 	mux.HandleFunc("GET /api/v1/orders/{id}/exposure-gate", guard(h.HandleExposureGate))
 	mux.HandleFunc("POST /api/v1/orders/{id}/exposure-override", guard(h.HandleExposureOverride))
 }
 
-func (h *Handler) HandleCreateOrder(w http.ResponseWriter, r *http.Request) {
-	var req CreateOrderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	o, err := h.service.CreateOrder(r.Context(), req)
-	if err != nil {
-		httputil.RespondError(w, r, "failed to create order", http.StatusInternalServerError, err)
-		return
-	}
-
+func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(o)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
-func (h *Handler) HandleListOrders(w http.ResponseWriter, r *http.Request) {
-	page := pagination.FromRequest(r)
-	orders, total, err := h.service.ListOrdersPaginated(r.Context(), page.Limit, page.Offset)
+func writeOrder(w http.ResponseWriter, status int, o *Order) {
+	httpx.WriteRevisionETag(w, o.Revision)
+	writeJSON(w, status, o)
+}
+
+func pathID(r *http.Request) (uuid.UUID, error) {
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "Failed to fetch orders", http.StatusInternalServerError, err)
+		return uuid.Nil, httpx.BadRequest("invalid order id",
+			httpx.FieldError{Field: "id", Message: "must be a UUID"})
+	}
+	return id, nil
+}
+
+func noQuery(r *http.Request) error {
+	_, err := httpx.StrictQuery(r)
+	return err
+}
+
+// actor reads the caller's subject for the audit rows (ADR 0005 section 2.3).
+func actor(r *http.Request) string {
+	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
+		return claims.Subject
+	}
+	return ""
+}
+
+// callerRole reads the caller's role; empty when the auth chain set none (an
+// in process caller, a machine key).
+func callerRole(r *http.Request) string {
+	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
+		return claims.Role
+	}
+	return ""
+}
+
+func (h *Handler) HandleCreateOrder(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	resp := pagination.PagedResponse[Order]{
-		Data:   orders,
-		Total:  total,
-		Limit:  page.Limit,
-		Offset: page.Offset,
+	var req Request
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
 	}
-	if resp.Data == nil {
-		resp.Data = []Order{}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	o, err := h.service.Create(r.Context(), draft, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/orders/"+o.ID.String())
+	writeOrder(w, http.StatusCreated, o)
 }
 
 func (h *Handler) HandleGetOrder(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	o, err := h.service.GetOrder(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "order not found", http.StatusNotFound, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(o)
+	writeOrder(w, http.StatusOK, o)
 }
 
-func (h *Handler) HandleConfirmOrder(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+func (h *Handler) HandleUpdateOrder(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req Request
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.ParseUpdate()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	pre := Precondition{IfMatch: r.Header.Get("If-Match"), Revision: draft.Revision}
+	o, err := h.service.Update(r.Context(), id, draft, pre, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeOrder(w, http.StatusOK, o)
+}
 
-	if err := h.service.ConfirmOrder(r.Context(), id); err != nil {
-		if writeExposureBlock(w, err) {
+// parseListFilter reads the list's filters (ADR 0005 section 5.7): status,
+// customer_id, job_id, ship_to_id, delivery_type and quote_id beside the
+// platform's cursor, limit and include.
+func parseListFilter(r *http.Request) (f ListFilter, wantTotal bool, err error) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "status", "customer_id",
+		"job_id", "ship_to_id", "delivery_type", "quote_id")
+	if err != nil {
+		return f, false, err
+	}
+	page, err := httpx.ParseListQuery(r, cursorScope)
+	if err != nil {
+		return f, false, err
+	}
+	f.Limit = page.Limit
+
+	v := &httpx.Validator{}
+	if vals := q["status"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "status", "parameter is repeated; send a comma separated list")
+		}
+		seen := map[OrderStatus]bool{}
+		for _, name := range strings.Split(vals[0], ",") {
+			st, ok := ParseStatus(name)
+			if !ok {
+				v.Check(false, "status", "must be a comma separated list of: "+strings.Join(statusNames, ", "))
+				break
+			}
+			if !seen[st] {
+				seen[st] = true
+				f.Statuses = append(f.Statuses, st)
+			}
+		}
+	}
+	if vals := q["customer_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "customer_id", "parameter is repeated")
+		} else if id, ok := v.UUID("customer_id", &vals[0], true); ok {
+			f.CustomerID = &id
+		}
+	}
+	if vals := q["job_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "job_id", "parameter is repeated")
+		} else if id, ok := v.UUID("job_id", &vals[0], true); ok {
+			f.JobID = &id
+		}
+	}
+	if vals := q["ship_to_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "ship_to_id", "parameter is repeated")
+		} else if id, ok := v.UUID("ship_to_id", &vals[0], true); ok {
+			f.ShipToID = &id
+		}
+	}
+	if vals := q["quote_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "quote_id", "parameter is repeated")
+		} else if id, ok := v.UUID("quote_id", &vals[0], true); ok {
+			f.QuoteID = &id
+		}
+	}
+	if vals := q["delivery_type"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "delivery_type", "parameter is repeated")
+		} else if dt, ok := ParseDeliveryType(vals[0]); ok {
+			f.DeliveryType = &dt
+		} else {
+			v.Check(false, "delivery_type", "must be one of: pickup, delivery")
+		}
+	}
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "include", "parameter is repeated")
+		} else {
+			set, ierr := httpx.ParseInclude(vals[0])
+			if ierr != nil {
+				return f, false, ierr
+			}
+			wantTotal = set.Has(httpx.IncludeTotal)
+		}
+	}
+	if err := v.Err(); err != nil {
+		return f, false, err
+	}
+
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			return f, false, cursorError()
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			return f, false, cursorError()
+		}
+		f.AfterTime, f.AfterID = &at, id
+	}
+	return f, wantTotal, nil
+}
+
+func cursorError() error {
+	return httpx.BadRequest("cursor keyset is malformed",
+		httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+}
+
+func (h *Handler) HandleListOrders(w http.ResponseWriter, r *http.Request) {
+	f, wantTotal, err := parseListFilter(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items, hasMore, total, err := h.service.ListOrders(r.Context(), f, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1]
+		next, err = httpx.MintCursor(cursorScope, httpx.FormatKeyTime(last.CreatedAt.Time), last.ID.String())
+		if err != nil {
+			httpx.WriteError(w, r, err)
 			return
 		}
-		httputil.RespondError(w, r, "failed to confirm order", http.StatusInternalServerError, err)
-		return
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	var opts []httpx.ListOption
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, f.Limit, opts...)
 }
 
-func (h *Handler) HandleFulfillOrder(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
+func (h *Handler) HandleTransition(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req TransitionRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 
-	if err := h.service.FulfillOrder(r.Context(), id); err != nil {
-		if writeExposureBlock(w, err) {
-			return
+	v := &httpx.Validator{}
+	var to OrderStatus
+	if req.To == nil {
+		v.Check(false, "to", "is required")
+	} else if st, ok := ParseStatus(*req.To); ok {
+		to = st
+	} else {
+		v.Check(false, "to", "must be one of: "+strings.Join(statusNames, ", "))
+	}
+	var revision *int64
+	if n, ok := v.Int("revision", req.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		revision = &n
+	}
+	var reason, holdNote string
+	if req.Reason != nil {
+		reason = strings.TrimSpace(*req.Reason)
+	}
+	if req.HoldNote != nil {
+		holdNote = strings.TrimSpace(*req.HoldNote)
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	// The release of a hold is held to the finance roles (ADR 0005 5.2).
+	if to == StatusConfirmed {
+		if cur, err := h.service.GetOrder(r.Context(), id); err == nil && cur.Status == StatusOnHold {
+			if role := callerRole(r); role != "" && !releaseRoles[role] {
+				httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+					Message: "releasing a hold needs the admin, owner or finance role"})
+				return
+			}
 		}
-		httputil.RespondError(w, r, "failed to fulfill order", http.StatusInternalServerError, err)
-		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleCancelOrder handles POST /orders/{id}/cancel.
-//
-// A refusal from the state machine is a 409, not a 500: "this order is already
-// cancelled" and "a fulfilled order cannot be cancelled" are both correct
-// answers to a reasonable question, and a client needs to tell them apart from
-// a server fault to know whether retrying could ever help.
-func (h *Handler) HandleCancelOrder(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	body := TransitionBody{Reason: reason, HoldNote: holdNote, Actor: actor(r)}
+	pre := Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision}
+	o, err := h.service.Transition(r.Context(), id, to, pre, body)
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	var body struct {
-		Reason string `json:"reason"`
-	}
-	// An empty body is fine — a reason is optional on the ERP side.
-	_ = json.NewDecoder(r.Body).Decode(&body)
-
-	if err := h.service.CancelOrder(r.Context(), id, body.Reason); err != nil {
-		if errors.Is(err, ErrOrderAlreadyCancelled) || errors.Is(err, ErrOrderNotCancellable) {
-			httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
-			return
-		}
-		httputil.RespondError(w, r, "failed to cancel order", http.StatusInternalServerError, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	writeOrder(w, http.StatusOK, o)
 }
 
-// HandleExposureGate reports whether the order is currently blocked by the
-// lumber-index pre-ship gate. 200 {"blocked":false} when clear; 409 with the
-// exposure payload when blocked.
+// unresolvedExposure is the duck-typed interface pricing.ErrUnresolvedExposure
+// satisfies, so the exposure payload renders as blockers inside the wire's
+// error envelope without the order package importing pricing.
+type unresolvedExposure interface {
+	UnresolvedExposurePayload() map[string]any
+}
+
+// exposureBlockers maps an unresolved exposure gate error to the wire's 409
+// envelope with its payload as blockers; false when err is something else.
+func exposureBlockers(err error) map[string]any {
+	var ue unresolvedExposure
+	if errors.As(err, &ue) {
+		return ue.UnresolvedExposurePayload()
+	}
+	return nil
+}
+
+// HandleExposureGate answers whether the pre-ship exposure gate blocks the
+// order: 200 {"blocked": false} when clear, the wire's 409 with the exposure
+// payload as blockers when it does (behaviour kept, onto the envelope).
 func (h *Handler) HandleExposureGate(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 	if err := h.service.CheckExposureGate(r.Context(), id); err != nil {
-		if writeExposureBlock(w, err) {
+		if payload := exposureBlockers(err); payload != nil {
+			writeExposureConflict(w, r, payload)
 			return
 		}
-		httputil.RespondError(w, r, "failed to check exposure gate", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"blocked": false})
+	writeJSON(w, http.StatusOK, map[string]any{"blocked": false})
 }
 
-// HandleExposureOverride records an explicit owner override of the pre-ship
-// gate. Requires a notes justification (>= 10 chars); writes an OVERRIDDEN
-// exposure event + audit entry.
 func (h *Handler) HandleExposureOverride(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 	var body struct {
 		Notes string `json:"notes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	actor, role := "", ""
-	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
-		actor = claims.Subject
-		role = claims.Role
-	}
-	if err := h.service.OverrideExposure(r.Context(), id, body.Notes, actor, role); err != nil {
-		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+	err = h.service.OverrideExposure(r.Context(), id, body.Notes, actor(r), callerRole(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"overridden": true})
+	writeJSON(w, http.StatusOK, map[string]any{"overridden": true})
+}
+
+func writeExposureConflict(w http.ResponseWriter, r *http.Request, payload map[string]any) {
+	details := []httpx.FieldError{}
+	for k, val := range payload {
+		details = append(details, httpx.FieldError{Code: "exposure_" + k, Message: fmt.Sprint(val)})
+	}
+	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+		Message: "the order's source quote has unresolved index exposure",
+		Details: details})
 }

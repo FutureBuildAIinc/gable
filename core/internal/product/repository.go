@@ -25,6 +25,13 @@ type Repository interface {
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry) error
 	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int) error
+}
+
+// KitStore is the kit definition store the kit component routes use. It is
+// satisfied by *PostgresRepository and deliberately not part of Repository:
+// the parsing and pim test mocks keep compiling, and a store that cannot
+// serve kit definitions simply answers 503 on those two routes.
+type KitStore interface {
 	ListKitComponents(ctx context.Context, kitID uuid.UUID) ([]KitComponent, error)
 	ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, comps []KitComponent) error
 	ProductKitRef(ctx context.Context, id uuid.UUID, sku, description, uom *string, isKit *bool) error

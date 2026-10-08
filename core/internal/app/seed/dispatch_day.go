@@ -532,8 +532,10 @@ func seedDispatchDay(
 			spID = sp
 		}
 		if _, err := db.Exec(`INSERT INTO orders
-			(id, customer_id, branch_id, total_amount, status, salesperson_id, created_at, scheduled_delivery_date)
-			VALUES ($1,$2,$3,0,'CONFIRMED',$4,$5,$6::date)`,
+			(id, customer_id, branch_id, total_amount, subtotal, status, salesperson_id, created_at, scheduled_delivery_date, delivery_type, currency)
+			VALUES ($1,$2,$3,0,0,'CONFIRMED',$4,$5,$6::date,'DELIVERY',
+				COALESCE((SELECT c.currency FROM customers c WHERE c.id = $2),
+					(SELECT value FROM system_settings WHERE key = 'currency.default')))`,
 			orderID, custID, branchID, spID, createdAt, date.Format("2006-01-02")); err != nil {
 			log.Printf("seedDispatchDay: order for %s: %v", s.Customer, err)
 			continue
@@ -550,14 +552,18 @@ func seedDispatchDay(
 			price := productPrices[ln.SKU]
 			total += float64(ln.Qty) * price
 			weight += float64(ln.Qty) * productWeights[ln.SKU]
-			if _, err := db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, price_each)
-				VALUES ($1,$2,$3,$4)`, orderID, pid, ln.Qty, price); err != nil {
+			if _, err := db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
+					description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable, quantity_allocated)
+				SELECT $1, $2, $3, $4, 'PRODUCT', $5,
+					COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3 * $4, 2), TRUE, $3
+				FROM products p WHERE p.id = $2`,
+				orderID, pid, ln.Qty, price, lines); err != nil {
 				log.Printf("seedDispatchDay: line %s for %s: %v", ln.SKU, s.Customer, err)
 				continue
 			}
 			lines++
 		}
-		db.Exec(`UPDATE orders SET total_amount=$1 WHERE id=$2`, total, orderID)
+		db.Exec(`UPDATE orders SET total_amount=$1, subtotal=$1 WHERE id=$2`, total, orderID)
 		dayWeight += weight
 
 		// stop_sequence 0 = not yet sequenced. AI_LM's push writes the real

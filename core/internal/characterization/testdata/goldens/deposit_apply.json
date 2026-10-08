@@ -108,20 +108,20 @@
       "path": "/api/v1/deposits/<id-4>/apply",
       "body": {
         "amount_cents": 4000,
-        "invoice_id": "<id-7>"
+        "invoice_id": "{myInvoice}"
       }
     },
     "response": {
-      "status": 201,
+      "status": 400,
       "content_type": "application/json",
       "body": {
-        "amount": 4000,
-        "created_at": "<ts+0d>",
-        "customer_id": "<id-2>",
-        "deposit_id": "<id-4>",
-        "gl_entry_id": "<id-8>",
-        "id": "<id-9>",
-        "invoice_id": "<id-7>"
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
       }
     }
   },
@@ -136,7 +136,7 @@
       "content_type": "application/json",
       "body": {
         "amount": 10000,
-        "applied_amount": 4000,
+        "applied_amount": 0,
         "branch_id": "<id-1>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
@@ -144,7 +144,7 @@
         "id": "<id-4>",
         "method": "CHECK",
         "reference": "GOLD-DEP-A1",
-        "remaining": 6000,
+        "remaining": 10000,
         "status": "OPEN",
         "updated_at": "<ts+0d>"
       }
@@ -168,7 +168,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -191,7 +191,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-9>"
         }
       }
     }
@@ -212,7 +212,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -235,7 +235,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -244,7 +244,7 @@
     "name": "deposit.apply.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/deposits/<id-14>/apply",
+      "path": "/api/v1/deposits/<id-12>/apply",
       "body": {
         "amount_cents": 100
       }
@@ -258,7 +258,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -273,15 +273,16 @@
       }
     },
     "response": {
-      "status": 201,
+      "status": 400,
       "content_type": "application/json",
       "body": {
-        "amount": 6000,
-        "created_at": "<ts+0d>",
-        "customer_id": "<id-2>",
-        "deposit_id": "<id-4>",
-        "gl_entry_id": "<id-16>",
-        "id": "<id-17>"
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
       }
     }
   },
@@ -303,7 +304,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -321,7 +322,7 @@
         "deposits": [
           {
             "amount": 10000,
-            "applied_amount": 10000,
+            "applied_amount": 0,
             "branch_id": "<id-1>",
             "created_at": "<ts+0d>",
             "customer_id": "<id-2>",
@@ -329,12 +330,12 @@
             "id": "<id-4>",
             "method": "CHECK",
             "reference": "GOLD-DEP-A1",
-            "remaining": 0,
-            "status": "APPLIED",
+            "remaining": 10000,
+            "status": "OPEN",
             "updated_at": "<ts+0d>"
           }
         ],
-        "open_balance_cents": 0
+        "open_balance_cents": 10000
       }
     }
   }

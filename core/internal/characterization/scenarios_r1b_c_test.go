@@ -664,8 +664,9 @@ func r1bCDeliveredGroups() []groupDef {
 				{
 					name: "order.create.c_delivered", method: "POST", path: "/api/v1/orders",
 					body: map[string]any{
-						"customer_id": "{myCustomer}",
-						"lines":       []map[string]any{{"product_id": "{product}", "quantity": 2, "price_each": 550}},
+						"customer_id":   "{myCustomer}",
+						"delivery_type": "delivery",
+						"lines":         []map[string]any{{"product_id": "{product}", "quantity": "2"}},
 					},
 					extract: map[string]string{"c_order_dl": "/id"},
 				},

@@ -76,17 +76,16 @@
         "cashier_id": "<id-9>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-7>",
-        "gl_entry_id": "<id-10>",
-        "id": "<id-11>",
+        "id": "<id-10>",
         "lines": [
           {
             "description": "",
-            "id": "<id-12>",
+            "id": "<id-11>",
             "line_total": 3000,
             "product_id": "<id-8>",
             "quantity": 1,
             "restock": false,
-            "return_id": "<id-11>",
+            "return_id": "<id-10>",
             "unit_price": 3000,
             "uom": "EA"
           }
@@ -128,7 +127,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -153,7 +152,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -184,7 +183,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -215,7 +214,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -236,7 +235,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-16>"
         }
       }
     }
@@ -283,7 +282,7 @@
     "name": "pos.return.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/returns/<id-18>"
+      "path": "/api/v1/pos/returns/<id-17>"
     },
     "response": {
       "status": 404,
@@ -294,7 +293,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-18>"
         }
       }
     }
@@ -314,7 +313,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-20>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -335,8 +334,7 @@
             "cashier_id": "<id-9>",
             "created_at": "<ts+0d>",
             "customer_id": "<id-7>",
-            "gl_entry_id": "<id-10>",
-            "id": "<id-11>",
+            "id": "<id-10>",
             "reason": "",
             "refund_method": "ACCOUNT",
             "register_id": "REG-01",

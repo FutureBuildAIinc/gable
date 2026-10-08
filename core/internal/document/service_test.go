@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/google/uuid"
 )
 
@@ -343,9 +344,13 @@ func TestGeneratePickTicketPDF_QuantityAndUOM(t *testing.T) {
 	repo := newRepo(&product.Product{ID: prodID, SKU: "2X4-8", Description: "SPF Stud", UOMPrimary: "MBF"})
 	svc := NewService(repo)
 
+	prodRef := prodID
+	qty := httpx.Quantity(125000)
+	uom := "MBF"
+	createdAt := httpx.TimestampOf(time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC))
 	ord := &order.Order{
-		ID: uuid.New(), CreatedAt: time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC),
-		Lines: []order.OrderLine{{ProductID: prodID, Quantity: 12.5}},
+		OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: createdAt},
+		Lines:        []order.OrderLine{{Line: salesdoc.Line{ProductID: &prodRef, Quantity: &qty, UOM: &uom, LineType: salesdoc.LineProduct}}},
 	}
 	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme Construction"})
 	if err != nil {
@@ -367,11 +372,15 @@ func TestGeneratePickTicketPDF_UOMFallback(t *testing.T) {
 	repo := newRepo(&product.Product{ID: known, SKU: "X", Description: "Y"}) // no UOM set
 	svc := NewService(repo)
 
+	knownRef := known
+	unknownRef := uuid.New()
+	q3 := httpx.Quantity(30000)
+	q5 := httpx.Quantity(50000)
 	ord := &order.Order{
-		ID: uuid.New(), CreatedAt: time.Now(),
+		OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: httpx.TimestampOf(time.Now())},
 		Lines: []order.OrderLine{
-			{ProductID: known, Quantity: 3},
-			{ProductID: uuid.New(), Quantity: 5}, // unknown product
+			{Line: salesdoc.Line{ProductID: &knownRef, Quantity: &q3, LineType: salesdoc.LineProduct}},
+			{Line: salesdoc.Line{ProductID: &unknownRef, Quantity: &q5, LineType: salesdoc.LineProduct}}, // unknown product
 		},
 	}
 	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme"})
@@ -394,9 +403,11 @@ func TestGeneratePickTicketPDF_CarriesNoPricing(t *testing.T) {
 	svc := NewService(repo)
 	limit := httpx.Cents(2500000)
 
+	prodRef := prodID
+	q10 := httpx.Quantity(100000)
 	ord := &order.Order{
-		ID: uuid.New(), CreatedAt: time.Now(), TotalAmount: 128450,
-		Lines: []order.OrderLine{{ProductID: prodID, Quantity: 10, PriceEach: 475}},
+		OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: httpx.TimestampOf(time.Now()), TotalCents: 128450},
+		Lines:        []order.OrderLine{{Line: salesdoc.Line{ProductID: &prodRef, Quantity: &q10, LineType: salesdoc.LineProduct}}},
 	}
 	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme", CreditLimitCents: &limit, BalanceCents: 487319})
 	if err != nil {
@@ -413,7 +424,7 @@ func TestGeneratePickTicketPDF_CarriesNoPricing(t *testing.T) {
 // than an empty file.
 func TestGeneratePickTicketPDF_NoLines(t *testing.T) {
 	svc := NewService(newRepo())
-	ord := &order.Order{ID: uuid.New(), CreatedAt: time.Now()}
+	ord := &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: httpx.TimestampOf(time.Now())}}
 
 	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme"})
 	if err != nil {
@@ -429,7 +440,7 @@ func TestGeneratePickTicketPDF_NoLines(t *testing.T) {
 // jobsite name can never appear on the ticket the driver takes to the site.
 func TestGeneratePickTicketPDF_JobIsAlwaysNA(t *testing.T) {
 	svc := NewService(newRepo())
-	ord := &order.Order{ID: uuid.New(), CreatedAt: time.Now()}
+	ord := &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: httpx.TimestampOf(time.Now())}}
 
 	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme"})
 	if err != nil {

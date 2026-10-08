@@ -6,6 +6,7 @@ package portal
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +14,10 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
-	"github.com/gablelbm/gable/pkg/money"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/google/uuid"
 )
 
@@ -475,18 +477,29 @@ func (f *fakeInventoryRepo) ExecuteInTx(ctx context.Context, fn func(context.Con
 }
 
 type fakeOrderRepo struct {
-	created  []order.Order
-	orders   map[uuid.UUID]*order.Order
-	statuses []order.OrderStatus
-	createEr error
+	created   []order.Order
+	orders    map[uuid.UUID]*order.Order
+	products  map[uuid.UUID]*product.Product
+	customers map[uuid.UUID]*customer.Customer
 }
 
 var _ order.Repository = (*fakeOrderRepo)(nil)
 
-func (f *fakeOrderRepo) CreateOrder(_ context.Context, o *order.Order) error {
-	if f.createEr != nil {
-		return f.createEr
+func (f *fakeOrderRepo) NextNumber(context.Context) (string, error) { return "SO-000001", nil }
+func (f *fakeOrderRepo) GetOrder(_ context.Context, id uuid.UUID) (*order.Order, error) {
+	o, ok := f.orders[id]
+	if !ok {
+		return nil, order.ErrNotFound
 	}
+	return o, nil
+}
+func (f *fakeOrderRepo) LockOrder(_ context.Context, id uuid.UUID) error {
+	if _, ok := f.orders[id]; !ok {
+		return order.ErrNotFound
+	}
+	return nil
+}
+func (f *fakeOrderRepo) InsertOrder(_ context.Context, o *order.Order) error {
 	if o.ID == uuid.Nil {
 		o.ID = uuid.New()
 	}
@@ -498,23 +511,67 @@ func (f *fakeOrderRepo) CreateOrder(_ context.Context, o *order.Order) error {
 	f.orders[o.ID] = &cp
 	return nil
 }
-func (f *fakeOrderRepo) GetOrder(_ context.Context, id uuid.UUID) (*order.Order, error) {
-	o, ok := f.orders[id]
-	if !ok {
-		return nil, errors.New("order not found")
-	}
-	return o, nil
-}
-func (f *fakeOrderRepo) ListOrders(context.Context) ([]order.Order, error) { return nil, nil }
-func (f *fakeOrderRepo) ListOrdersPaginated(context.Context, int, int) ([]order.Order, int, error) {
-	return nil, 0, nil
-}
-func (f *fakeOrderRepo) UpdateStatus(_ context.Context, id uuid.UUID, status order.OrderStatus) error {
-	f.statuses = append(f.statuses, status)
-	if o, ok := f.orders[id]; ok {
-		o.Status = status
-	}
+func (f *fakeOrderRepo) ReplaceDraft(_ context.Context, o *order.Order) error {
+	f.orders[o.ID] = o
 	return nil
+}
+func (f *fakeOrderRepo) SaveTransition(_ context.Context, o *order.Order) error {
+	f.orders[o.ID] = o
+	return nil
+}
+func (f *fakeOrderRepo) ListOrders(context.Context, order.ListFilter) ([]order.OrderSummary, error) {
+	return nil, nil
+}
+func (f *fakeOrderRepo) CountOrders(context.Context, order.ListFilter) (int64, error) { return 0, nil }
+
+func (f *fakeOrderRepo) LookupProducts(_ context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error) {
+	out := map[string]salesdoc.ProductRef{}
+	for _, id := range ids {
+		if p, ok := f.products[id]; ok {
+			out[id.String()] = salesdoc.ProductRef{
+				ID: id, SKU: p.SKU, Description: p.Description, UOMPrimary: string(p.UOMPrimary),
+				BasePrice: httpx.Price(int64(math.Round(p.BasePrice * 10000))), Taxable: true,
+			}
+		}
+	}
+	return out, nil
+}
+func (f *fakeOrderRepo) LookupKitComponents(context.Context, []uuid.UUID) (map[string][]salesdoc.KitComponent, error) {
+	return map[string][]salesdoc.KitComponent{}, nil
+}
+func (f *fakeOrderRepo) LookupChargeCodes(context.Context, []string) (map[string]salesdoc.ChargeCode, error) {
+	return map[string]salesdoc.ChargeCode{}, nil
+}
+func (f *fakeOrderRepo) CustomerFacts(_ context.Context, customerID uuid.UUID) (order.CustomerFacts, error) {
+	facts := order.CustomerFacts{Exists: true, Name: "Acme", Currency: "USD"}
+	if c, ok := f.customers[customerID]; ok {
+		facts.Name = c.Name
+		facts.SalespersonID = c.SalespersonID
+	}
+	return facts, nil
+}
+func (f *fakeOrderRepo) ContactAuthority(context.Context, uuid.UUID) (order.ContactAuthority, error) {
+	return order.ContactAuthority{Exists: true, CanPlaceOrders: true}, nil
+}
+func (f *fakeOrderRepo) DefaultShipToID(context.Context, uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeOrderRepo) ShipTo(context.Context, uuid.UUID) (*order.ShipToSnapshot, *string, error) {
+	return nil, nil, nil
+}
+func (f *fakeOrderRepo) BranchTaxRate(context.Context, uuid.UUID) (*string, error) {
+	rate := "0.000000"
+	return &rate, nil
+}
+func (f *fakeOrderRepo) CustomerExempt(context.Context, uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (f *fakeOrderRepo) OpenReceivableCents(context.Context, uuid.UUID, *uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (f *fakeOrderRepo) HasInvoices(context.Context, uuid.UUID) (bool, error) { return false, nil }
+func (f *fakeOrderRepo) OrderExistsForQuote(context.Context, uuid.UUID) (bool, error) {
+	return false, nil
 }
 
 // --- service builder -----------------------------------------------------
@@ -541,13 +598,16 @@ func newPortalRig(t *testing.T) *portalRig {
 		products:  &fakeProductRepo{products: map[uuid.UUID]*product.Product{}},
 		prices:    &fakePricingRepo{contracts: map[uuid.UUID]float64{}},
 		stock:     &fakeInventoryRepo{byProduct: map[uuid.UUID][]inventory.Inventory{}},
-		orders:    &fakeOrderRepo{orders: map[uuid.UUID]*order.Order{}},
+	}
+	rig.orders = &fakeOrderRepo{
+		orders:   map[uuid.UUID]*order.Order{},
+		products: rig.products.products,
 	}
 
 	customerSvc := customer.NewService(rig.customers)
-	// order.Service without a *database.DB takes its documented no-transaction
-	// fallback, which is exactly the seam this rig needs.
-	orderSvc := order.NewService(rig.orders, inventory.NewService(rig.stock), nil, customerSvc, nil)
+	// order.Service over the fakes: every dependency the checkout path reads
+	// is a fake, so the rig tests the portal's own behaviour.
+	orderSvc := order.NewService(rig.orders)
 
 	rig.svc = NewService(
 		rig.repo,
@@ -890,22 +950,22 @@ func cartWith(lines ...[2]float64) *CartDTO {
 	return cart
 }
 
-// CORRECTNESS: checkout is the dollars-to-cents boundary. Every cart line's
-// float64 dollar unit price becomes an int64 cent price on the order line,
-// rounded half away from zero — the same rule pkg/money.DollarsToCents applies
-// everywhere else in the ledger. Truncation here loses a cent per line on the
-// binary-float cases (8.20*100 is 819.99999999999989 in float64).
-func TestCheckout_ConvertsEachCartLineToCents(t *testing.T) {
+// CORRECTNESS: checkout no longer crosses money at all. The cart's lines
+// carry product and quantity only; the order prices them through the engine
+// (the product's base price here, the same engine the catalog priced the
+// cart with), so no float price crosses the checkout (ADR 0005 2.3).
+func TestCheckout_PricesTheOrderFromTheCatalog(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
-	rig.repo.cart = cartWith(
-		[2]float64{10, 8.20},   // the classic 819.99999999999989 case
-		[2]float64{3, 0.29},    // 28.999999999999996
-		[2]float64{1, 1.15},    // 114.99999999999999
-		[2]float64{2, 1234.56}, //
-		[2]float64{5, 4.75},    //
-	)
+	stud := uuid.New()
+	screw := uuid.New()
+	rig.withProduct(stud, "P-STUD", 8.20)
+	rig.withProduct(screw, "P-SCREW", 0.29)
+	rig.repo.cart = &CartDTO{ID: uuid.New(), ItemCount: 2, Items: []CartItemDTO{
+		{ID: uuid.New(), ProductID: stud, ProductSKU: "P-STUD", ProductName: "P-STUD", Quantity: 10, UnitPrice: 8.20, LineTotal: 82},
+		{ID: uuid.New(), ProductID: screw, ProductSKU: "P-SCREW", ProductName: "P-SCREW", Quantity: 3, UnitPrice: 0.29, LineTotal: 0.87},
+	}}
 
 	resp, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{})
 	if err != nil {
@@ -914,36 +974,28 @@ func TestCheckout_ConvertsEachCartLineToCents(t *testing.T) {
 	if resp.OrderID == uuid.Nil {
 		t.Fatal("checkout returned no order id")
 	}
-
 	if len(rig.orders.created) != 1 {
-		t.Fatalf("CreateOrder ran %d times, want 1", len(rig.orders.created))
+		t.Fatalf("the order ran %d times, want 1", len(rig.orders.created))
 	}
 	got := rig.orders.created[0]
-	if len(got.Lines) != len(rig.repo.cart.Items) {
-		t.Fatalf("order has %d lines, want %d", len(got.Lines), len(rig.repo.cart.Items))
+	if len(got.Lines) != 2 {
+		t.Fatalf("order has %d lines, want 2", len(got.Lines))
 	}
-
-	for i, item := range rig.repo.cart.Items {
-		want := money.DollarsToCents(item.UnitPrice)
-		if got.Lines[i].PriceEach != want {
-			t.Errorf("line %d price_each = %d cents, want %d (from $%v)",
-				i, got.Lines[i].PriceEach, want, item.UnitPrice)
-		}
-		if got.Lines[i].Quantity != item.Quantity {
-			t.Errorf("line %d quantity = %v, want %v", i, got.Lines[i].Quantity, item.Quantity)
-		}
-		if got.Lines[i].ProductID != item.ProductID {
-			t.Errorf("line %d product = %s, want %s", i, got.Lines[i].ProductID, item.ProductID)
-		}
+	if id := got.Lines[0].ProductID; id == nil || *id != stud {
+		t.Errorf("line 0 product = %v, want the cart's", id)
 	}
-
-	// And the order total the ERP computed from those cents matches the cart.
-	var wantTotal int64
-	for _, item := range rig.repo.cart.Items {
-		wantTotal += money.RoundToCents(item.Quantity * float64(money.DollarsToCents(item.UnitPrice)))
+	if q := got.Lines[0].Quantity; q == nil || *q != 100000 {
+		t.Errorf("line 0 quantity = %v, want 10 at scale 4", q)
 	}
-	if got.TotalAmount != wantTotal {
-		t.Errorf("order total = %d cents, want %d", got.TotalAmount, wantTotal)
+	if p := got.Lines[0].UnitPrice; p == nil || *p != 82000 {
+		t.Errorf("line 0 price = %v, want the base price 8.20 at scale 4", p)
+	}
+	if src := got.Lines[0].PriceSource; src != salesdoc.PriceSourceList {
+		t.Errorf("line 0 price source = %s, want PRICE_LIST", src)
+	}
+	// 10 at 8.20 plus 3 at 0.29 is 8287 cents; the fake branch rate is 0.
+	if got.SubtotalCents != 8287 || got.TaxCents != 0 || got.TotalCents != 8287 {
+		t.Errorf("subtotal=%d tax=%d total=%d, want 8287, 0, 8287", got.SubtotalCents, got.TaxCents, got.TotalCents)
 	}
 }
 
@@ -1092,7 +1144,8 @@ func TestCheckout_OrderFailureLeavesTheCartIntact(t *testing.T) {
 	me := uuid.New()
 	rig.withCustomer(me, customer.TierRetail)
 	rig.repo.cart = cartWith([2]float64{2, 4.75})
-	rig.orders.createEr = errors.New("failed to create order")
+	// A product the order service cannot find: the create fails before any
+	// row is written, the failure the ERP-refusal path models.
 
 	if _, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{}); err == nil {
 		t.Fatal("a failed order was reported as a successful checkout")
@@ -1595,8 +1648,8 @@ func TestCancelOrder_ForeignOrderIsNotFoundAndNeverReachesTheERP(t *testing.T) {
 	if len(rig.repo.statusReads) != 1 || rig.repo.statusReads[0] != (scopeCall{orderID, me}) {
 		t.Errorf("status read as %+v, want {%s %s}", rig.repo.statusReads, orderID, me)
 	}
-	if len(rig.orders.statuses) != 0 {
-		t.Errorf("the ERP cancel ran for a foreign order: %v", rig.orders.statuses)
+	if len(rig.orders.created) != 0 {
+		t.Errorf("the ERP cancel ran for a foreign order: %v", rig.orders.created)
 	}
 }
 
@@ -1621,8 +1674,8 @@ func TestCancelOrder_GoodsInMotionAreRefusedBeforeTheERP(t *testing.T) {
 	if !strings.Contains(err.Error(), "call the dealer") {
 		t.Errorf("error %q does not say what to do next", err)
 	}
-	if len(rig.orders.statuses) != 0 {
-		t.Errorf("the ERP cancel ran for an in-motion order: %v", rig.orders.statuses)
+	if len(rig.orders.created) != 0 {
+		t.Errorf("the ERP cancel ran for an in-motion order: %v", rig.orders.created)
 	}
 }
 
@@ -1633,7 +1686,7 @@ func TestCancelOrder_CancellableOrderReachesTheERP(t *testing.T) {
 	rig := newPortalRig(t)
 	me, orderID := uuid.New(), uuid.New()
 	rig.repo.orderStatus = "DRAFT"
-	rig.orders.orders[orderID] = &order.Order{ID: orderID, CustomerID: me, Status: order.StatusDraft}
+	rig.orders.orders[orderID] = &order.Order{OrderSummary: order.OrderSummary{ID: orderID, CustomerID: me, Status: order.StatusDraft}}
 
 	resp, err := rig.svc.CancelOrder(context.Background(), orderID, me, "changed my mind")
 	if err != nil {
@@ -1648,8 +1701,8 @@ func TestCancelOrder_CancellableOrderReachesTheERP(t *testing.T) {
 	if resp.Status != string(order.StatusCancelled) {
 		t.Errorf("status = %q, want %q", resp.Status, order.StatusCancelled)
 	}
-	if len(rig.orders.statuses) != 1 || rig.orders.statuses[0] != order.StatusCancelled {
-		t.Errorf("ERP status writes = %v, want a single CANCELLED", rig.orders.statuses)
+	if o := rig.orders.orders[orderID]; o == nil || o.Status != order.StatusCancelled {
+		t.Errorf("ERP order after cancel = %+v, want CANCELLED", o)
 	}
 }
 
@@ -1659,13 +1712,13 @@ func TestCancelOrder_ERPStateMachineStillApplies(t *testing.T) {
 	rig := newPortalRig(t)
 	me, orderID := uuid.New(), uuid.New()
 	rig.repo.orderStatus = "FULFILLED"
-	rig.orders.orders[orderID] = &order.Order{ID: orderID, CustomerID: me, Status: order.StatusFulfilled}
+	rig.orders.orders[orderID] = &order.Order{OrderSummary: order.OrderSummary{ID: orderID, CustomerID: me, Status: order.StatusFulfilled}}
 
 	if _, err := rig.svc.CancelOrder(context.Background(), orderID, me, ""); err == nil {
 		t.Fatal("a FULFILLED order was cancelled from the portal")
 	}
-	if len(rig.orders.statuses) != 0 {
-		t.Errorf("the status was written anyway: %v", rig.orders.statuses)
+	if o := rig.orders.orders[orderID]; o == nil || o.Status != order.StatusFulfilled {
+		t.Errorf("the status was written anyway: %+v", o)
 	}
 }
 

@@ -3,15 +3,18 @@
     "name": "document.print_pickticket",
     "request": {
       "method": "GET",
-      "path": "/api/v1/documents/print/pickticket/<id-1>"
+      "path": "/api/v1/documents/print/pickticket/{myOrder}"
     },
     "response": {
-      "status": 200,
-      "content_type": "application/pdf",
+      "status": 400,
+      "content_type": "application/json",
       "body": {
-        "binary": {
-          "length": 3076,
-          "text_sha256": "ff0be32dafb466a7f97962d64a01a19ecd2f171fc7b2dcbf3aecb7f0ab8531a6"
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-1>"
         }
       }
     }

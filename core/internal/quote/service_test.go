@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -530,47 +531,101 @@ func TestTransition_SnapshotOnSendIsBestEffort(t *testing.T) {
 	}
 }
 
-func TestConvert_ReturnsTheOrderPayload(t *testing.T) {
+// fakeOrderCreator records what the convert handed the order module.
+type fakeOrderCreator struct {
+	sources  []*order.QuoteSource
+	created  []*order.Order
+	existing bool
+	failWith error
+}
+
+func (f *fakeOrderCreator) PrepareQuoteTax(context.Context, *order.QuoteSource) (*order.ProviderTax, error) {
+	return nil, nil
+}
+func (f *fakeOrderCreator) QuoteHasOrder(context.Context, uuid.UUID) (bool, error) {
+	return f.existing, nil
+}
+func (f *fakeOrderCreator) CreateFromQuote(_ context.Context, src *order.QuoteSource, _ *order.ProviderTax) (*order.Order, error) {
+	if f.failWith != nil {
+		return nil, f.failWith
+	}
+	f.sources = append(f.sources, src)
+	o := &order.Order{}
+	o.ID = uuid.New()
+	o.QuoteID = &src.QuoteID
+	o.Number = "SO-000001"
+	o.Status = order.StatusDraft
+	f.created = append(f.created, o)
+	return o, nil
+}
+
+// The convert accepts the quote and hands the order module the lines without
+// loss: the pair and the scale 4 price cross exactly (ADR 0005 5.8 lifts
+// R1-15's refusal).
+func TestConvert_HandsTheLinesToTheOrderCreator(t *testing.T) {
 	svc, repo, _ := newTestService()
 	pid := uuid.New()
-	line := QuoteLine{
-		ID: uuid.New(), ProductID: &pid, Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "PCS",
+	mbfLine := QuoteLine{
+		ID: uuid.New(), ProductID: &pid, Quantity: 1875000, UOM: product.UOM_PCS, PriceUOM: "MBF",
+		UOMQty: 1875000, PriceUOMQty: one, UnitPrice: 5000000,
+	}
+	plain := QuoteLine{
+		ID: uuid.New(), Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "PCS",
 		UOMQty: one, PriceUOMQty: one, UnitPrice: 26667,
 	}
-	q := repo.seed(QuoteStateSent, line)
+	q := repo.seed(QuoteStateSent, mbfLine, plain)
+	creator := &fakeOrderCreator{}
+	svc.WithOrderCreator(creator)
+
 	rev := int64(1)
-	payload, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev})
+	o, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 2.6667 per piece is 267 cents.
-	if payload.QuoteID != q.ID || len(payload.Lines) != 1 || payload.Lines[0].PriceEachCents != 267 || payload.Lines[0].Quantity != 100000 {
-		t.Errorf("payload = %+v", payload)
+	if o == nil || o.QuoteID == nil || *o.QuoteID != q.ID {
+		t.Fatalf("convert returned %+v, want the created order of the quote", o)
 	}
-	if payload.Revision != 2 {
-		t.Errorf("payload revision = %d, want the accepted quote's 2", payload.Revision)
+	if len(creator.sources) != 1 || len(creator.sources[0].Lines) != 2 {
+		t.Fatalf("the order module received %d sources", len(creator.sources))
+	}
+	got := creator.sources[0].Lines[0]
+	if got.UOMQty != 1875000 || got.PriceUOMQty != one || got.UnitPrice != 5000000 || got.PriceUOM != "MBF" {
+		t.Errorf("the MBF line crossed as %+v, want the pair and the price exactly", got)
+	}
+	if after, err := svc.GetQuote(context.Background(), q.ID); err != nil || after.Status != QuoteStateAccepted {
+		t.Errorf("quote after convert = %v (%v), want accepted", after.Status, err)
 	}
 }
 
-// Orders carry no conversion pair yet: a line priced per another unit is
-// refused before the status moves.
-func TestConvert_RefusesALineOrdersCannotCarry(t *testing.T) {
+// A quote that already has an order not cancelled is refused with
+// already_converted, and the quote stays as it was.
+func TestConvert_RefusesAnAlreadyConvertedQuote(t *testing.T) {
 	svc, repo, _ := newTestService()
-	pid := uuid.New()
-	line := QuoteLine{
-		ID: uuid.New(), ProductID: &pid, Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "MBF",
-		UOMQty: 1875000, PriceUOMQty: one, UnitPrice: 5000000,
-	}
-	q := repo.seed(QuoteStateSent, line)
+	q := repo.seed(QuoteStateSent)
+	svc.WithOrderCreator(&fakeOrderCreator{existing: true})
 	rev := int64(1)
 	_, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev})
 	var herr *httpx.Error
-	if !errors.As(err, &herr) || herr.Code != httpx.CodeInvalidStateTransition || len(herr.Details) != 1 || herr.Details[0].Code != "line_not_convertible" {
-		t.Fatalf("err = %v, want invalid_state_transition with a line_not_convertible blocker", err)
+	if !errors.As(err, &herr) || herr.Code != httpx.CodeConflict || len(herr.Details) != 1 || herr.Details[0].Code != "already_converted" {
+		t.Fatalf("err = %v, want conflict with an already_converted blocker", err)
 	}
-	got, gerr := svc.GetQuote(context.Background(), q.ID)
-	if gerr != nil || got.Status != QuoteStateSent {
+	if got, gerr := svc.GetQuote(context.Background(), q.ID); gerr != nil || got.Status != QuoteStateSent {
 		t.Errorf("status after a refused convert = %v (%v), want sent", got.Status, gerr)
+	}
+}
+
+// A failing order create rolls the acceptance back with it: the convert is
+// one transaction (ADR 0005 5.8).
+func TestConvert_AFailedOrderCreateRollsTheAcceptanceBack(t *testing.T) {
+	svc, repo, _ := newTestService()
+	q := repo.seed(QuoteStateSent)
+	svc.WithOrderCreator(&fakeOrderCreator{failWith: errors.New("order insert failed")})
+	rev := int64(1)
+	if _, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev}); err == nil {
+		t.Fatal("convert succeeded though the order could not be created")
+	}
+	if got, gerr := svc.GetQuote(context.Background(), q.ID); gerr != nil || got.Status != QuoteStateSent {
+		t.Errorf("status after a failed convert = %v (%v), want sent", got.Status, gerr)
 	}
 }
 

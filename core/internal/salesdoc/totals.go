@@ -156,19 +156,24 @@ func parseFixedScale(s string, scale int) (int64, error) {
 		}
 		value = value*10 + int64(d-'0')
 	}
-	for i := 0; i < scale; i++ {
-		value *= 10
+	// The fraction's digits walk in at their own places, then the remaining
+	// scale pads with zeros: 8.875 at scale 4 is 88750, never 80000875.
+	used := len(fracPart)
+	if used > scale {
+		used = scale
 	}
 	for i, d := range fracPart {
 		if d < '0' || d > '9' {
 			return 0, errors.New("not a plain decimal")
 		}
-		switch {
-		case i < scale:
+		if i < used {
 			value = value*10 + int64(d-'0')
-		case d != '0':
+		} else if d != '0' {
 			return 0, errors.New("precision beyond the rate's scale")
 		}
+	}
+	for i := 0; i < scale-used; i++ {
+		value *= 10
 	}
 	if neg {
 		value = -value

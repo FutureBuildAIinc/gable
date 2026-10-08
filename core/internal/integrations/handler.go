@@ -9,7 +9,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -304,79 +303,47 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 
 	ctx := r.Context()
 
-	// 1. Load the quote first. We intentionally do NOT mark it ACCEPTED yet —
-	//    QuoteStateAccepted is terminal, so accepting it before the order is
-	//    created would strand the quote un-reconvertible if order creation fails.
-	q, err := h.quoteSvc.GetQuote(ctx, quoteID)
+	// 1. Convert in one act: the quote is accepted and the order created in
+	//    one transaction (ADR 0005 5.8), the pair and the scale 4 price
+	//    carried without loss. This seam's wire is frozen byte for byte; only
+	//    the calls inside the handler changed.
+	o, err := h.quoteSvc.Convert(ctx, quoteID, quote.Precondition{})
 	if err != nil {
-		slog.Error("failed to get quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
-		writeError(w, http.StatusInternalServerError, "failed to get quote")
-		return
-	}
-
-	// 2. Convert to order. PriceEach is int64 cents: the quote line's price per
-	// sale unit, rounded to cents (half away from zero) the way an order line
-	// has always held it. A quote with a line an order cannot carry yet (a
-	// conversion pair that is not 1 to 1, or a price per another unit) is
-	// refused before anything is created: 409 with the lines named.
-	payload, err := quote.OrderPayloadFor(q)
-	if err != nil {
+		slog.Error("failed to convert quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
 		var herr *httpx.Error
 		if errors.As(err, &herr) {
-			msgs := make([]string, 0, len(herr.Details))
-			for _, d := range herr.Details {
-				msgs = append(msgs, d.Message)
-			}
-			writeError(w, http.StatusConflict, "quote cannot be converted: "+strings.Join(msgs, "; "))
+			writeError(w, http.StatusConflict, "quote cannot be converted: "+herr.Message)
 			return
 		}
-		slog.Error("failed to price quote for order", "error", err, "quote_id", idStr)
 		writeError(w, http.StatusInternalServerError, "failed to create order")
 		return
 	}
-	var orderLines []order.OrderLineRequest
-	for _, pl := range payload.Lines {
-		var productID uuid.UUID
-		if pl.ProductID != nil {
-			productID = *pl.ProductID
-		}
-		orderLines = append(orderLines, order.OrderLineRequest{
-			ProductID: productID,
-			Quantity:  float64(pl.Quantity) / 10000,
-			PriceEach: int64(pl.PriceEachCents),
-		})
-	}
 
-	o, err := h.orderSvc.CreateOrder(ctx, order.CreateOrderRequest{
-		CustomerID: q.CustomerID,
-		QuoteID:    &quoteID,
-		Lines:      orderLines,
-	})
+	// 2. Confirm the created order through the same transition the desk
+	//    uses. A confirm that lands on_hold keeps this seam's 409 with
+	//    today's body, while the order holds with its order.hold event
+	//    (ADR 0005 5.8); an order that lands backordered reports CONFIRMED,
+	//    the vocabulary this seam's callers know.
+	confirmed, err := h.orderSvc.ConfirmInProcess(ctx, o.ID)
 	if err != nil {
-		slog.Error("failed to create order from quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
-		writeError(w, http.StatusInternalServerError, "failed to create order")
-		return
-	}
-
-	// 3. Now that the order exists, mark the quote accepted.
-	if err := h.quoteSvc.UpdateState(ctx, quoteID, quote.QuoteStateAccepted); err != nil {
-		slog.Error("order created but quote not marked accepted", "error", err, "order_id", o.ID, "quote_id", idStr)
-		writeError(w, http.StatusInternalServerError, "order "+o.ID.String()+" created but quote could not be accepted")
-		return
-	}
-
-	// 4. Confirm the order. A failure here is reported (not silently masked as a
-	//    200 success) — the order exists in DRAFT and confirmation can be retried.
-	if err := h.orderSvc.ConfirmOrder(ctx, o.ID); err != nil {
 		slog.Error("order created but not confirmed", "order_id", o.ID, "error", err)
 		writeError(w, http.StatusConflict, "order "+o.ID.String()+" created from quote but could not be confirmed: "+err.Error())
 		return
 	}
 
-	// Reflect the true post-confirmation status in the response.
 	status := "CONFIRMED"
-	if confirmed, gErr := h.orderSvc.GetOrder(ctx, o.ID); gErr == nil {
-		status = string(confirmed.Status)
+	if confirmed != nil {
+		switch confirmed.Status {
+		case order.StatusOnHold:
+			// The hold is a committed state change with its event; the seam
+			// keeps the 409 its callers know.
+			writeError(w, http.StatusConflict, "order "+o.ID.String()+" created from quote but could not be confirmed: credit limit exceeded")
+			return
+		case order.StatusBackordered:
+			status = "CONFIRMED" // the vocabulary this seam's callers know
+		default:
+			status = string(confirmed.Status)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, OrderResponse{

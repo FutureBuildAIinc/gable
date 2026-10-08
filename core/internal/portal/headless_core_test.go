@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gablelbm/gable/internal/order"
 	"github.com/google/uuid"
 )
 
@@ -410,8 +409,8 @@ func TestStatusForPortalError(t *testing.T) {
 		"quote not decidable":   {ErrQuoteNotDecidable, http.StatusConflict},
 		"reschedule refused":    {ErrRescheduleRefused, http.StatusConflict},
 		"cancel refused":        {ErrCancelRefused, http.StatusConflict},
-		"already cancelled":     {order.ErrOrderAlreadyCancelled, http.StatusConflict},
-		"erp refuses cancel":    {order.ErrOrderNotCancellable, http.StatusConflict},
+		"already cancelled":     {ErrOrderAlreadyCancelled, http.StatusConflict},
+		"erp refuses cancel":    {ErrOrderNotCancellable, http.StatusConflict},
 		"invalid request":       {ErrInvalidRequest, http.StatusBadRequest},
 		"something else is 500": {context.DeadlineExceeded, http.StatusInternalServerError},
 	} {
@@ -437,8 +436,8 @@ func TestWriteRefusal_CarriesAnActionableReason(t *testing.T) {
 	for name, err := range map[string]error{
 		"reschedule refused": ErrRescheduleRefused,
 		"cancel refused":     ErrCancelRefused,
-		"already cancelled":  order.ErrOrderAlreadyCancelled,
-		"not cancellable":    order.ErrOrderNotCancellable,
+		"already cancelled":  ErrOrderAlreadyCancelled,
+		"not cancellable":    ErrOrderNotCancellable,
 		"quote not priced":   ErrQuoteNotDecidable,
 	} {
 		t.Run(name, func(t *testing.T) {

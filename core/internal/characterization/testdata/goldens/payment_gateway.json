@@ -6,32 +6,8 @@
       "path": "/api/v1/payments/card",
       "body": {
         "amount": 100,
-        "invoice_id": "<id-1>",
+        "invoice_id": "{myInvoice}",
         "token_id": "tok_golden"
-      }
-    },
-    "response": {
-      "status": 402,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "PAYMENT_REQUIRED",
-          "message": "Payment Required"
-        },
-        "meta": {
-          "request_id": "<id-2>"
-        }
-      }
-    }
-  },
-  {
-    "name": "payment.card.missing_token",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/payments/card",
-      "body": {
-        "amount": 100,
-        "invoice_id": "<id-1>"
       }
     },
     "response": {
@@ -43,7 +19,31 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-1>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.card.missing_token",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/card",
+      "body": {
+        "amount": 100,
+        "invoice_id": "{myInvoice}"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-2>"
         }
       }
     }
@@ -64,7 +64,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-4>"
+          "request_id": "<id-3>"
         }
       }
     }
@@ -76,20 +76,20 @@
       "path": "/api/v1/payments/refund",
       "body": {
         "amount": 100,
-        "payment_id": "<id-5>",
+        "payment_id": "{myPayment}",
         "reason": "golden refund"
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-4>"
         }
       }
     }
@@ -110,7 +110,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-5>"
         }
       }
     }

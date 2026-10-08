@@ -50,6 +50,11 @@ func NewService(exemptionRepo ExemptionRepo, avalaraClient *AvalaraClient, compa
 	}
 }
 
+// ProviderConfigured reports whether a tax provider answers (the Avalara
+// path). The ADR 0005 rate resolver asks before it calls: an unconfigured
+// provider must never fall back to a silent rate.
+func (s *Service) ProviderConfigured() bool { return s.avalara != nil }
+
 func (s *Service) PreviewTax(ctx context.Context, req *TaxPreviewRequest) (*TaxResult, error) {
 	// Check for tax exemption
 	if req.CustomerID != nil {

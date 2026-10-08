@@ -309,8 +309,10 @@ func (h *Handler) HandleTransition(w http.ResponseWriter, r *http.Request) {
 	writeQuote(w, http.StatusOK, q)
 }
 
-// HandleConvertToOrder accepts the quote and returns the order payload the
-// client POSTs to /orders itself; no order is created here.
+// HandleConvertToOrder accepts the quote and creates the order in one
+// transaction, answering 201 with the order and its Location (ADR 0005
+// section 5.8): no payload crosses the client, so a retry cannot create a
+// second order.
 func (h *Handler) HandleConvertToOrder(w http.ResponseWriter, r *http.Request) {
 	if err := noQuery(r); err != nil {
 		httpx.WriteError(w, r, err)
@@ -321,13 +323,14 @@ func (h *Handler) HandleConvertToOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	payload, err := h.service.Convert(r.Context(), id, precondition(r, nil))
+	o, err := h.service.Convert(r.Context(), id, precondition(r, nil))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteRevisionETag(w, payload.Revision)
-	writeJSON(w, http.StatusOK, payload)
+	w.Header().Set("Location", "/api/v1/orders/"+o.ID.String())
+	httpx.WriteRevisionETag(w, o.Revision)
+	writeJSON(w, http.StatusCreated, o)
 }
 
 func (h *Handler) HandleGetAnalytics(w http.ResponseWriter, r *http.Request) {

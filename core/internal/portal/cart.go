@@ -7,9 +7,12 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/google/uuid"
 )
 
@@ -114,22 +117,37 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		}
 	}
 
-	// Build order request from cart — PriceEach is now int64 cents
-	lines := make([]order.OrderLineRequest, 0, len(cart.Items))
+	// Build the order draft from the cart. The lines carry no price: the
+	// order prices them through the same engine the catalog priced the cart
+	// with (price_source PRICE_LIST), so the money never crosses the portal
+	// as a float (ADR 0005 sections 2.3 and 2.7).
+	deliveryType := order.DeliveryDelivery
+	if strings.EqualFold(req.DeliveryMethod, "PICKUP") {
+		deliveryType = order.DeliveryPickup
+	}
+	lines := make([]salesdoc.ParsedLine, 0, len(cart.Items))
 	for _, item := range cart.Items {
-		lines = append(lines, order.OrderLineRequest{
-			ProductID: item.ProductID,
-			Quantity:  item.Quantity,
-			PriceEach: int64(math.Round(item.UnitPrice * 100)), // TODO: align with int64 cents — cart UnitPrice is still float64 dollars
+		productID := item.ProductID
+		qty := httpx.Quantity(int64(math.Round(item.Quantity * 10000)))
+		lines = append(lines, salesdoc.ParsedLine{
+			LineType:  salesdoc.LineProduct,
+			ProductID: &productID,
+			Quantity:  qty,
 		})
 	}
-
-	orderReq := order.CreateOrderRequest{
-		CustomerID: customerID,
-		Lines:      lines,
+	draft := &order.Draft{
+		CustomerID:   customerID,
+		DeliveryType: deliveryType,
+		Lines:        lines,
+	}
+	// The order is written at the customer's branch: the portal calls the
+	// order service in process, with no branch context of its own to inherit.
+	if cust, cErr := s.customerSvc.GetCustomer(ctx, customerID); cErr == nil && cust.PrimaryBranchID != uuid.Nil {
+		branch := cust.PrimaryBranchID
+		draft.BranchID = &branch
 	}
 
-	newOrder, err := s.orderSvc.CreateOrder(ctx, orderReq)
+	newOrder, err := s.orderSvc.Create(ctx, draft, "portal:customer:"+customerID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}

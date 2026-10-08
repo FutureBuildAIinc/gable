@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,6 +28,7 @@ import (
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/configurator"
+	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
@@ -49,6 +51,7 @@ import (
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/partner"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/portal"
@@ -59,6 +62,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
@@ -423,10 +427,21 @@ func Run() {
 	ediHandler := edi.NewEDIHandler(ediRepo, bgSvc, ediSvc)
 	ediHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
-	orderSvc := order.NewService(orderRepo, inventorySvc, invoiceSvc, customerSvc, poSvc, db)
-	orderSvc.WithAuditLog(auditLog)
-	orderHandler := order.NewHandler(orderSvc)
-	orderHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
+	// The order module on the wire contract (ADR 0005 section 5): every write
+	// one transaction with its order.* outbox event, the payload branch rule,
+	// the pricing engine wrapped at the boundary, and the tax provider behind
+	// the rate resolver.
+	orderSvc := order.NewService(orderRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAuditLog(auditLog).
+		WithPriceEngine(&priceEngineAdapter{pricing: pricingSvc, customers: customerSvc})
+	wall.orders(mux, orderSvc)
+	// The charge code master (ADR 0005 section 2.5), contract born.
+	chargecode.NewHandler(chargecode.NewService(chargecode.NewRepository(db))).
+		RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"), scoped("admin", "owner", "finance"))
+	// Quote conversion creates the order in one act (ADR 0005 section 5.8).
+	quoteSvc.WithOrderCreator(orderSvc)
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
@@ -452,6 +467,9 @@ func Run() {
 		logger.Info("AVALARA_ACCOUNT_ID not set — POS/invoice tax uses the branch default rate (locations.default_tax_rate)")
 	}
 	taxSvc := tax.NewService(taxExemptionRepo, avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
+	// The configured provider path sits behind the order rate resolver
+	// (ADR 0005 section 3).
+	orderSvc.WithTaxProvider(&taxProviderAdapter{svc: taxSvc})
 	taxHandler := tax.NewHandler(taxSvc)
 	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
@@ -1119,6 +1137,45 @@ func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Hand
 	})
 }
 
+// priceEngineAdapter wraps today's pricing engine at the order boundary
+// (ADR 0005 section 1): the engine answers in dollars, and its result is
+// converted to a scale 4 price once, here, never inside the order module.
+type priceEngineAdapter struct {
+	pricing   *pricing.Service
+	customers *customer.Service
+}
+
+func (a *priceEngineAdapter) PriceFor(ctx context.Context, customerID, productID uuid.UUID, basePrice httpx.Price, quantity httpx.Quantity, jobID *uuid.UUID) (httpx.Price, error) {
+	cust, err := a.customers.GetCustomer(ctx, customerID)
+	if err != nil {
+		return 0, fmt.Errorf("price engine: customer: %w", err)
+	}
+	base := float64(basePrice) / 10000
+	cp, err := a.pricing.CalculatePriceWithQty(ctx, cust, productID, base, float64(quantity)/10000, jobID)
+	if err != nil {
+		return 0, fmt.Errorf("price engine: %w", err)
+	}
+	return httpx.Price(int64(math.Round(cp.FinalPrice * 10000))), nil
+}
+
+// taxProviderAdapter is the configured provider path behind the rate
+// resolver (ADR 0005 section 3).
+type taxProviderAdapter struct {
+	svc *tax.Service
+}
+
+func (a *taxProviderAdapter) Configured() bool { return a.svc.ProviderConfigured() }
+func (a *taxProviderAdapter) PreviewTax(ctx context.Context, req *tax.TaxPreviewRequest) (*tax.TaxResult, error) {
+	return a.svc.PreviewTax(ctx, req)
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // invoiceServiceAdapter bridges invoice.Service to delivery.InvoiceServiceInterface.
 type invoiceServiceAdapter struct {
 	invoiceSvc *invoice.Service
@@ -1140,13 +1197,29 @@ func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uui
 		return fmt.Errorf("get order for invoice: %w", err)
 	}
 
-	// Build invoice from order — PriceEach is already in cents
+	// Build the invoice from the order's lines. The invoice module still
+	// holds whole cents per sale unit, so a line whose conversion pair is not
+	// 1 to 1 cannot be handed over without rounding its money away: the
+	// adapter refuses it (the recipe's rule for a helper feeding an
+	// unconverted neighbour) until the fulfilment route replaces this path
+	// (ADR 0005 5.5, C2-2b).
 	var lines []invoice.InvoiceLine
-	for _, ol := range ord.Lines {
+	for i := range ord.Lines {
+		ol := &ord.Lines[i]
+		if ol.LineType == salesdoc.LineText || ol.LineType == salesdoc.LineCharge {
+			continue
+		}
+		if ol.UOMQty == nil || ol.PriceUOMQty == nil || *ol.UOMQty != salesdoc.One || *ol.PriceUOMQty != salesdoc.One {
+			return fmt.Errorf("order %s has a line priced per %s: the delivery invoice path cannot carry a conversion pair until the fulfilment route lands",
+				orderID, derefString(ol.PriceUOM))
+		}
+		if ol.ProductID == nil || ol.Quantity == nil || ol.UnitPrice == nil || ol.LineTotal == nil {
+			continue
+		}
 		lines = append(lines, invoice.InvoiceLine{
-			ProductID: ol.ProductID,
-			Quantity:  ol.Quantity,
-			PriceEach: ol.PriceEach,
+			ProductID: *ol.ProductID,
+			Quantity:  float64(*ol.Quantity) / 10000,
+			PriceEach: int64(math.Round(float64(*ol.UnitPrice) / 100)),
 		})
 	}
 
