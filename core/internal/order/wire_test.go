@@ -1070,3 +1070,25 @@ func TestOrderIdempotency(t *testing.T) {
 
 var _ = fmt.Sprintf
 var _ = httpx.ParseInclude
+
+// RULE (review P3-13): quote_id is not accepted on POST /orders. A quote's
+// order is created by POST /quotes/{id}/convert; accepting any quote_id on
+// create left a manual order linked to a quote, which then blocked the real
+// convert with already_converted.
+func TestOrderCreateRefusesAQuoteID(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	body := f.createBody()
+	body["quote_id"] = uuid.NewString()
+	r := f.do("POST", "/api/v1/orders", body)
+	if r.status != 400 {
+		t.Fatalf("create with a quote_id = %d, want 400: %s", r.status, r.raw)
+	}
+	if _, _, details := errorOf(t, r); len(details) != 1 || details[0]["field"] != "quote_id" {
+		t.Errorf("details = %v, want a single 400 on quote_id", details)
+	}
+	var n int
+	if err := db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM orders WHERE customer_id = $1`, f.customerID).Scan(&n); err != nil || n != 0 {
+		t.Errorf("%d orders written by the refused create (%v)", n, err)
+	}
+}

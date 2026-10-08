@@ -17,6 +17,8 @@ import (
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -270,5 +272,155 @@ func TestConvert_AcceptedEventCarriesTheNewRevision(t *testing.T) {
 	}
 	if from != "draft" {
 		t.Errorf("from_status = %q, want draft", from)
+	}
+}
+
+// RULE (ADR 0005 5.8's table): the quote header's freight becomes one charge
+// line with code FREIGHT, quantity 1 EA, the freight as its unit price and
+// price_source quote.
+func TestConvert_FreightBecomesAFreightLine(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := branchctx.WithSystem(context.Background())
+	pid := w.f.productID
+	q, err := w.svc.Create(ctx, &quote.Draft{
+		CustomerID: w.f.customerID, DeliveryType: quote.DeliveryDelivery, Source: "manual", FreightCents: 12500,
+		Lines: []quote.DraftLine{{
+			ProductID: &pid, SKU: w.f.sku, Description: "2x4x8 SPF",
+			Quantity: 10 * 10000, UOM: "PCS", PriceUOM: "PCS", UOMQty: 10000, PriceUOMQty: 10000, UnitPrice: 55000,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	o, err := w.svc.Convert(ctx, q.ID, quote.Precondition{Revision: &q.Revision})
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if len(o.Lines) != 2 {
+		t.Fatalf("the order carries %d lines, want the product and one FREIGHT charge", len(o.Lines))
+	}
+	f := o.Lines[1]
+	if f.LineType != salesdoc.LineCharge || f.ChargeCode == nil || *f.ChargeCode != "FREIGHT" {
+		t.Fatalf("line 2 = %+v, want a FREIGHT charge line", f.Line)
+	}
+	if f.Quantity == nil || *f.Quantity != 10000 || f.UOM == nil || *f.UOM != "EA" ||
+		f.UnitPrice == nil || *f.UnitPrice != 1250000 || f.LineTotal == nil || *f.LineTotal != 12500 || f.PriceSource != salesdoc.PriceSourceQuote {
+		t.Errorf("FREIGHT line = qty %v uom %v price %v total %v source %s, want 1 EA at 125.00 = 12500 from the quote",
+			f.Quantity, f.UOM, f.UnitPrice, f.LineTotal, f.PriceSource)
+	}
+	if o.SubtotalCents != 5500+12500 {
+		t.Errorf("subtotal = %d, want the goods and the freight (18000)", o.SubtotalCents)
+	}
+}
+
+// RULE (ADR 0005 5.8): a quote that already has an order not cancelled is 409
+// with the blocker already_converted, on both converts, and the refusal
+// leaves the quote draft. (An order linked to a quote that is still a draft
+// comes only from history now: POST /orders refuses quote_id.)
+func TestConvert_QuoteWithALiveOrderIsAlreadyConverted(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := branchctx.WithSystem(context.Background())
+	q := w.otherBranchQuote(t)
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency, quote_id)
+		VALUES (gen_random_uuid(), $1, $2, 'CONFIRMED', 10, 'PICKUP', 'USD', $3)`, w.f.customerID, w.other, q.ID); err != nil {
+		t.Fatalf("seed the historic order: %v", err)
+	}
+	blocked := func(name string, err error) {
+		t.Helper()
+		var herr *httpx.Error
+		if !errors.As(err, &herr) || herr.Status != 409 || len(herr.Details) != 1 || herr.Details[0].Code != "already_converted" {
+			t.Fatalf("%s: %v, want 409 with the blocker already_converted", name, err)
+		}
+	}
+	_, err := w.svc.Convert(ctx, q.ID, quote.Precondition{Revision: &q.Revision})
+	blocked("Convert", err)
+	_, err = w.svc.ConvertInProcess(ctx, q.ID)
+	blocked("ConvertInProcess", err)
+	got, err := w.svc.GetQuote(ctx, q.ID)
+	if err != nil || got.Status != quote.QuoteStateDraft {
+		t.Errorf("quote after the refusals = %v (%v), want draft", got.Status, err)
+	}
+}
+
+type convertTax struct {
+	tax   int64
+	err   error
+	hook  func()
+	calls int
+}
+
+func (c *convertTax) Configured() bool { return true }
+
+func (c *convertTax) PreviewTax(context.Context, *tax.TaxPreviewRequest) (*tax.TaxResult, error) {
+	c.calls++
+	if c.hook != nil {
+		c.hook()
+	}
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &tax.TaxResult{TotalTax: c.tax}, nil
+}
+
+// RULE (ADR 0005 3 and 5.8): a configured provider prices the convert's tax
+// BEFORE the transaction (tax_source provider, no rate); a provider failure
+// is 503 with the quote untouched; lines that move between the provider call
+// and the lock are 409 tax_quote_stale and the quote stays unaccepted.
+func TestConvert_TaxProviderPath(t *testing.T) {
+	db := testutil.RequireDB(t)
+	w := newConvertWorld(t, db)
+	ctx := branchctx.WithSystem(context.Background())
+	prov := &convertTax{tax: 777}
+	orders := order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithTaxProvider(prov)
+	svc := quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).
+		WithBranchGuard(middleware.NewBranchGuard(db)).WithOrderCreator(orders)
+
+	// The provider answers: tax_source provider, the provider's tax, no rate.
+	q := w.otherBranchQuote(t)
+	o, err := svc.Convert(ctx, q.ID, quote.Precondition{Revision: &q.Revision})
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if o.TaxSource != salesdoc.TaxSourceProvider || o.TaxCents != 777 || o.TaxRatePercent != nil || o.TotalCents != 5500+777 {
+		t.Errorf("order tax = %s %d rate %v total %d, want provider 777 with no rate and total 6277", o.TaxSource, o.TaxCents, o.TaxRatePercent, o.TotalCents)
+	}
+
+	// The provider fails: 503, and the quote is exactly as it was.
+	prov.err = errors.New("provider down")
+	q2 := w.otherBranchQuote(t)
+	_, err = svc.Convert(ctx, q2.ID, quote.Precondition{Revision: &q2.Revision})
+	var herr *httpx.Error
+	if !errors.As(err, &herr) || herr.Status != 503 {
+		t.Fatalf("convert with the provider down: %v, want 503", err)
+	}
+	got, err := svc.GetQuote(ctx, q2.ID)
+	if err != nil || got.Status != quote.QuoteStateDraft || got.Revision != q2.Revision {
+		t.Fatalf("quote after the 503 = %v rev %d (%v), want draft rev %d", got.Status, got.Revision, err, q2.Revision)
+	}
+
+	// The lines move under the provider call: 409 tax_quote_stale.
+	prov.err = nil
+	prov.hook = func() {
+		prov.hook = nil
+		if _, err := db.Pool.Exec(context.Background(), `UPDATE quote_lines SET quantity = quantity + 1 WHERE quote_id = $1`, q2.ID); err != nil {
+			t.Errorf("move the quote's lines: %v", err)
+		}
+	}
+	_, err = svc.Convert(ctx, q2.ID, quote.Precondition{Revision: &q2.Revision})
+	if !errors.As(err, &herr) || herr.Status != 409 || len(herr.Details) != 1 || herr.Details[0].Code != "tax_quote_stale" {
+		t.Fatalf("convert with moved lines: %v, want 409 tax_quote_stale", err)
+	}
+	if got, _ := svc.GetQuote(ctx, q2.ID); got.Status != quote.QuoteStateDraft {
+		t.Errorf("quote after tax_quote_stale = %v, want draft", got.Status)
+	}
+	var n int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM orders WHERE quote_id = $1`, q2.ID).Scan(&n); err != nil || n != 0 {
+		t.Errorf("%d orders exist for the stale convert (%v)", n, err)
+	}
+	// The retry prices afresh.
+	if _, err := svc.Convert(ctx, q2.ID, quote.Precondition{Revision: &q2.Revision}); err != nil {
+		t.Errorf("retry: %v", err)
 	}
 }

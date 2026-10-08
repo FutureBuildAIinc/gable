@@ -166,7 +166,7 @@ func (s *Service) build(ctx context.Context, d *Draft, branchID uuid.UUID, actor
 	o := Order{}
 	o.ID = uuid.New()
 	o.BranchID = branchID
-	o.CustomerID, o.QuoteID, o.JobID = d.CustomerID, d.QuoteID, d.JobID
+	o.CustomerID, o.JobID = d.CustomerID, d.JobID
 	o.DeliveryType = d.DeliveryType
 	o.CustomerPO, o.OrderedByContactID = d.CustomerPO, d.OrderedByContactID
 	o.SalespersonID = d.SalespersonID
@@ -925,16 +925,18 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to OrderStatus, 
 	return out, nil
 }
 
-// linesFingerprint captures everything the provider priced: the lines'
-// identity, quantities, prices, discounts, taxable flags and extensions, and
-// the ship-to the rates came from.
+// linesFingerprint captures everything the provider priced: the lines in
+// order, their products, quantities, prices, discounts, taxable flags and
+// extensions, and the ship-to the rates came from. A line's own id is not
+// part of it: a quote conversion builds its lines twice (before the
+// transaction and inside it), each build minting fresh ids.
 func linesFingerprint(o *Order) string {
 	var b []byte
 	b = append(b, []byte(derefUUID(o.ShipToID))...)
 	for i := range o.Lines {
 		l := &o.Lines[i]
-		b = append(b, []byte(fmt.Sprintf("|%s;%s;%s;%s;%s;%s;%s;%t",
-			l.ID, derefUUID(l.ProductID), derefQtyStr(l.Quantity), derefPriceStr(l.UnitPrice),
+		b = append(b, []byte(fmt.Sprintf("|%d;%s;%s;%s;%s;%s;%s;%t",
+			i, derefUUID(l.ProductID), derefQtyStr(l.Quantity), derefPriceStr(l.UnitPrice),
 			derefQtyStr(l.DiscountPercent), derefCentsStr(l.DiscountAmount), derefCentsStr(l.LineTotal),
 			l.Taxable))...)
 	}

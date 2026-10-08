@@ -36,7 +36,6 @@ type Request struct {
 type Draft struct {
 	BranchID              *uuid.UUID
 	CustomerID            uuid.UUID
-	QuoteID               *uuid.UUID
 	JobID                 *uuid.UUID
 	DeliveryType          DeliveryType
 	ShipToID              *uuid.UUID
@@ -84,8 +83,11 @@ func (req *Request) parse(update bool) (*Draft, error) {
 	if id, ok := v.UUID("customer_id", req.CustomerID, true); ok {
 		d.CustomerID = id
 	}
-	if id, ok := v.UUID("quote_id", req.QuoteID, false); ok && !update {
-		d.QuoteID = &id
+	// A quote's order is made by converting the quote (ADR 0005 section 5.8);
+	// a quote_id here would link a manual order to a quote and then block the
+	// real convert with already_converted.
+	if !update {
+		v.Check(req.QuoteID == nil, "quote_id", "is not accepted here: convert the quote with POST /api/v1/quotes/{id}/convert")
 	}
 	if id, ok := v.UUID("job_id", req.JobID, false); ok {
 		d.JobID = &id
