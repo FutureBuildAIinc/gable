@@ -996,13 +996,21 @@ revenue posts net. Component and text lines post nothing.
 
 - Unit cost of a stocked line (`product` with a product, `component`) is
   `products.average_unit_cost` read inside the posting transaction
-  (`costOf`, the one function cycle 4 replaces). A special order line uses
-  the cost of the received purchase order line linked to it
-  (`purchase_order_lines.linked_so_line_id`) when one is received, else
-  `costOf`; never the `special_order_cost` estimate, which would leave a
-  residue in `1030` against what the receipt cost.
+  (`costOf`, the one function cycle 4 replaces). A stocked special order
+  line is costed the same way, because its receipt entered stock and moved
+  the average. A non stock or direct ship line (no product) relieves `1030`
+  from the posted values of the receipt lines linked to it
+  (`purchase_order_lines.linked_so_line_id`), never from the
+  `special_order_cost` estimate and never from one linked line's cost: each
+  bill relieves the unrelieved posted value x the billed quantity / (the
+  received quantity less the quantity billed before), rounded half away from
+  zero, and the bill that brings billed up to received takes the unrelieved
+  remainder, so the bills relieve exactly what the receipts posted. With
+  nothing received it posts no cost.
 - `cost = round_half_away(quantity x unit_cost)` per line, in cents, stored
   on the invoice line with `unit_cost`; the entry's COGS legs are the sum.
+  For a non stock or direct ship line `cost` is the pro rata relief above and
+  `unit_cost` is a display figure.
 - A unit cost of zero or NULL posts no COGS for that line and stores 0; the
   margin read shows it. It is not an error: a missing cost must not stop a
   sale.
