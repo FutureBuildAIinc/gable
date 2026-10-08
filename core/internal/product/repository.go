@@ -46,7 +46,8 @@ type Repository interface {
 // serve kit definitions simply answers 503 on those two routes.
 type KitStore interface {
 	ListKitComponents(ctx context.Context, kitID uuid.UUID) ([]KitComponent, error)
-	ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, comps []KitComponent) error
+	LockKitProduct(ctx context.Context, kitID uuid.UUID) (revision int64, sku string, err error)
+	ReplaceKitComponents(ctx context.Context, kitID uuid.UUID, comps []KitComponent, revision int64) (int64, error)
 	ProductKitRef(ctx context.Context, id uuid.UUID, sku, description, uom *string, isKit *bool) error
 }
 

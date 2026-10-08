@@ -237,7 +237,10 @@ func Run() {
 
 	// Product Module
 	productRepo := product.NewRepository(db)
-	productSvc := product.NewService(productRepo)
+	productSvc := product.NewService(productRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog)
 	productHandler := product.NewHandler(productSvc)
 	wall.products(mux, productHandler)
 

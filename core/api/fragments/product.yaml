@@ -765,11 +765,14 @@ paths:
       tags: [product]
       summary: Replace a kit's component list
       description: >-
-        Replaces the whole list. A product with a non empty list becomes a kit
+        Replaces the whole list in one transaction at the product's revision
+        (If-Match or the body revision, as every write): the delete, the
+        inserts and the is_kit update with the revision bump are one database
+        act, with the audit row and a product.updated event (parts
+        kit_components) in the same transaction, so a fault partway leaves
+        the kit unchanged. A product with a non empty list becomes a kit
         (is_kit); an empty list clears the definition. A kit cannot contain a
-        kit and cannot contain itself. Until the products module converts
-        there is no product revision to precondition on: last write wins,
-        as ADR 0005 section 2.6 states.
+        kit, cannot contain itself and lists a component once.
       parameters:
         - name: id
           in: path
@@ -779,6 +782,12 @@ paths:
             format: uuid
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted product revision; required unless the body carries it.
       requestBody:
         required: true
         content:
@@ -787,6 +796,10 @@ paths:
               type: object
               required: [components]
               properties:
+                revision:
+                  type: integer
+                  format: int64
+                  description: The product revision this write builds on (If-Match carries it too; the write needs one of them).
                 components:
                   type: array
                   items:
@@ -801,7 +814,11 @@ paths:
                         description: Per one kit, in the component's stocking unit; a decimal string greater than zero.
       responses:
         "200":
-          description: The replaced component list.
+          description: The replaced component list, with the product's new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -814,10 +831,14 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalError"
 components:
@@ -842,7 +863,7 @@ components:
           type: integer
     KitComponentList:
       type: object
-      required: [kit_product_id, components]
+      required: [kit_product_id, components, revision]
       properties:
         kit_product_id:
           type: string
@@ -851,6 +872,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/KitComponent"
+        revision:
+          type: integer
+          format: int64
+          description: The product's current revision; send it (or If-Match) on the next write.
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.
