@@ -14,10 +14,19 @@ const client = createClient({ baseUrl: "https://erp.example.test" });
 // Happy paths -------------------------------------------------------------
 
 async function _happy() {
-  const page = await client.get("/api/v1/quotes", { query: { limit: 50, offset: 0 } });
-  const quoteTotal: number = page.body.total;
-  const firstState: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "EXPIRED" | undefined =
-    page.body.data[0]?.state;
+  const page = await client.get("/api/v1/quotes", { query: { limit: 50, status: "sent", include: "total" } });
+  const quoteTotal: number = page.body.total ?? 0;
+  const nextCursor: string | null = page.body.next_cursor;
+  const firstStatus: "draft" | "sent" | "accepted" | "rejected" | "expired" | undefined =
+    page.body.items[0]?.status;
+
+  const sent = await client.post(
+    "/api/v1/quotes/{id}/transitions",
+    { to: "sent", revision: 1 },
+    { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" }, headers: { "If-Match": '"1"' } },
+  );
+  const revision: number = sent.body.revision;
+  const lineTotal: number = sent.body.lines[0]?.line_total_cents ?? 0;
 
   const one = await client.get("/api/v1/quotes/{id}", { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } });
   const customerId: string = one.body.customer_id;
@@ -39,7 +48,7 @@ async function _happy() {
   const cleared = await client.post("/api/v1/orders/{id}/cancel", undefined, { path: { id: "8f14e45f" } });
   const noBody: undefined = cleared.body;
 
-  return [quoteTotal, firstState, orderStatus, vehicleCount, noBody];
+  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, noBody];
 }
 
 // Wrong paths: each line must be a compile error --------------------------
@@ -51,8 +60,14 @@ async function _wrong() {
   // @ts-expect-error DELETE on a path that carries only GET and POST
   await client.delete("/api/v1/quotes");
 
-  // @ts-expect-error unknown query parameter (the contract declares only limit and offset)
-  await client.get("/api/v1/quotes", { query: { status: "sent" } });
+  // @ts-expect-error unknown query parameter (the quote list is cursor paged: no offset)
+  await client.get("/api/v1/quotes", { query: { offset: 10 } });
+
+  // @ts-expect-error the wire status is lowercase
+  await client.post("/api/v1/quotes/{id}/transitions", { to: "SENT" }, { path: { id: "8f14e45f" } });
+
+  // @ts-expect-error a unit price is an integer in ten thousandths, not a decimal string
+  await client.post("/api/v1/quotes", { customer_id: "x", lines: [{ quantity: "1", uom: "PCS", unit_price_ten_thousandths: "5.5" }] });
 
   // @ts-expect-error path parameter must be a string
   await client.get("/api/v1/quotes/{id}", { path: { id: 123 } });

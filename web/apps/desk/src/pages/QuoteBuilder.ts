@@ -6,13 +6,24 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
 import { router } from '../lib/router.ts';
 import { ToastService } from '../lib/toast-service.ts';
-import { QuoteService } from '../services/QuoteService.ts';
+import { QuoteService, QuoteApiError, quoteErrorMessage } from '../services/QuoteService.ts';
 import { ProductService } from '../services/product.service.ts';
 import { CustomerService } from '../services/CustomerService.ts';
 import { deliveryService } from '../services/deliveryService.ts';
 import type { Customer } from '../types/customer.ts';
 import type { Product } from '../types/product.ts';
-import type { CreateQuoteRequest } from '../types/quote.ts';
+import { QUOTE_UOM_CODES } from '../types/quote.ts';
+import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
+import { formatCents, formatPrice4 } from '../lib/utils.ts';
+import {
+    dollarsToCents,
+    extensionCents,
+    floatDollarsToTenThousandths,
+    normalizeQuantity,
+    numberToQuantity,
+    tenThousandthsToDecimal,
+    centsToInput,
+} from '../lib/money.ts';
 import type { QuoteLineEscalator } from '../types/pricing.ts';
 import type { ParseResponse, ParsedItem } from '../types/parsing.ts';
 import type { Vehicle } from '../types/delivery.ts';
@@ -26,13 +37,24 @@ import '../components/quotes/LineItemEditor.ts';
 import '../components/quotes/EscalatorToggle.ts';
 import '../components/quotes/ParsedResultsPanel.ts';
 
+/**
+ * One editor line. Quantity is a decimal string and the unit price an integer in
+ * ten thousandths of a dollar, exactly as the quote wire carries them; nothing
+ * here is a float. The optional fields are kept from a loaded quote so a full
+ * replace (PUT) does not drop a portal customer's note or a price unit pair.
+ */
 interface LineWithEscalator {
-    product_id: string;
+    id?: string;
+    product_id: string | null;
     sku: string;
     description: string;
-    quantity: number;
+    customer_note?: string | null;
+    quantity: string;
     uom: string;
-    unit_price: number;
+    price_uom?: string;
+    uom_qty?: string;
+    price_uom_qty?: string;
+    unit_price_ten_thousandths: number;
     escalator: QuoteLineEscalator;
 }
 
@@ -57,8 +79,9 @@ export class GableQuoteBuilder extends LitElement {
     @state() private initialLoading = false;
 
     // Delivery state
-    @state() private deliveryType: 'PICKUP' | 'DELIVERY' = 'PICKUP';
-    @state() private freightAmount = 0;
+    @state() private deliveryType: QuoteDeliveryType = 'pickup';
+    @state() private freightCents = 0;
+    @state() private freightText = '';
     @state() private selectedVehicleId: string | undefined;
     @state() private vehicles: Vehicle[] = [];
 
@@ -67,6 +90,13 @@ export class GableQuoteBuilder extends LitElement {
     @state() private showParsePanel = false;
     @state() private aiSource = false;
     @state() private lastParseResult: ParseResponse | null = null;
+
+    // Save state: the loaded quote's revision (If-Match) and server side problems.
+    @state() private revision: number | null = null;
+    @state() private formError: string | null = null;
+    @state() private lineErrors: Record<number, string> = {};
+    private jobId: string | null = null;
+    private expiresAt: string | null = null;
 
     private get isEditing() { return !!this.routeId; }
 
@@ -98,8 +128,8 @@ export class GableQuoteBuilder extends LitElement {
 
     private async loadExistingQuote(editId: string) {
         try {
-            const quote = await QuoteService.getQuote(editId);
-            if (quote.state !== 'DRAFT') {
+            const quote = await QuoteService.get(editId);
+            if (quote.status !== 'draft') {
                 ToastService.show('Only draft quotes can be edited', 'error');
                 router.navigate(`/quotes/${editId}`);
                 return;
@@ -109,40 +139,55 @@ export class GableQuoteBuilder extends LitElement {
                 this.customer = c;
             } catch { /* customer might not load, that's ok */ }
 
-            if (quote.lines) {
-                this.lines = quote.lines.map(l => ({
-                    product_id: l.product_id,
-                    sku: l.sku,
-                    description: l.description,
-                    quantity: l.quantity,
-                    uom: l.uom,
-                    unit_price: l.unit_price,
-                    escalator: defaultEscalator(),
-                }));
-            }
-            if (quote.source === 'ai') this.aiSource = true;
-            if (quote.delivery_type) this.deliveryType = quote.delivery_type;
-            if (quote.freight_amount) this.freightAmount = quote.freight_amount;
-            if (quote.vehicle_id) this.selectedVehicleId = quote.vehicle_id;
+            this.revision = quote.revision;
+            this.jobId = quote.job_id;
+            this.expiresAt = quote.expires_at;
+            this.formError = null;
+            this.lineErrors = {};
+            this.lines = (quote.lines ?? []).map(l => ({
+                id: l.id,
+                product_id: l.product_id,
+                sku: l.sku,
+                description: l.description,
+                customer_note: l.customer_note,
+                quantity: l.quantity,
+                uom: l.uom,
+                price_uom: l.price_uom,
+                uom_qty: l.uom_qty,
+                price_uom_qty: l.price_uom_qty,
+                unit_price_ten_thousandths: l.unit_price_ten_thousandths,
+                escalator: defaultEscalator(),
+            }));
+            this.aiSource = quote.source === 'ai';
+            this.deliveryType = quote.delivery_type;
+            this.freightCents = quote.freight_cents;
+            this.freightText = quote.freight_cents > 0 ? centsToInput(quote.freight_cents) : '';
+            this.selectedVehicleId = quote.vehicle_id ?? undefined;
         } catch (err) {
             console.error('Failed to load quote for editing', err);
-            ToastService.show('Failed to load quote', 'error');
+            ToastService.show(`Failed to load quote: ${quoteErrorMessage(err, 'Unknown error')}`, 'error');
             router.navigate('/quotes');
         } finally {
             this.initialLoading = false;
         }
     }
 
-    private handleAddLine(product: Product, quantity: number, unitPrice: number) {
+    private handleAddLine(product: Product, quantity: string, uom: string, unitPriceTenThousandths: number) {
         this.lines = [...this.lines, {
             product_id: product.id,
             sku: product.sku,
             description: product.description,
-            uom: product.uom_primary,
+            uom: uom || product.uom_primary || '',
             quantity,
-            unit_price: unitPrice,
+            unit_price_ten_thousandths: unitPriceTenThousandths,
             escalator: defaultEscalator(),
         }];
+    }
+
+    private handleUomInput(idx: number, value: string) {
+        const updated = [...this.lines];
+        updated[idx] = { ...updated[idx], uom: value.trim().toUpperCase() };
+        this.lines = updated;
     }
 
     private handleEscalatorChange(idx: number, escalator: QuoteLineEscalator) {
@@ -157,13 +202,15 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private handleAcceptParsed(parsedItems: ParsedItem[]) {
+        // The parsing API still answers in float dollars and a float quantity;
+        // both are converted here, once, through the integer helpers.
         const newLines: LineWithEscalator[] = parsedItems.map(item => ({
-            product_id: item.matched_product?.product_id || '',
+            product_id: item.matched_product?.product_id || null,
             sku: item.matched_product?.sku || 'SPECIAL-ORDER',
             description: item.matched_product?.description || item.raw_text,
-            quantity: item.quantity,
-            uom: item.matched_product?.uom || item.uom,
-            unit_price: item.matched_product?.base_price || 0,
+            quantity: numberToQuantity(item.quantity) ?? '1',
+            uom: (item.matched_product?.uom || item.uom || '').toUpperCase(),
+            unit_price_ten_thousandths: floatDollarsToTenThousandths(item.matched_product?.base_price || 0),
             escalator: defaultEscalator(),
         }));
         this.lines = [...this.lines, ...newLines];
@@ -174,29 +221,98 @@ export class GableQuoteBuilder extends LitElement {
         ToastService.show(`${parsedItems.length} items added from material list`, 'success');
     }
 
+    /** Index of every line that has no unit of measure; the server rejects such a line. */
+    private get linesMissingUom(): number[] {
+        return this.lines.flatMap((l, i) => (l.uom.trim() === '' ? [i] : []));
+    }
+
+    private get freightInvalid() {
+        return this.deliveryType === 'delivery' && this.freightText.trim() !== '' && dollarsToCents(this.freightText) === null;
+    }
+
+    private get saveBlockedReason(): string | null {
+        if (this.linesMissingUom.length > 0) return 'Every line needs a unit of measure before the quote can be saved.';
+        if (this.lines.some(l => normalizeQuantity(l.quantity) === null)) return 'Every line needs a quantity above zero.';
+        if (this.freightInvalid) return 'Freight must be a dollar amount such as 125.00.';
+        return null;
+    }
+
+    private buildLine(l: LineWithEscalator): QuoteLineRequest {
+        const line: QuoteLineRequest = {
+            quantity: l.quantity,
+            uom: l.uom as QuoteLineRequest['uom'],
+            unit_price_ten_thousandths: l.unit_price_ten_thousandths,
+            sku: l.sku,
+            description: l.description,
+        };
+        if (l.id) line.id = l.id;
+        if (l.product_id) line.product_id = l.product_id;
+        if (l.customer_note) line.customer_note = l.customer_note;
+        if (l.price_uom && l.price_uom !== l.uom) {
+            line.price_uom = l.price_uom;
+            line.uom_qty = l.uom_qty;
+            line.price_uom_qty = l.price_uom_qty;
+        }
+        return line;
+    }
+
+    /** Maps server problems such as lines[0].uom onto the line they name. */
+    private showSaveError(err: unknown) {
+        const lineErrors: Record<number, string> = {};
+        const general: string[] = [];
+        if (err instanceof QuoteApiError && err.code === 'validation_failed') {
+            for (const d of err.details) {
+                const m = d.field ? /^lines\[(\d+)\]\.?(.*)$/.exec(d.field) : null;
+                if (m) {
+                    const idx = Number(m[1]);
+                    const text = m[2] ? `${m[2]}: ${d.message}` : d.message;
+                    lineErrors[idx] = lineErrors[idx] ? `${lineErrors[idx]}; ${text}` : text;
+                } else {
+                    general.push(d.field ? `${d.field}: ${d.message}` : d.message);
+                }
+            }
+            this.lineErrors = lineErrors;
+            this.formError = Object.keys(lineErrors).length > 0 && general.length === 0
+                ? 'Some lines need attention.'
+                : [err.message, ...general].join(' ');
+            ToastService.show(this.formError, 'error');
+            return;
+        }
+        this.formError = quoteErrorMessage(err, 'Failed to save quote');
+        ToastService.show(this.formError, 'error');
+    }
+
     private async handleSave() {
         if (!this.customer) return;
+        if (this.saveBlockedReason) {
+            this.formError = this.saveBlockedReason;
+            return;
+        }
         this.loading = true;
+        this.formError = null;
+        this.lineErrors = {};
         try {
-            const payload: CreateQuoteRequest = {
+            const delivery = this.deliveryType === 'delivery';
+            // A create also carries the fields fixed at create (source, the
+            // original upload, the parse map); an edit sends only the header
+            // fields and lines the server applies, and refuses the rest.
+            const payload: QuoteRequest = {
                 customer_id: this.customer.id,
-                source: this.aiSource ? 'ai' : 'manual',
                 delivery_type: this.deliveryType,
-                freight_amount: this.deliveryType === 'DELIVERY' ? this.freightAmount : 0,
-                vehicle_id: this.deliveryType === 'DELIVERY' ? this.selectedVehicleId : undefined,
-                lines: this.lines.map(l => ({
-                    product_id: l.product_id,
-                    sku: l.sku,
-                    description: l.description,
-                    quantity: l.quantity,
-                    uom: l.uom as import('../types/product.ts').UOM,
-                    unit_price: l.unit_price,
-                })),
+                freight_cents: delivery ? this.freightCents : 0,
+                lines: this.lines.map(l => this.buildLine(l)),
             };
+            if (delivery && this.selectedVehicleId) payload.vehicle_id = this.selectedVehicleId;
+            if (this.isEditing) {
+                payload.job_id = this.jobId;
+                payload.expires_at = this.expiresAt;
+            }
 
-            // Attach AI parse data if available
-            if (this.aiSource && this.lastParseResult) {
-                payload.parse_map = this.lastParseResult.items;
+            if (!this.isEditing) payload.source = this.aiSource ? 'ai' : 'manual';
+
+            // Attach AI parse data if available (a create only)
+            if (!this.isEditing && this.aiSource && this.lastParseResult) {
+                payload.parse_map = this.lastParseResult.items as unknown as QuoteRequest['parse_map'];
                 if (this.lastParseResult.source_image) {
                     const [header, data] = this.lastParseResult.source_image.split(',');
                     const contentType = header?.match(/data:([^;]+)/)?.[1] || 'application/octet-stream';
@@ -208,40 +324,53 @@ export class GableQuoteBuilder extends LitElement {
 
             let quote;
             if (this.isEditing && this.routeId) {
-                quote = await QuoteService.updateQuote(this.routeId, payload);
+                if (this.revision === null) throw new Error('The quote has not finished loading.');
+                quote = await QuoteService.update(this.routeId, payload, this.revision);
                 ToastService.show('Quote updated', 'success');
             } else {
-                quote = await QuoteService.createQuote(payload);
+                quote = await QuoteService.create(payload);
                 ToastService.show('Draft quote created', 'success');
             }
             router.navigate(`/quotes/${quote.id}`);
         } catch (err) {
             console.error(err);
-            ToastService.show('Failed to save quote', 'error');
+            if (err instanceof QuoteApiError && err.isStaleRevision && this.routeId) {
+                ToastService.show('This quote changed elsewhere. Reloaded.', 'error');
+                this.initialLoading = true;
+                await this.loadExistingQuote(this.routeId);
+            } else {
+                this.showSaveError(err);
+            }
         } finally {
             this.loading = false;
         }
     }
 
-    private get subtotalAmount() {
-        return this.lines.reduce((sum, line) => sum + (line.quantity * line.unit_price), 0);
+    private lineTotalCents(line: LineWithEscalator): number {
+        return extensionCents(line.quantity, line.unit_price_ten_thousandths, line.uom_qty, line.price_uom_qty);
     }
 
-    private get effectiveFreight() {
-        return this.deliveryType === 'DELIVERY' ? this.freightAmount : 0;
+    private get subtotalCents() {
+        return this.lines.reduce((sum, line) => sum + this.lineTotalCents(line), 0);
     }
 
-    private get totalAmount() {
-        return this.subtotalAmount + this.effectiveFreight;
+    private get effectiveFreightCents() {
+        return this.deliveryType === 'delivery' ? this.freightCents : 0;
     }
 
-    private get escalatedTotal() {
-        return this.lines.reduce((sum, line) => {
-            if (line.escalator.enabled && line.escalator.result) {
-                return sum + (line.quantity * line.escalator.result.future_price);
-            }
-            return sum + (line.quantity * line.unit_price);
-        }, 0);
+    private get totalCents() {
+        return this.subtotalCents + this.effectiveFreightCents;
+    }
+
+    /** The escalator service answers in float dollars; its price is converted to ten thousandths once. */
+    private escalatedPriceTT(line: LineWithEscalator): number {
+        return line.escalator.enabled && line.escalator.result
+            ? floatDollarsToTenThousandths(line.escalator.result.future_price)
+            : line.unit_price_ten_thousandths;
+    }
+
+    private get escalatedTotalCents() {
+        return this.lines.reduce((sum, line) => sum + extensionCents(line.quantity, this.escalatedPriceTT(line), line.uom_qty, line.price_uom_qty), 0);
     }
 
     private get hasEscalators() {
@@ -253,7 +382,7 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private get isOverLimit() {
-        return this.customer ? (this.customer.balance_due + this.totalAmount) > this.customer.credit_limit : false;
+        return this.customer ? (this.customer.balance_due + this.totalCents / 100) > this.customer.credit_limit : false;
     }
 
     render() {
@@ -282,13 +411,20 @@ export class GableQuoteBuilder extends LitElement {
                     </div>
                     <button
                         @click=${() => this.handleSave()}
-                        ?disabled=${!this.customer || this.lines.length === 0 || this.loading}
+                        ?disabled=${!this.customer || this.lines.length === 0 || this.loading || this.saveBlockedReason !== null}
                         class="inline-flex items-center justify-center rounded-lg text-sm font-medium transition-colors bg-gable-green text-deep-space hover:bg-gable-green/90 px-4 py-2 shadow-glow disabled:opacity-50"
                     >
                         ${this.loading ? html`<span class="animate-spin mr-2">...</span>` : icon(Save, 16, 'w-4 h-4 mr-2')}
                         ${this.isEditing ? 'Save Changes' : 'Create Quote'}
                     </button>
                 </div>
+
+                ${this.saveBlockedReason || this.formError ? html`
+                    <div role="alert" class="flex items-start gap-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm p-3 rounded-lg mb-6">
+                        ${icon(AlertCircle, 16, 'w-4 h-4 shrink-0 mt-0.5')}
+                        <p>${this.lines.length > 0 && this.saveBlockedReason ? this.saveBlockedReason : this.formError}</p>
+                    </div>
+                ` : nothing}
 
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
                     <!-- Left Column: Customer & Details -->
@@ -355,9 +491,9 @@ export class GableQuoteBuilder extends LitElement {
                                 <!-- Delivery Type Toggle -->
                                 <div class="flex gap-1 bg-white/5 rounded-lg p-1 border border-white/10 mb-4">
                                     <button
-                                        @click=${() => { this.deliveryType = 'PICKUP'; this.freightAmount = 0; this.selectedVehicleId = undefined; }}
+                                        @click=${() => { this.deliveryType = 'pickup'; this.freightCents = 0; this.freightText = ''; this.selectedVehicleId = undefined; }}
                                         class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                                            this.deliveryType === 'PICKUP'
+                                            this.deliveryType === 'pickup'
                                                 ? 'bg-gable-green/10 text-gable-green border border-gable-green/20'
                                                 : 'text-zinc-400 hover:text-white'
                                         }"
@@ -365,9 +501,9 @@ export class GableQuoteBuilder extends LitElement {
                                         ${icon(Package, 14)} Pickup
                                     </button>
                                     <button
-                                        @click=${() => { this.deliveryType = 'DELIVERY'; }}
+                                        @click=${() => { this.deliveryType = 'delivery'; }}
                                         class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                                            this.deliveryType === 'DELIVERY'
+                                            this.deliveryType === 'delivery'
                                                 ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                                                 : 'text-zinc-400 hover:text-white'
                                         }"
@@ -376,7 +512,7 @@ export class GableQuoteBuilder extends LitElement {
                                     </button>
                                 </div>
 
-                                ${this.deliveryType === 'DELIVERY' ? html`
+                                ${this.deliveryType === 'delivery' ? html`
                                     <div class="space-y-4">
                                         <div>
                                             <label class="block text-xs text-zinc-500 mb-1.5">Assign Truck</label>
@@ -402,8 +538,11 @@ export class GableQuoteBuilder extends LitElement {
                                                 type="number"
                                                 min="0"
                                                 step="0.01"
-                                                .value=${String(this.freightAmount || '')}
-                                                @input=${(e: Event) => { this.freightAmount = parseFloat((e.target as HTMLInputElement).value) || 0; }}
+                                                .value=${this.freightText}
+                                                @input=${(e: Event) => {
+                                                    this.freightText = (e.target as HTMLInputElement).value;
+                                                    this.freightCents = dollarsToCents(this.freightText) ?? 0;
+                                                }}
                                                 placeholder="0.00"
                                                 class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500/50"
                                             />
@@ -421,23 +560,23 @@ export class GableQuoteBuilder extends LitElement {
                                 </h2>
                                 <div class="flex items-baseline justify-between">
                                     <span class="text-zinc-400">Subtotal</span>
-                                    <span class="font-mono font-bold ${this.effectiveFreight > 0 ? 'text-lg text-zinc-300' : 'text-2xl text-white'}">$${this.subtotalAmount.toFixed(2)}</span>
+                                    <span class="font-mono font-bold ${this.effectiveFreightCents > 0 ? 'text-lg text-zinc-300' : 'text-2xl text-white'}">${formatCents(this.subtotalCents)}</span>
                                 </div>
 
-                                ${this.effectiveFreight > 0 ? html`
+                                ${this.effectiveFreightCents > 0 ? html`
                                     <div class="flex items-baseline justify-between mt-2">
                                         <span class="text-zinc-400 flex items-center gap-1.5 text-sm">
                                             ${icon(Truck, 14, 'w-3.5 h-3.5 text-blue-400')}
                                             Freight
                                         </span>
-                                        <span class="font-mono font-bold text-lg text-blue-400">$${this.effectiveFreight.toFixed(2)}</span>
+                                        <span class="font-mono font-bold text-lg text-blue-400">${formatCents(this.effectiveFreightCents)}</span>
                                     </div>
                                 ` : nothing}
 
-                                ${this.effectiveFreight > 0 ? html`
+                                ${this.effectiveFreightCents > 0 ? html`
                                     <div class="flex items-baseline justify-between mt-2 pt-2 border-t border-white/5">
                                         <span class="text-zinc-400 font-medium">Total</span>
-                                        <span class="text-2xl font-mono font-bold text-white">$${this.totalAmount.toFixed(2)}</span>
+                                        <span class="text-2xl font-mono font-bold text-white">${formatCents(this.totalCents)}</span>
                                     </div>
                                 ` : nothing}
 
@@ -449,11 +588,11 @@ export class GableQuoteBuilder extends LitElement {
                                                 Escalated Total
                                             </span>
                                             <span class="text-xl font-mono font-bold text-emerald-400">
-                                                $${this.escalatedTotal.toFixed(2)}
+                                                ${formatCents(this.escalatedTotalCents)}
                                             </span>
                                         </div>
                                         <div class="text-[10px] text-zinc-500 text-right mt-1">
-                                            +$${(this.escalatedTotal - this.totalAmount).toFixed(2)} from escalators
+                                            +${formatCents(this.escalatedTotalCents - this.subtotalCents)} from escalators
                                         </div>
                                     </div>
                                 ` : nothing}
@@ -485,7 +624,7 @@ export class GableQuoteBuilder extends LitElement {
                                 <gable-line-item-editor
                                     .products=${this.products}
                                     .customerId=${this.customer?.id}
-                                    @add-line=${(e: CustomEvent) => this.handleAddLine(e.detail.product, e.detail.quantity, e.detail.unitPrice)}
+                                    @add-line=${(e: CustomEvent) => this.handleAddLine(e.detail.product, e.detail.quantity, e.detail.uom, e.detail.unitPriceTenThousandths)}
                                 ></gable-line-item-editor>
 
                                 <!-- Lines Table -->
@@ -514,27 +653,40 @@ export class GableQuoteBuilder extends LitElement {
                                                         <div class="text-zinc-400 text-xs">${line.description}</div>
 
                                                         <gable-escalator-toggle
-                                                            .basePrice=${line.unit_price}
+                                                            .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
                                                             .escalator=${line.escalator}
                                                             @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
                                                         ></gable-escalator-toggle>
                                                     </td>
                                                     <td class="px-6 py-4 text-right font-mono text-zinc-300 align-top">
                                                         ${line.quantity} <span class="text-zinc-600 text-[10px] ml-1">${line.uom}</span>
+                                                        ${line.uom === '' || this.lineErrors[idx] ? html`
+                                                            <select
+                                                                aria-label="Unit of measure"
+                                                                class="mt-1 w-24 bg-[#0A0B10] border border-rose-500/40 rounded px-2 py-1 text-white text-right font-mono text-xs outline-none"
+                                                                .value=${line.uom}
+                                                                @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}
+                                                            >
+                                                                <option value="" ?selected=${line.uom === ''}>Unit...</option>
+                                                                ${QUOTE_UOM_CODES.map(code => html`<option value=${code} ?selected=${line.uom === code}>${code}</option>`)}
+                                                            </select>
+                                                            ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>` : nothing}
+                                                        ` : nothing}
+                                                        ${this.lineErrors[idx] ? html`<div class="text-[10px] text-rose-400 mt-1">${this.lineErrors[idx]}</div>` : nothing}
                                                     </td>
                                                     <td class="px-6 py-4 text-right font-mono text-zinc-300 align-top">
-                                                        $${line.unit_price.toFixed(2)}
+                                                        ${formatPrice4(line.unit_price_ten_thousandths)}
                                                         ${line.escalator.result ? html`
                                                             <div class="text-xs text-emerald-400 mt-1">
-                                                                \u2192 $${line.escalator.result.future_price.toFixed(2)}
+                                                                \u2192 ${formatPrice4(floatDollarsToTenThousandths(line.escalator.result.future_price))}
                                                             </div>
                                                         ` : nothing}
                                                     </td>
                                                     <td class="px-6 py-4 text-right font-mono font-bold text-emerald-400 align-top">
-                                                        $${(line.quantity * line.unit_price).toFixed(2)}
+                                                        ${formatCents(this.lineTotalCents(line))}
                                                         ${line.escalator.result ? html`
                                                             <div class="text-xs text-emerald-300/70 mt-1">
-                                                                \u2192 $${(line.quantity * line.escalator.result.future_price).toFixed(2)}
+                                                                \u2192 ${formatCents(extensionCents(line.quantity, floatDollarsToTenThousandths(line.escalator.result.future_price), line.uom_qty, line.price_uom_qty))}
                                                             </div>
                                                         ` : nothing}
                                                     </td>
@@ -545,22 +697,22 @@ export class GableQuoteBuilder extends LitElement {
                                             <tfoot class="bg-white/5 border-t border-white/10">
                                                 <tr>
                                                     <td colspan="3" class="px-6 py-4 text-right font-medium text-zinc-400 uppercase tracking-wider text-xs">
-                                                        ${this.effectiveFreight > 0 ? 'Lines Subtotal' : 'Total Amount'}
+                                                        ${this.effectiveFreightCents > 0 ? 'Lines Subtotal' : 'Total Amount'}
                                                     </td>
-                                                    <td class="px-6 py-4 text-right font-mono text-xl font-bold text-gable-green">$${this.subtotalAmount.toFixed(2)}</td>
+                                                    <td class="px-6 py-4 text-right font-mono text-xl font-bold text-gable-green">${formatCents(this.subtotalCents)}</td>
                                                 </tr>
-                                                ${this.effectiveFreight > 0 ? html`
+                                                ${this.effectiveFreightCents > 0 ? html`
                                                     <tr class="border-t border-white/5">
                                                         <td colspan="3" class="px-6 py-2 text-right text-zinc-400 text-xs">
                                                             <span class="flex items-center justify-end gap-1.5">
                                                                 ${icon(Truck, 12, 'w-3 h-3 text-blue-400')} Freight
                                                             </span>
                                                         </td>
-                                                        <td class="px-6 py-2 text-right font-mono text-sm text-blue-400">$${this.effectiveFreight.toFixed(2)}</td>
+                                                        <td class="px-6 py-2 text-right font-mono text-sm text-blue-400">${formatCents(this.effectiveFreightCents)}</td>
                                                     </tr>
                                                     <tr class="border-t border-white/5">
                                                         <td colspan="3" class="px-6 py-4 text-right font-medium text-zinc-400 uppercase tracking-wider text-xs">Total Amount</td>
-                                                        <td class="px-6 py-4 text-right font-mono text-xl font-bold text-gable-green">$${this.totalAmount.toFixed(2)}</td>
+                                                        <td class="px-6 py-4 text-right font-mono text-xl font-bold text-gable-green">${formatCents(this.totalCents)}</td>
                                                     </tr>
                                                 ` : nothing}
                                             </tfoot>

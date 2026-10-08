@@ -76,6 +76,7 @@
             "id": "<id-6>",
             "is_special_order": false,
             "line_total": 0,
+            "price_uom": "PCS",
             "product_id": "<id-4>",
             "product_sku": "LUM-248-PREM",
             "quantity": 12,
@@ -88,6 +89,7 @@
             "id": "<id-7>",
             "is_special_order": true,
             "line_total": 0,
+            "price_uom": "EA",
             "product_id": null,
             "product_sku": "SPECIAL-ORDER",
             "quantity": 4,
@@ -139,6 +141,7 @@
             "id": "<id-9>",
             "is_special_order": false,
             "line_total": 0,
+            "price_uom": "PCS",
             "product_id": "<id-4>",
             "product_sku": "LUM-248-PREM",
             "quantity": 2,
@@ -256,6 +259,7 @@
               "id": "<id-9>",
               "is_special_order": false,
               "line_total": 0,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 2,
@@ -288,6 +292,7 @@
               "id": "<id-6>",
               "is_special_order": false,
               "line_total": 0,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 12,
@@ -300,6 +305,7 @@
               "id": "<id-7>",
               "is_special_order": true,
               "line_total": 0,
+              "price_uom": "EA",
               "product_id": null,
               "product_sku": "SPECIAL-ORDER",
               "quantity": 4,
@@ -332,6 +338,7 @@
               "id": "<id-14>",
               "is_special_order": false,
               "line_total": 11,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 2,
@@ -364,6 +371,7 @@
               "id": "<id-16>",
               "is_special_order": false,
               "line_total": 500,
+              "price_uom": "EA",
               "product_id": "<id-4>",
               "product_sku": "EVT",
               "quantity": 5,
@@ -396,6 +404,7 @@
               "id": "<id-18>",
               "is_special_order": false,
               "line_total": 66,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 12,
@@ -428,6 +437,7 @@
               "id": "<id-20>",
               "is_special_order": false,
               "line_total": 27.5,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 5,
@@ -460,6 +470,7 @@
               "id": "<id-22>",
               "is_special_order": false,
               "line_total": 27.5,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 5,
@@ -492,6 +503,7 @@
               "id": "<id-24>",
               "is_special_order": false,
               "line_total": 27.5,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 5,
@@ -524,6 +536,7 @@
               "id": "<id-26>",
               "is_special_order": false,
               "line_total": 27.5,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 5,
@@ -556,6 +569,7 @@
               "id": "<id-28>",
               "is_special_order": false,
               "line_total": 27.5,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 5,
@@ -588,6 +602,7 @@
               "id": "<id-30>",
               "is_special_order": false,
               "line_total": 27.5,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 5,
@@ -620,6 +635,7 @@
               "id": "<id-32>",
               "is_special_order": false,
               "line_total": 110,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 20,
@@ -652,6 +668,7 @@
               "id": "<id-34>",
               "is_special_order": false,
               "line_total": 819,
+              "price_uom": "PCS",
               "product_id": "<id-35>",
               "product_sku": "DW-58-FC",
               "quantity": 39,
@@ -664,6 +681,7 @@
               "id": "<id-36>",
               "is_special_order": false,
               "line_total": 722,
+              "price_uom": "PCS",
               "product_id": "<id-37>",
               "product_sku": "PLY-34-CDX",
               "quantity": 19,
@@ -676,6 +694,7 @@
               "id": "<id-38>",
               "is_special_order": false,
               "line_total": 779.74,
+              "price_uom": "BOX",
               "product_id": "<id-39>",
               "product_sku": "SCR-DECK-3-5",
               "quantity": 26,
@@ -688,6 +707,7 @@
               "id": "<id-40>",
               "is_special_order": false,
               "line_total": 623,
+              "price_uom": "PCS",
               "product_id": "<id-41>",
               "product_sku": "LUM-2816-NO2",
               "quantity": 28,
@@ -700,6 +720,7 @@
               "id": "<id-42>",
               "is_special_order": false,
               "line_total": 6440,
+              "price_uom": "PCS",
               "product_id": "<id-43>",
               "product_sku": "DR-EXT-3680-STL",
               "quantity": 23,
@@ -712,6 +733,7 @@
               "id": "<id-44>",
               "is_special_order": false,
               "line_total": 337.5,
+              "price_uom": "PCS",
               "product_id": "<id-45>",
               "product_sku": "MLD-CASE-MDF",
               "quantity": 25,
@@ -724,6 +746,7 @@
               "id": "<id-46>",
               "is_special_order": false,
               "line_total": 5984,
+              "price_uom": "BAG",
               "product_id": "<id-47>",
               "product_sku": "INS-R13-15",
               "quantity": 88,
@@ -736,6 +759,7 @@
               "id": "<id-48>",
               "is_special_order": false,
               "line_total": 12.95,
+              "price_uom": "PCS",
               "product_id": "<id-49>",
               "product_sku": "HANGER-210",
               "quantity": 7,
@@ -768,6 +792,7 @@
               "id": "<id-51>",
               "is_special_order": false,
               "line_total": 7052,
+              "price_uom": "BAG",
               "product_id": "<id-52>",
               "product_sku": "INS-R19-15",
               "quantity": 86,
@@ -780,6 +805,7 @@
               "id": "<id-53>",
               "is_special_order": false,
               "line_total": 324,
+              "price_uom": "EA",
               "product_id": "<id-54>",
               "product_sku": "CORNHMOLD14",
               "quantity": 54,
@@ -792,6 +818,7 @@
               "id": "<id-55>",
               "is_special_order": false,
               "line_total": 2703.75,
+              "price_uom": "EA",
               "product_id": "<id-56>",
               "product_sku": "CORNSFT2408V",
               "quantity": 103,
@@ -804,6 +831,7 @@
               "id": "<id-57>",
               "is_special_order": false,
               "line_total": 1579.75,
+              "price_uom": "PCS",
               "product_id": "<id-41>",
               "product_sku": "LUM-2816-NO2",
               "quantity": 71,
@@ -816,6 +844,7 @@
               "id": "<id-58>",
               "is_special_order": false,
               "line_total": 1504.44,
+              "price_uom": "EA",
               "product_id": "<id-59>",
               "product_sku": "CORNCTRMG12+",
               "quantity": 84,
@@ -848,6 +877,7 @@
               "id": "<id-61>",
               "is_special_order": false,
               "line_total": 275,
+              "price_uom": "PCS",
               "product_id": "<id-4>",
               "product_sku": "LUM-248-PREM",
               "quantity": 50,
@@ -860,6 +890,7 @@
               "id": "<id-62>",
               "is_special_order": false,
               "line_total": 3687.62,
+              "price_uom": "EA",
               "product_id": "<id-63>",
               "product_sku": "CORNSFT1612V",
               "quantity": 94,
@@ -872,6 +903,7 @@
               "id": "<id-64>",
               "is_special_order": false,
               "line_total": 274.61,
+              "price_uom": "EA",
               "product_id": "<id-63>",
               "product_sku": "CORNSFT1612V",
               "quantity": 7,
@@ -884,6 +916,7 @@
               "id": "<id-65>",
               "is_special_order": false,
               "line_total": 463.32,
+              "price_uom": "EA",
               "product_id": "<id-66>",
               "product_sku": "CORNSHTGR49",
               "quantity": 33,
@@ -928,6 +961,7 @@
             "id": "<id-6>",
             "is_special_order": false,
             "line_total": 0,
+            "price_uom": "PCS",
             "product_id": "<id-4>",
             "product_sku": "LUM-248-PREM",
             "quantity": 12,
@@ -940,6 +974,7 @@
             "id": "<id-7>",
             "is_special_order": true,
             "line_total": 0,
+            "price_uom": "EA",
             "product_id": null,
             "product_sku": "SPECIAL-ORDER",
             "quantity": 4,
@@ -1044,108 +1079,147 @@
   {
     "name": "portal_quotes.erp_send_a",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/quotes/<id-5>/state",
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-5>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
-        "state": "SENT"
+        "to": "sent"
       }
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "accepted_at": null,
         "branch_id": "<id-72>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
         "customer_name": "Kelbrook Construction",
-        "delivery_type": "DELIVERY",
-        "exposure_dollars": 0,
-        "exposure_last_checked_at": "<ts+0d>",
-        "exposure_state": "OK",
-        "freight_amount": 0,
+        "delivery_type": "delivery",
+        "expires_at": null,
+        "exposure_cents": 0,
+        "exposure_last_checked_at": null,
+        "exposure_state": "ok",
+        "freight_cents": 0,
         "id": "<id-5>",
+        "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": "catalog line",
             "description": "2x4x8 SPF Premium",
             "id": "<id-6>",
-            "line_total": 0,
+            "line_total_cents": 0,
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
             "product_id": "<id-4>",
-            "quantity": 12,
+            "quantity": "12",
             "quote_id": "<id-5>",
             "sku": "LUM-248-PREM",
-            "unit_cost": 3.5,
-            "unit_price": 0,
-            "uom": "PCS"
+            "unit_cost_ten_thousandths": 35000,
+            "unit_price_ten_thousandths": 0,
+            "uom": "PCS",
+            "uom_qty": "1"
           },
           {
             "created_at": "<ts+0d>",
+            "customer_note": null,
             "description": "Custom cedar bracket",
             "id": "<id-7>",
-            "line_total": 0,
-            "product_id": "<id-73>",
-            "quantity": 4,
+            "line_total_cents": 0,
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "product_id": null,
+            "quantity": "4",
             "quote_id": "<id-5>",
             "sku": "SPECIAL-ORDER",
-            "unit_cost": 0,
-            "unit_price": 0,
-            "uom": "EA"
+            "unit_cost_ten_thousandths": 0,
+            "unit_price_ten_thousandths": 0,
+            "uom": "EA",
+            "uom_qty": "1"
           }
         ],
-        "margin_total": 0,
+        "margin_total_cents": 0,
+        "number": "Q-000031",
+        "original_content_type": null,
+        "original_filename": null,
+        "parse_map": null,
+        "rejected_at": null,
+        "revision": 2,
         "sent_at": "<ts+0d>",
         "source": "portal",
-        "state": "SENT",
-        "total_amount": 0,
-        "updated_at": "<ts+0d>"
+        "status": "sent",
+        "total_cents": 0,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": null,
+        "vehicle_name": null
       }
     }
   },
   {
     "name": "portal_quotes.erp_send_b",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/quotes/<id-8>/state",
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-8>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
-        "state": "SENT"
+        "to": "sent"
       }
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "accepted_at": null,
         "branch_id": "<id-72>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
         "customer_name": "Kelbrook Construction",
-        "delivery_type": "PICKUP",
-        "exposure_dollars": 0,
-        "exposure_last_checked_at": "<ts+0d>",
-        "exposure_state": "OK",
-        "freight_amount": 0,
+        "delivery_type": "pickup",
+        "expires_at": null,
+        "exposure_cents": 0,
+        "exposure_last_checked_at": null,
+        "exposure_state": "ok",
+        "freight_cents": 0,
         "id": "<id-8>",
+        "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
+            "customer_note": null,
             "description": "2x4x8 SPF Premium",
             "id": "<id-9>",
-            "line_total": 0,
+            "line_total_cents": 0,
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
             "product_id": "<id-4>",
-            "quantity": 2,
+            "quantity": "2",
             "quote_id": "<id-8>",
             "sku": "LUM-248-PREM",
-            "unit_cost": 3.5,
-            "unit_price": 0,
-            "uom": "PCS"
+            "unit_cost_ten_thousandths": 35000,
+            "unit_price_ten_thousandths": 0,
+            "uom": "PCS",
+            "uom_qty": "1"
           }
         ],
-        "margin_total": 0,
+        "margin_total_cents": 0,
+        "number": "Q-000032",
+        "original_content_type": null,
+        "original_filename": null,
+        "parse_map": null,
+        "rejected_at": null,
+        "revision": 2,
         "sent_at": "<ts+0d>",
         "source": "portal",
-        "state": "SENT",
-        "total_amount": 0,
-        "updated_at": "<ts+0d>"
+        "status": "sent",
+        "total_cents": 0,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": null,
+        "vehicle_name": null
       }
     }
   },
@@ -1173,6 +1247,7 @@
             "id": "<id-6>",
             "is_special_order": false,
             "line_total": 0,
+            "price_uom": "PCS",
             "product_id": "<id-4>",
             "product_sku": "LUM-248-PREM",
             "quantity": 12,
@@ -1185,6 +1260,7 @@
             "id": "<id-7>",
             "is_special_order": true,
             "line_total": 0,
+            "price_uom": "EA",
             "product_id": null,
             "product_sku": "SPECIAL-ORDER",
             "quantity": 4,
@@ -1220,7 +1296,7 @@
           "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
         },
         "meta": {
-          "request_id": "<id-74>"
+          "request_id": "<id-73>"
         }
       }
     }
@@ -1249,6 +1325,7 @@
             "id": "<id-9>",
             "is_special_order": false,
             "line_total": 0,
+            "price_uom": "PCS",
             "product_id": "<id-4>",
             "product_sku": "LUM-248-PREM",
             "quantity": 2,
@@ -1283,7 +1360,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-75>"
+          "request_id": "<id-74>"
         }
       }
     }
@@ -1303,7 +1380,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-76>"
+          "request_id": "<id-75>"
         }
       }
     }

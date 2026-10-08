@@ -432,11 +432,11 @@ func r1bAQuoteFileGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/quotes",
 				body: map[string]any{
-					"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
+					"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "pickup",
 					"original_file": "R29sZGVuIGZpbGU=", "original_filename": "golden-quote.txt",
 					"lines": []map[string]any{{
 						"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
-						"quantity": 2, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
+						"quantity": "2", "uom": "PCS", "unit_price_ten_thousandths": 55000,
 					}},
 				},
 				extract: map[string]string{"a_quote": "/id"},

@@ -70,6 +70,7 @@ import (
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -314,7 +315,12 @@ func Run() {
 	accountHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
 
 	quoteRepo := quote.NewRepository(db)
-	quoteSvc := quote.NewService(quoteRepo)
+	// The quote module is the wire template (docs/refactor/MODULE-RECIPE.md):
+	// its writes run in one transaction with their quote.* outbox event as the
+	// last statement.
+	quoteSvc := quote.NewService(quoteRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db)
 	quoteHandler := quote.NewHandler(quoteSvc)
 	quoteHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 
@@ -694,7 +700,7 @@ func Run() {
 		}
 	}
 
-	portalRepo := portal.NewRepository(db)
+	portalRepo := portal.NewRepository(db).WithOutbox(outbox.NewWriter(db, cfg.EventsOrg))
 	portalSvc := portal.NewService(portalRepo, portalJWTSecret, logger, pricingSvc, customerSvc, inventorySvc, orderSvc, productSvc)
 	// Reuse the module-level quoteSvc so a portal accept/decline runs the same
 	// state machine — and the same auto-PO and price-protection side effects —
@@ -933,8 +939,8 @@ func Run() {
 	// CORS — must be outside auth so OPTIONS preflight is handled before auth
 	finalHandler = middleware.CORSMiddleware(finalHandler)
 
-	// Rate limiting (120 requests/minute per IP)
-	finalHandler = middleware.RateLimit(120, cfg.TrustedProxies)(finalHandler)
+	// Rate limiting (RATE_LIMIT_PER_MINUTE requests per IP, default 120)
+	finalHandler = middleware.RateLimit(cfg.RateLimitPerMinute, cfg.TrustedProxies)(finalHandler)
 
 	// Panic recovery
 	finalHandler = middleware.Recovery(logger)(finalHandler)

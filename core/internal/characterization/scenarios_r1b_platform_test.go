@@ -43,10 +43,10 @@ func r1bPlatformGroups() []groupDef {
 			// the refusal is audited against the key's id.
 			{
 				name:    "machine_key.write_quote_refused",
-				method:  "PUT",
-				path:    "/api/v1/quotes/{myQuote}/state",
+				method:  "POST",
+				path:    "/api/v1/quotes/{myQuote}/transitions",
 				headers: bearer(),
-				body:    map[string]any{"state": "DRAFT"},
+				body:    map[string]any{"to": "draft"},
 			},
 			// The audit row of that refusal. No route reads audit_log (the
 			// users listing unions only user attributed rows, and a key is

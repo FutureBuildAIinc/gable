@@ -198,7 +198,7 @@ func (h *IndexAdminHandler) HandlePreviewRefresh(w http.ResponseWriter, r *http.
 			continue
 		}
 		ratio := req.NewValue / *pe.BaseIndexValue
-		exposure := (ratio - 1.0) * pe.BasePrice * ewc.LineQuantity
+		exposure := (ratio - 1.0) * pe.BasePrice * ewc.PricedQuantity()
 		if exposure < 0 {
 			exposure = -exposure
 		}

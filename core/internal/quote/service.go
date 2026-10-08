@@ -5,10 +5,15 @@ package quote
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -17,15 +22,50 @@ type AutoPOService interface {
 	CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error
 }
 
+// EventRecorder writes a domain event into the transactional outbox. The
+// service calls it as the LAST statement of the mutation's transaction
+// (ADR 0003 section 2), so the event commits or rolls back with the mutation
+// it describes. *outbox.Writer satisfies it.
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
+
+// TxRunner runs fn inside one transaction, joining the caller's when ctx
+// already carries one. *database.DB satisfies it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// Event types the module writes to the outbox.
+const (
+	EventCreated  = "quote.created"
+	EventSent     = "quote.sent"
+	EventAccepted = "quote.accepted"
+	EventRejected = "quote.rejected"
+	EventExpired  = "quote.expired"
+	EventReopened = "quote.reopened"
+)
+
+var transitionEvents = map[QuoteState]string{
+	QuoteStateSent:     EventSent,
+	QuoteStateAccepted: EventAccepted,
+	QuoteStateRejected: EventRejected,
+	QuoteStateExpired:  EventExpired,
+	QuoteStateDraft:    EventReopened,
+}
+
 type Service struct {
 	repo        Repository
 	poSvc       AutoPOService
 	snapshotSvc SnapshotService
+	events      EventRecorder // optional; nil records nothing (unit tests)
+	tx          TxRunner      // optional; nil runs each method unwrapped (unit tests)
 	logger      *slog.Logger
+	now         func() time.Time
 }
 
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo, logger: slog.Default()}
+	return &Service{repo: repo, logger: slog.Default(), now: time.Now}
 }
 
 // WithAutoPO injects the purchase order service for auto-PO on quote accept.
@@ -34,172 +74,468 @@ func (s *Service) WithAutoPO(poSvc AutoPOService) {
 }
 
 // WithSnapshotService injects the pricing exposure snapshot service, fired
-// best-effort when a quote transitions DRAFT → SENT. Optional: nil disables
+// best-effort when a quote transitions DRAFT to SENT. Optional: nil disables
 // price-protection snapshotting.
 func (s *Service) WithSnapshotService(snapshotSvc SnapshotService) {
 	s.snapshotSvc = snapshotSvc
 }
 
-func (s *Service) CreateQuote(ctx context.Context, q *Quote) error {
-	// 1. Set Defaults
-	if q.State == "" {
-		q.State = QuoteStateDraft
-	}
-	if q.Source == "" {
-		q.Source = "manual"
-	}
-
-	// 2. Normalize delivery, then total. Order matters: freight must be
-	//    cleared for a pickup BEFORE it is rolled into the total.
-	normalizeDeliveryAndTotal(q)
-
-	return s.repo.CreateQuote(ctx, q)
+// WithOutbox wires the recorder of quote.created and the transition events.
+func (s *Service) WithOutbox(events EventRecorder) *Service {
+	s.events = events
+	return s
 }
 
-// normalizeDeliveryAndTotal applies the delivery-type default, clears the
-// vehicle and freight on a pickup, and only then recomputes the line totals
-// and the quote total.
-//
-// The clearing has to happen first. Adding freight to the total and zeroing
-// FreightAmount afterwards stored a quote whose freight_amount was 0 while its
-// total_amount still contained the freight: the customer was billed for
-// delivery on an order they were collecting themselves, and the total no
-// longer reconciled with its own components.
-func normalizeDeliveryAndTotal(q *Quote) {
-	if q.DeliveryType == "" {
-		q.DeliveryType = "PICKUP"
+// WithTxRunner wires the transaction wrapper every write uses, so the
+// mutation, its revision move and its event are one transactional fact.
+func (s *Service) WithTxRunner(tx TxRunner) *Service {
+	s.tx = tx
+	return s
+}
+
+func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
 	}
-	if q.DeliveryType == "PICKUP" {
-		q.VehicleID = nil
-		q.FreightAmount = 0
+	return s.tx.RunInTx(ctx, fn)
+}
+
+// Precondition is the client's revision for an update or a transition: the
+// If-Match header and/or the body's revision (ADR 0001 section 11).
+type Precondition struct {
+	IfMatch  string
+	Revision *int64
+}
+
+func (p Precondition) missing() bool { return p.IfMatch == "" && p.Revision == nil }
+
+func (p Precondition) check(current int64) error {
+	return httpx.CheckRevision(current, p.IfMatch, p.Revision)
+}
+
+// notFound maps the repository's sentinel to the wire's 404.
+func notFound(err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return httpx.NotFound(ErrNotFound.Error())
+	}
+	return err
+}
+
+// priceDraft turns a Draft into a priced Quote body (no number, no id yet):
+// product defaults filled, each line extended once by the platform rule,
+// totals summed, and freight cleared on a pickup BEFORE it is rolled into the
+// total (a pickup must not be billed for delivery). Every field problem found
+// is collected into one 400.
+func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
+	v := &httpx.Validator{}
+
+	var productIDs []uuid.UUID
+	for _, l := range d.Lines {
+		if l.ProductID != nil {
+			productIDs = append(productIDs, *l.ProductID)
+		}
+	}
+	products, err := s.repo.LookupProducts(ctx, productIDs)
+	if err != nil {
+		return nil, err
 	}
 
-	var total float64
-	for i := range q.Lines {
-		line := &q.Lines[i]
-		line.LineTotal = line.Quantity * line.UnitPrice
-		total += line.LineTotal
+	now := s.now().UTC()
+	q := &Quote{}
+	q.CustomerID, q.JobID, q.ExpiresAt = d.CustomerID, d.JobID, d.ExpiresAt
+	q.Status, q.Source, q.MarginTotalCents = QuoteStateDraft, d.Source, d.MarginTotalCents
+	q.DeliveryType, q.FreightCents, q.VehicleID = d.DeliveryType, d.FreightCents, d.VehicleID
+	if d.BranchID != nil {
+		q.BranchID = *d.BranchID
 	}
-	total += q.FreightAmount
-	q.TotalAmount = total
+	if d.DeliveryType == DeliveryPickup {
+		q.VehicleID = nil
+		q.FreightCents = 0
+	}
+	q.CreatedAt = httpx.TimestampOf(now)
+	q.UpdatedAt = q.CreatedAt
+	q.Revision = 1
+	if len(d.OriginalFile) > 0 {
+		q.OriginalFile = d.OriginalFile
+	}
+	if d.OriginalFilename != "" {
+		q.OriginalFilename = &d.OriginalFilename
+	}
+	if d.OriginalContentType != "" {
+		q.OriginalContentType = &d.OriginalContentType
+	}
+	q.ParseMap = d.ParseMap
+	q.ExposureState = "OK"
+
+	q.Lines = make([]QuoteLine, 0, len(d.Lines))
+	total := int64(q.FreightCents)
+	for i, dl := range d.Lines {
+		path := fmt.Sprintf("lines[%d]", i)
+		line := QuoteLine{
+			ID: dl.ID, ProductID: dl.ProductID, SKU: dl.SKU, Description: dl.Description,
+			Quantity: dl.Quantity, UOM: dl.UOM, PriceUOM: dl.PriceUOM,
+			UOMQty: dl.UOMQty, PriceUOMQty: dl.PriceUOMQty, UnitPrice: dl.UnitPrice,
+			CreatedAt: q.CreatedAt,
+		}
+		if dl.CustomerNote != "" {
+			note := dl.CustomerNote
+			line.CustomerNote = &note
+		}
+		if line.ID == uuid.Nil {
+			line.ID = uuid.New()
+		}
+		if dl.ProductID != nil {
+			p, ok := products[*dl.ProductID]
+			if !ok {
+				v.Check(false, path+".product_id", "no such product")
+			} else {
+				if line.SKU == "" {
+					line.SKU = p.SKU
+				}
+				if line.Description == "" {
+					line.Description = p.Description
+				}
+				// The unit defaults from the product, then the price unit
+				// from the unit, then the pair from the two.
+				if line.UOM == "" {
+					line.UOM = productUOM(p.UOMPrimary)
+				}
+			}
+		}
+		if line.PriceUOM == "" {
+			line.PriceUOM = string(line.UOM)
+		}
+		if line.UOM == "" {
+			continue // the product was unknown (reported above): nothing to price
+		}
+		if line.UOMQty == 0 && line.PriceUOMQty == 0 {
+			if line.PriceUOM != string(line.UOM) {
+				v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
+				continue
+			}
+			line.UOMQty, line.PriceUOMQty = one, one
+		}
+		ext, err := httpx.Extend(line.Quantity, line.UOMQty, line.PriceUOMQty, line.UnitPrice)
+		if err != nil || total > math.MaxInt64-int64(ext) {
+			v.Check(false, path, "the line's extension is beyond what the document can hold")
+			continue
+		}
+		line.LineTotal = ext
+		total += int64(ext)
+		q.Lines = append(q.Lines, line)
+	}
+	if err := v.Err(); err != nil {
+		return nil, err
+	}
+	q.TotalCents = httpx.Cents(total)
+	return q, nil
+}
+
+// Create validates the references, prices the document, mints its number from
+// the sequence and stores it, writing quote.created as the transaction's last
+// statement. A create that fails anywhere leaves no quote and no event.
+func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
+	var out *Quote
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		q, err := s.priceDraft(ctx, d)
+		if err != nil {
+			return err
+		}
+		q.ID = uuid.New()
+		for i := range q.Lines {
+			q.Lines[i].QuoteID = q.ID
+		}
+		if q.Number, err = s.repo.NextNumber(ctx); err != nil {
+			return err
+		}
+		if err := s.repo.InsertQuote(ctx, q); err != nil {
+			return err
+		}
+		if out, err = s.repo.GetQuote(ctx, q.ID); err != nil {
+			return err
+		}
+		return s.record(ctx, out, EventCreated, "")
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Update replaces a draft quote's header and lines on the client's revision.
+func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precondition) (*Quote, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var out *Quote
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockQuote(ctx, id); err != nil {
+			return notFound(err)
+		}
+		cur, err := s.repo.GetQuote(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := pre.check(cur.Revision); err != nil {
+			return err
+		}
+		if cur.Status != QuoteStateDraft {
+			return &httpx.Error{Status: 409, Code: httpx.CodeConflict, Message: "only draft quotes can be edited",
+				Details: []httpx.FieldError{httpx.Blocker("quote_not_draft", "the quote is "+cur.Status.Status())}}
+		}
+		q, err := s.priceDraft(ctx, d)
+		if err != nil {
+			return err
+		}
+		q.ID, q.Number, q.BranchID = cur.ID, cur.Number, cur.BranchID
+		for i := range q.Lines {
+			q.Lines[i].QuoteID = id
+		}
+		if err := s.repo.ReplaceDraft(ctx, q); err != nil {
+			return err
+		}
+		out, err = s.repo.GetQuote(ctx, id)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
-	return s.repo.GetQuote(ctx, id)
-}
-
-func (s *Service) ListQuotes(ctx context.Context) ([]Quote, error) {
-	return s.repo.ListQuotes(ctx)
-}
-
-func (s *Service) ListQuotesPaginated(ctx context.Context, limit, offset int) ([]Quote, int, error) {
-	return s.repo.ListQuotesPaginated(ctx, limit, offset)
-}
-
-func (s *Service) UpdateState(ctx context.Context, id uuid.UUID, state QuoteState) error {
 	q, err := s.repo.GetQuote(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	return q, nil
+}
+
+// ListQuotes returns one page: up to f.Limit rows, and whether more follow
+// (the repository is asked for one extra row to know). total is set only
+// when the caller asks, the opt in count of ADR 0001 section 1.
+func (s *Service) ListQuotes(ctx context.Context, f ListFilter, wantTotal bool) (items []QuoteSummary, hasMore bool, total *int64, err error) {
+	limit := f.Limit
+	f.Limit = limit + 1
+	rows, err := s.repo.ListQuotes(ctx, f)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	if len(rows) > limit {
+		rows, hasMore = rows[:limit], true
+	}
+	if wantTotal {
+		n, err := s.repo.CountQuotes(ctx, f)
+		if err != nil {
+			return nil, false, nil, err
+		}
+		total = &n
+	}
+	return rows, hasMore, total, nil
+}
+
+// ListByCustomer is every quote of one customer, for the partner surface.
+func (s *Service) ListByCustomer(ctx context.Context, customerID uuid.UUID) ([]QuoteSummary, error) {
+	return s.repo.ListQuotesByCustomer(ctx, customerID)
+}
+
+// Transition moves a quote along its lifecycle on the client's revision,
+// writes the transition's event as the transaction's last statement, and
+// after the commit runs the best effort side effects (auto purchase orders on
+// accept, the exposure snapshot on send).
+func (s *Service) Transition(ctx context.Context, id uuid.UUID, to QuoteState, pre Precondition) (*Quote, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	return s.transition(ctx, id, to, &pre, nil)
+}
+
+// UpdateState is the transition for in process callers (the portal's accept
+// and decline, the integration seam): the same lifecycle rules, the same
+// event, no client revision to precondition on.
+func (s *Service) UpdateState(ctx context.Context, id uuid.UUID, to QuoteState) error {
+	_, err := s.transition(ctx, id, to, nil, nil)
+	return err
+}
+
+// transition runs the lifecycle change in one transaction. check, when set,
+// runs on the locked quote after the lifecycle rule and BEFORE the status
+// moves, so a refusal it returns leaves the quote exactly as it was.
+func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, pre *Precondition, check func(cur *Quote) error) (*Quote, error) {
+	var out *Quote
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockQuote(ctx, id); err != nil {
+			return notFound(err)
+		}
+		cur, err := s.repo.GetQuote(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if pre != nil {
+			if err := pre.check(cur.Revision); err != nil {
+				return err
+			}
+		}
+		if err := validateStateTransition(cur.Status, to); err != nil {
+			return err
+		}
+		if check != nil {
+			if err := check(cur); err != nil {
+				return err
+			}
+		}
+		from := cur.Status
+		now := httpx.TimestampOf(s.now().UTC())
+		cur.Status = to
+		switch to {
+		case QuoteStateSent:
+			cur.SentAt = &now
+		case QuoteStateAccepted:
+			cur.AcceptedAt = &now
+		case QuoteStateRejected:
+			cur.RejectedAt = &now
+		}
+		if err := s.repo.SetStatus(ctx, cur); err != nil {
+			return err
+		}
+		if out, err = s.repo.GetQuote(ctx, id); err != nil {
+			return err
+		}
+		return s.record(ctx, out, transitionEvents[to], from.Status())
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-PO: when accepted, trigger POs for special-order items.
+	if to == QuoteStateAccepted && s.poSvc != nil {
+		s.triggerAutoPO(ctx, out)
+	}
+	// Price-protection: when sent, snapshot index baselines for commodity
+	// lines. Best-effort: a pricing-module failure must never block a send.
+	if to == QuoteStateSent && s.snapshotSvc != nil {
+		if err := s.snapshotSvc.SnapshotQuoteLines(ctx, out.ID); err != nil {
+			s.logger.Warn("exposure snapshot failed for quote", "quote_id", out.ID, "error", err)
+		} else {
+			s.logger.Info("exposure snapshot written for quote", "quote_id", out.ID)
+		}
+	}
+	return out, nil
+}
+
+// OrderPayloadFor builds the order creation payload from a quote's lines, or
+// refuses with the 409 invalid_state_transition that names every line an order
+// cannot carry. Orders hold whole cents per sale unit and no conversion pair
+// until cycle 2 (R2-1), so a line whose pair is not 1 to 1, or whose price_uom
+// differs from its uom, cannot be handed over without rounding the money
+// away: that line is a line_not_convertible blocker naming lines[i].
+func OrderPayloadFor(q *Quote) (*OrderPayload, error) {
+	payload := &OrderPayload{CustomerID: q.CustomerID, QuoteID: q.ID, Lines: make([]OrderPayloadLine, 0, len(q.Lines))}
+	var blockers []httpx.FieldError
+	for i, l := range q.Lines {
+		if l.UOMQty != one || l.PriceUOMQty != one || l.PriceUOM != string(l.UOM) {
+			blockers = append(blockers, httpx.Blocker("line_not_convertible", fmt.Sprintf(
+				"lines[%d] is priced per %s but sold in %s: orders take a price per sale unit until the order contract carries the conversion",
+				i, l.PriceUOM, l.UOM)))
+			continue
+		}
+		// The price per sale unit in whole cents, rounded once.
+		each, err := httpx.Extend(10000, l.UOMQty, l.PriceUOMQty, l.UnitPrice)
+		if err != nil {
+			blockers = append(blockers, httpx.Blocker("line_not_convertible", fmt.Sprintf(
+				"lines[%d] has a price the order cannot hold", i)))
+			continue
+		}
+		payload.Lines = append(payload.Lines, OrderPayloadLine{
+			ProductID: l.ProductID, Quantity: l.Quantity, UOM: l.UOM, PriceEachCents: each,
+		})
+	}
+	if len(blockers) > 0 {
+		return nil, httpx.InvalidStateTransition("the quote has lines an order cannot carry yet", blockers...)
+	}
+	return payload, nil
+}
+
+// Convert accepts the quote on the client's revision and returns the order
+// payload for the client to POST to /orders. The payload is built inside the
+// transition's transaction, before the status changes, so a quote with a line
+// an order cannot carry is refused and stays as it was. The payload carries
+// the accepted quote's revision.
+func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (*OrderPayload, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var payload *OrderPayload
+	q, err := s.transition(ctx, id, QuoteStateAccepted, &pre, func(cur *Quote) error {
+		p, err := OrderPayloadFor(cur)
+		payload = p
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	payload.Revision = q.Revision
+	return payload, nil
+}
+
+// record writes the quote's event into the outbox through the transaction's
+// executor. fromStatus is set on a transition.
+func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus string) error {
+	if s.events == nil {
+		return nil
+	}
+	data := map[string]any{
+		"number":      q.Number,
+		"customer_id": q.CustomerID,
+		"status":      q.Status.Status(),
+		"revision":    q.Revision,
+		"total_cents": int64(q.TotalCents),
+	}
+	if fromStatus != "" {
+		data["from_status"] = fromStatus
+	}
+	raw, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-
-	// Validate state transition
-	if err := validateStateTransition(q.State, state); err != nil {
-		return err
-	}
-
-	now := time.Now()
-	q.State = state
-
-	// Set lifecycle timestamp based on target state
-	switch state {
-	case QuoteStateSent:
-		q.SentAt = &now
-	case QuoteStateAccepted:
-		q.AcceptedAt = &now
-	case QuoteStateRejected:
-		q.RejectedAt = &now
-	}
-
-	if err := s.repo.UpdateQuote(ctx, q); err != nil {
-		return err
-	}
-
-	// Auto-PO: when accepted, trigger POs for special-order items
-	if state == QuoteStateAccepted && s.poSvc != nil {
-		s.triggerAutoPO(ctx, q)
-	}
-
-	// Price-protection: when sent, snapshot index baselines for commodity
-	// lines. Best-effort — a pricing-module failure must never block a send.
-	if state == QuoteStateSent && s.snapshotSvc != nil {
-		if err := s.snapshotSvc.SnapshotQuoteLines(ctx, q.ID); err != nil {
-			s.logger.Warn("exposure snapshot failed for quote",
-				"quote_id", q.ID,
-				"error", err,
-			)
-		} else {
-			s.logger.Info("exposure snapshot written for quote", "quote_id", q.ID)
-		}
-	}
-
-	return nil
+	branch := q.BranchID
+	return s.events.Write(ctx, outbox.Event{
+		Type: eventType, EntityType: "quote", EntityID: q.ID, BranchID: &branch, Data: raw,
+	})
 }
 
 // triggerAutoPO creates purchase orders for special-order quote lines.
-// This is fire-and-forget — failures are logged but don't block acceptance.
+// This is fire-and-forget: failures are logged but don't block acceptance.
 func (s *Service) triggerAutoPO(ctx context.Context, q *Quote) {
 	for _, line := range q.Lines {
 		// Only create POs for lines that have a unit cost (special order indicator)
-		if line.UnitCost > 0 {
+		if line.UnitCost > 0 && line.ProductID != nil {
 			err := s.poSvc.CreatePOFromSpecialOrderLine(
-				ctx, line.ProductID, nil, line.Quantity, line.UnitCost, line.ID,
+				ctx, *line.ProductID, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, line.ID,
 			)
 			if err != nil {
 				s.logger.Warn("auto-PO failed for quote line",
-					"quote_id", q.ID,
-					"line_id", line.ID,
-					"product_id", line.ProductID,
-					"error", err,
-				)
+					"quote_id", q.ID, "line_id", line.ID, "product_id", line.ProductID, "error", err)
 			} else {
 				s.logger.Info("auto-PO created for quote line",
-					"quote_id", q.ID,
-					"line_id", line.ID,
-					"product_id", line.ProductID,
-				)
+					"quote_id", q.ID, "line_id", line.ID, "product_id", line.ProductID)
 			}
 		}
 	}
-}
-
-func (s *Service) UpdateQuote(ctx context.Context, q *Quote) error {
-	existing, err := s.repo.GetQuote(ctx, q.ID)
-	if err != nil {
-		return fmt.Errorf("quote not found: %w", err)
-	}
-	if existing.State != QuoteStateDraft {
-		return fmt.Errorf("only DRAFT quotes can be edited")
-	}
-
-	// Recalculate totals. Same normalization as CreateQuote — an edit that
-	// switches a quote to pickup must drop the freight from the total, and an
-	// edit that omits the delivery type gets the same PICKUP default a create
-	// would, rather than silently keeping freight on an unspecified quote.
-	normalizeDeliveryAndTotal(q)
-	q.State = QuoteStateDraft
-
-	return s.repo.UpdateQuoteWithLines(ctx, q)
 }
 
 func (s *Service) GetAnalytics(ctx context.Context) (*QuoteAnalytics, error) {
 	return s.repo.GetQuoteAnalytics(ctx)
 }
 
+// GetOriginalFile returns the stored upload; a missing quote is a 404.
 func (s *Service) GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error) {
-	return s.repo.GetOriginalFile(ctx, id)
+	data, name, ctype, err := s.repo.GetOriginalFile(ctx, id)
+	return data, name, ctype, notFound(err)
 }
 
-// validateStateTransition ensures the state change is valid.
+// validateStateTransition ensures the status change is allowed by the
+// lifecycle; a refusal is the wire's 409 invalid_state_transition.
 func validateStateTransition(from, to QuoteState) error {
 	allowed := map[QuoteState][]QuoteState{
 		QuoteStateDraft:    {QuoteStateSent, QuoteStateAccepted, QuoteStateRejected, QuoteStateExpired},
@@ -211,13 +547,12 @@ func validateStateTransition(from, to QuoteState) error {
 
 	targets, ok := allowed[from]
 	if !ok {
-		return fmt.Errorf("unknown current state: %s", from)
+		return fmt.Errorf("unknown current status: %s", from.Status())
 	}
-
 	for _, t := range targets {
 		if t == to {
 			return nil
 		}
 	}
-	return fmt.Errorf("cannot transition from %s to %s", from, to)
+	return httpx.InvalidStateTransition(fmt.Sprintf("cannot transition from %s to %s", from.Status(), to.Status()))
 }

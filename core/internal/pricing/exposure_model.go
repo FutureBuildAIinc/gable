@@ -231,6 +231,8 @@ type EscalatorWithContext struct {
 	SalespersonID             *uuid.UUID
 	SalespersonName           string
 	LineQuantity              float64
+	LineUOMQty                float64 // the line's conversion pair: LineUOMQty of the sale unit
+	LinePriceUOMQty           float64 // equals LinePriceUOMQty of the price unit
 	LineUnitPrice             float64
 	CustomerAgreementSignedAt *time.Time
 	CustomerAgreementRef      string
@@ -275,4 +277,20 @@ type IndexRefreshRequest struct {
 	NewValue float64 `json:"new_value"`
 	Source   string  `json:"source"`
 	Notes    string  `json:"notes,omitempty"`
+}
+
+// PricedQuantity is a quantity in the unit its price is quoted per: the sale
+// quantity times price_uom_qty over uom_qty, the same conversion that extends
+// the line. A missing or non positive pair is 1 to 1. Exposure is a price
+// delta times this, never times the sale quantity.
+func PricedQuantity(quantity, uomQty, priceUOMQty float64) float64 {
+	if uomQty <= 0 || priceUOMQty <= 0 {
+		return quantity
+	}
+	return quantity * priceUOMQty / uomQty
+}
+
+// PricedQuantity is the line's quantity in its price unit.
+func (e *EscalatorWithContext) PricedQuantity() float64 {
+	return PricedQuantity(e.LineQuantity, e.LineUOMQty, e.LinePriceUOMQty)
 }

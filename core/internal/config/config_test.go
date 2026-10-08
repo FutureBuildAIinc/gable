@@ -68,6 +68,18 @@ func TestLoad_TrustedProxies(t *testing.T) {
 	}
 }
 
+func TestLoad_RateLimitPerMinute(t *testing.T) {
+	t.Setenv("FB_BRAIN_ENABLED", "false")
+	cfg, err := Load()
+	if err != nil || cfg.RateLimitPerMinute != 120 {
+		t.Fatalf("default = %d (%v), want 120", cfg.RateLimitPerMinute, err)
+	}
+	t.Setenv("RATE_LIMIT_PER_MINUTE", "2000")
+	if cfg, err = Load(); err != nil || cfg.RateLimitPerMinute != 2000 {
+		t.Fatalf("with the variable set = %d (%v), want 2000", cfg.RateLimitPerMinute, err)
+	}
+}
+
 func TestLoad_OutboxRetentionDays(t *testing.T) {
 	t.Setenv("FB_BRAIN_ENABLED", "false")
 

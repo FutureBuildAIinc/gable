@@ -64,7 +64,10 @@ var modelBoundSchemas = []struct {
 }{
 	// quote
 	{"Quote", quote.Quote{}},
+	{"QuoteSummary", quote.QuoteSummary{}},
 	{"QuoteLine", quote.QuoteLine{}},
+	{"QuoteOrderPayload", quote.OrderPayload{}},
+	{"QuoteOrderPayloadLine", quote.OrderPayloadLine{}},
 	{"QuoteAnalytics", quote.QuoteAnalytics{}},
 	{"QuoteAnalyticsTrend", quote.QuoteAnalyticsTrend{}},
 	// customer
@@ -329,9 +332,7 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 		for _, name := range schema.Required {
 			required[name] = true
 		}
-		model := reflect.TypeOf(bound.Model)
-		for i := 0; i < model.NumField(); i++ {
-			f := model.Field(i)
+		for _, f := range jsonFields(reflect.TypeOf(bound.Model)) {
 			name, opts := parseJSONTag(f)
 			if name == "" {
 				continue
@@ -360,6 +361,22 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 		t.Fatalf("model bound schemas drifted from their Go models with %d problem(s):\n\t%s",
 			len(problems), strings.Join(problems, "\n\t"))
 	}
+}
+
+// jsonFields lists the struct's fields as encoding/json sees them: an
+// embedded struct with no json tag is flattened into its parent (its fields
+// are the parent's properties), everything else is one field.
+func jsonFields(t reflect.Type) []reflect.StructField {
+	var out []reflect.StructField
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous && f.Tag.Get("json") == "" && f.Type.Kind() == reflect.Struct {
+			out = append(out, jsonFields(f.Type)...)
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // parseJSONTag returns the wire name of the field ("" when the field is not

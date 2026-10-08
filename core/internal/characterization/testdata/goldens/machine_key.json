@@ -48,46 +48,60 @@
         "created_at": "<ts+0d>",
         "customer_id": "<id-4>",
         "customer_name": "Kelbrook Construction",
-        "delivery_type": "PICKUP",
-        "exposure_dollars": 0,
+        "delivery_type": "pickup",
+        "expires_at": null,
+        "exposure_cents": 0,
         "exposure_last_checked_at": "<ts+0d>",
-        "exposure_state": "OK",
-        "freight_amount": 0,
+        "exposure_state": "ok",
+        "freight_cents": 0,
         "id": "<id-2>",
+        "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
+            "customer_note": null,
             "description": "2x4x8 SPF Premium",
             "id": "<id-5>",
-            "line_total": 110,
+            "line_total_cents": 11000,
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
             "product_id": "<id-6>",
-            "quantity": 20,
+            "quantity": "20",
             "quote_id": "<id-2>",
             "sku": "LUM-248-PREM",
-            "unit_cost": 3.5,
-            "unit_price": 5.5,
-            "uom": "PCS"
+            "unit_cost_ten_thousandths": 35000,
+            "unit_price_ten_thousandths": 55000,
+            "uom": "PCS",
+            "uom_qty": "1"
           }
         ],
-        "margin_total": 0,
+        "margin_total_cents": 0,
+        "number": "Q-000021",
+        "original_content_type": null,
+        "original_filename": null,
+        "parse_map": null,
+        "rejected_at": null,
+        "revision": 4,
         "sent_at": "<ts+0d>",
         "source": "manual",
-        "state": "ACCEPTED",
-        "total_amount": 110,
-        "updated_at": "<ts+0d>"
+        "status": "accepted",
+        "total_cents": 11000,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": null,
+        "vehicle_name": null
       }
     }
   },
   {
     "name": "machine_key.write_quote_refused",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/quotes/<id-2>/state",
+      "method": "POST",
+      "path": "/api/v1/quotes/<id-2>/transitions",
       "headers": {
         "Authorization": "Bearer <api-key>"
       },
       "body": {
-        "state": "DRAFT"
+        "to": "draft"
       }
     },
     "response": {
@@ -119,8 +133,8 @@
           "actor_id": "<id-1>",
           "actor_kind": "key",
           "changes": {
-            "method": "PUT",
-            "path": "/api/v1/quotes/<id-2>/state",
+            "method": "POST",
+            "path": "/api/v1/quotes/<id-2>/transitions",
             "scope": "quotes:write"
           },
           "entity_id": "<id-1>",

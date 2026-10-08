@@ -125,7 +125,7 @@ export function createClient(options: ClientOptions): Client {
 /** Fills {param} segments with the typed path parameters, encoded. */
 function substitute(templated: string, params: Record<string, string> | undefined): string {
   if (!params) return templated;
-  return templated.replace(/\{([^}/]+)\}/g, (whole, name: string) => {
+  return templated.replace(/\{([^}/]+)\}/g, (_whole, name: string) => {
     const value = params[name];
     if (value === undefined) throw new Error(`missing path parameter ${name} for ${templated}`);
     return encodeURIComponent(value);

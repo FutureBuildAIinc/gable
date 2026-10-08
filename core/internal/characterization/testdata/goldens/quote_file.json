@@ -7,15 +7,14 @@
       "body": {
         "branch_id": "<id-1>",
         "customer_id": "<id-2>",
-        "delivery_type": "PICKUP",
+        "delivery_type": "pickup",
         "lines": [
           {
             "description": "2x4x8 SPF Premium",
             "product_id": "<id-3>",
-            "quantity": 2,
+            "quantity": "2",
             "sku": "LUM-248-PREM",
-            "unit_cost": 3.5,
-            "unit_price": 5.5,
+            "unit_price_ten_thousandths": 55000,
             "uom": "PCS"
           }
         ],
@@ -27,35 +26,52 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
+        "accepted_at": null,
         "branch_id": "<id-1>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
-        "delivery_type": "PICKUP",
-        "exposure_dollars": 0,
-        "exposure_state": "",
-        "freight_amount": 0,
+        "customer_name": "Kelbrook Construction",
+        "delivery_type": "pickup",
+        "expires_at": null,
+        "exposure_cents": 0,
+        "exposure_last_checked_at": null,
+        "exposure_state": "ok",
+        "freight_cents": 0,
         "id": "<id-4>",
+        "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
+            "customer_note": null,
             "description": "2x4x8 SPF Premium",
             "id": "<id-5>",
-            "line_total": 11,
+            "line_total_cents": 1100,
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
             "product_id": "<id-3>",
-            "quantity": 2,
+            "quantity": "2",
             "quote_id": "<id-4>",
             "sku": "LUM-248-PREM",
-            "unit_cost": 3.5,
-            "unit_price": 5.5,
-            "uom": "PCS"
+            "unit_cost_ten_thousandths": 35000,
+            "unit_price_ten_thousandths": 55000,
+            "uom": "PCS",
+            "uom_qty": "1"
           }
         ],
-        "margin_total": 0,
+        "margin_total_cents": 0,
+        "number": "Q-000030",
+        "original_content_type": null,
         "original_filename": "golden-quote.txt",
+        "parse_map": null,
+        "rejected_at": null,
+        "revision": 1,
+        "sent_at": null,
         "source": "manual",
-        "state": "DRAFT",
-        "total_amount": 11,
-        "updated_at": "<ts+0d>"
+        "status": "draft",
+        "total_cents": 1100,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": null,
+        "vehicle_name": null
       }
     }
   },
@@ -84,8 +100,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "no original file is stored for this quote"
         },
         "meta": {
           "request_id": "<id-7>"
@@ -104,8 +120,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "quote not found"
         },
         "meta": {
           "request_id": "<id-9>"
@@ -124,8 +140,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid quote id"
         },
         "meta": {
           "request_id": "<id-10>"

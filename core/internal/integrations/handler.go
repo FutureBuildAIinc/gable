@@ -6,13 +6,15 @@ package integrations
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
-	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
@@ -234,8 +236,11 @@ func (h *Handler) CreateQuote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build quote lines
-	var lines []quote.QuoteLine
+	// Build quote lines. The seam's wire is frozen (ADR 0001 section 10): it
+	// keeps its integer cent unit_price and its silent skipping of lines whose
+	// product it cannot resolve, and converts onto the quote module's exact
+	// types here, inside the handler.
+	var lines []quote.DraftLine
 	for _, line := range req.Lines {
 		productID, err := uuid.Parse(line.ProductID)
 		if err != nil {
@@ -247,42 +252,38 @@ func (h *Handler) CreateQuote(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		unitPriceDollars := float64(line.UnitPrice) / 100.0
-		lines = append(lines, quote.QuoteLine{
-			ProductID:   productID,
+		lines = append(lines, quote.DraftLine{
+			ProductID:   &productID,
 			SKU:         prod.SKU,
 			Description: prod.Description,
-			Quantity:    float64(line.Quantity),
+			Quantity:    httpx.Quantity(int64(line.Quantity) * 10000),
 			UOM:         prod.UOMPrimary,
-			UnitPrice:   unitPriceDollars,
+			PriceUOM:    string(prod.UOMPrimary),
+			UOMQty:      1 * 10000,
+			PriceUOMQty: 1 * 10000,
+			UnitPrice:   httpx.Price(line.UnitPrice * 100), // cents to ten-thousandths
 		})
 	}
 
-	demoCreatedBy := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	expires := time.Now().AddDate(0, 0, 30)
-
-	q := &quote.Quote{
-		CustomerID: customerID,
-		State:      quote.QuoteStateDraft,
-		ExpiresAt:  &expires,
-		Lines:      lines,
-	}
-	// Set CreatedBy via context or field - the service will handle totals
-	_ = demoCreatedBy
-
-	if err := h.quoteSvc.CreateQuote(r.Context(), q); err != nil {
+	expires := httpx.TimestampOf(time.Now().AddDate(0, 0, 30))
+	q, err := h.quoteSvc.Create(r.Context(), &quote.Draft{
+		CustomerID:   customerID,
+		DeliveryType: quote.DeliveryPickup,
+		Source:       "manual",
+		ExpiresAt:    &expires,
+		Lines:        lines,
+	})
+	if err != nil {
 		slog.Error("failed to create quote", "error", err, "method", r.Method, "path", r.URL.Path)
 		writeError(w, http.StatusInternalServerError, "failed to create quote")
 		return
 	}
 
-	totalCents := int64(q.TotalAmount * 100)
-
 	writeJSON(w, http.StatusCreated, QuoteResponse{
 		ID:         q.ID.String(),
 		CustomerID: req.CustomerID,
-		Total:      totalCents,
-		Status:     string(q.State),
+		Total:      int64(q.TotalCents),
+		Status:     string(q.Status),
 	})
 }
 
@@ -313,14 +314,36 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 2. Convert to order — PriceEach is now int64 cents
-	// TODO: align with int64 cents — quote.UnitPrice is still float64 dollars
+	// 2. Convert to order. PriceEach is int64 cents: the quote line's price per
+	// sale unit, rounded to cents (half away from zero) the way an order line
+	// has always held it. A quote with a line an order cannot carry yet (a
+	// conversion pair that is not 1 to 1, or a price per another unit) is
+	// refused before anything is created: 409 with the lines named.
+	payload, err := quote.OrderPayloadFor(q)
+	if err != nil {
+		var herr *httpx.Error
+		if errors.As(err, &herr) {
+			msgs := make([]string, 0, len(herr.Details))
+			for _, d := range herr.Details {
+				msgs = append(msgs, d.Message)
+			}
+			writeError(w, http.StatusConflict, "quote cannot be converted: "+strings.Join(msgs, "; "))
+			return
+		}
+		slog.Error("failed to price quote for order", "error", err, "quote_id", idStr)
+		writeError(w, http.StatusInternalServerError, "failed to create order")
+		return
+	}
 	var orderLines []order.OrderLineRequest
-	for _, ql := range q.Lines {
+	for _, pl := range payload.Lines {
+		var productID uuid.UUID
+		if pl.ProductID != nil {
+			productID = *pl.ProductID
+		}
 		orderLines = append(orderLines, order.OrderLineRequest{
-			ProductID: ql.ProductID,
-			Quantity:  ql.Quantity,
-			PriceEach: int64(math.Round(ql.UnitPrice * 100)),
+			ProductID: productID,
+			Quantity:  float64(pl.Quantity) / 10000,
+			PriceEach: int64(pl.PriceEachCents),
 		})
 	}
 

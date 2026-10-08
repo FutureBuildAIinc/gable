@@ -3,7 +3,7 @@
 
 package characterization
 
-import "strings"
+import "fmt"
 
 // Sales and logistics groups: platform health, product, customer, sales team,
 // CRM, quotes, orders (with the exposure gate), invoices (created through the
@@ -142,58 +142,117 @@ func glGroups() []groupDef {
 }
 
 func quoteGroups() []groupDef {
+	// The quote module is on the wire contract (R1-15): lowercase status,
+	// _cents money, quantities as decimal strings, a document number, and a
+	// revision every update and transition names in If-Match. The revision
+	// of a scripted quote is deterministic (create 1, then one per write).
+	line := func(qty string) map[string]any {
+		return map[string]any{
+			"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
+			"quantity": qty, "uom": "PCS", "unit_price_ten_thousandths": 55000,
+		}
+	}
 	steps := []stepDef{
 		{
 			name:   "quote.create",
 			method: "POST",
 			path:   "/api/v1/quotes",
 			body: map[string]any{
-				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
-				"lines": []map[string]any{{
-					"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
-					"quantity": 10, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
-				}},
+				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "pickup",
+				"lines": []map[string]any{line("10")},
 			},
 			extract: map[string]string{"myQuote": "/id"},
 		},
 		{name: "quote.get", method: "GET", path: "/api/v1/quotes/{myQuote}"},
 		{name: "quote.list", method: "GET", path: "/api/v1/quotes?limit=1"},
-		// PUT on a DRAFT quote: the editable window. The doubled line
-		// quantity is the observable difference.
+		// The four live failures the refactor inputs name for quotes, now
+		// refused or served correctly: a line with neither a unit of measure nor
+		// a product is a 400 naming the field, ?status filters, an unsupported status or
+		// parameter is a 400, and the list pages by cursor.
 		{
-			name:   "quote.update",
-			method: "PUT",
-			path:   "/api/v1/quotes/{myQuote}",
+			name:   "quote.create.missing_uom",
+			method: "POST",
+			path:   "/api/v1/quotes",
 			body: map[string]any{
-				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
+				"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "pickup",
 				"lines": []map[string]any{{
-					"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
-					"quantity": 20, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
+					"sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
+					"quantity": "10", "unit_price_ten_thousandths": 55000,
 				}},
 			},
 		},
-		{name: "quote.state.draft_to_sent", method: "PUT", path: "/api/v1/quotes/{myQuote}/state",
-			body: map[string]any{"state": "SENT"}},
+		{name: "quote.list.status_filter", method: "GET", path: "/api/v1/quotes?status=sent&limit=2&include=total"},
+		{name: "quote.list.unsupported_status", method: "GET", path: "/api/v1/quotes?status=SENT"},
+		{name: "quote.list.unsupported_parameter", method: "GET", path: "/api/v1/quotes?offset=1"},
+		{name: "quote.list.bad_cursor", method: "GET", path: "/api/v1/quotes?cursor=garbage"},
+		// PUT on a DRAFT quote at its revision: the editable window. The
+		// doubled line quantity is the observable difference.
+		{
+			name:   "quote.update.without_revision",
+			method: "PUT",
+			path:   "/api/v1/quotes/{myQuote}",
+			body:   map[string]any{"customer_id": "{customer}", "lines": []map[string]any{line("20")}},
+		},
+		{
+			name:    "quote.update",
+			method:  "PUT",
+			path:    "/api/v1/quotes/{myQuote}",
+			headers: map[string]string{"If-Match": `"1"`},
+			body: map[string]any{
+				"customer_id": "{customer}", "delivery_type": "pickup",
+				"lines": []map[string]any{line("20")},
+			},
+		},
+		{
+			name:    "quote.update.stale",
+			method:  "PUT",
+			path:    "/api/v1/quotes/{myQuote}",
+			headers: map[string]string{"If-Match": `"1"`},
+			body:    map[string]any{"customer_id": "{customer}", "lines": []map[string]any{line("30")}},
+		},
+		// A PUT applies the header fields and lines only: a create-only field
+		// is a 400 naming it, and the revision stays where it was.
+		{
+			name:    "quote.update.create_only_field",
+			method:  "PUT",
+			path:    "/api/v1/quotes/{myQuote}",
+			headers: map[string]string{"If-Match": `"2"`},
+			body: map[string]any{
+				"branch_id": "{branch}", "customer_id": "{customer}", "lines": []map[string]any{line("20")},
+			},
+		},
+		{name: "quote.state.draft_to_sent", method: "POST", path: "/api/v1/quotes/{myQuote}/transitions",
+			headers: map[string]string{"If-Match": `"2"`}, body: map[string]any{"to": "sent"}},
 		// Convert out of SENT: returns the order payload the frontend is
-		// meant to POST, and marks the quote ACCEPTED.
-		{name: "quote.convert", method: "POST", path: "/api/v1/quotes/{myQuote}/convert"},
-		// ACCEPTED is terminal: the refused transition, with the
+		// meant to map onto POST /orders, and marks the quote accepted.
+		{name: "quote.convert", method: "POST", path: "/api/v1/quotes/{myQuote}/convert",
+			headers: map[string]string{"If-Match": `"3"`}},
+		// accepted is terminal: the refused transition, with the
 		// service's own error text.
-		{name: "quote.state.refused_from_accepted", method: "PUT", path: "/api/v1/quotes/{myQuote}/state",
-			body: map[string]any{"state": "SENT"}},
+		{name: "quote.state.refused_from_accepted", method: "POST", path: "/api/v1/quotes/{myQuote}/transitions",
+			headers: map[string]string{"If-Match": `"4"`}, body: map[string]any{"to": "sent"}},
+		{name: "quote.state.unknown_target", method: "POST", path: "/api/v1/quotes/{myQuote}/transitions",
+			headers: map[string]string{"If-Match": `"4"`}, body: map[string]any{"to": "SENT"}},
 	}
 	// The remaining allowed transitions, each on its own fresh quote so the
 	// source state is exactly what the transition map requires. Together
 	// with the steps above, every allowed edge of the state machine is
 	// pinned exactly once.
 	steps = append(steps, appendSteps(
-		quoteTransitionSteps("to_accepted", "ACCEPTED"),
-		quoteTransitionSteps("rejected_reopened", "REJECTED", "DRAFT"),
-		quoteTransitionSteps("expired_reopened", "EXPIRED", "DRAFT"),
-		quoteTransitionSteps("sent_accepted", "SENT", "ACCEPTED"),
-		quoteTransitionSteps("sent_rejected", "SENT", "REJECTED"),
-		quoteTransitionSteps("sent_expired", "SENT", "EXPIRED"),
+		quoteTransitionSteps("to_accepted", "accepted"),
+		quoteTransitionSteps("rejected_reopened", "rejected", "draft"),
+		quoteTransitionSteps("expired_reopened", "expired", "draft"),
+		quoteTransitionSteps("sent_accepted", "sent", "accepted"),
+		quoteTransitionSteps("sent_rejected", "sent", "rejected"),
+		quoteTransitionSteps("sent_expired", "sent", "expired"),
 	)...)
+	// The events the writes above committed, read once through the feed: the
+	// outbox wiring of the module is pinned here (quote.created and the
+	// transition events are written in the mutation's transaction).
+	steps = append(steps,
+		stepDef{name: "quote.events.created", method: "GET", path: "/api/v1/events?types=quote.created&limit=3"},
+		stepDef{name: "quote.events.transitions", method: "GET", path: "/api/v1/events?types=quote.sent,quote.accepted,quote.rejected,quote.expired,quote.reopened&limit=4"},
+	)
 	// Window aggregates over the whole quote book as this group leaves it
 	// (deterministic: the group's writes are ordered).
 	steps = append(steps,
@@ -202,33 +261,35 @@ func quoteGroups() []groupDef {
 }
 
 // quoteTransitionSteps builds the steps for one fresh quote walked through
-// the given states in order, starting from DRAFT. The quote's {var} is named
+// the given statuses in order, starting from draft. The quote's {var} is named
 // after the whole sequence, so several transition quotes can live in one
-// script without colliding.
-func quoteTransitionSteps(sequence string, states ...string) []stepDef {
+// script without colliding. Each transition names the quote's revision, which
+// starts at 1 on create and moves by one per write.
+func quoteTransitionSteps(sequence string, statuses ...string) []stepDef {
 	quoteVar := "quote_" + sequence
 	steps := []stepDef{{
 		name:   "quote.create." + sequence,
 		method: "POST",
 		path:   "/api/v1/quotes",
 		body: map[string]any{
-			"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "PICKUP",
+			"branch_id": "{branch}", "customer_id": "{customer}", "delivery_type": "pickup",
 			"lines": []map[string]any{{
 				"product_id": "{product}", "sku": "LUM-248-PREM", "description": "2x4x8 SPF Premium",
-				"quantity": 5, "uom": "PCS", "unit_price": 5.5, "unit_cost": 3.5,
+				"quantity": "5", "uom": "PCS", "unit_price_ten_thousandths": 55000,
 			}},
 		},
 		extract: map[string]string{quoteVar: "/id"},
 	}}
 	from := "draft"
-	for _, target := range states {
+	for i, target := range statuses {
 		steps = append(steps, stepDef{
-			name:   "quote.state." + from + "_to_" + strings.ToLower(target),
-			method: "PUT",
-			path:   "/api/v1/quotes/{" + quoteVar + "}/state",
-			body:   map[string]any{"state": target},
+			name:    "quote.state." + from + "_to_" + target,
+			method:  "POST",
+			path:    "/api/v1/quotes/{" + quoteVar + "}/transitions",
+			headers: map[string]string{"If-Match": fmt.Sprintf(`"%d"`, i+1)},
+			body:    map[string]any{"to": target},
 		})
-		from = strings.ToLower(target)
+		from = target
 	}
 	return steps
 }

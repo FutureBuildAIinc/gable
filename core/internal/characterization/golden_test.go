@@ -93,10 +93,12 @@ var volatileNumberFields = map[string]string{
 // volatileStringFields are response fields whose string values are random by
 // construction: /healthz/ready's uptime is a duration since process start,
 // and an exposure event's idempotency key is a hash over its creation
-// instant.
+// instant, and a list's next_cursor, which encodes the last row's creation
+// instant and its random id (a null cursor, the last page, stays null).
 var volatileStringFields = map[string]string{
 	"uptime":          "<uptime>",
 	"idempotency_key": "<idem-key>",
+	"next_cursor":     "<cursor>",
 	// quote_short_id is the first eight characters of the quote's uuid, so
 	// the events feed's exposure payloads carry a per-run fragment of an id.
 	"quote_short_id": "<short-id>",

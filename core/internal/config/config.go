@@ -69,6 +69,11 @@ type Config struct {
 	// TCP peer. A deployment behind a load balancer sets the balancer's network.
 	TrustedProxies clientip.Trusted
 
+	// RateLimitPerMinute is the per-address request limit on the ERP API
+	// (RATE_LIMIT_PER_MINUTE, default 120). The Playwright stack raises it:
+	// the desk makes many calls per page and a whole suite shares one address.
+	RateLimitPerMinute int
+
 	// Logging
 	LogLevel string // DEBUG, INFO, WARN, ERROR (default: INFO)
 
@@ -173,6 +178,8 @@ func Load() (*Config, error) {
 		// Events
 		EventsOrg:           getEnv("EVENTS_ORG", "default"),
 		OutboxRetentionDays: getEnvInt("OUTBOX_RETENTION_DAYS", 14),
+
+		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),

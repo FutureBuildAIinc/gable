@@ -250,7 +250,7 @@ func (s *ExposureScanner) evaluateOne(
 	// when summing across lines with mixed-direction movement (e.g. a quote
 	// with one line on an index that rose 7% and another on an index that
 	// fell 6% — both contribute exposure, not net out).
-	exposureDollars := math.Abs(currentIndex/baseIndex-1.0) * pe.BasePrice * ewc.LineQuantity
+	exposureDollars := math.Abs(currentIndex/baseIndex-1.0) * pe.BasePrice * ewc.PricedQuantity()
 	exposureDollars = math.Round(exposureDollars*100) / 100
 	policy := PolicyFlagForRequote
 	if pe.PolicyAtSnapshot != nil && *pe.PolicyAtSnapshot != "" {

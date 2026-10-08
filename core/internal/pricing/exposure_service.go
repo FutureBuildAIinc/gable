@@ -355,7 +355,7 @@ func (s *ExposureService) EscalateNowPreview(ctx context.Context, quoteID uuid.U
 			SuggestedUnitPrice: suggested,
 			DeltaPct:           deltaPct,
 		})
-		total += suggested * line.Quantity
+		total += suggested * PricedQuantity(line.Quantity, line.UOMQty, line.PriceUOMQty)
 	}
 	res.EstimatedNewTotal = math.Round(total*100) / 100
 	return res, nil

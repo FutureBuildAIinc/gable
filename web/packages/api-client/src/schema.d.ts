@@ -2814,7 +2814,7 @@ export interface paths {
         };
         /**
          * The partner's quotes
-         * @description The customer's quotes in the ERP's own quote shape; a bare array, or null when the customer has no quotes.
+         * @description The customer's quotes as quote headers, newest first; a bare array, empty when the customer has none.
          */
         get: operations["partnerListQuotes"];
         put?: never;
@@ -2834,7 +2834,7 @@ export interface paths {
         };
         /**
          * One quote
-         * @description The ERP's own quote shape. Every failure, a quote that does not exist, one belonging to another customer, and a repository fault, is the handler's fixed 404. A malformed UUID is a 400.
+         * @description The full quote, as GET /api/v1/quotes/{id} serves it. Every failure, a quote that does not exist, one belonging to another customer, and a repository fault, is the handler's fixed 404. A malformed UUID is a 400.
          */
         get: operations["partnerGetQuote"];
         put?: never;
@@ -4897,13 +4897,13 @@ export interface paths {
         };
         /**
          * List quotes
-         * @description Offset paged quote list. No filters are implemented; any query parameter other than limit and offset is silently ignored.
+         * @description The cursor list envelope, newest first. status filters on the lowercase lifecycle vocabulary (a comma separated list), customer_id filters on the customer. total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["quoteList"];
         put?: never;
         /**
          * Create a quote
-         * @description Decodes the full quote shape (lines included) and the optional base64 original upload. Validation is loose: a line without a unit of measure fails at the database cast and surfaces as a 500.
+         * @description Creates a draft quote, priced by the platform rule: each line's extension is rounded once to cents. A line carries its unit of measure, or names a product whose own unit it takes (a line with neither is a 400 naming lines[i].uom); every field problem is collected into one 400. Mints the document number and writes quote.created in the same transaction.
          */
         post: operations["quoteCreate"];
         delete?: never;
@@ -4940,7 +4940,7 @@ export interface paths {
         get: operations["quoteGet"];
         /**
          * Replace a draft quote
-         * @description Full replace. Only a DRAFT quote can be edited; any other state is a 400. Lines are replaced; a line whose id survives keeps its customer note.
+         * @description Full replace of a draft quote's header and lines, on the client's revision (If-Match or the body's revision; neither is 428, a stale one is 409 stale_revision). Only a draft is editable; any other status is a 409 conflict. A line whose id survives keeps its customer note. The lifecycle never moves here: use the transitions route. A PUT applies the header fields and the lines only: branch_id, source, margin_total_cents, original_file, original_filename, original_content_type and parse_map are fixed at create, and sending one is a 400 naming it.
          */
         put: operations["quoteUpdate"];
         post?: never;
@@ -4950,7 +4950,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/quotes/{id}/state": {
+    "/api/v1/quotes/{id}/transitions": {
         parameters: {
             query?: never;
             header?: never;
@@ -4958,12 +4958,12 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
         /**
-         * Change the quote lifecycle state
-         * @description Sets the state directly; the service refuses transitions it does not allow and the handler reports that refusal as a 400. Returns the updated quote.
+         * Move a quote along its lifecycle
+         * @description One write on the client's revision. The target is a lowercase status; a transition the lifecycle does not allow is 409 invalid_state_transition (accepted is terminal; rejected and expired can reopen to draft). Writes the transition's event (quote.sent, quote.accepted, quote.rejected, quote.expired or quote.reopened) in the same transaction.
          */
-        put: operations["quoteUpdateState"];
-        post?: never;
+        post: operations["quoteTransition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4980,8 +4980,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mark accepted and return the order creation payload
-         * @description Marks the quote ACCEPTED and returns the body the client is expected to POST to /api/v1/orders itself; no order is created here. The returned price_each is in float dollars, while POST /api/v1/orders expects cents: the client converts.
+         * Accept the quote and return the order creation payload
+         * @description A transition to accepted on the client's revision, then the body the client maps onto POST /api/v1/orders itself; no order is created here. The orders route is not converted yet and reads a numeric quantity and price_each in cents, so the client maps quantity and price_each_cents onto it. Until the orders contract carries the conversion pair (cycle 2), a quote with a line whose pair is not 1 to 1, or whose price_uom differs from uom, is refused with 409 invalid_state_transition and a line_not_convertible blocker naming lines[i]; the quote is left as it was.
          */
         post: operations["quoteConvertToOrderPayload"];
         delete?: never;
@@ -5113,7 +5113,7 @@ export interface paths {
         };
         /**
          * Download the original uploaded file
-         * @description Streams the stored original upload of an AI sourced quote. The stored content type is echoed; the filename in Content-Disposition is sanitized. A quote with no stored file is a 404.
+         * @description Streams the stored original upload of an AI sourced quote. The stored content type is echoed; the filename in Content-Disposition is sanitized. A quote with no stored file, or no such quote, is a 404.
          */
         get: operations["quoteDownloadOriginalFile"];
         put?: never;
@@ -8344,7 +8344,9 @@ export interface components {
             customer_note: string;
             quantity: number;
             uom: string;
-            /** @description Float dollars; 0 until the dealer prices the line. */
+            /** @description The unit unit_price is quoted per; equal to uom unless the dealer priced the line per another unit. */
+            price_uom: string;
+            /** @description Float dollars per price_uom; 0 until the dealer prices the line. */
             unit_price: number;
             /** @description Float dollars; 0 until the dealer prices the line. */
             line_total: number;
@@ -9600,142 +9602,248 @@ export interface components {
             lookback_days?: number;
         };
         /**
-         * @description Today's lifecycle vocabulary: the field is named state and the values are UPPERCASE.
+         * @description The lifecycle, lowercase on the wire (ADR 0001 section 6). The database keeps its uppercase enum.
          * @enum {string}
          */
-        QuoteState: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "EXPIRED";
-        Quote: {
+        QuoteStatus: "draft" | "sent" | "accepted" | "rejected" | "expired";
+        /** @enum {string} */
+        QuoteDeliveryType: "pickup" | "delivery";
+        /**
+         * @description The price protection rollup, lowercase on the quote wire; the exposure routes below still speak their own uppercase vocabulary until the pricing module converts.
+         * @enum {string}
+         */
+        QuoteExposureStatus: "ok" | "flagged" | "escalated" | "ack_required" | "acknowledged" | "blocked" | "overridden";
+        /** @description A quote header, used as a list item and as the head of the full document. */
+        QuoteSummary: {
             /** Format: uuid */
             id: string;
+            /** @description The human readable document number, Q- and at least six digits, from a database sequence. */
+            number: string;
             /** Format: uuid */
             branch_id: string;
             /** Format: uuid */
             customer_id: string;
-            customer_name?: string;
+            customer_name: string;
             /** Format: uuid */
-            job_id?: string;
-            state: components["schemas"]["QuoteState"];
-            /** @description Float dollars. The order and invoice modules carry cents; this module does not. */
-            total_amount: number;
-            /** Format: date-time */
-            expires_at?: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-            /** Format: date-time */
-            sent_at?: string;
-            /** Format: date-time */
-            accepted_at?: string;
-            /** Format: date-time */
-            rejected_at?: string;
-            /** @enum {string} */
-            delivery_type: "PICKUP" | "DELIVERY";
-            /** @description Float dollars. */
-            freight_amount: number;
+            job_id: string | null;
+            status: components["schemas"]["QuoteStatus"];
+            /**
+             * Format: int64
+             * @description Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
+             */
+            revision: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            freight_cents: number;
+            /** Format: int64 */
+            margin_total_cents: number;
+            delivery_type: components["schemas"]["QuoteDeliveryType"];
             /** Format: uuid */
-            vehicle_id?: string;
-            vehicle_name?: string;
-            margin_total: number;
+            vehicle_id: string | null;
+            vehicle_name: string | null;
             /**
              * @description How the quote came to be; portal is a quote the dealer portal customer requested.
              * @enum {string}
              */
             source: "manual" | "ai" | "portal";
-            original_filename?: string;
-            original_content_type?: string;
-            /** @description The AI parse mapping, arbitrary JSON. */
-            parse_map?: unknown;
-            /** @description The price protection rollup state; OK when no escalator is active. */
-            exposure_state: string;
-            exposure_dollars: number;
             /** Format: date-time */
-            exposure_last_checked_at?: string;
-            lines?: components["schemas"]["QuoteLine"][];
+            expires_at: string | null;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            accepted_at: string | null;
+            /** Format: date-time */
+            rejected_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
+        Quote: {
+            /** Format: uuid */
+            id: string;
+            /** @description The human readable document number, Q- and at least six digits, from a database sequence. */
+            number: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            job_id: string | null;
+            status: components["schemas"]["QuoteStatus"];
+            /**
+             * Format: int64
+             * @description Starts at 1 and moves on every write; the client sends it back as If-Match or in the body.
+             */
+            revision: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            freight_cents: number;
+            /** Format: int64 */
+            margin_total_cents: number;
+            delivery_type: components["schemas"]["QuoteDeliveryType"];
+            /** Format: uuid */
+            vehicle_id: string | null;
+            vehicle_name: string | null;
+            /**
+             * @description How the quote came to be; portal is a quote the dealer portal customer requested.
+             * @enum {string}
+             */
+            source: "manual" | "ai" | "portal";
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            accepted_at: string | null;
+            /** Format: date-time */
+            rejected_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            original_filename: string | null;
+            original_content_type: string | null;
+            parse_map: Record<string, never>[] | null;
+            exposure_state: components["schemas"]["QuoteExposureStatus"];
+            /** Format: int64 */
+            exposure_cents: number;
+            /** Format: date-time */
+            exposure_last_checked_at: string | null;
+            lines: components["schemas"]["QuoteLine"][];
+        };
+        /** @description One priced line. Every priced line carries the same fields: the quantity as a decimal string with its unit, the scaled unit price with its price unit, the conversion pair, and the extension in cents (quantity x unit price x price_uom_qty / uom_qty, rounded once, half away from zero). */
         QuoteLine: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             quote_id: string;
-            /** Format: uuid */
-            product_id: string;
+            /**
+             * Format: uuid
+             * @description Null for a special order line the dealer does not stock.
+             */
+            product_id: string | null;
             sku: string;
             description: string;
-            /** @description What a portal user asked for when requesting this line. */
-            customer_note?: string;
-            quantity: number;
-            /** @enum {string} */
-            uom: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
-            /** @description Float dollars per the line's uom. */
-            unit_price: number;
-            /** @description Float dollars. */
-            unit_cost: number;
-            /** @description Float dollars. */
-            line_total: number;
+            /** @description What a portal user wrote when asking for the line to be priced; an edit that keeps the line id keeps it. */
+            customer_note: string | null;
+            quantity: components["schemas"]["Quantity"];
+            uom: components["schemas"]["QuoteUom"];
+            /** @description The unit the price is quoted in; equal to uom when the units agree. Not limited to the sale enum (per M, per CWT). */
+            price_uom: string;
+            uom_qty: components["schemas"]["Quantity"];
+            price_uom_qty: components["schemas"]["Quantity"];
+            /**
+             * Format: int64
+             * @description The unit price per price_uom, times 10,000 (13725 is 1.3725).
+             */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            line_total_cents: number;
+            /**
+             * Format: int64
+             * @description The product's average cost times 10,000; read only.
+             */
+            unit_cost_ten_thousandths: number;
             /** Format: date-time */
             created_at: string;
         };
-        /** @description The create and update body: the full quote shape plus the base64 original upload. Decoding is lenient and validation happens late, so most invalid payloads surface as 500 today. */
-        QuoteCreateRequest: {
+        /** @description A plain decimal string with at most four fraction digits, never a JSON number. */
+        Quantity: string;
+        /**
+         * @description Units of measure keep their standard uppercase codes.
+         * @enum {string}
+         */
+        QuoteUom: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
+        /** @description The body of POST /quotes and PUT /quotes/{id}. A field the schema does not name is a 400. revision is the PUT precondition beside If-Match; a create has no revision and refuses one with a 400. A PUT refuses the create-only fields (branch_id, source, margin_total_cents, original_file, original_filename, original_content_type, parse_map). */
+        QuoteRequest: {
             /** Format: uuid */
             branch_id?: string;
             /** Format: uuid */
             customer_id: string;
-            customer_name?: string;
             /** Format: uuid */
-            job_id?: string;
-            state?: components["schemas"]["QuoteState"];
-            total_amount?: number;
+            job_id?: string | null;
             /** Format: date-time */
-            expires_at?: string;
-            /** @enum {string} */
-            delivery_type?: "PICKUP" | "DELIVERY";
-            freight_amount?: number;
+            expires_at?: string | null;
+            delivery_type?: components["schemas"]["QuoteDeliveryType"];
+            /**
+             * Format: int64
+             * @description Cleared for a pickup.
+             */
+            freight_cents?: number;
             /** Format: uuid */
-            vehicle_id?: string;
-            vehicle_name?: string;
+            vehicle_id?: string | null;
             /** @enum {string} */
             source?: "manual" | "ai";
-            /** @description Base64 of the original upload; over 5 MiB decoded is a 400. */
+            /** Format: int64 */
+            margin_total_cents?: number;
+            /** @description Base64 of the original upload, up to 5 MB. */
             original_file?: string;
-            lines?: components["schemas"]["QuoteLineInput"][];
+            original_filename?: string;
+            original_content_type?: string;
+            parse_map?: Record<string, never>[] | null;
+            /** Format: int64 */
+            revision?: number;
+            lines: components["schemas"]["QuoteLineRequest"][];
         };
-        QuoteLineInput: {
+        /** @description uom defaults from the product's own unit when the line names a product; a line with neither uom nor product_id is a 400 naming lines[i].uom. sku and description default from product_id and are required without one. price_uom defaults to uom; when it differs, uom_qty and price_uom_qty (both) are required. */
+        QuoteLineRequest: {
             /** Format: uuid */
-            product_id: string;
+            id?: string;
+            /** Format: uuid */
+            product_id?: string;
             sku?: string;
             description?: string;
-            quantity: number;
-            /** @enum {string} */
-            uom: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
-            unit_price: number;
-            unit_cost?: number;
             customer_note?: string;
+            quantity: components["schemas"]["Quantity"];
+            uom?: components["schemas"]["QuoteUom"];
+            /** @description A unit code of one to six capital letters; defaults to uom. */
+            price_uom?: string;
+            uom_qty?: components["schemas"]["Quantity"];
+            price_uom_qty?: components["schemas"]["Quantity"];
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
         };
-        QuoteStateUpdate: {
-            state: components["schemas"]["QuoteState"];
+        QuoteTransitionRequest: {
+            to: components["schemas"]["QuoteStatus"];
+            /** Format: int64 */
+            revision?: number;
         };
-        /** @description What POST /api/v1/orders expects, except price_each here is float dollars while the order route expects cents. */
+        /** @description What the client maps onto POST /api/v1/orders, which is not converted yet and reads a numeric quantity and price_each in cents. */
         QuoteOrderPayload: {
             /** Format: uuid */
             customer_id: string;
             /** Format: uuid */
             quote_id: string;
-            lines: {
-                /** Format: uuid */
-                product_id: string;
-                quantity: number;
-                /** @description Float dollars. */
-                price_each: number;
-            }[];
+            /**
+             * Format: int64
+             * @description The accepted quote's revision.
+             */
+            revision: number;
+            lines: components["schemas"]["QuoteOrderPayloadLine"][];
         };
-        /** @description Today's offset page envelope; data is never null on this route (the handler substitutes an empty array). */
+        QuoteOrderPayloadLine: {
+            /** Format: uuid */
+            product_id: string | null;
+            quantity: components["schemas"]["Quantity"];
+            uom: components["schemas"]["QuoteUom"];
+            /**
+             * Format: int64
+             * @description The price per sale unit in cents (the unit price through the line's conversion pair).
+             */
+            price_each_cents: number;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         QuotePage: {
-            data: components["schemas"]["Quote"][];
-            total: number;
+            items: components["schemas"]["QuoteSummary"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
             limit: number;
-            offset: number;
+            /** Format: int64 */
+            total?: number;
         };
         QuoteAnalytics: {
             total_quotes: number;
@@ -9744,12 +9852,17 @@ export interface components {
             accepted_count: number;
             rejected_count: number;
             expired_count: number;
+            /** @description A percentage. */
             conversion_rate: number;
-            avg_margin_accepted: number;
-            avg_margin_rejected: number;
+            /** Format: int64 */
+            avg_margin_accepted_cents: number;
+            /** Format: int64 */
+            avg_margin_rejected_cents: number;
             avg_days_to_close: number;
-            total_quote_value: number;
-            total_accepted_value: number;
+            /** Format: int64 */
+            total_quote_value_cents: number;
+            /** Format: int64 */
+            total_accepted_value_cents: number;
             ai_sourced_count: number;
             ai_conversion_rate: number;
             manual_conversion_rate: number;
@@ -9760,8 +9873,10 @@ export interface components {
             created: number;
             accepted: number;
             rejected: number;
-            total_value: number;
-            accepted_value: number;
+            /** Format: int64 */
+            total_value_cents: number;
+            /** Format: int64 */
+            accepted_value_cents: number;
         };
         /** @enum {string} */
         ExposureState: "OK" | "FLAGGED" | "ESCALATED" | "ACK_REQUIRED" | "ACKNOWLEDGED" | "BLOCKED" | "OVERRIDDEN";
@@ -10296,6 +10411,33 @@ export interface components {
         };
     };
     responses: {
+        /** @description The addressed resource does not exist, or is not visible to the caller. */
+        WireNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The write conflicts with the resource's state: stale_revision, invalid_state_transition, duplicate, idempotency_in_progress or conflict. */
+        WireConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The write needs If-Match or a body revision and carries neither. */
+        WirePreconditionRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
         /** @description A handler (or the branch middleware) cannot consume the request. The body is the standard error envelope; the message is the generic status text, and the specific message goes to the server log only. POST, PUT and PATCH operations that take an Idempotency-Key use BadRequestEither. */
         BadRequest: {
             headers: {
@@ -10415,6 +10557,15 @@ export interface components {
         };
         /** @description Either the role guard or the machine key scope check refused the caller (the ADR 0001 envelope, code forbidden), or the branch middleware found no grant for the X-Branch-Id (the standard error envelope, code FORBIDDEN). */
         ForbiddenEither: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"] | components["schemas"]["Error"];
+            };
+        };
+        /** @description An unexpected server fault. A converted handler answers with the ADR 0001 envelope (code internal_error, the fixed message "internal error"); the branch middleware's access lookup failing answers with the standard error envelope (code INTERNAL_ERROR). */
+        InternalErrorEither: {
             headers: {
                 [name: string]: unknown;
             };
@@ -10568,6 +10719,14 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+        PageLimit: number;
+        /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+        Cursor: string;
+        /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+        Include: string;
+        /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+        IfMatch: string;
         /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
         Limit: number;
         /** @description Page offset. Unparseable or negative values are silently ignored and the default applies. */
@@ -16234,13 +16393,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The quotes, a bare array, or null when the customer has no quotes. */
+            /** @description The quotes, a bare array, never null. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Quote"][] | null;
+                    "application/json": components["schemas"]["QuoteSummary"][];
                 };
             };
             401: components["responses"]["HandlerUnauthorized"];
@@ -20046,10 +20205,15 @@ export interface operations {
     quoteList: {
         parameters: {
             query?: {
-                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
-                limit?: components["parameters"]["Limit"];
-                /** @description Page offset. Unparseable or negative values are silently ignored and the default applies. */
-                offset?: components["parameters"]["Offset"];
+                /** @description Comma separated lowercase statuses (draft, sent, accepted, rejected, expired). */
+                status?: string;
+                customer_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
@@ -20069,9 +20233,10 @@ export interface operations {
                     "application/json": components["schemas"]["QuotePage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     quoteCreate: {
@@ -20088,13 +20253,16 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuoteCreateRequest"];
+                "application/json": components["schemas"]["QuoteRequest"];
             };
         };
         responses: {
-            /** @description The created quote, echoed with server filled fields. */
+            /** @description The created quote, with its ETag and a Location header. */
             201: {
                 headers: {
+                    /** @description The quote's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20104,10 +20272,10 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     quoteAnalytics: {
@@ -20122,7 +20290,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Aggregated quote analytics. */
+            /** @description Aggregated quote analytics; money in cents. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -20131,9 +20299,10 @@ export interface operations {
                     "application/json": components["schemas"]["QuoteAnalytics"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     quoteGet: {
@@ -20150,25 +20319,30 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The quote. */
+            /** @description The quote, with its revision as the ETag. */
             200: {
                 headers: {
+                    /** @description The quote's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Quote"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     quoteUpdate: {
         parameters: {
             query?: never;
             header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
@@ -20181,13 +20355,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuoteCreateRequest"];
+                "application/json": components["schemas"]["QuoteRequest"];
             };
         };
         responses: {
-            /** @description The updated quote with lines. */
+            /** @description The updated quote at its new revision. */
             200: {
                 headers: {
+                    /** @description The quote's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20197,16 +20373,20 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
-    quoteUpdateState: {
+    quoteTransition: {
         parameters: {
             query?: never;
             header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
@@ -20219,13 +20399,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuoteStateUpdate"];
+                "application/json": components["schemas"]["QuoteTransitionRequest"];
             };
         };
         responses: {
-            /** @description The updated quote. */
+            /** @description The quote at its new status and revision. */
             200: {
                 headers: {
+                    /** @description The quote's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20235,16 +20417,20 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     quoteConvertToOrderPayload: {
         parameters: {
             query?: never;
             header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
@@ -20257,9 +20443,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The order creation payload for the client to POST. */
+            /** @description The order creation payload, with the accepted quote's revision as the ETag. */
             200: {
                 headers: {
+                    /** @description The accepted quote's revision in quotes, for example "3". */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -20269,11 +20457,12 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     exposureList: {
@@ -20513,10 +20702,11 @@ export interface operations {
                     "application/octet-stream": string;
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     reportingBuilderPreview: {

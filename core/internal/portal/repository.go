@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -78,12 +79,20 @@ type Repository interface {
 
 // PostgresRepository implements Repository against Postgres.
 type PostgresRepository struct {
-	db *database.DB
+	db     *database.DB
+	events quote.EventRecorder // optional; nil records no quote.created event
 }
 
 // NewRepository creates a new portal repository.
 func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
+}
+
+// WithOutbox wires the recorder of the quote.created event a portal quote
+// request writes inside its transaction. Optional.
+func (r *PostgresRepository) WithOutbox(events quote.EventRecorder) *PostgresRepository {
+	r.events = events
+	return r
 }
 
 // GetCustomerUserByEmail fetches a customer user by email for login.

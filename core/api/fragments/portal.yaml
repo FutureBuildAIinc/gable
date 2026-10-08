@@ -1769,7 +1769,7 @@ components:
             $ref: "#/components/schemas/PortalQuoteLine"
     PortalQuoteLine:
       type: object
-      required: [id, product_id, product_sku, description, customer_note, quantity, uom, unit_price, line_total, is_special_order]
+      required: [id, product_id, product_sku, description, customer_note, quantity, uom, price_uom, unit_price, line_total, is_special_order]
       properties:
         id:
           type: string
@@ -1790,9 +1790,12 @@ components:
           type: number
         uom:
           type: string
+        price_uom:
+          type: string
+          description: The unit unit_price is quoted per; equal to uom unless the dealer priced the line per another unit.
         unit_price:
           type: number
-          description: Float dollars; 0 until the dealer prices the line.
+          description: Float dollars per price_uom; 0 until the dealer prices the line.
         line_total:
           type: number
           description: Float dollars; 0 until the dealer prices the line.

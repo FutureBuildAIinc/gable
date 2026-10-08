@@ -326,7 +326,7 @@ POST	/api/v1/quotes/{id}/exposure/escalate-now	internal/pricing	h.HandleEscalate
 POST	/api/v1/quotes/{id}/exposure/override	internal/pricing	h.HandleOverride
 POST	/api/v1/quotes/{id}/exposure/request-ack	internal/pricing	h.HandleRequestAck
 GET	/api/v1/quotes/{id}/file	internal/quote	h.HandleDownloadOriginalFile
-PUT	/api/v1/quotes/{id}/state	internal/quote	h.HandleUpdateState
+POST	/api/v1/quotes/{id}/transitions	internal/quote	h.HandleTransition
 POST	/api/v1/reporting/builder/export	internal/reporting	h.HandleBuilderExport
 POST	/api/v1/reporting/builder/preview	internal/reporting	h.HandleBuilderPreview
 GET	/api/v1/reporting/export/{entity}	internal/reporting	h.HandleBIEntityExport

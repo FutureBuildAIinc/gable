@@ -9,6 +9,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ArrowLeft, TrendingUp, Target, Clock, Sparkles, BarChart3, Percent } from 'lucide';
 import { QuoteService } from '../../services/QuoteService.ts';
 import type { QuoteAnalytics as QuoteAnalyticsType } from '../../types/quote.ts';
+import { formatCents } from '../../lib/utils.ts';
 
 @customElement('gable-quote-analytics')
 export class GableQuoteAnalytics extends LitElement {
@@ -24,7 +25,7 @@ export class GableQuoteAnalytics extends LitElement {
 
     private async loadAnalytics() {
         try {
-            const data = await QuoteService.getAnalytics();
+            const data = await QuoteService.analytics();
             this.analytics = data;
         } catch (error) {
             console.error('Failed to load analytics:', error);
@@ -86,7 +87,7 @@ export class GableQuoteAnalytics extends LitElement {
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     ${this.renderKPICard(Target, 'Total Quotes', String(analytics.total_quotes))}
                     ${this.renderKPICard(Percent, 'Conversion Rate', `${analytics.conversion_rate.toFixed(1)}%`, 'text-gable-green')}
-                    ${this.renderKPICard(TrendingUp, 'Avg Margin (Won)', `$${analytics.avg_margin_accepted.toFixed(2)}`, 'text-emerald-400')}
+                    ${this.renderKPICard(TrendingUp, 'Avg Margin (Won)', formatCents(analytics.avg_margin_accepted_cents), 'text-emerald-400')}
                     ${this.renderKPICard(Clock, 'Avg Days to Close', analytics.avg_days_to_close.toFixed(1))}
                 </div>
 
@@ -110,17 +111,17 @@ export class GableQuoteAnalytics extends LitElement {
                         <div class="space-y-6">
                             <div>
                                 <div class="text-xs text-zinc-500 mb-1">Total Quoted</div>
-                                <div class="text-2xl font-mono font-bold text-white">$${analytics.total_quote_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                                <div class="text-2xl font-mono font-bold text-white">${formatCents(analytics.total_quote_value_cents)}</div>
                             </div>
                             <div>
                                 <div class="text-xs text-zinc-500 mb-1">Total Won</div>
-                                <div class="text-2xl font-mono font-bold text-gable-green">$${analytics.total_accepted_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                                <div class="text-2xl font-mono font-bold text-gable-green">${formatCents(analytics.total_accepted_value_cents)}</div>
                             </div>
                             <div class="pt-4 border-t border-white/5">
                                 <div class="text-xs text-zinc-500 mb-1">Capture Rate (Value)</div>
                                 <div class="text-lg font-mono font-bold text-emerald-400">
-                                    ${analytics.total_quote_value > 0
-                                        ? ((analytics.total_accepted_value / analytics.total_quote_value) * 100).toFixed(1)
+                                    ${analytics.total_quote_value_cents > 0
+                                        ? ((analytics.total_accepted_value_cents / analytics.total_quote_value_cents) * 100).toFixed(1)
                                         : '0.0'}%
                                 </div>
                             </div>
@@ -137,13 +138,13 @@ export class GableQuoteAnalytics extends LitElement {
                         <div class="space-y-4">
                             <div class="flex items-center justify-between">
                                 <span class="text-zinc-400 text-sm">Avg Margin (Accepted)</span>
-                                <span class="font-mono text-emerald-400 font-bold">$${analytics.avg_margin_accepted.toFixed(2)}</span>
+                                <span class="font-mono text-emerald-400 font-bold">${formatCents(analytics.avg_margin_accepted_cents)}</span>
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="text-zinc-400 text-sm">Avg Margin (Rejected)</span>
-                                <span class="font-mono text-red-400 font-bold">$${analytics.avg_margin_rejected.toFixed(2)}</span>
+                                <span class="font-mono text-red-400 font-bold">${formatCents(analytics.avg_margin_rejected_cents)}</span>
                             </div>
-                            ${analytics.avg_margin_rejected > analytics.avg_margin_accepted && analytics.avg_margin_rejected > 0 ? html`
+                            ${analytics.avg_margin_rejected_cents > analytics.avg_margin_accepted_cents && analytics.avg_margin_rejected_cents > 0 ? html`
                                 <div class="mt-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-400">
                                     Rejected quotes have higher margins \u2014 consider adjusting pricing on competitive bids.
                                 </div>

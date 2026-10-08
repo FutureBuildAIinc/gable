@@ -46,7 +46,7 @@ func (s *Service) GetDashboard(ctx context.Context, customerID uuid.UUID) (*Dash
 	}, nil
 }
 
-func (s *Service) ListQuotes(ctx context.Context, customerID uuid.UUID) ([]quote.Quote, error) {
+func (s *Service) ListQuotes(ctx context.Context, customerID uuid.UUID) ([]quote.QuoteSummary, error) {
 	return s.quoteRepo.ListQuotesByCustomer(ctx, customerID)
 }
 

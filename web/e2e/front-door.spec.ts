@@ -167,20 +167,20 @@ test.describe('Desk', () => {
   test('/quotes/<seeded id> opens directly and renders that quote', async ({ page, request }) => {
     const list = await request.get('/api/v1/quotes?limit=5');
     expect(list.ok()).toBe(true);
-    const quotes = (await list.json()).data as { id: string; customer_name: string }[];
+    const quotes = (await list.json()).items as { id: string; number: string; customer_name: string }[];
     expect(quotes.length).toBeGreaterThan(0);
     const q = quotes[0];
 
     await signInOnDoor(page, 'Playwright Record');
     await page.goto(`/quotes/${q.id}`);
     await expect(page).toHaveURL(new RegExp(`/quotes/${q.id}$`));
-    await expect(page.getByRole('heading', { name: `Quote #${q.id.slice(0, 8)}` })).toBeVisible();
+    await expect(page.getByRole('heading', { name: `Quote ${q.number}` })).toBeVisible();
     if (q.customer_name) await expect(page.getByText(q.customer_name).first()).toBeVisible();
     await shot(page, 'desk-quote-record.png');
   });
 
   test('a record URL opened cold, with no session, does not 404 at the server', async ({ page, request }) => {
-    const q = ((await (await request.get('/api/v1/quotes?limit=1')).json()).data as { id: string }[])[0];
+    const q = ((await (await request.get('/api/v1/quotes?limit=1')).json()).items as { id: string }[])[0];
     const res = await page.goto(`/quotes/${q.id}`);
     expect(res?.status()).toBe(200);
     await expect(page.locator('gable-app-shell, gable-not-found').first()).toBeVisible();

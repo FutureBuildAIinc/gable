@@ -28,6 +28,49 @@ components:
         constant time. When no key is configured the whole seam answers 503
         before the handler runs.
   parameters:
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      description: >-
+        Page size of a converted list, 1 to 200, default 50. Anything else is
+        a 400 naming limit (ADR 0001 section 2); it is never clamped.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        The opaque cursor of the previous page's next_cursor, passed back
+        verbatim. A malformed cursor, or one minted for another ordering, is a
+        400 naming cursor.
+      schema:
+        type: string
+    Include:
+      name: include
+      in: query
+      required: false
+      description: >-
+        A comma separated list of expansions. total adds the count of rows
+        matching the filters, which costs a second query and is therefore
+        opt in.
+      schema:
+        type: string
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: >-
+        The document revision the client read, in quotes ("3"; the weak form
+        W/"3" is accepted too). The body's revision field is the alternative;
+        a write carrying neither is 428, a stale one 409 stale_revision, and
+        * or a list of tags is a 400.
+      schema:
+        type: string
     Limit:
       name: limit
       in: query
@@ -76,6 +119,27 @@ components:
         minLength: 1
         maxLength: 255
   responses:
+    WireNotFound:
+      description: The addressed resource does not exist, or is not visible to the caller.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireConflict:
+      description: >-
+        The write conflicts with the resource's state: stale_revision,
+        invalid_state_transition, duplicate, idempotency_in_progress or
+        conflict.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WirePreconditionRequired:
+      description: The write needs If-Match or a body revision and carries neither.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     BadRequest:
       description: >-
         A handler (or the branch middleware) cannot consume the request. The
@@ -211,6 +275,18 @@ components:
         (the ADR 0001 envelope, code forbidden), or the branch middleware found
         no grant for the X-Branch-Id (the standard error envelope, code
         FORBIDDEN).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/WireError"
+              - $ref: "#/components/schemas/Error"
+    InternalErrorEither:
+      description: >-
+        An unexpected server fault. A converted handler answers with the ADR
+        0001 envelope (code internal_error, the fixed message "internal
+        error"); the branch middleware's access lookup failing answers with the
+        standard error envelope (code INTERNAL_ERROR).
       content:
         application/json:
           schema:
