@@ -19,7 +19,7 @@ import (
 // ExposureNotifier is the subscriber that turns lumber-index price exposure
 // events into salesperson alerts and customer notices. Its handler is
 // registered on the outbox drain for the quote.exposure.> subject in
-// cmd/server/wire_exposure.go.
+// internal/app/worker/worker.go.
 //
 // Routing:
 //   - FLAGGED / ESCALATED / ACK_REQUIRED → email the assigned salesperson.

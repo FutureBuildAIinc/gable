@@ -3,9 +3,9 @@
 
 // Package outbox implements the transactional outbox (ADR 0003, item
 // R1-12): a mutation writes its domain events into the events_outbox table
-// inside the mutation's own transaction, and a drain runner republishes the
-// committed rows to the in-process event bus so delivery no longer depends
-// on what one process kept in memory.
+// inside the mutation's own transaction, and a drain runner delivers the
+// committed rows to their subscribers so delivery no longer depends on what
+// one process kept in memory.
 //
 // The ordering rule is the package's core property: positions are drawn from
 // the sequence under a transaction scoped advisory lock, so position order

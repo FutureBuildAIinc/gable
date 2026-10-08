@@ -22,9 +22,9 @@ import (
 // *outbox.Writer (whose Write resolves the caller's executor, so inside a
 // transaction the event joins that transaction), and by a capture fake in
 // tests. The scanner records its notification events through it instead of
-// publishing to the in-process bus; a drain runner republishes committed
-// events to the bus, so the exposure emails survive a restart and follow
-// the commit, not the process.
+// publishing to the in-process bus; a drain runner delivers committed
+// events to their subscribers, so the exposure emails survive a restart and
+// follow the commit, not the process.
 type EventRecorder interface {
 	Write(ctx context.Context, ev outbox.Event) error
 }
@@ -61,8 +61,8 @@ type TxRunner interface {
 //
 // Side-effects (notifications) are decoupled via the transactional outbox:
 // the notification event is recorded inside the same transaction as the
-// state change, and a drain runner republishes committed events to the
-// in-process bus, whose subscribers resolve recipient emails.
+// state change, and a drain runner delivers committed events to the
+// exposure notifier, which resolves recipient emails.
 type ExposureScanner struct {
 	exposure   ExposureRepository
 	escalators EscalatorRepository

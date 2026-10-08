@@ -178,7 +178,7 @@ func (s *ExposureService) RequestAck(ctx context.Context, quoteID uuid.UUID, act
 	}
 	// The ledger row and the notification event are one transactional fact,
 	// with the outbox write as the transaction's last statement; the drain
-	// republishes the committed row on the ACK_REQUIRED subject, so the
+	// delivers the committed row on the ACK_REQUIRED subject, so the
 	// notifier's per-(salesperson, index) routing engages.
 	err = s.runInTx(ctx, func(txCtx context.Context) error {
 		if _, err := s.exposure.InsertEvent(txCtx, ev); err != nil {

@@ -347,6 +347,7 @@ live failure the inputs document.
   transaction.
 - Outside consumers get a stable, cursor-paginated feed with the platform's
   strictness rules, and agents stop polling domain tables.
-- The in-process bus keeps its role (fan-out, queues, panic isolation) and
-  loses its role as the durability seam; its package doc's guarantees are
-  now true of the bus alone, not of event delivery end to end.
+- The drain calls subscriber handlers directly, so nothing in production
+  delivers through the in-process bus now; the bus package stays for its
+  own tests and in-process fan-out, and its package doc's guarantees are
+  true of the bus alone, not of event delivery end to end.
