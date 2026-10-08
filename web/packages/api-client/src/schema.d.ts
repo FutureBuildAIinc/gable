@@ -4,6 +4,68 @@
  */
 
 export interface paths {
+    "/api/v1/accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get account summary
+         * @description Balance due, credit limit and available credit, all in cents. Any service error, including an unknown customer, answers 500.
+         */
+        get: operations["accountSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{id}/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List account transactions
+         * @description The list is not paginated: limit and offset are not read.
+         */
+        get: operations["accountTransactions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/activities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one activity */
+        get: operations["activityGet"];
+        /**
+         * Update an activity
+         * @description The write replaces contact_id, activity_type, description, logged_by and activity_date; an omitted field is cleared.
+         */
+        put: operations["activityUpdate"];
+        post?: never;
+        /** Delete an activity */
+        delete: operations["activityDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers": {
         parameters: {
             query?: never;
@@ -77,6 +139,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customerId}/activities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List customer activities
+         * @description Returns activities for a customer, ordered by activity_date descending. The handler guarantees a bare array: an empty array, never null, when the customer has no activities.
+         */
+        get: operations["customerListActivities"];
+        put?: never;
+        /** Create a customer activity */
+        post: operations["customerCreateActivity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customerId}/contacts": {
         parameters: {
             query?: never;
@@ -125,6 +208,419 @@ export interface paths {
         get: operations["customerListPriceLevels"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/vehicles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List vehicles */
+        get: operations["deliveryVehicleList"];
+        put?: never;
+        /** Create a vehicle */
+        post: operations["deliveryVehicleCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/vehicles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a vehicle
+         * @description Any repository error, not only a missing row, answers 404.
+         */
+        get: operations["deliveryVehicleGet"];
+        /**
+         * Update a vehicle
+         * @description A missing vehicle answers 500, not 404.
+         */
+        put: operations["deliveryVehicleUpdate"];
+        post?: never;
+        /** Delete a vehicle */
+        delete: operations["deliveryVehicleDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/vehicles/{id}/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload a vehicle photo
+         * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         */
+        post: operations["deliveryVehiclePhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/drivers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List drivers */
+        get: operations["deliveryDriverList"];
+        put?: never;
+        /** Create a driver */
+        post: operations["deliveryDriverCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/drivers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a driver
+         * @description Any repository error, not only a missing row, answers 404.
+         */
+        get: operations["deliveryDriverGet"];
+        /**
+         * Update a driver
+         * @description A missing driver answers 500, not 404.
+         */
+        put: operations["deliveryDriverUpdate"];
+        post?: never;
+        /** Delete a driver */
+        delete: operations["deliveryDriverDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/drivers/{id}/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload a driver photo
+         * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         */
+        post: operations["deliveryDriverPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List routes */
+        get: operations["deliveryRouteList"];
+        put?: never;
+        /**
+         * Create a route
+         * @description An unparseable scheduled_date answers 500.
+         */
+        post: operations["deliveryRouteCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch a route
+         * @description Only a DRAFT or SCHEDULED route can be dispatched, otherwise 500. The route becomes IN_TRANSIT.
+         */
+        post: operations["deliveryRouteDispatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reorder the stops of a route */
+        post: operations["deliveryRouteReorder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/optimize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Optimize the stop order of a route */
+        post: operations["deliveryRouteOptimize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a route
+         * @description Every failure answers 400: a route with no deliveries, a delivery not yet DELIVERED, FAILED or PARTIAL, or a repository fault.
+         */
+        post: operations["deliveryRouteComplete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the deliveries of a route */
+        get: operations["deliveryRouteDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign an order to a route
+         * @description A missing route, an order blocked by unresolved index exposure or any other failure answers 500.
+         */
+        post: operations["deliveryCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/deliveries/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a delivery
+         * @description A missing delivery answers 500, not 404.
+         */
+        get: operations["deliveryGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/deliveries/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Complete a delivery
+         * @description Only DELIVERED, FAILED and PARTIAL are accepted. DELIVERED and PARTIAL need pod_proof_url and pod_signed_by. Any other value or a missing proof answers 500.
+         */
+        put: operations["deliveryUpdateStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/deliveries/{id}/adjust-qty": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adjust delivered quantities on site */
+        post: operations["deliveryAdjustQty"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/deliveries/{id}/pod-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a proof of delivery photo
+         * @description A missing photo, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         */
+        post: operations["deliveryPodPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/deliveries/{id}/pod-photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the proof of delivery photos */
+        get: operations["deliveryPodPhotos"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deposits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's deposits
+         * @description A missing customer_id answers 400. The list is not paginated.
+         */
+        get: operations["depositList"];
+        put?: never;
+        /**
+         * Record a customer deposit
+         * @description Every service failure, such as a non positive amount, answers 400.
+         */
+        post: operations["depositCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deposits/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one deposit */
+        get: operations["depositGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deposits/{id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a deposit against AR
+         * @description Every service failure, such as a deposit not OPEN or an amount over the remainder, answers 400.
+         */
+        post: operations["depositApply"];
         delete?: never;
         options?: never;
         head?: never;
@@ -405,6 +901,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List inventory rows of a product
+         * @description A product_id that is not a UUID reaches the service and answers 500, not 400.
+         */
+        get: operations["inventoryList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adjust inventory (cycle count)
+         * @description A result that would leave negative stock answers 500.
+         */
+        post: operations["inventoryAdjust"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer inventory between locations
+         * @description A cross-branch move, a non positive quantity or insufficient unallocated stock answers 500.
+         */
+        post: operations["inventoryTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices": {
         parameters: {
             query?: never;
@@ -450,6 +1006,26 @@ export interface paths {
         put?: never;
         /** Create and apply a credit memo against an invoice */
         post: operations["invoiceCreateCreditMemo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{id}/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email invoice to customer
+         * @description Queues an email to the customer with the invoice PDF attached. Returns 202 Accepted immediately; the email is dispatched asynchronously. Fails if the customer has no email address on file.
+         */
+        post: operations["invoiceEmail"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1602,6 +2178,318 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List transaction summaries */
+        get: operations["posTransactionList"];
+        put?: never;
+        /**
+         * Start a transaction
+         * @description register_id defaults to REG-01 and a missing cashier_id is replaced by a random UUID.
+         */
+        post: operations["posTransactionCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a transaction with its lines and tenders */
+        get: operations["posTransactionGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a line item */
+        post: operations["posTransactionAddItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/items/{itemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a line item */
+        delete: operations["posTransactionRemoveItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a transaction with tenders
+         * @description An empty tenders list answers 400. Every service failure (an under-tendered sale, a declined card, a transaction not OPEN) answers 422.
+         */
+        post: operations["posTransactionComplete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a transaction */
+        post: operations["posTransactionVoid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/products/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Typeahead product search */
+        get: operations["posProductSearch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay offline transactions
+         * @description A missing batch_id or an empty items list answers 400.
+         */
+        post: operations["posSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Product catalog for the offline cache */
+        get: operations["posCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a till session
+         * @description register_id defaults to REG-01. Every service failure, such as a session already open on the register, answers 409.
+         */
+        post: operations["posTillOpen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The open till session of a register */
+        get: operations["posTillCurrent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/{id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live X report of a session
+         * @description An unknown session answers 500.
+         */
+        get: operations["posTillReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a till session
+         * @description Every service failure, such as a session not OPEN, answers 409.
+         */
+        post: operations["posTillClose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/{id}/zreport": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The Z report of a closed session */
+        get: operations["posTillZReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/zreports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Z reports */
+        get: operations["posZReportList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List returns */
+        get: operations["posReturnList"];
+        put?: never;
+        /**
+         * Record a return and refund
+         * @description register_id defaults to REG-01. Every service failure, including validation, answers 400.
+         */
+        post: operations["posReturnCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/returns/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a return with its lines */
+        get: operations["posReturnGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/products": {
         parameters: {
             query?: never;
@@ -1651,6 +2539,209 @@ export interface paths {
         get: operations["productGet"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get product detail
+         * @description A missing product answers 500, not 404.
+         */
+        get: operations["productDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get PIM content for a product */
+        get: operations["productPimContentGet"];
+        /**
+         * Update PIM content for a product
+         * @description Only the fields present in the body are changed.
+         */
+        put: operations["productPimContentUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List PIM media for a product */
+        get: operations["productPimMediaList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/media/{mediaId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete PIM media */
+        delete: operations["productPimMediaDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/media/{mediaId}/primary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set primary PIM media */
+        patch: operations["productPimMediaSetPrimary"];
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/collateral": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List PIM collateral for a product */
+        get: operations["productPimCollateralList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/collateral/{collateralId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete PIM collateral */
+        delete: operations["productPimCollateralDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/generate/collateral": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate PIM collateral
+         * @description Answers 500 when no AI client is configured.
+         */
+        post: operations["productPimGenerateCollateral"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/generate/descriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate PIM descriptions
+         * @description Answers 500 when no AI client is configured.
+         */
+        post: operations["productPimGenerateDescriptions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/generate/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate PIM image */
+        post: operations["productPimGenerateImage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/products/{id}/pim/generate/seo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate PIM SEO content
+         * @description Answers 500 when no AI client is configured.
+         */
+        post: operations["productPimGenerateSeo"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1867,6 +2958,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/exposure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List at-risk quotes
+         * @description 403 when owner=me and the caller has no salesperson id and is not owner or admin, when owner=all and the caller is not owner or admin, or when a sales role names another salesperson. An unparseable owner, customer_id or min_dollars answers 400.
+         */
+        get: operations["exposureList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/exposure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get exposure status for one quote
+         * @description A missing quote answers 500, not 404.
+         */
+        get: operations["exposureGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/exposure/request-ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request customer acknowledgment of exposure */
+        post: operations["exposureRequestAck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/exposure/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge exposure on behalf of the customer
+         * @description Notes under ten characters or an unknown method answer 400; a quote whose exposure is already cleared answers 409.
+         */
+        post: operations["exposureAcknowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/exposure/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Override exposure (owner or admin only)
+         * @description A caller without the owner or admin role answers 403. Notes under ten characters answer 400; a quote whose exposure is already cleared answers 409.
+         */
+        post: operations["exposureOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/exposure/escalate-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview re-quoting at market prices */
+        post: operations["exposureEscalateNow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/quotes/{id}/file": {
         parameters: {
             query?: never;
@@ -1887,6 +3092,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sales-team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List sales team members */
+        get: operations["salesTeamList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales-team/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one sales person */
+        get: operations["salesTeamGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/uploads/": {
         parameters: {
             query?: never;
@@ -1899,6 +3138,44 @@ export interface paths {
          * @description Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles do not include admin, owner or user is a 403; a machine key is a 403 on this path whatever scope it holds.
          */
         get: operations["uploadsFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vendors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List vendors
+         * @description The list is not paginated: limit and offset are not read.
+         */
+        get: operations["vendorList"];
+        put?: never;
+        /** Create a vendor */
+        post: operations["vendorCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vendors/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one vendor */
+        get: operations["vendorGet"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1948,6 +3225,80 @@ export interface components {
                 /** Format: date-time */
                 last_checked_at?: string | null;
             };
+        };
+        AccountSummary: {
+            /** Format: uuid */
+            customer_id: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            balance_due: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            credit_limit: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            available_credit: number;
+        };
+        CustomerTransaction: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** @enum {string} */
+            type: "INVOICE" | "PAYMENT" | "ADJUSTMENT" | "REFUND";
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            amount: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            balance_after: number;
+            /** Format: uuid */
+            reference_id: string | null;
+            description: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @enum {string} */
+        ActivityType: "CALL" | "MEETING" | "EMAIL" | "NOTE";
+        /** @description crm.Activity. contact_id and logged_by are omitted when unset. The customer routes of the customer fragment return the same schema. */
+        Activity: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            contact_id?: string;
+            activity_type: components["schemas"]["ActivityType"];
+            description: string;
+            /** Format: uuid */
+            logged_by?: string;
+            /** Format: date-time */
+            activity_date: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The Activity decoded from the body; a missing or unknown activity_type answers 400. */
+        ActivityUpdate: {
+            /** Format: uuid */
+            contact_id?: string;
+            activity_type: components["schemas"]["ActivityType"];
+            description?: string;
+            /** Format: uuid */
+            logged_by?: string;
+            /** Format: date-time */
+            activity_date?: string;
         };
         Customer: {
             /** Format: uuid */
@@ -2032,6 +3383,383 @@ export interface components {
             updated_at: string;
         };
         ContactList: components["schemas"]["Contact"][] | null;
+        /** @description The Activity decoded from the body; customer_id comes from the path and created_at and updated_at are set by the server. A supplied id is kept. A missing or unknown activity_type answers 400. */
+        CustomerActivityCreate: {
+            /** Format: uuid */
+            contact_id?: string;
+            activity_type: components["schemas"]["ActivityType"];
+            description?: string;
+            /** Format: uuid */
+            logged_by?: string;
+            /** Format: date-time */
+            activity_date?: string;
+        };
+        /** @description Transcribed from delivery.Vehicle. The expiry and service dates are stored as dates and serialized as date-times. */
+        DeliveryVehicle: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            vehicle_type: components["schemas"]["DeliveryVehicleType"];
+            license_plate: string;
+            capacity_weight_lbs: number | null;
+            vin: string | null;
+            year: number | null;
+            make: string | null;
+            model: string | null;
+            /** Format: date-time */
+            insurance_expiry: string | null;
+            /** Format: date-time */
+            next_service_date: string | null;
+            odometer_miles: number | null;
+            notes: string | null;
+            photo_url: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @enum {string} */
+        DeliveryVehicleType: "BOX_TRUCK" | "FLATBED" | "PICKUP" | "VAN" | "CRANE";
+        /** @description CreateVehicleRequest. Nothing is validated; an unparseable date is silently dropped. */
+        DeliveryVehicleCreate: {
+            name?: string;
+            vehicle_type?: components["schemas"]["DeliveryVehicleType"];
+            license_plate?: string;
+            capacity_weight_lbs?: number | null;
+            vin?: string | null;
+            year?: number | null;
+            make?: string | null;
+            model?: string | null;
+            /** Format: date */
+            insurance_expiry?: string | null;
+            /** Format: date */
+            next_service_date?: string | null;
+            odometer_miles?: number | null;
+            notes?: string | null;
+        };
+        /** @description UpdateVehicleRequest. The handler overwrites every field: an omitted optional date or value clears it. */
+        DeliveryVehicleUpdate: {
+            name?: string;
+            vehicle_type?: components["schemas"]["DeliveryVehicleType"];
+            license_plate?: string;
+            capacity_weight_lbs?: number | null;
+            vin?: string | null;
+            year?: number | null;
+            make?: string | null;
+            model?: string | null;
+            /** Format: date */
+            insurance_expiry?: string | null;
+            /** Format: date */
+            next_service_date?: string | null;
+            odometer_miles?: number | null;
+            notes?: string | null;
+        };
+        DeliveryPhotoUpload: {
+            /**
+             * Format: binary
+             * @description jpg, jpeg, png or webp, at most 10 MB.
+             */
+            photo: string;
+        };
+        DeliveryPhotoUrl: {
+            photo_url: string;
+        };
+        /** @enum {string} */
+        DeliveryDriverStatus: "ACTIVE" | "INACTIVE" | "ON_LEAVE";
+        /** @description Transcribed from delivery.Driver. */
+        DeliveryDriver: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            license_number: string | null;
+            status: components["schemas"]["DeliveryDriverStatus"];
+            phone_number: string | null;
+            cdl_class: string | null;
+            /** Format: date-time */
+            cdl_expiry: string | null;
+            /** Format: date-time */
+            hire_date: string | null;
+            email: string | null;
+            photo_url: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description CreateDriverRequest. Nothing is validated. */
+        DeliveryDriverCreate: {
+            name?: string;
+            license_number?: string | null;
+            phone_number?: string | null;
+            cdl_class?: string | null;
+            /** Format: date */
+            cdl_expiry?: string | null;
+            /** Format: date */
+            hire_date?: string | null;
+            email?: string | null;
+        };
+        /** @description UpdateDriverRequest. */
+        DeliveryDriverUpdate: {
+            name?: string;
+            license_number?: string | null;
+            phone_number?: string | null;
+            cdl_class?: string | null;
+            /** Format: date */
+            cdl_expiry?: string | null;
+            /** Format: date */
+            hire_date?: string | null;
+            email?: string | null;
+            status?: components["schemas"]["DeliveryDriverStatus"];
+        };
+        /** @enum {string} */
+        DeliveryRouteStatus: "DRAFT" | "SCHEDULED" | "IN_TRANSIT" | "COMPLETED" | "CANCELLED";
+        /** @description Transcribed from delivery.Route. The two totals and the joined vehicle and driver names are omitted when empty. */
+        DeliveryRoute: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vehicle_id: string;
+            /** Format: uuid */
+            driver_id: string;
+            /** Format: date-time */
+            scheduled_date: string;
+            status: components["schemas"]["DeliveryRouteStatus"];
+            notes: string | null;
+            total_duration_mins?: number;
+            total_distance_miles?: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            vehicle_name?: string;
+            driver_name?: string;
+            stop_count: number;
+        };
+        DeliveryRouteCreate: {
+            /** Format: uuid */
+            vehicle_id: string;
+            /** Format: uuid */
+            driver_id: string;
+            /** Format: date */
+            scheduled_date: string;
+            notes?: string | null;
+        };
+        DeliveryRouteReorder: {
+            ordered_delivery_ids: string[];
+        };
+        /** @enum {string} */
+        DeliveryStatus: "PENDING" | "OUT_FOR_DELIVERY" | "DELIVERED" | "FAILED" | "PARTIAL";
+        /** @description Transcribed from delivery.PODPhoto. */
+        DeliveryPodPhoto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            delivery_id: string;
+            photo_url: string;
+            /** @description signature, site or damage; site when the form leaves it empty. */
+            photo_type: string;
+            /** Format: date-time */
+            uploaded_at: string;
+        };
+        /** @description Transcribed from delivery.Delivery. route_id is null for a stop not yet on a route. The signature, the ETA, the scheduled window, the joined order fields and pod_photos are omitted when empty. */
+        Delivery: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            route_id: string | null;
+            /** Format: uuid */
+            order_id: string;
+            stop_sequence: number;
+            status: components["schemas"]["DeliveryStatus"];
+            pod_proof_url: string | null;
+            pod_signed_by: string | null;
+            /** Format: date-time */
+            pod_timestamp: string | null;
+            signature_data_url?: string;
+            delivery_instructions: string | null;
+            latitude: number | null;
+            longitude: number | null;
+            /** Format: date-time */
+            estimated_arrival?: string;
+            /** Format: date-time */
+            scheduled_start?: string;
+            /** Format: date-time */
+            scheduled_end?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            customer_name?: string;
+            order_number?: string;
+            address?: string;
+            pod_photos?: components["schemas"]["DeliveryPodPhoto"][];
+        };
+        /** @description AssignOrderRequest. */
+        DeliveryCreate: {
+            /** Format: uuid */
+            route_id: string;
+            /** Format: uuid */
+            order_id: string;
+            stop_sequence?: number;
+            delivery_instructions?: string | null;
+        };
+        /** @description Soft warning only; the assignment still happens. */
+        DeliveryCapacityWarning: {
+            vehicle_capacity_lbs: number;
+            current_load_lbs: number;
+            order_weight_lbs: number;
+            total_after_lbs: number;
+        };
+        DeliveryAssignResult: {
+            delivery: components["schemas"]["Delivery"];
+            capacity_warning?: components["schemas"]["DeliveryCapacityWarning"];
+        };
+        /** @description UpdateDeliveryStatusRequest. */
+        DeliveryStatusUpdate: {
+            status: components["schemas"]["DeliveryStatus"];
+            pod_proof_url?: string | null;
+            pod_signed_by?: string | null;
+            signature_data_url?: string | null;
+        };
+        /** @description DeliveryLineAdjustment. */
+        DeliveryAdjustLine: {
+            /** Format: uuid */
+            product_id: string;
+            original_qty: number;
+            adjusted_qty: number;
+            /** @description SHORT_SHIP, DAMAGED, REFUSED, WRONG_PRODUCT or OTHER; not validated by the handler. */
+            reason_code: string;
+            notes?: string;
+        };
+        /** @description QtyAdjustmentRequest; the delivery id comes from the path. */
+        DeliveryAdjustQty: {
+            /** Format: uuid */
+            adjusted_by: string;
+            adjustments: components["schemas"]["DeliveryAdjustLine"][];
+        };
+        DeliveryAdjustAck: {
+            /** @enum {string} */
+            status: "adjusted";
+        };
+        DeliveryStatusAck: {
+            /** @enum {string} */
+            status: "completed";
+        };
+        DeliveryPodPhotoUpload: {
+            /**
+             * Format: binary
+             * @description jpg, jpeg, png or webp, at most 10 MB.
+             */
+            photo: string;
+            /** @description signature, site or damage; defaults to site. */
+            photo_type?: string;
+        };
+        /** @description RouteLeg. */
+        DeliveryRouteLeg: {
+            stop_index: number;
+            duration_mins: number;
+            distance_miles: number;
+            /**
+             * Format: date-time
+             * @description ISO 8601 timestamp.
+             */
+            eta: string;
+        };
+        /** @description RouteOptimizationResult. optimized_order holds indices into the geocoded stops, not delivery ids. */
+        DeliveryRouteOptimizationResult: {
+            optimized_order: number[] | null;
+            legs: components["schemas"]["DeliveryRouteLeg"][] | null;
+            total_duration_mins: number;
+            total_distance_miles: number;
+        };
+        /** @description deposit.CustomerDeposit. The branch, reference, note and ledger entry are omitted when empty. */
+        Deposit: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: int64
+             * @description Cents, original.
+             */
+            amount: number;
+            /**
+             * Format: int64
+             * @description Cents, cumulative applied.
+             */
+            applied_amount: number;
+            /**
+             * Format: int64
+             * @description Cents, amount minus applied.
+             */
+            remaining: number;
+            /** @enum {string} */
+            status: "OPEN" | "APPLIED" | "REFUNDED";
+            /** @description How the prepayment was taken; free text, CASH when the request leaves it empty. */
+            method: string;
+            reference?: string;
+            note?: string;
+            /** Format: uuid */
+            gl_entry_id?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description deposit.DepositApplication. The invoice and ledger entry are omitted when empty. */
+        DepositApplication: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            deposit_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            amount: number;
+            /** Format: uuid */
+            invoice_id?: string;
+            /** Format: uuid */
+            gl_entry_id?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description The list wrapper; deposits is null when the customer has none. */
+        DepositList: {
+            deposits: components["schemas"]["Deposit"][] | null;
+            /** Format: int64 */
+            open_balance_cents: number;
+        };
+        /** @description RecordDepositRequest. */
+        DepositCreate: {
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: int64
+             * @description Must be positive.
+             */
+            amount_cents: number;
+            /** @description Free text; defaults to CASH. */
+            method?: string;
+            reference?: string;
+            note?: string;
+        };
+        /** @description ApplyDepositRequest. */
+        DepositApply: {
+            /**
+             * Format: int64
+             * @description Must be positive and at most the remainder.
+             */
+            amount_cents: number;
+            /** Format: uuid */
+            invoice_id?: string;
+        };
         HealthReadyOK: {
             /** @enum {string} */
             status: "ok";
@@ -2251,6 +3979,46 @@ export interface components {
             /** @description Never null. */
             modules: string[];
         };
+        /** @description inventory.Inventory. location_id is omitted when unset. */
+        Inventory: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            location_id?: string;
+            /** @description Deprecated text field. */
+            location: string;
+            quantity: number;
+            allocated: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        StockAdjustmentRequest: {
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            location_id?: string | null;
+            /** @description The new quantity, or the delta when is_delta is true. */
+            quantity: number;
+            reason?: string;
+            /** @description If true, add or subtract; if false, replace. */
+            is_delta?: boolean;
+        };
+        StockMovementRequest: {
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            from_location_id?: string | null;
+            /** Format: uuid */
+            to_location_id: string;
+            quantity: number;
+            reason?: string;
+        };
+        InventoryStatusAck: {
+            /** @enum {string} */
+            status: "ok";
+        };
         /** @enum {string} */
         InvoiceStatus: "UNPAID" | "PARTIAL" | "PAID" | "VOID" | "OVERDUE";
         /** @enum {string} */
@@ -2353,6 +4121,10 @@ export interface components {
             reason: string;
         };
         CreditMemoList: components["schemas"]["CreditMemo"][] | null;
+        InvoiceEmailResponse: {
+            /** @enum {string} */
+            status: "queued";
+        };
         /** @enum {string} */
         LocationType: "BRANCH" | "ZONE" | "AISLE" | "RACK" | "SHELF" | "BIN" | "YARD";
         Location: {
@@ -3093,6 +4865,406 @@ export interface components {
             /** @enum {string} */
             status: "Active" | "Inactive";
         };
+        /** @description The refusal body for a machine key on a cashier route. The code is lower case, unlike the standard envelope. */
+        PosCashierRefusal: {
+            error: {
+                /** @enum {string} */
+                code: "forbidden";
+                message: string;
+            };
+            meta: {
+                request_id: string;
+            };
+        };
+        /** @enum {string} */
+        PosTransactionStatus: "OPEN" | "COMPLETED" | "VOIDED" | "RETURNED" | "HELD";
+        /** @description POSLineItem. */
+        PosLineItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            transaction_id: string;
+            /** Format: uuid */
+            product_id: string;
+            description: string;
+            quantity: number;
+            uom: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            unit_price: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            line_total: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description POSTender. The reference and card fields are omitted when empty. */
+        PosTender: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            transaction_id: string;
+            /** @description CASH, CARD, CHECK or ACCOUNT. */
+            method: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            amount: number;
+            reference?: string;
+            card_last4?: string;
+            card_brand?: string;
+            gateway_tx_id?: string;
+            auth_code?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description POSTransaction. The customer, till session, completion time, sync fields and the lines and tenders are omitted when empty; only the read and mutation routes after the first line fill the lists. */
+        PosTransaction: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            branch_id: string;
+            register_id: string;
+            /** Format: uuid */
+            cashier_id: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            subtotal: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            tax_amount: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total: number;
+            /**
+             * Format: int64
+             * @description Cents, set at completion.
+             */
+            change_due: number;
+            /** Format: uuid */
+            till_session_id?: string;
+            status: components["schemas"]["PosTransactionStatus"];
+            /** Format: date-time */
+            completed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Absent for a live sale, offline-v1 for a synced one. */
+            synced_from?: string;
+            /** Format: date-time */
+            client_created_at?: string;
+            line_items?: components["schemas"]["PosLineItem"][];
+            tenders?: components["schemas"]["PosTender"][];
+        };
+        /** @description TransactionSummary. */
+        PosTransactionSummary: {
+            /** Format: uuid */
+            id: string;
+            register_id: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total: number;
+            status: components["schemas"]["PosTransactionStatus"];
+            item_count: number;
+            /** Format: date-time */
+            completed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description QuickSearchResult. */
+        PosSearchResult: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            /** @description Float dollars. */
+            unit_price: number;
+            uom: string;
+            in_stock: number;
+        };
+        /** @description CatalogProduct. */
+        PosCatalogProduct: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            /** @description Float dollars. */
+            price: number;
+            uom: string;
+            in_stock: number;
+        };
+        /** @description TillSession. Everything set at close, and the branch, is omitted when empty. */
+        PosTillSession: {
+            /** Format: uuid */
+            id: string;
+            register_id: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            cashier_id: string;
+            /** @enum {string} */
+            status: "OPEN" | "CLOSED";
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            opening_float: number;
+            /** Format: date-time */
+            opened_at: string;
+            /** Format: date-time */
+            closed_at?: string;
+            /** @description Cents keyed by tender method. */
+            expected_by_method?: {
+                [key: string]: number;
+            };
+            /** @description Cents keyed by tender method. */
+            counted_by_method?: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int64
+             * @description Cents; negative means short.
+             */
+            over_short?: number;
+            /** Format: uuid */
+            gl_entry_id?: string;
+            notes: string;
+        };
+        /** @description The current session wrapper. */
+        PosTillCurrent: {
+            session: components["schemas"]["PosTillSession"] | null;
+        };
+        /** @description TillReport. */
+        PosTillReport: {
+            session: components["schemas"]["PosTillSession"];
+            sale_count: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            sales_total: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            tax_total: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            change_given: number;
+            /** @description Cents keyed by tender method. */
+            tendered_by_method: {
+                [key: string]: number;
+            };
+            /** @description Cents keyed by tender method. */
+            expected_by_method: {
+                [key: string]: number;
+            };
+        };
+        /** @description ZReport. */
+        PosZReport: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            till_session_id: string;
+            register_id: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            over_short: number;
+            /** @description The frozen closing report, a JSON object. */
+            payload: components["schemas"]["PosTillReport"];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        PosZReportList: {
+            z_reports: components["schemas"]["PosZReport"][] | null;
+        };
+        /** @description POSReturnLine. */
+        PosReturnLine: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            return_id: string;
+            /** Format: uuid */
+            product_id: string;
+            description: string;
+            quantity: number;
+            uom: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            unit_price: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            line_total: number;
+            restock: boolean;
+        };
+        /** @description POSReturn. The till session, original transaction, customer, branch, ledger entry and lines are omitted when empty. */
+        PosReturn: {
+            /** Format: uuid */
+            id: string;
+            register_id: string;
+            /** Format: uuid */
+            till_session_id?: string;
+            /** Format: uuid */
+            original_transaction_id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            cashier_id: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            subtotal: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            tax_amount: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total: number;
+            /** @description CASH, CARD or ACCOUNT. */
+            refund_method: string;
+            reason: string;
+            status: string;
+            /** Format: uuid */
+            gl_entry_id?: string;
+            /** Format: date-time */
+            created_at: string;
+            lines?: components["schemas"]["PosReturnLine"][];
+        };
+        PosReturnList: {
+            returns: components["schemas"]["PosReturn"][] | null;
+        };
+        /** @description SyncError. */
+        PosSyncError: {
+            client_id: string;
+            reason: string;
+        };
+        /** @description OfflineSyncResponse. errors is omitted when empty. */
+        PosSyncResponse: {
+            batch_id: string;
+            synced_count: number;
+            duplicate_count: number;
+            error_count: number;
+            errors?: components["schemas"]["PosSyncError"][];
+        };
+        PosTransactionCreate: {
+            /** @description Defaults to REG-01. */
+            register_id?: string;
+            /** Format: uuid */
+            cashier_id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+        };
+        PosAddItem: {
+            /** Format: uuid */
+            product_id: string;
+            quantity: number;
+            uom?: string;
+        };
+        /** @description AddTenderRequest. */
+        PosTenderInput: {
+            /** @description CASH, CARD, CHECK or ACCOUNT. */
+            method: string;
+            /** @description Float dollars. */
+            amount: number;
+            reference?: string;
+            /** @description Card token from the payment processor. */
+            token_id?: string;
+        };
+        PosComplete: {
+            tenders: components["schemas"]["PosTenderInput"][];
+        };
+        /** @description OfflineTransaction. */
+        PosOfflineTransaction: {
+            /** Format: uuid */
+            client_id: string;
+            register_id: string;
+            /** Format: uuid */
+            cashier_id: string;
+            /** Format: uuid */
+            customer_id?: string;
+            items: components["schemas"]["PosAddItem"][];
+            tenders: components["schemas"]["PosTenderInput"][];
+            /** Format: date-time */
+            client_created_at: string;
+        };
+        /** @description OfflineSyncRequest. */
+        PosSyncRequest: {
+            batch_id: string;
+            register_id?: string;
+            items: components["schemas"]["PosOfflineTransaction"][];
+        };
+        PosTillOpen: {
+            /** @description Defaults to REG-01. */
+            register_id?: string;
+            /** @description Float dollars; converted to cents on the server. */
+            opening_float: number;
+        };
+        PosTillClose: {
+            /** @description Float dollars keyed by tender method. */
+            counted_by_method: {
+                [key: string]: number;
+            };
+            notes?: string;
+        };
+        /** @description ReturnLineRequest. */
+        PosReturnLineRequest: {
+            /** Format: uuid */
+            product_id: string;
+            description?: string;
+            /** @description Positive units returned. */
+            quantity: number;
+            uom?: string;
+            /** @description Float dollars. */
+            unit_price: number;
+            /** @description Defaults to true; false for damaged goods. */
+            restock?: boolean;
+        };
+        /** @description ReturnRequest. */
+        PosReturnRequest: {
+            /** @description Defaults to REG-01. */
+            register_id?: string;
+            /** Format: uuid */
+            original_transaction_id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** @description CASH, CARD or ACCOUNT, case insensitive; defaults to CASH. */
+            refund_method?: string;
+            reason?: string;
+            /** @description The original card transaction to reverse. */
+            gateway_tx_id?: string;
+            lines: components["schemas"]["PosReturnLineRequest"][];
+        };
         /**
          * @description The database unit of measure vocabulary, verbatim.
          * @enum {string}
@@ -3167,6 +5339,135 @@ export interface components {
         ProductLeadTimeUpdate: {
             /** @description Days; null clears to unpublished, zero asserts same day. */
             lead_time_days: number | null;
+        };
+        /** @description pim.PIMContent. The handler always sends all fifteen fields. A product with no content yet answers a record with a zero id and zero timestamps. */
+        PimContent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            product_id: string;
+            short_description: string;
+            long_description: string;
+            marketing_copy: string;
+            attributes: {
+                [key: string]: string;
+            } | null;
+            seo_title: string;
+            seo_description: string;
+            seo_keywords: string[] | null;
+            seo_slug: string;
+            last_gen_model: string;
+            last_gen_prompt: string;
+            /** Format: date-time */
+            last_gen_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description pim.PIMMedia. */
+        PimMedia: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** @description hero for generated images. */
+            media_type: string;
+            url: string;
+            alt_text: string;
+            sort_order: number;
+            is_primary: boolean;
+            /** @enum {string} */
+            status: "generating" | "ready" | "failed";
+            gen_model: string;
+            gen_prompt: string;
+            gen_style: string;
+            /** Format: date-time */
+            generated_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description pim.PIMCollateral. */
+        PimCollateral: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** @description sell_sheet, facebook, instagram, linkedin or email_blast; anything else generates a generic piece. */
+            collateral_type: string;
+            title: string;
+            content: string;
+            tone: string;
+            audience: string;
+            gen_model: string;
+            gen_prompt: string;
+            /** Format: date-time */
+            generated_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description pim.ProductDetail. content is null when the product has none. */
+        ProductDetail: {
+            /** Format: uuid */
+            id: string;
+            sku: string;
+            description: string;
+            uom_primary: string;
+            /** @description Float dollars today. */
+            base_price: number;
+            vendor: string | null;
+            upc: string | null;
+            weight_lbs: number;
+            reorder_point: number;
+            reorder_qty: number;
+            total_quantity: number;
+            total_allocated: number;
+            average_unit_cost: number;
+            target_margin: number;
+            commission_rate: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            content: components["schemas"]["PimContent"] | null;
+            media: components["schemas"]["PimMedia"][];
+            collateral: components["schemas"]["PimCollateral"][];
+        };
+        /** @description UpdateContentRequest: every field optional, absent means unchanged. */
+        PimContentUpdate: {
+            short_description?: string;
+            long_description?: string;
+            marketing_copy?: string;
+            attributes?: {
+                [key: string]: string;
+            };
+            seo_title?: string;
+            seo_description?: string;
+            seo_keywords?: string[];
+            seo_slug?: string;
+        };
+        PimGenerateDescriptionsRequest: {
+            /** @description Defaults to professional. */
+            tone?: string;
+            /** @description Defaults to contractors and builders. */
+            audience?: string;
+        };
+        PimGenerateSeoRequest: {
+            target_keywords?: string[];
+        };
+        PimGenerateImageRequest: {
+            style?: string;
+            prompt?: string;
+        };
+        PimGenerateCollateralRequest: {
+            /** @description sell_sheet, facebook, instagram, linkedin or email_blast; anything else generates a generic piece. */
+            type?: string;
+            tone?: string;
+            audience?: string;
         };
         Project: {
             /** Format: uuid */
@@ -3373,6 +5674,166 @@ export interface components {
             total_value: number;
             accepted_value: number;
         };
+        /** @enum {string} */
+        ExposureState: "OK" | "FLAGGED" | "ESCALATED" | "ACK_REQUIRED" | "ACKNOWLEDGED" | "BLOCKED" | "OVERRIDDEN";
+        /** @description pricing.QuoteExposureEvent. Everything but the five required fields is omitted when empty. */
+        QuoteExposureEvent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            quote_id: string;
+            /** Format: uuid */
+            quote_line_id?: string;
+            /** Format: uuid */
+            market_index_id?: string;
+            /** Format: uuid */
+            market_index_history_id?: string;
+            /** @enum {string} */
+            event_type: "DETECTED" | "FLAGGED" | "ESCALATED" | "ACK_REQUIRED" | "ACK_REQUESTED" | "ACKNOWLEDGED" | "CLEARED" | "BLOCKED" | "OVERRIDDEN";
+            base_index_value?: number;
+            current_index_value?: number;
+            delta_pct?: number;
+            exposure_dollars?: number;
+            threshold_pct?: number;
+            policy?: string;
+            actor_user_id?: string;
+            actor_role?: string;
+            method?: string;
+            notes?: string;
+            idempotency_key: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description pricing.ExposureRow. The salesperson fields are omitted when empty. */
+        ExposureRow: {
+            /** Format: uuid */
+            quote_id: string;
+            short_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            salesperson_id?: string;
+            salesperson_name?: string;
+            days_open: number;
+            indexes: string[] | null;
+            max_delta_pct: number;
+            /** @description Float dollars. */
+            exposure_dollars: number;
+            policy: string;
+            exposure_state: string;
+            available_actions: string[];
+        };
+        ExposureList: {
+            items: components["schemas"]["ExposureRow"][];
+            total: number;
+        };
+        ExposureSummary: {
+            count: number;
+            /** @description Float dollars rounded to cents. */
+            total_dollars: number;
+        };
+        /** @description A hand built map, not pricing.ExposureStatus: the state is named exposure_state here and the events ride along. */
+        QuoteExposureDetail: {
+            /** Format: uuid */
+            quote_id: string;
+            exposure_state: components["schemas"]["ExposureState"];
+            /** @description Float dollars. */
+            exposure_dollars: number;
+            /** Format: date-time */
+            last_checked_at: string | null;
+            indexes: string[] | null;
+            required_action: string;
+            events: components["schemas"]["QuoteExposureEvent"][];
+        };
+        AcknowledgmentRequest: {
+            /** @enum {string} */
+            method: "VERBAL" | "EMAIL" | "PORTAL";
+            customer_contact?: string;
+            /** @description At least ten characters after trimming. */
+            notes: string;
+        };
+        OverrideRequest: {
+            /** @description At least ten characters after trimming. */
+            notes: string;
+        };
+        ExposureRequestAckResponse: {
+            /** Format: uuid */
+            event_id: string;
+            salesperson_notified: boolean;
+        };
+        ExposureAcknowledgeResponse: {
+            /** Format: uuid */
+            event_id: string;
+            /** Format: uuid */
+            quote_id: string;
+            /** @enum {string} */
+            new_exposure_state: "ACKNOWLEDGED";
+        };
+        ExposureOverrideResponse: {
+            /** Format: uuid */
+            event_id: string;
+            /** @enum {string} */
+            new_exposure_state: "OVERRIDDEN";
+        };
+        EscalateNowLine: {
+            /** Format: uuid */
+            quote_line_id: string;
+            /** @description Float dollars. */
+            current_unit_price: number;
+            /** @description Float dollars. */
+            suggested_unit_price: number;
+            delta_pct: number;
+        };
+        /** @description pricing.EscalateNowResult. lines is null when the quote is missing or has no lines. */
+        EscalateNowResult: {
+            /** Format: uuid */
+            quote_id: string;
+            lines: components["schemas"]["EscalateNowLine"][] | null;
+            /** @description Float dollars. */
+            estimated_new_total: number;
+        };
+        SalesPerson: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            email: string;
+            phone: string;
+            role: string;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description vendor.Vendor. */
+        Vendor: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            contact_email: string | null;
+            phone: string | null;
+            address_line1: string | null;
+            city: string | null;
+            state: string | null;
+            zip: string | null;
+            payment_terms: string;
+            average_lead_time_days: number;
+            fill_rate: number;
+            /** @description Float dollars today. */
+            total_spend_ytd: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description CreateVendorRequest. The address fields are not accepted. */
+        VendorCreate: {
+            name: string;
+            contact_email?: string | null;
+            phone?: string | null;
+            payment_terms?: string | null;
+        };
     };
     responses: {
         /** @description The request cannot be consumed. The body is the standard error envelope; the message is the generic status text, and the handler's specific message goes to the server log only. */
@@ -3527,6 +5988,157 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    accountSummary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    accountTransactions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every transaction of the customer, newest first. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerTransaction"][] | null;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    activityGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The activity. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activity"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    activityUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivityUpdate"];
+            };
+        };
+        responses: {
+            /** @description The activity as the request wrote it. customer_id, created_at and any field the body omitted come back as zero values, because the handler echoes the decoded body rather than re-reading the row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activity"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    activityDelete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Activity deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     customerList: {
         parameters: {
             query?: {
@@ -3715,6 +6327,70 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    customerListActivities: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                customerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Activities, a bare array that is empty when none exist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activity"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    customerCreateActivity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                customerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerActivityCreate"];
+            };
+        };
+        responses: {
+            /** @description The created activity. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activity"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     customerListContacts: {
         parameters: {
             query?: never;
@@ -3894,6 +6570,912 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryVehicleList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All vehicles. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryVehicle"][] | null;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryVehicleCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryVehicleCreate"];
+            };
+        };
+        responses: {
+            /** @description The created vehicle. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryVehicle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryVehicleGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vehicle. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryVehicle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deliveryVehicleUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryVehicleUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated vehicle. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryVehicle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryVehicleDelete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Vehicle deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryVehiclePhoto: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["DeliveryPhotoUpload"];
+            };
+        };
+        responses: {
+            /** @description The stored photo URL. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryPhotoUrl"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All drivers. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDriver"][] | null;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryDriverCreate"];
+            };
+        };
+        responses: {
+            /** @description The created driver, status ACTIVE. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDriver"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The driver. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDriver"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deliveryDriverUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryDriverUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated driver. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDriver"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverDelete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Driver deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverPhoto: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["DeliveryPhotoUpload"];
+            };
+        };
+        responses: {
+            /** @description The stored photo URL. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryPhotoUrl"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteList: {
+        parameters: {
+            query?: {
+                /** @description Filter to one scheduled date. An unparseable date answers 500. */
+                date?: string;
+                /** @description Filter to one driver. */
+                driver_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Routes. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryRoute"][] | null;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryRouteCreate"];
+            };
+        };
+        responses: {
+            /** @description The created route, status DRAFT. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryRoute"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteDispatch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dispatched; the body is empty. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteReorder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryRouteReorder"];
+            };
+        };
+        responses: {
+            /** @description Reordered; the body is empty. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteOptimize: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The optimization result. A route with no deliveries or no geocoded stops answers an empty result: null order and legs and zero totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryRouteOptimizationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteComplete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The route is completed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryStatusAck"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    deliveryRouteDeliveries: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deliveries in stop order. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"][] | null;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryCreate"];
+            };
+        };
+        responses: {
+            /** @description The created delivery, with a capacity warning when the vehicle would be over its weight capacity. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryAssignResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The delivery. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryUpdateStatus: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryStatusUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated; the body is empty. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryAdjustQty: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryAdjustQty"];
+            };
+        };
+        responses: {
+            /** @description Adjusted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryAdjustAck"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryPodPhoto: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["DeliveryPodPhotoUpload"];
+            };
+        };
+        responses: {
+            /** @description The stored photo record. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryPodPhoto"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryPodPhotos: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Photo records; an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryPodPhoto"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    depositList: {
+        parameters: {
+            query: {
+                /** @description Required. */
+                customer_id: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deposits and the customer's open balance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepositList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    depositCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepositCreate"];
+            };
+        };
+        responses: {
+            /** @description The recorded deposit. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deposit"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    depositGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deposit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deposit"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    depositApply: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepositApply"];
+            };
+        };
+        responses: {
+            /** @description The recorded application. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepositApplication"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     healthLive: {
@@ -4262,6 +7844,102 @@ export interface operations {
             503: components["responses"]["IntegrationUnavailable"];
         };
     };
+    inventoryList: {
+        parameters: {
+            query: {
+                /** @description Required; a missing value answers 400. */
+                product_id: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The product's inventory rows, one per location. The body is null when the product has none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Inventory"][] | null;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    inventoryAdjust: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StockAdjustmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Adjusted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryStatusAck"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    inventoryTransfer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StockMovementRequest"];
+            };
+        };
+        responses: {
+            /** @description Transferred. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryStatusAck"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     invoiceList: {
         parameters: {
             query?: {
@@ -4352,6 +8030,44 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    invoiceEmail: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Email queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceEmailResponse"];
+                };
+            };
+            /** @description Customer has no email address on file. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -6468,6 +10184,628 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posTransactionList: {
+        parameters: {
+            query?: {
+                /** @description Filter to one register. */
+                register_id?: string;
+                /** @description The day to list; today when omitted or unparseable. */
+                date?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Summaries; an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransactionSummary"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTransactionCreate"];
+            };
+        };
+        responses: {
+            /** @description The new OPEN transaction, attached to the register's open till session when there is one. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The transaction. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    posTransactionAddItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosAddItem"];
+            };
+        };
+        responses: {
+            /** @description The transaction with totals recalculated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionRemoveItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The transaction with totals recalculated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionComplete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosComplete"];
+            };
+        };
+        responses: {
+            /** @description The COMPLETED transaction. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The completion failed (under-tendered sale, declined card, transaction not OPEN). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    posTransactionVoid: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The VOIDED transaction. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posProductSearch: {
+        parameters: {
+            query?: {
+                /** @description SKU, description or barcode. An empty or one character query answers an empty array. */
+                q?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 20 matches; a bare array. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSearchResult"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSync: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description The batch result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSyncResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posCatalog: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The whole catalog as a bare array. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosCatalogProduct"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillOpen: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTillOpen"];
+            };
+        };
+        responses: {
+            /** @description The OPEN session. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
+                };
+            };
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillCurrent: {
+        parameters: {
+            query?: {
+                /** @description Defaults to REG-01. */
+                register_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open session, or null when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillCurrent"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillReport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillClose: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTillClose"];
+            };
+        };
+        responses: {
+            /** @description The closing Z report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    posTillZReport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The frozen Z snapshot. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosZReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    posZReportList: {
+        parameters: {
+            query?: {
+                register_id?: string;
+                /** @description An unparseable date is ignored. */
+                date?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Z reports wrapped in an object. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosZReportList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posReturnList: {
+        parameters: {
+            query?: {
+                register_id?: string;
+                /** @description An unparseable date is ignored. */
+                date?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returns wrapped in an object. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosReturnList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posReturnCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosReturnRequest"];
+            };
+        };
+        responses: {
+            /** @description The return with its lines. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosReturn"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posReturnGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The return. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosReturn"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     productList: {
         parameters: {
             query?: {
@@ -6574,6 +10912,380 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    productDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The product with its PIM content, media and collateral. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimContentGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PIM content; an empty record (zero id, empty text, no keywords) when the product has none yet. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimContent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimContentUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimContentUpdate"];
+            };
+        };
+        responses: {
+            /** @description The merged PIM content. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimContent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimMediaList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Media; an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimMedia"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimMediaDelete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Media deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimMediaSetPrimary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Primary media set; the body is empty. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimCollateralList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Collateral; an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimCollateral"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimCollateralDelete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+                collateralId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Collateral deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimGenerateCollateral: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateCollateralRequest"];
+            };
+        };
+        responses: {
+            /** @description The generated collateral, already stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimCollateral"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimGenerateDescriptions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateDescriptionsRequest"];
+            };
+        };
+        responses: {
+            /** @description The PIM content with the generated descriptions and attributes, already stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimContent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimGenerateImage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateImageRequest"];
+            };
+        };
+        responses: {
+            /** @description Generation runs in the background; the placeholder media row (status generating) is returned for polling the media list. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimMedia"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productPimGenerateSeo: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PimGenerateSeoRequest"];
+            };
+        };
+        responses: {
+            /** @description The PIM content with the generated SEO fields, already stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PimContent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
         };
     };
     productUpdateMarginRules: {
@@ -7022,6 +11734,211 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    exposureList: {
+        parameters: {
+            query?: {
+                /** @description me (the default) scopes to the caller's book, all needs the owner or admin role, or a salesperson UUID (a sales role may only name itself). */
+                owner?: string;
+                /** @description Comma separated exposure states. */
+                state?: string;
+                /** @description Page size, 50 when absent or non positive. */
+                limit?: number;
+                offset?: number;
+                index_code?: string;
+                customer_id?: string;
+                /** @description A non negative dollar floor. */
+                min_dollars?: number;
+                /** @description Only the literal true selects the summary body. */
+                summary?: boolean;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rows, or the summary when summary=true. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExposureList"] | components["schemas"]["ExposureSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exposureGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The exposure status with the quote's event ledger. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteExposureDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exposureRequestAck: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledgment requested. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExposureRequestAckResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exposureAcknowledge: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Acknowledgment recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExposureAcknowledgeResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exposureOverride: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Override recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExposureOverrideResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exposureEscalateNow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dry run: suggested per line prices. Nothing is persisted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EscalateNowResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     quoteDownloadOriginalFile: {
         parameters: {
             query?: never;
@@ -7051,6 +11968,62 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    salesTeamList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Array of sales persons. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesPerson"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    salesTeamGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sales person. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesPerson"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     uploadsFile: {
         parameters: {
             query?: never;
@@ -7072,6 +12045,95 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    vendorList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every vendor; an empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vendor"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    vendorCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VendorCreate"];
+            };
+        };
+        responses: {
+            /** @description The created vendor. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vendor"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    vendorGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vendor. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vendor"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
         };
     };
 }
