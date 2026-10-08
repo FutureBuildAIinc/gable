@@ -263,16 +263,16 @@ func TestParseListQueryLimitRefused(t *testing.T) {
 		code string
 	}{
 		{"limit=0", CodeValidationFailed},
-		{"limit=-5", CodeValidationFailed},
+		{"limit=-5", CodeBadRequest}, // a sign is not a plain digit run
 		{"limit=201", CodeValidationFailed},
 		{"limit=abc", CodeBadRequest},
 		{"limit=12.5", CodeBadRequest},
 		{"limit=", CodeBadRequest},
-		{"limit=%2B5", CodeBadRequest},  // a plus sign
-		{"limit=%205", CodeBadRequest},  // leading space
-		{"limit=5%20", CodeBadRequest},  // trailing space
-		{"limit=05", CodeBadRequest},    // leading zero
-		{"limit=1e1", CodeBadRequest},   // exponent notation
+		{"limit=%2B5", CodeBadRequest},                             // a plus sign
+		{"limit=%205", CodeBadRequest},                             // leading space
+		{"limit=5%20", CodeBadRequest},                             // trailing space
+		{"limit=05", CodeBadRequest},                               // leading zero
+		{"limit=1e1", CodeBadRequest},                              // exponent notation
 		{"limit=" + strings.Repeat("9", 30), CodeValidationFailed}, // past int range, a range refusal
 	}
 	for _, tc := range cases {
