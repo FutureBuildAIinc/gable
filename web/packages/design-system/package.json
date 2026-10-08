@@ -1,0 +1,29 @@
+{
+  "name": "@gable/design-system",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./tailwind": "./tailwind/theme.js",
+    "./src/tokens.css": "./src/tokens.css"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lit": "^3.2.1",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "jsdom": "^29.0.2",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "license": "LicenseRef-OpenLBM-Surface-1.0"
+}

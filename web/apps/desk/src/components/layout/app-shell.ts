@@ -14,7 +14,7 @@ import { customElement, state, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { workspace, menuForKey, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
-import '../ui/brand-logo.ts';
+import '@gable/design-system';
 import '../ui/omnibar.ts';
 import '../ui/shortcuts-modal.ts';
 import './branch-switcher.ts';

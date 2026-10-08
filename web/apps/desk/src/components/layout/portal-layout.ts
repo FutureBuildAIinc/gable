@@ -7,7 +7,7 @@ import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { clearToken } from '../../services/PortalService.ts';
 import type { PortalConfig, PortalUser } from '../../types/portal.ts';
-import '../ui/brand-logo.ts';
+import '@gable/design-system';
 import { icon } from '../../lib/icons.ts';
 import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, ChevronRight, Users, FolderGit2 } from 'lucide';
 
