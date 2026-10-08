@@ -33,6 +33,15 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
 
+# Shared web packages (the generated API client first). Covers the generated
+# src/schema.d.ts in particular: its generator owns the whole file and would
+# overwrite an inline header on every run, so the licence lives here instead.
+[[annotations]]
+path = "web/packages/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
+
 # Documentation, specs, guides.
 [[annotations]]
 path = "docs/**"
