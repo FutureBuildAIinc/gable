@@ -26,9 +26,31 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Connector-1.0"
 
-# Surfaces & native client apps.
+# Surfaces & native client apps: one row for every app bundle under
+# web/apps/ (the desk and the front door share the Surface licence).
 [[annotations]]
-path = "web/apps/desk/**"
+path = "web/apps/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
+
+# Shared web packages (auth, design-system, later api-client): Surface
+# licensed, same as the apps that consume them. The desk's shared tokens,
+# components and auth code were MOVED here (identifier for identifier).
+[[annotations]]
+path = "web/packages/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
+
+# Web workspace manifests: the npm workspace root and its lockfile. Build
+# manifests next to Surface code take the Surface licence (same reasoning as
+# core/go.mod taking Commons below).
+[[annotations]]
+path = [
+  "web/package.json",
+  "web/package-lock.json",
+]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
@@ -81,7 +103,7 @@ SPDX-License-Identifier = "LicenseRef-OpenLBM-Commons-1.0"
 # are deliberately absent here.
 #
 # `*.md` matches root-level markdown ONLY — a single `*` does not cross a `/`,
-# so docs/, web/apps/desk/ and core/ keep their own licenses. Using the glob rather
+# so docs/, web/ and core/ keep their own licenses. Using the glob rather
 # than a list of filenames means a new top-level document (a changelog, another
 # contributor guide) is covered the day it lands instead of the day someone
 # remembers to add it here.
@@ -116,7 +138,7 @@ SPDX-License-Identifier = "LicenseRef-OpenLBM-Docs-1.0"
 # TRADEMARK-POLICY.md and USAGE.md, which are the documents that actually
 # govern their use. The app's own logo is drawn inline
 # (web/apps/desk/src/components/ui/brand-logo.ts, web/apps/desk/public/favicon.svg) and is covered
-# by the web/apps/desk/ Surface annotation above.
+# by the web/ Surface annotation above.
 #
 # LICENSES/LicenseRef-OpenLBM-Trademark.txt stays: it is the brand-use policy
 # the project is bound by, and — as LICENSE-MAP.md's "Also in LICENSES/"

@@ -56,5 +56,17 @@ export default defineConfig({
         changeOrigin: false,
       },
     },
-  }
+  },
+  preview: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_PROXY || 'http://localhost:8080',
+        changeOrigin: false,
+      },
+      '/healthz': {
+        target: process.env.VITE_API_PROXY || 'http://localhost:8080',
+        changeOrigin: false,
+      },
+    },
+  },
 })

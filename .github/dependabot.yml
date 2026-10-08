@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
 # Dependabot keeps the three dependency surfaces of this repo current:
-# the Go module in core/, the npm workspace in web/apps/desk/, and the GitHub Actions
+# the Go module in core/, the npm workspace in web/, and the GitHub Actions
 # used by the workflows in .github/workflows/.
 #
 # Cadence is weekly rather than daily on purpose: the `vulnerabilities` job in
@@ -49,7 +49,7 @@ updates:
   # Frontend (Vite + React SPA)
   # ---------------------------------------------------------------------------
   - package-ecosystem: npm
-    directory: /web/apps/desk
+    directory: /web
     schedule:
       interval: weekly
       day: monday

@@ -206,7 +206,7 @@ describe('gable-portal-layout — sign out', () => {
     expect(localStorage.getItem('portal_user')).toBeNull()
     expect(localStorage.getItem('portal_config')).toBeNull()
     expect(localStorage.getItem('portal_token')).toBeNull()
-    expect(window.location.pathname).toBe('/')
+    expect(window.location.pathname).toBe('/home')
   })
 
   it('calls the logout endpoint so the httpOnly cookie is revoked server-side', async () => {
