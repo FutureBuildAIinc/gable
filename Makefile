@@ -79,8 +79,10 @@ logs:
 ps:
 	$(STACK_ENV) docker compose ps
 
+# psql in the Postgres alone container (`make db`). For the stack's Postgres:
+# COMPOSE_PROJECT_NAME=gable-stack make pg-shell
 pg-shell:
-	docker exec -it gable_postgres psql -U gable_user -d gable_db
+	docker compose exec postgres psql -U gable_user -d gable_db
 
 # ---------------------------------------------------------------------------
 # Backend lifecycle
@@ -108,11 +110,11 @@ migrate:
 seed:
 	cd core && go run ./cmd/seed
 
-# Nuke + repave the dev database, then migrate and seed. Requires the
-# `gable_postgres` container from docker compose to be running.
+# Nuke + repave the dev database, then migrate and seed. Requires the Postgres
+# from `make db` to be running.
 reset-db:
-	docker exec -i gable_postgres psql -U gable_user -d postgres -c "DROP DATABASE IF EXISTS gable_db;"
-	docker exec -i gable_postgres psql -U gable_user -d postgres -c "CREATE DATABASE gable_db OWNER gable_user;"
+	docker compose exec -T postgres psql -U gable_user -d postgres -c "DROP DATABASE IF EXISTS gable_db;"
+	docker compose exec -T postgres psql -U gable_user -d postgres -c "CREATE DATABASE gable_db OWNER gable_user;"
 	$(MAKE) migrate
 	$(MAKE) seed
 
