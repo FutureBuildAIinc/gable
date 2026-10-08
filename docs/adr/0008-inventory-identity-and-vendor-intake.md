@@ -8,25 +8,44 @@
 Proposed for the Gable v1 refactor (item C4-0, the design stop before cycle
 4's build items). It becomes accepted when the lead merges it after review.
 It stands on ADR 0001 (the wire contract), ADR 0002 (machine keys), ADR
-0003 (the outbox), ADR 0005 (the sales and money core) and the module recipe
-(`docs/refactor/MODULE-RECIPE.md`). Items C4-1 and C4-2 build from this
-record and the recipe. Where an item has to differ from this record, the
-record is changed first, in its own pull request.
-
-Two designs are being written at the same time as this one. Where this
-record depends on them, it states the assumption it makes and names the
-record that owns the question:
-
-- **ADR 0006 (units and pricing, cycle 3)** owns unit sets, conversion
-  factors, the tally shape and board foot arithmetic, and vendor price
-  levels on the cost side.
-- **ADR 0007 (drafts, links and confirm gated scopes, cycle 5)** owns
-  drafts as a resource and the `:propose` and `:commit` scopes.
+0003 (the outbox), ADR 0005 (the sales and money core), ADR 0006 (units and
+pricing) and ADR 0007 (drafts, links and confirm gated scopes), all
+accepted, and the module recipe (`docs/refactor/MODULE-RECIPE.md`). Items
+C4-1 and C4-2 build from this record and the recipe. Where an item has to
+differ from this record, the record is changed first, in its own pull
+request. This pull request also amends ADR 0005 section 8.4 and its Status
+note (sections 3.4 and 3.5 here are the reason).
 
 ADR 0005 is a hard dependency. This record extends its lock order (section
 11), its `purchase_order.received` event, its allocation request queue, and
-its cost function `costOf`. C4-2 starts only after C2-2 has merged into
-`refactor/v1`, because C4-2 changes inventory calls that C2-2 introduces.
+its cost function `costOf`.
+
+**The run order against cycle 2's chain and ADR 0006's items.** Cycle 2
+owns customer, order, invoice, payment, deposit, account, GL postings, POS
+and till, and its items land in a chain: C2-1 and C2-2a are merged; C2-2b
+(allocation and fulfilment) is being built now; C2-3, C2-4 and C2-5 follow.
+C2-2b adds the `Qty` functions to `inventory/service.go`, the
+`purchase_order.received` event and the allocation request queue; C2-4 is
+the last cycle 2 item that edits `internal/gl`; none of them is on
+`refactor/v1` yet. This record's items say "C2-2 adds" in the present tense
+of the plan, not of today's code. No cycle 4 item edits a file a running
+cycle 2 item or a running ADR 0006 item owns:
+
+| Item | Starts after | Must not edit |
+|---|---|---|
+| C4-1a (inventory, purchase orders, vendors, EDI partners; matching routes as they are) | C2-2b has merged; the purchase line shape of section 1 after C3-2A-units, else held to the stocking unit as below | the cycle 2 modules while their item is open (`internal/invoice`, `credit_memo`, `payment`, `deposit`, `account`, `gl`, `pos`, and `internal/order`, `salesdoc`, `inventory/service.go` until C2-2b has merged), `internal/pricing` |
+| C4-1b (the AP fixes of section 7.4) | C2-4, the last cycle 2 item that edits `internal/gl` | as C4-1a (no cycle 2 item edits `internal/gl` after C2-4) |
+| C4-2 A | C2-5 and C3-2B have merged (both C3-2B and A change the order, invoice and counter stock calls, and A's signatures carry C3-2B's `stock_quantity` and fulfilment tally) | nothing in cycle 2 is open; `internal/units` and the unit set service while C3-2A-units is open |
+| C4-2 B | A | as A |
+| C4-2 C | A, and C2-2b's allocation worker, which C changes (`RESERVED` first) | as A, plus `internal/quote` while C5-2 is open |
+| C4-2 D | C4-1a | as C4-1a |
+| C4-2 E | C4-1b | as C4-1b |
+| C4-2 F | C4-1a and C3-2A-pricing (`vendor_product_costs`, `ResolveCost`) | as C4-1a; `internal/pricing` is open only to C3-2A-pricing, which has merged before F starts, and F may extend pricing's service with the feed's system caller write path but adds no table |
+
+D and F depend only on C4-1a (and, for F, C3-2A-pricing) and may run beside
+A to C. C4-2 C's deletion of the quote's auto purchase order path
+(section 5.1) edits `internal/quote`, which C2-2 has already merged and
+C5-2 has not opened.
 
 ## Context
 
@@ -52,13 +71,24 @@ Today's code has no notion of stock identity beyond a row:
 
 Purchasing has the same kind of gap:
 
-- A purchase order goes from draft to sent with no approval step.
+- A purchase order goes from draft to sent with no approval step, and
+  `SubmitPO` sends from any status, `RECEIVED` included.
 - A receipt reads the purchase order without a lock. It accepts any
   quantity, including more than was ordered. It posts nothing to the
-  general ledger, writes no event, and recomputes average cost from
-  `products.total_quantity`.
+  general ledger and writes no event. Its average cost recompute reads
+  `products.total_quantity`, which is not a column but the
+  `SUM(inventory.quantity)` of the product read by `GetProduct`
+  (`product/repository.go`): because the receipt's `AdjustStock` runs
+  first in the same transaction, the received quantity is counted twice in
+  `Q`, and the cost update's error is dropped
+  (`purchase_order/service.go`).
+- Vendor statistics are averaged as `(old + new) / 2`, which weights the
+  latest sample at one half however many came before, and lead time is
+  `time.Since(po.CreatedAt)` at both submit and receive.
 - AP approval posts an entry with only the payable leg, because the bill's
   lines are never loaded, and it swallows the error when that save fails.
+  `PayVendor` also never checks that the invoice it applies to is
+  approved.
 - Matching pairs an invoice's lines with the purchase order's lines by
   their position in the list.
 - Neither vendor credit memos nor returns to the vendor exist.
@@ -82,16 +112,29 @@ purchasing and intake questions on top of that.
 
 | Concern | This record | Owned elsewhere |
 |---|---|---|
-| Units | Every stock quantity is held in the product's stocking unit, as NUMERIC(12,4). A purchase line carries its purchase unit and that unit's factor to the stocking unit, stored on the line. A receipt converts at the stored factor. | ADR 0006 owns unit sets, how a factor is resolved, and the column names for the stored factor. This record calls the factor `stock_factor`; the build uses ADR 0006's name. Until ADR 0006 lands, a purchase line's unit must be the stocking unit (409 blocker `unit_not_stock_unit`), as ADR 0005 did for sales. |
-| Stock by length (random length lumber) | Settled here as tally lines on a stock row (section 2.4), whatever ADR 0006 decides about sale lines. If ADR 0006 settles a tally shape for lines, the stock tally uses the same shape and the same quantity function, so a sold tally decrements a stock tally without conversion. | ADR 0006 owns the tally shape (pieces by length, thickness and width) and the board foot function. This record assumes a product sold by tally has a fixed thickness and width, with only length varying in stock. |
+| Units | Every stock quantity is held in the product's stocking unit, as NUMERIC(12,4). A purchase line carries ADR 0006's line shape: `uom`, `price_uom`, `uom_qty`, `price_uom_qty`, `stock_uom` and `stock_quantity`, with `unit_cost` NUMERIC(12,4) per `price_uom` and `line_total` by `httpx.Extend`. A receipt converts the received purchase quantity into the stocking unit exactly or refuses it (section 4). | ADR 0006 sections 3.3 and 3.4 own the pair resolution and the stock unit rule, which applies at receipt. Purchase lines are not one of the readers ADR 0006 9.1 protects: from C3-2A-units any unit of the product's set with `purchase` set is allowed; before it, the same columns carry the stocking unit and the pair 1 and 1, and the service holds a purchase line to the stocking unit (409 blocker `unit_not_stock_unit`), as ADR 0005 did for sales. During that hold `REPLACEMENT_COST` reads only stocking unit vendor costs (ADR 0006 9.1). The stock conversion paragraph below the table settles what `stock_unit_in_use` defers here. |
+| Stock by length (random length lumber) | Settled here as tally rows on a stock row (section 2.4), in ADR 0006's shape: a tallied row's quantity is linear feet, the sum of pieces x `length_ft`, and board feet are display only. A product sold by tally is a product with `products.random_length`. | ADR 0006 section 4 owns the tally table, the wire shape and the board foot function. No fixed cross section is assumed: a random length moulding has neither thickness nor width, and its board feet are null. |
 | Cost basis | Moving weighted average per product, kept in `products.average_unit_cost` and maintained correctly by receipts (section 3.5). `costOf` keeps its signature. | ADR 0005 named cycle 4 as the owner of cost layers. This record decides against layers for v1 (Alternatives). |
 | Receipts in the ledger | Receipts post to `1030` against a received-not-invoiced accrual (section 3.4). This closes the gap ADR 0005 section 1 left open. | |
-| Vendor costs from feeds | A price feed writes vendor costs (section 8.4). | ADR 0006 owns vendor price levels on the cost side. If ADR 0006 defines a vendor cost table, the price feed writes into it, and this record's `vendor_item_costs` is not built. |
-| Drafts and confirm gated scopes | Purchase orders keep their own `draft` status. Adjustments and transfers post on create. Counts have their own lifecycle. | ADR 0007 owns drafts as a resource and the `:propose` and `:commit` scopes. When those land, the scope a feed key needs to post a run is whatever ADR 0007 maps from today's `vendor-feeds:write`. Approval limits apply to people whatever scope a key holds: no key ever approves (section 6). |
+| Vendor costs from feeds | A price feed writes ADR 0006's `vendor_product_costs` through pricing's service (section 8.4); this record builds no cost table of its own. | ADR 0006 section 5.5 owns the table, `ResolveCost` and the vendor price levels. Purchase lines default their unit cost through `ResolveCost`. |
+| Drafts and confirm gated scopes | Purchase orders keep their own `draft` status. Adjustments and transfers post on create. Counts have their own lifecycle. | ADR 0007 owns drafts as a resource and the `:propose` and `:commit` verbs. Neither `vendor-feeds` nor `purchase-orders` has a draft kind, so ADR 0007 5.3 refuses `propose` and `commit` on them at mint and their keys keep `read` and `write` exactly as today. Purchase orders become a draft kind only after cycle 4 (ADR 0007 section 10). Approval limits apply to people whatever scope a key holds: no key ever approves, and no agent marked session either (section 6). |
 | Inter-branch transfers | Refused, as today. A move stays inside one branch. | A later item: a transfer order with in-transit stock. |
 | Vendor ASN, acknowledgement and invoice intake (856, 855, 810) | Not built. Feed runs are shaped so that each becomes another feed kind. | A later item. |
 | AP payment runs, 1099 | Not built. | GC-179, following the refactor. |
 | Vendor stock availability reads | Stored by the stock feed only. | GC-212, following the refactor. |
+
+**The stock conversion act.** ADR 0006 3.2's `stock_unit_in_use` defers "a
+stock conversion, a cycle 4 adjustment act" to this record. This record
+defines none in v1, and says so as a known limit: `stock_unit_in_use`
+refuses a change of the stocking unit while any stock row of the product
+holds a nonzero quantity or allocation, or any open order line or open
+purchase line names the product (this record adds open purchase lines to
+ADR 0006's check, one read in the unit set service, built by C4-1a). A
+dealer who must re-unit a stocked product waits for the conversion act. A
+full act would convert every row, tally, allocation and open line and
+recompute the average, each exactly or refused, under the locks of section
+9; that is a later item on this record's successor, because v1 has no
+dealer requirement that names it.
 
 ### 2. Stock identity
 
@@ -214,22 +257,52 @@ The bundle's status follows from what happens to its stock:
   marks the bundle `CONSUMED`.
 - Tags are never reused.
 
-`inventory_tally (inventory_id, length NUMERIC(8,2), pieces INTEGER NOT NULL
-CHECK (pieces > 0), PRIMARY KEY (inventory_id, length))` holds stock by
-length for products sold by tally. Its rules:
+`inventory_tally (inventory_id, length_ft NUMERIC(12,4) CHECK (length_ft >
+0), pieces INTEGER NOT NULL CHECK (pieces > 0 AND pieces <= 1000000),
+PRIMARY KEY (inventory_id, length_ft))` holds stock by length for a product
+with `products.random_length`, in ADR 0006 section 4's shape: a tallied
+row's quantity is linear feet, the sum of pieces x `length_ft`, exact at
+scale 4. No thickness or width enters it, and board feet are display only
+(ADR 0006 R4.3): a random length moulding tallies as freely as a random
+length board. Its rules:
 
-- Lengths use the unit ADR 0006 fixes for tallies; the assumption here is
-  feet.
-- The invariant is that a tallied row's `quantity` equals ADR 0006's tally
-  quantity function applied to its tally lines and the product's thickness
-  and width. The inventory service is the only writer of both, and it
+- The invariant is that a tallied row's `quantity` equals its tally rows'
+  linear feet. The inventory service is the only writer of both, and it
   recomputes `quantity` from the tally on every write. It never accepts a
   quantity and a tally that disagree: that is a 400 naming the tally.
-- A tallied line in an act (receipt, adjustment, transfer, sale) carries the
-  pieces by length it moves, and the stock row's tally decrements or
-  increments length by length.
+- An act line that moves a tallied row (a receipt, adjustment, transfer,
+  vendor return or count line) carries the pieces by length it moves as
+  rows of ADR 0006's `line_tally_rows`: cycle 4's migration extends that
+  table with one foreign key column per act line table
+  (`purchase_receipt_line_id`, `stock_adjustment_line_id`,
+  `stock_transfer_line_id`, `vendor_return_line_id`,
+  `stock_count_line_id`) and widens its `num_nonnulls` CHECK. ADR 0006
+  chose that table over JSONB for its constraints, and this record does
+  not fork it. The stock row's tally decrements or increments length by
+  length from those rows.
+- `stock_moves.tally` stays JSONB as a snapshot only: nothing reads it for
+  arithmetic, and the rows in `line_tally_rows` are the record.
 - A sale or move that names a length the row does not hold enough of is a
   409 blocker `tally_unavailable` naming the length.
+
+Three cases ADR 0006 leaves to stock:
+
+- **A sale without a tally.** ADR 0006 allows a random length sale line
+  with no tally, and a partial fulfilment with none. Such a sale takes
+  pieces longest first from the rows it draws on, and the tallies
+  decrement accordingly; there is no `tally_required` refusal on stock. A
+  client that cares which lengths leave names them.
+- **Allocation versus lengths.** An allocation holds linear feet, not
+  lengths, so a fulfilment can meet `tally_unavailable` after allocation
+  succeeded. Lengths are taken at fulfilment: a fulfilment whose tally
+  (ADR 0006 4.4) cannot be taken from the allocated rows is a 409
+  `tally_unavailable`, the allocation stands, and the desk reassigns it
+  (2.7) to a row that holds the lengths.
+- **Legacy rows.** A random length row with no tally rows is an untallied
+  linear feet row, which is what every existing row becomes at migration.
+  Untallied and tallied rows of one product coexist, and the pick policy
+  of 2.7 serves untallied rows first, so the length detail on tallied rows
+  survives until the amorphous pool is empty.
 
 #### 2.5 The stock row
 
@@ -245,7 +318,7 @@ After C4-2, `inventory` has these columns:
 | `bundle_id` UUID NULL, FK `stock_bundles` | |
 | `is_serial` BOOLEAN NOT NULL | 2.1 |
 | `quantity` NUMERIC(12,4) NOT NULL CHECK `>= 0` | stocking unit |
-| `allocated` NUMERIC(12,4) NOT NULL CHECK `>= 0 AND <= quantity` | widened from (10,4) by C4-1; the CHECK is added `NOT VALID` and validated only when the migration finds no violating row (it reports them otherwise) |
+| `allocated` NUMERIC(12,4) NOT NULL CHECK `>= 0 AND <= quantity` | already widened to (12,4) by C3-1's migration; the CHECK is added by C4-2 A `NOT VALID` and validated only when the migration finds no violating row (it reports them otherwise) |
 | `location` TEXT NULL | legacy text, no longer read or written; dropped by a later cycle |
 | `created_at`, `updated_at` | |
 
@@ -256,7 +329,9 @@ On the wire a stock row is `StockRow`:
 - `lot_code`, `serial`, `expires_on`;
 - `bundle_tag`, `bundle_status`;
 - `quantity`, `allocated`, `available` (decimal strings);
-- `tally` (null, or `[{length, pieces}]`);
+- `tally` (null, or ADR 0006 4.3's object: `rows` of `{pieces, length_ft}`,
+  with the read only `linear_feet`, `thickness_in`, `width_in` and
+  `board_feet`);
 - `updated_at`.
 
 `GET /api/v1/inventory` lists stock rows with these filters: `product_id`,
@@ -354,6 +429,9 @@ identity, it chooses rows in this order:
 
 1. this line's `RESERVED` rows (5.2);
 2. then rows in the order's branch with available quantity, in this order:
+   - untallied rows before tallied ones, on a random length product
+     (2.4's legacy case: the amorphous linear feet pool serves first, so
+     the lengths on tallied rows survive);
    - lot `expires_on` ascending, nulls last (first expiring, first out);
    - then lot `received_on` ascending (first in, first out);
    - then loose stock before broken bundles, and broken bundles before
@@ -384,6 +462,13 @@ row, and two refusals:
   unit;
 - a lot product with more than one lot on hand at the branch takes its lot
   by the policy unless the line names one.
+
+The serial rule stays in package A and is not deferred: tracking defaults
+to `NONE`, so the refusal fires only for a product a dealer has turned
+serial tracking on, and until then no counter line, no client and no
+golden changes. The field is optional and additive. Without the rule, the
+serial invariant of 2.1 (a serial is on hand in at most one place) breaks
+at the first counter sale of a serial product.
 
 **What the wire shows.** Invoice lines and credit memo lines expose a
 read-only `stock` array, `[{location_path, lot_code, serial, bundle_tag,
@@ -439,7 +524,9 @@ same pull request.
 - `inventory_id NULL` (null for stock found that was not in the snapshot);
 - the identity: `product_id`, `location_id`, `lot_code`, `serial`,
   `bundle_tag`;
-- `expected_quantity`, `expected_tally`;
+- `expected_quantity`, `expected_tally` (the snapshot);
+- `expected_at_count_quantity NULL`, `expected_at_count_tally NULL` (the
+  row as it was when the line was counted, below);
 - `counted_quantity NULL`, `counted_tally`, `counted_by`, `counted_at`.
 
 | From | To | Act | Effect | Event |
@@ -447,14 +534,22 @@ same pull request.
 | none | `draft` | `POST /api/v1/inventory/counts` | | `stock_count.created` |
 | `draft` | `in_progress` | transition | snapshot: one line per stock row in scope with its quantity and tally as expected | `stock_count.started` |
 | `in_progress` | `in_progress` | `PUT /api/v1/inventory/counts/{id}/lines` (revision) | record counted quantities; add lines for found stock | `stock_count.updated` |
-| `in_progress` | `posted` | transition | one adjustment, reason `CYCLE_COUNT`, with one line per counted line whose `counted - expected` is nonzero, applied to the current quantity; uncounted lines change nothing | `stock_count.posted`, then `inventory.adjusted` |
+| `in_progress` | `posted` | transition | one adjustment, reason `CYCLE_COUNT`, with one line per counted line whose `counted - expected_at_count` is nonzero, applied to the current quantity; uncounted lines change nothing | `stock_count.posted`, then `inventory.adjusted` |
 | `draft`, `in_progress` | `cancelled` | transition | none | `stock_count.cancelled` |
 
 Stock keeps moving during a count. The posted variance is `counted -
-expected`, taken against the snapshot. A sale between the snapshot and the
-count is in both the snapshot and the current quantity, so it is not
-counted twice. A blind count hides `expected_quantity` on the wire from
-roles other than `admin` and `owner`.
+expected_at_count`: when `PUT /api/v1/inventory/counts/{id}/lines` records
+a line's counted quantity, the same transaction also stores
+`expected_at_count`, the stock row's quantity and tally read under that
+row's lock (section 9 step 6), so the expectation moves with the shelf
+between the snapshot and the count. A sale before the line is counted is
+therefore in both `expected_at_count` and the current quantity exactly
+once, and the post leaves the shelf quantity: the snapshot said 10, 2 were
+sold, the counter finds 8, the variance is 8 - 8 = 0 and 8 stay. A sale
+after the line is counted is caught by the variance itself, as any later
+move is. The snapshot's `expected_quantity` stays for display and blind
+counts, and no post reads it. A blind count hides `expected_quantity` on
+the wire from roles other than `admin` and `owner`.
 
 Two refusals at posting, each a 409 naming the line:
 
@@ -599,17 +694,21 @@ that is closed fails the act with 409 blocker `period_closed`, as in ADR
 | Movement | Act | Source | Debit | Credit |
 |---|---|---|---|---|
 | Stock receipt | receipt (4) | `RECEIPT` | `1030` received value | `2040` the same |
-| Non stock or direct ship receipt | receipt | `RECEIPT` | `1030` received value | `2040` the same (relieved to `5010` when the order line is billed: ADR 0005 section 8.4 already costs such a line from its linked received purchase line) |
+| Non stock or direct ship receipt | receipt | `RECEIPT` | `1030` received value | `2040` the same (relieved to `5010` when the order line is billed: ADR 0005 section 8.4, as amended by this pull request, costs such a line from its linked received purchase line) |
 | Adjustment out | adjustment | `ADJUSTMENT` | each line's reason account, its value | `1030` the total |
 | Adjustment in | adjustment | `ADJUSTMENT` | `1030` the total | each line's reason account, its value |
 | Count | count post, through its adjustment | `ADJUSTMENT` | as above, per sign | |
-| Vendor invoice approved, for purchase lines | AP approve (7.4) | `VENDOR_INVOICE` | `2040` matched quantity x receipt unit cost; `5050` invoiced amount less that (a negative variance credits `5050`); for lines without a purchase line, each line's account | `2010` total |
-| Vendor return shipped | vendor return ship (7.1) | `VENDOR_RETURN` | `1050` the expected credit (quantity x the unit cost on the return line) | `1030` quantity x average cost; the difference to `5050` |
+| Vendor invoice approved, for purchase lines | AP approve (7.4) | `VENDOR_INVOICE` | `2040` relieved from the receipt lines' posted values pro rata to the matched quantity, the last relief taking the remainder (never a scale 4 recompute, which leaves cent residues in `2040`); `5050` invoiced amount less that (a negative variance credits `5050`); for lines without a purchase line, each line's account | `2010` total |
+| Vendor return shipped | vendor return ship (7.1) | `VENDOR_RETURN` | `2040` for the returned part of its receipt lines not yet invoiced (the vendor will simply invoice less, so the accrual clears now); `1050` the expected credit (quantity x the unit cost on the return line) for the invoiced part | `1030` quantity x average cost; the difference to `5050` |
 | Vendor credit memo posted | credit memo post (7.2) | `VENDOR_CREDIT` | `2010` total | return lines: `1050` the returned value, difference to `5050`; allowance lines: `5050`; charge lines: their account |
 | Transfer, allocation, reassignment | | none | | |
 
 Customer sale and return postings stay as ADR 0005 section 8.2 sets them.
-They value at `costOf`, and their moves carry that unit cost.
+They value at `costOf`, and their moves carry that unit cost. A stocked
+special order line values at `costOf` like any stocked line, because its
+receipt entered stock and moved the average (ADR 0005 section 8.4 as
+amended by this pull request); the linked purchase cost relieves `1030`
+only on non stock and direct ship lines, whose receipts carry no average.
 
 #### 3.5 Cost
 
@@ -618,30 +717,53 @@ They value at `costOf`, and their moves carry that unit cost.
 maintains it and how:
 
 - **A receipt line** of a stocked product, with `q` stocking units received
-  at unit cost `c`, computes the following in its transaction, under the
-  product row's lock (section 9 step 6b):
+  and value `v` (the receipt line's own extension, below), computes the
+  following in its transaction, under the product row's `FOR UPDATE` lock
+  (section 9 step 6b):
   - `Q` = the sum of `inventory.quantity` over all of the product's rows,
-    before this receipt;
-  - `avg' = (Q x avg + q x c) / (Q + q)`, rounded half away from zero to
-    scale 4;
-  - `avg' = c` when `Q <= 0` or `avg` is null.
-- **The receipt unit cost** in the stocking unit is the purchase line's unit
-  cost divided by its `stock_factor`, at scale 4. Freight applied to the
-  purchase order (today's freight allocation) adds to the receipt's unit
-  cost only when it is applied before the receipt. A freight charge applied
-  after the receipt posts to `5050`, and it never rewrites an average that
-  later sales already used. This is a change from today; it has a
-  CONTRACT-CHANGES row.
+    read after the lock is taken;
+  - `avg' = (Q x avg + v) / (Q + q)`, computed exactly from the value and
+    the stocking quantity and rounded once, half away from zero, to scale
+    4: the cost side's one rounding, beside ADR 0005's extension;
+  - `avg' = v / q` when `Q <= 0` or `avg` is null.
+- **The receipt line's value** is `httpx.Extend(quantity, uom_qty,
+  price_uom_qty, unit_cost)` in cents, on the purchase line's stored pair
+  and price unit (section 1). No factor is stored or divided by: the
+  purchase line carries ADR 0006's line shape, and the received purchase
+  quantity converts into the stocking unit exactly or the receipt is a 400
+  naming `lines[i].quantity` with the nearest exact quantities (ADR 0006
+  3.4), whose `stock_unit_changed` rule also applies at receipt.
+- **Freight.** Freight applied to the purchase order before the receipt
+  adds to the receipt's unit cost, as today's freight allocation does.
+  Freight applied after the receipt capitalizes the on hand share: freight
+  `F` on a receipt of `q` units puts `F x min(Q, q) / q` into `1030` and
+  the average, where `Q` is the product's on hand at that moment, folded
+  in under the same product lock by the same formula as a value with no
+  quantity (`avg' = (Q x avg + that share) / Q`, rounded once to scale 4);
+  the sold share, `F x max(q - Q, 0) / q`, goes to `5050`. Freight
+  therefore stays in inventory for lumber, where it is material, without
+  rewriting an average that later sales already used. This is a change
+  from today; it has a CONTRACT-CHANGES row and costs 2 to 4 dev hour
+  equivalents in package C.
 - **IN adjustments with a unit cost** (`OPENING`, and `FOUND` when one is
   given) update the average the same way. Other IN lines and every OUT line
   move at the current average and leave it unchanged.
 - **Vendor returns** leave at the average and leave it unchanged.
 - `products.total_quantity` is no longer read for cost.
 
-A sale committing at the same moment as a receipt is valued at the average
-it reads, which is the old or the new one depending on commit order. That is
-the normal behaviour of a moving average and leaves no residue: each move
-records the cost it was valued at, and `1030` moves by exactly those values.
+**The average under concurrency.** Every act that values a move at the
+average (a fulfilment or counter sale through `costOf`, an OUT adjustment,
+a count post, a vendor return, a restock with no source line) reads the
+product row `FOR SHARE` at section 9 step 6b, after its inventory locks;
+receipts and IN adjustments with a cost keep `FOR UPDATE` there and read
+`Q` after taking it. Share locks do not conflict with each other, so sales
+never queue behind sales; only receipts serialize against them. A sale
+racing a receipt values every relieved unit at one average, the old or the
+new, never a torn mix, and after both commit the balance of `1030` equals
+on hand x average. Package A proves it with
+`inventory.TestAverageLockNoResidue`: a receipt and a sale racing at pool
+size 4, after which `1030` equals the sum over products of on hand x
+average.
 
 ### 4. Receipts
 
@@ -660,13 +782,17 @@ and traced.
 `purchase_receipt_lines` has these columns:
 
 - `id`, `receipt_id`, `purchase_order_line_id`, `product_id NULL`;
-- `purchase_quantity`, `uom`, `stock_factor`, `quantity` (the stocking
-  unit);
-- `unit_cost` (per stocking unit), `value`;
+- `purchase_quantity` (in the purchase line's `uom`), with the purchase
+  line's shape snapshotted beside it: `uom`, `price_uom`, `uom_qty`,
+  `price_uom_qty`, `stock_uom`, and `quantity`, the stocking unit converted
+  exactly as below;
+- `unit_cost` NUMERIC(12,4), per `price_uom`, the purchase line's, and
+  `value`, the line's own `httpx.Extend` in cents (3.5);
 - `location_id NULL` (null on direct ship and non stock lines);
 - `lot_code`, `expires_on`;
 - `bundles JSONB` (`[{tag, vendor_tag, quantity, tally}]`), `serials
-  TEXT[]`, `tally JSONB`.
+  TEXT[]`; a tallied line's tally is rows in `line_tally_rows` (2.4), not
+  JSONB.
 
 The act is `POST /api/v1/purchase-orders/{id}/receipts`, with this body:
 
@@ -690,6 +816,10 @@ Validation:
   (1 + purchasing.over_receipt_percent / 100)`, where the setting defaults to
   0. Otherwise it is a 409 blocker `over_receipt` naming the line;
 - `quantity > 0`;
+- the received purchase quantity converts into the stocking unit exactly
+  (ADR 0006 R5); otherwise it is a 400 naming `lines[i].quantity` with the
+  nearest exact quantities, and a changed stocking unit answers 409
+  `stock_unit_changed` (ADR 0006 3.4);
 - a lot product names `lot_code`;
 - a serial product names exactly `quantity` serials, none already on hand;
 - a bundle line's bundle quantities sum to the line's quantity;
@@ -762,8 +892,21 @@ Links are created in two ways:
     and retried by `POST
     /api/v1/purchase-orders/special-order-requests/{order_line_id}/retry`.
 
-  This replaces today's best effort `CreateFromSOLine`, which runs outside
-  any transaction and can lose a link.
+**Today's automatic purchase order is already broken, and C4-2 C removes
+it.** `triggerAutoPO` (`quote/service.go`) fires for any quote line with a
+unit cost and a product, not only special order lines, and passes the
+quote line id as `linked_so_line_id`, which `REFERENCES order_lines(id)`
+(migration 011): `CreatePO` commits the purchase order first, `AddPOLine`
+then fails the foreign key, and the error is only logged
+(`purchase_order/service.go`). What is left is an empty `SPECIAL_ORDER`
+draft with no vendor; the `purchase_order_list` golden holds two of them
+from the seed's run. C4-2 C deletes `triggerAutoPO` and the quote's
+`AutoPOService` (an edit to `internal/quote`, which C2-2 has merged and
+cycle 5 has not opened), so the order confirm subscriber above is the only
+creator, and migration C cancels every empty `SPECIAL_ORDER` draft (sets
+it `CANCELLED`, never deletes it), with a notice of the count. Tests: no
+purchase order line is created from a quote, and none for a priced line
+that is not a special order line.
 
 #### 5.2 Allocation on receipt
 
@@ -778,7 +921,14 @@ for the same product. This record adds a reservation:
   line's `quantity_backordered`, and it raises `inventory.allocated` by the
   same amount. Reserved stock is not available to anyone else. The receipt
   takes no order lock: it reads the order line without one, and the worker
-  rechecks under the lock.
+  rechecks under the lock. Two receipts on two purchase lines linked to one
+  order line can therefore each read the same `quantity_backordered` and
+  over reserve: the receipt never fails for this, the sum of the line's
+  `RESERVED` rows may exceed its backorder until the worker serves it, and
+  the worker releases the excess with 5.2's rule. Package C tests it: two
+  concurrent receipts against one order line at pool size 4 end with the
+  reservation no greater than the backorder and both stocks on the rows
+  they were received into.
 - **In the worker.** The receipt's `purchase_order.received` event queues
   the order through ADR 0005's subscriber, because the order is backordered
   on that product. When the allocation worker serves the request, it
@@ -792,7 +942,10 @@ for the same product. This record adds a reservation:
   insert only, with no lock on existing request rows, so it stays inside
   ADR 0005's order.
 - **Cancel and close short** (ADR 0005 transitions) release `RESERVED` rows
-  with the `ALLOCATED` ones.
+  with the `ALLOCATED` ones, and insert `order_allocation_requests` rows
+  for other orders backordered on the released products, `ON CONFLICT DO
+  NOTHING`, insert only, exactly as the excess release does, so the freed
+  stock is served to the queue rather than left to the next receipt.
 - **A received line whose order line is already dead** inserts no
   reservation. The stock lands available. `purchase_order.received` names
   the line in `unlinked_order_line_ids`, so the desk sees it.
@@ -849,10 +1002,20 @@ writes `purchase_order.received` (with `ship_mode`) and
 The order line is then billable for the received quantity, under the same
 `special_order_not_received` rule. The desk bills it through ADR 0005's
 fulfilment route, and its COGS comes from the linked received purchase line
-(ADR 0005 section 8.4).
+(ADR 0005 section 8.4 as amended: a direct ship line never enters stock).
 
-Automatic billing on direct ship receipt is not built. Section "Open
-questions" explains why.
+**Automatic billing is not built in v1; the desk gets a list instead.** A
+direct ship receipt could queue the order's fulfilment the way delivery
+completion does (ADR 0005 section 5.5), but that queue is keyed on
+`delivery_id` and cycle 2 owns it. When automatic billing is built later,
+it gets its own queue keyed on `receipt_id`, in cycle 4's own files, and
+re-keys nothing of ADR 0005's. Until then, so that no received direct ship
+is forgotten, package C adds `GET /api/v1/purchase-orders/direct-ship-lines`
+(list envelope, filters `branch_id`, `order_id`, `unbilled` default true):
+one item per direct ship order line with the quantity received on its
+linked purchase lines and the quantity still unbilled, read from the
+receipt lines and the line's `quantity_fulfilled`, a read only join with
+the branch wall applied.
 
 ### 6. Purchase order approval by amount limits
 
@@ -879,9 +1042,15 @@ segment, `purchasing-limits`:
 
 Only an `owner` may set their own limit. A machine key is refused on every
 `purchasing-limits` route with 403 `forbidden`, message "purchasing limits
-are set by users". It is refused whatever scope it holds, on the same
-reasoning as ADR 0002's key management routes: a key that could set limits
-could approve through a user it controls.
+are set by users", whatever scope it holds, on the same reasoning as ADR
+0002's key management routes: a key that could set limits could approve
+through a user it controls. A session request whose actor resolves to kind
+`agent` (ADR 0007 5.4: any `X-Acting-As` value on a non key request) is
+refused the same 403 with the audit row `agent.limits_refused`, because
+ADR 0007's confirm gate fires only on confirm gated modules and
+`purchasing-limits` is not one: without this rule an agent holding a
+person's session could set the limit it is later approved under. Package D
+tests both refusals with their audit rows.
 
 Each change writes an `audit_log` row `purchasing_limit.set` holding the
 before and after values and the actor, and an event
@@ -896,7 +1065,12 @@ Transitions go through `POST /api/v1/purchase-orders/{id}/transitions` with
 otherwise they are a 409 blocker `purchase_order_not_draft`.
 
 The approved amount is `total_cents`, the sum of the line extensions (ADR
-0001 section 7a) in the purchase order's currency. A purchase order whose
+0001 section 7a) in the purchase order's currency. Freight charges applied
+to the purchase order before submission are part of `total_cents`: the
+buyer's spend authority covers the whole commitment. Freight applied after
+submission is outside it and needs no re-approval; it posts by 3.5's
+freight rule (the on hand share into `1030` and the average, the sold
+share to `5050`), a stated rule, not a gap. A purchase order whose
 currency differs from the approver's limit currency is a 409 blocker
 `currency_mismatch`.
 
@@ -912,7 +1086,12 @@ currency differs from the approver's limit currency is a 409 blocker
 
 A key is refused the approve edge with 403 `forbidden`, message "an approver
 must be a user". The refusal is served by the route, like ADR 0002's cashier
-rule.
+rule. A session request whose actor resolves to kind `agent` is refused the
+same way, 403 with the audit row `agent.approval_refused`: ADR 0007 5.4's
+confirm gate covers only confirm gated modules, and `purchase-orders` is
+not one until after cycle 4 (ADR 0007 section 10), so without this rule an
+agent holding a person's session could approve its own purchase order.
+Package D tests it.
 
 The reorder job, the A2A receiver and agents create `draft` purchase orders.
 Their submissions always wait for a person.
@@ -1072,7 +1251,7 @@ Matching becomes line keyed and document keyed.
   The event is `match.completed`, with data `{document_kind, document_id,
   status, purchase_order_id}`.
 
-#### 7.4 AP posting fixes that C4-1 makes
+#### 7.4 AP posting fixes that C4-1b makes
 
 These are required by 3.4 and are today's live failures:
 
@@ -1124,6 +1303,18 @@ key is refused 403.
   bound to this feed", with an `audit_log` row `key.feed_refused` that
   holds the key as actor and the bounded path, as in ADR 0002 section 5;
 - `GET /api/v1/vendor-feeds` returns only the key's own feed.
+
+**A bound key's reach, closed.** The `vendor-feeds:write` scope admits
+every non GET route under the segment, so the binding rule must close what
+the scope opens. A key may do exactly three things: `GET` its own feed,
+`POST /vendor-feeds/{id}/runs` on it, and read its runs and their rows.
+It is refused 403 `forbidden`, with an `audit_log` row, on `POST
+/api/v1/vendor-feeds` (creating a feed, and so a binding) and on every
+`PUT /vendor-feeds/{id}`, on its own feed included: a key that could edit
+its feed's mapping, `vendor_id` or `active` flag could rewrite what its
+own files post, or point its feed at another vendor and post costs
+against it. The retry and repost routes are users only. Package F tests
+each refusal with its audit row.
 
 A user with the role may post a run by hand from the desk.
 
@@ -1180,6 +1371,26 @@ re-export with different bytes becomes a new run, and its rows post as
 `UNCHANGED` because every row write is an upsert keyed by the vendor's own
 identifiers (8.4). The cost of that is a run record, not a double posting.
 
+**A, B, A.** A vendor that sends file A, then B, then A again to revert
+cannot post the third: its digest is already taken. Effective dates cover
+most price reverts, but the case is real, so the replay answer names the
+earlier run it matches, and a user (roles `admin`, `owner`, `purchasing`)
+may post it again: `POST /api/v1/vendor-feeds/{id}/runs/{run_id}/repost`,
+body `{"reason": "..."}`, refused unless the run is finished (`POSTED` or
+`PARTIAL`) and its body still stored (409 blocker `body_purged` once the
+file retention purge has taken it). It creates a new run from the stored
+body, processes it from row 0, records the reason on the new run, and
+writes the audit row `vendor_feed.reposted`. No key may call it.
+
+**The idempotency layer on a body this large.** The `Idempotency-Key`
+middleware buffers the request body for its fingerprint inside the
+request's own size limit and has no smaller cap of its own; its only own
+cap, 1 MiB, is on the stored response, and an answer above it is served in
+full and simply not stored, which is safe here because the digest is the
+durable guarantee and a run's answer is small. Package F tests a run
+posted at the `vendor_feeds.max_bytes` limit with an `Idempotency-Key`:
+the first post answers 201 and the keyed retry replays it.
+
 #### 8.3 Processing and partial failure
 
 A worker job, `vendor-feed-runs` in `internal/app/worker`, serves the runs
@@ -1220,7 +1431,9 @@ The routes:
   for `FAILED` or parked runs. It clears the parking and the attempts and
   re-queues the run from `processed_through`. A `PARTIAL` run is not
   retried: the vendor sends a corrected file, which has a new digest and
-  becomes a new run.
+  becomes a new run;
+- `POST /api/v1/vendor-feeds/{id}/runs/{run_id}/repost` (8.2's A, B, A
+  case), users only.
 
 The worker purges file bodies (not runs, rows or digests) of finished runs
 older than the setting `vendor_feeds.file_retention_days`. A purged run can
@@ -1253,16 +1466,35 @@ through section 2.
   a run on the partner vendor's catalogue feed. It answers with the run, a
   CONTRACT-CHANGES row, and refuses with 409 blocker `partner_has_no_feed`
   when the partner has no linked vendor or no catalogue feed.
-- **`PRICE` (CSV, X12 832 pricing).** Upserts `vendor_item_costs`:
-  - `vendor_item_id`, `uom`, `min_quantity`;
-  - `unit_cost NUMERIC(12,4)`;
-  - `effective_on`, `expires_on NULL`, `updated_by_run_id`;
-  - `UNIQUE (vendor_item_id, uom, min_quantity, effective_on)`.
+- **`PRICE` (CSV, X12 832 pricing).** Writes ADR 0006 5.5's
+  `vendor_product_costs` through pricing's service: pricing is the single
+  writer of that table, and the feed worker calls it as a system caller
+  (`branchctx.WithSystem`, null `branch_id`, every branch), which ADR
+  0006 5.6's `CheckEveryBranch` admits; a feed carries no branch split in
+  v1. The row it writes:
+  - `product_id` from the vendor item's mapping: a row whose vendor item
+    is not mapped to a product is `REJECTED` with `vendor_item_unmapped`
+    (the desk maps the item, and the vendor's next file posts it), not
+    staged;
+  - `purchase_uom` from the feed's unit map, which must resolve to a
+    product unit with `purchase` set in the product's set; otherwise the
+    row is `REJECTED` with `unit_not_purchase_unit`;
+  - `unit_cost` NUMERIC(12,4), never rounded;
+  - `effective_from`, and `effective_to NULL`, from the feed's
+    `effective_on` and `expires_on`;
+  - `vendor_price_level_id`, named by the feed, defaulting to the vendor's
+    default level;
+  - `updated_by_run_id`.
 
-  A row for a vendor SKU that is not in `vendor_items` is rejected
-  (`unknown_vendor_sku`). ADR 0006 owns this table if it defines one (see
-  section 1). Purchase lines default their unit cost from the cost row in
-  effect, and receipts never read it.
+  Quantity breaks (`min_quantity`) have no column in ADR 0006 and are
+  dropped for v1; if a dealer needs them, ADR 0006 is amended first in
+  its own pull request. A row for a vendor SKU that is not in
+  `vendor_items` is rejected (`unknown_vendor_sku`). ADR 0006 5.6's per
+  row `vendor_cost.created` and `vendor_cost.updated` events are replaced
+  on the feed path only by the run's summary event (ADR 0003 section 2);
+  nothing else that writes a vendor cost changes. Purchase lines default
+  their unit cost through `pricing.ResolveCost`, and receipts never read
+  the table.
 - **`STOCK` (CSV, X12 846).** Upserts `vendor_item_availability`:
   - `vendor_item_id`, `warehouse_code`;
   - `quantity_available`, `as_of`, `updated_by_run_id`;
@@ -1273,7 +1505,7 @@ through section 2.
 
 #### 8.5 Partners and feeds
 
-EDI trading partners keep their routes (converted by C4-1) and gain
+EDI trading partners keep their routes (converted by C4-1a) and gain
 `vendor_id NULL`.
 
 A partner's transport settings may name a secret only by reference: a
@@ -1310,7 +1542,12 @@ The rules:
   and transaction set numbers come from `edi_control_counters (partner_id,
   kind CHECK (ISA, GS, ST), next_value, PRIMARY KEY (partner_id, kind))`,
   locked and incremented in the same transaction (section 9 step 8). They
-  are never 1 for every document again.
+  are never 1 for every document again. ISA13 is exactly nine digits, so
+  the ISA counter wraps from 999999999 back to 1 and never emits 0; the
+  GS and ST counters wrap the same way at their own field widths. A wrap
+  changes nothing but the number: the outbox row keeps the number it
+  minted, and a vendor deduplicating on it has seen the earlier one long
+  before the counter comes round.
 - **Partner data.** The 850 is rendered from the partner row (its ISA and GS
   identifiers) and from `vendor_items.vendor_sku` per line. A line without a
   mapped vendor item is a 409 blocker `vendor_item_unmapped` naming the
@@ -1368,10 +1605,18 @@ follows (the new steps are marked):
    tally rows and bundle rows of a stock row are changed only under its
    lock. An act creates any missing stock rows (`INSERT ... ON CONFLICT DO
    NOTHING`) before it locks, so creation never interleaves with locking;
-   - **6b. product rows, in `product_id` order, for an average cost
-     update.** This is taken only by receipts, IN adjustments with cost, and
-     the C4-2 migration. Product edits lock a product row and take no
-     inventory lock, so they cannot meet a receipt in the opposite order;
+   - **6b. product rows, in `product_id` order.** Two locks live here.
+     `FOR UPDATE`, on an average cost update, is taken only by receipts, IN
+     adjustments with a cost, the post receipt freight fold (3.5) and the
+     C4-2 migration, each of which reads `Q` after taking it. `FOR SHARE`,
+     on an average cost read, is taken by every act that values a move at
+     the average (a fulfilment or counter sale through `costOf`, an OUT
+     adjustment, a count post, a vendor return, a restock with no source
+     line), after its inventory locks (3.5). Share locks never conflict
+     with each other, so sales do not queue behind sales; a receipt's
+     `FOR UPDATE` serializes against them and against the other average
+     movers only. Product edits lock a product row and take no inventory
+     lock, so they cannot meet a receipt in the opposite order;
    - **6c. `stock_level_dirty` inserts (`ON CONFLICT DO NOTHING`).** These
      take no lock on existing rows;
 7. the customer row;
@@ -1405,12 +1650,12 @@ with a small summary as data.
 | purchasing limit | `purchasing_limit.updated` | limits (6.1) |
 | stock count | `stock_count.created`, `.started`, `.updated`, `.posted`, `.cancelled` | counts |
 | vendor return | `vendor_return.created`, `.updated`, `.shipped`, `.credited`, `.cancelled` | returns |
-| vendor invoice | `vendor_invoice.created`, `.approved`, `.partial`, `.paid`, `.voided` | AP (C4-1) |
+| vendor invoice | `vendor_invoice.created`, `.approved`, `.partial`, `.paid`, `.voided` | AP (C4-1b) |
 | vendor credit memo | `vendor_credit_memo.created`, `.posted`, `.applied`, `.partial`, `.voided` | AP (C4-2) |
 | match | `match.completed` | matching |
 | vendor feed run | `vendor_feed.run_received`, `vendor_feed.run_posted`, `vendor_feed.run_failed` | feeds |
 | vendor document | `vendor_document.sent`, `vendor_document.parked` | the sender |
-| vendor | `vendor.created`, `vendor.updated` | vendors (C4-1) |
+| vendor | `vendor.created`, `vendor.updated` | vendors (C4-1a) |
 
 The plan's six names are covered: `inventory.adjusted`, `inventory.moved`,
 `stock.low`, `reorder.recommended`, `purchase_order.created` and
@@ -1426,7 +1671,7 @@ The plan's six names are covered: `inventory.adjusted`, `inventory.moved`,
 - `revision`, `updated_at`;
 - `PRIMARY KEY (product_id, branch_id)`.
 
-C4-1 backfills it from `products.reorder_point` and `reorder_qty` for every
+C4-1a backfills it from `products.reorder_point` and `reorder_qty` for every
 branch that holds the product. From then on, the refresh job writes per
 branch targets. The routes are `GET /api/v1/inventory/levels` (filters
 `branch_id`, `product_id`, `low`) and `PUT /api/v1/inventory/levels/{id}`.
@@ -1494,7 +1739,7 @@ fragment edited, and has CONTRACT-CHANGES rows for the differences.
 | Module segment | Routes |
 |---|---|
 | `inventory` | `GET /inventory`; `GET /inventory/moves`; `GET /inventory/reconciliation`; `GET`, `POST /inventory/adjustments`, `GET /inventory/adjustments/{id}`; `GET`, `POST /inventory/adjustment-reasons`, `PUT /inventory/adjustment-reasons/{code}`; `GET`, `POST /inventory/transfers`, `GET /inventory/transfers/{id}`; `GET`, `POST /inventory/counts`, `GET /inventory/counts/{id}`, `PUT /inventory/counts/{id}/lines`, `POST /inventory/counts/{id}/transitions`; `GET /inventory/lots`, `GET /inventory/lots/{id}`; `GET /inventory/bundles`, `GET /inventory/bundles/{id}`; `GET /inventory/allocations`, `POST /inventory/allocations/{id}/reassignments`; `GET /inventory/levels`, `PUT /inventory/levels/{id}` |
-| `purchase-orders` | `GET`, `POST /purchase-orders`; `GET`, `PUT /purchase-orders/{id}`; `POST /purchase-orders/{id}/transitions`; `GET`, `POST /purchase-orders/{id}/receipts`, `GET /purchase-orders/{id}/receipts/{receipt_id}`; `GET /purchase-orders/{id}/approvals`; the freight routes, converted; `GET /purchase-orders/recommendations`; the reorder routes, converted; `GET /purchase-orders/special-order-requests`, `POST /purchase-orders/special-order-requests/{order_line_id}/retry` |
+| `purchase-orders` | `GET`, `POST /purchase-orders`; `GET`, `PUT /purchase-orders/{id}`; `POST /purchase-orders/{id}/transitions`; `GET`, `POST /purchase-orders/{id}/receipts`, `GET /purchase-orders/{id}/receipts/{receipt_id}`; `GET /purchase-orders/{id}/approvals`; the freight routes, converted; `GET /purchase-orders/recommendations`; the reorder routes, converted; `GET /purchase-orders/special-order-requests`, `POST /purchase-orders/special-order-requests/{order_line_id}/retry`; `GET /purchase-orders/direct-ship-lines` (5.3) |
 | `purchasing-limits` (new) | `GET /purchasing-limits`, `GET`, `PUT /purchasing-limits/{user_id}`; users only |
 | `vendor-returns` (new) | `GET`, `POST /vendor-returns`; `GET`, `PUT /vendor-returns/{id}`; `POST /vendor-returns/{id}/transitions` |
 | `ap` | the invoice routes, converted, with `POST /ap/invoices/{id}/transitions` replacing `/approve`; `GET`, `POST /ap/credit-memos`, `GET`, `PUT /ap/credit-memos/{id}`, `POST /ap/credit-memos/{id}/transitions`, `POST /ap/credit-memos/{id}/applications`; payments and aging, converted |
@@ -1505,7 +1750,7 @@ fragment edited, and has CONTRACT-CHANGES rows for the differences.
 | `edi` | the partner routes, converted; import-catalog as an adapter (8.4) |
 
 All paths are under `/api/v1`. The A2A receiver stays on its JWS seam (ADR
-0002 section 3). C4-1 fixes its check-then-act duplicate:
+0002 section 3). C4-1a fixes its check-then-act duplicate:
 
 - the log row is inserted first, `ON CONFLICT (idempotency_key) DO
   NOTHING`, in the same transaction as the purchase order it creates;
@@ -1517,19 +1762,60 @@ Roles:
 - inventory: `admin`, `owner`, `warehouse` (reads also `sales`);
 - purchasing: `admin`, `owner`, `purchasing`;
 - AP and matching: `admin`, `owner`, `finance`;
-- feeds and vendor documents: `admin`, `owner`, `purchasing`;
-- every route is behind `scoped(...)` with the branch wall where the
-  resource has a branch.
+- feeds and vendor documents: `admin`, `owner`, `purchasing`.
+
+**The branch wall, per route (on the guards PR 37 and PR 39 landed).**
+Every route is behind `scoped(...)` and the branch middleware, and the
+wall is three guards the platform already carries plus two same branch
+rules this record adds:
+
+- **Body branches.** `middleware.BranchGuard.CheckPayloadBranch`
+  (`core/pkg/middleware/branch_payload.go`) on the payload `branch_id` of
+  purchase orders, counts, vendor returns, vendor credit memos and vendor
+  invoices.
+- **Body locations.** `CheckPayloadLocation` on every body `location_id`:
+  adjustment lines, a transfer's `from` and `to_location_id`, the count
+  root, receipt lines, a reassignment's `to`, and vendor return lines.
+- **Path ids.** The path id record check that `checkPOBranch`
+  (`purchase_order/handler.go`) applies, on every by id route whose record
+  has a branch: purchase orders, receipts, adjustments, transfers, counts,
+  vendor returns, credit memos, vendor invoices (which gain `branch_id`),
+  allocations and reassignments (the stock row's branch), stock levels,
+  approvals, matching results, and the special order retry (the order's
+  branch). A record of a branch the caller may not target is a 403 before
+  the act.
+- **Lists.** The list wall (`middleware.BranchIDForQuery`, nil meaning no
+  wall): a bound caller sees the context branch, and an administrator or
+  an unbound caller with no context branch sees every branch. The lane
+  STATUS's queued item (5) is named as C4-1a's test: with
+  `default_branch_required` false and no header, today's purchase order
+  list shows every branch, and the converted list applies the wall.
+- **Two same branch rules the wall does not give.**
+  - A receipt's `location_id` must be in the purchase order's branch,
+    else 409 `cross_branch` naming the line: today `HandleReceivePO`
+    checks only the caller's grants on the locations it names, so an
+    administrator or an unbound key can receive branch A's purchase
+    order into branch B.
+  - A linked purchase line's purchase order must be in the linked order
+    line's order's branch, else 409 `cross_branch` naming the line:
+    otherwise the `RESERVED` row sits in another branch, outside the pick
+    policy of 2.7 and outside the release the worker does.
 
 ### 12. Migrations, in order
 
-Each item lands numbered migrations with their down files. The number is
-the next free one when the item merges. Every step is idempotent and every
-backfill reads only columns that earlier steps made NOT NULL. Each migration
-is applied to an empty database and to a seeded one, and the backfill is
-tested on rows that exist.
+Each item lands numbered migrations with their down files. Every step is
+idempotent and every backfill reads only columns that earlier steps made
+NOT NULL. Each migration is applied to an empty database and to a seeded
+one, and the backfill is tested on rows that exist. The numbering: 092 is
+the last number merged to `refactor/v1`, and 093 to 096 are taken or
+reserved (093 is C3-1's `catalog_pricing_wire_contract`, in PR 41; the
+rest are cycle 2's and cycle 3's), so cycle 4 numbers from 097 upward:
+C4-1a takes 097, C4-1b 098, and the C4-2 packages take the next free
+numbers from 099 upward in their merge order, planned A 099, B 100, C 101,
+D 102, E 103, F 104 (D and F may merge beside A to C, so their numbers
+follow the merge, not the plan).
 
-**C4-1, `inventory_purchasing_wire_contract`.**
+**C4-1a, `inventory_purchasing_wire_contract` (097).**
 
 1. `purchase_orders`:
    - fill `created_at` and set it NOT NULL; add `revision`;
@@ -1539,17 +1825,29 @@ tested on rows that exist.
    - add a status CHECK on today's values (`DRAFT`, `SENT`, `PARTIAL`,
      `RECEIVED`, `CANCELLED`).
 2. `purchase_order_lines`:
-   - add `position` (by `(id)` within the purchase order; there is no
-     `created_at`);
+   - add `position` (by `(created_at, id)` within the purchase order;
+     `created_at` exists, migration 011);
    - widen `quantity` and `qty_received` to NUMERIC(12,4);
-   - rename `cost` to `unit_cost` and widen it to NUMERIC(12,4);
-   - add `uom`, backfilled from the product's stocking unit and `EA` when
-     there is no product;
-   - add `stock_factor`, backfilled to 1 (ADR 0006 names the column);
+   - rename `cost` to `unit_cost` and widen it to NUMERIC(12,4), per
+     `price_uom`;
+   - add the line shape of section 1: `uom`, `price_uom`, `uom_qty`,
+     `price_uom_qty`, `stock_uom` and `stock_quantity`, backfilled to the
+     product's stocking unit, the pair 1 and 1 and `stock_quantity =
+     quantity` (TEXT columns until ADR 0006's catalogue has landed; the
+     `units(code)` foreign keys are added by the first cycle 4 migration
+     that lands after C3-2A-units);
    - add `line_total` NUMERIC(12,2), computed with ADR 0001's extension.
-3. `inventory.allocated` widened to NUMERIC(12,4); `inventory.created_at`.
+3. `inventory.created_at` (the `allocated` widening to NUMERIC(12,4) is
+   already done: C3-1's migration 093).
 4. `vendors`: `created_at` NOT NULL, `revision`.
-5. `vendor_invoices`:
+5. `stock_levels`, backfilled from `products` for each branch holding the
+   product; `stock_level_dirty`; `reorder_recommendations`;
+   `reorder_runs` gains `branch_id NULL`.
+6. Keyset indexes on purchase orders and vendors.
+
+**C4-1b, `ap_wire_contract` (098).**
+
+1. `vendor_invoices`:
    - `created_at` NOT NULL, `revision`;
    - `number` (`AP-`);
    - `branch_id`, backfilled from the purchase order's branch or the
@@ -1559,31 +1857,42 @@ tested on rows that exist.
    - `po_id` as a real FK (orphans set to null, with a notice);
    - `UNIQUE (vendor_id, invoice_number)` after suffixing duplicates;
    - `amount_open`.
-   `vendor_invoice_lines`: `position`, `purchase_order_line_id NULL`,
+2. `vendor_invoice_lines`: `position`, `purchase_order_line_id NULL`,
    `product_id NULL`, `unit_price` widened to NUMERIC(12,4). Existing lines
    are not linked: today's lines have no reliable key to their purchase
    line, and the old positional pairing is exactly the defect.
-6. `stock_levels`, backfilled from `products` for each branch holding the
-   product; `stock_level_dirty`; `reorder_recommendations`;
-   `reorder_runs` gains `branch_id NULL`.
-7. Keyset indexes on purchase orders, vendor invoices and vendors.
+3. Keyset indexes on vendor invoices.
 
 **C4-2, in package order (section 13). Each package is one migration file.**
 
-*A, `stock_identity`.*
+*A, `stock_identity`, merging in two steps (13.2): A1 is steps 1 to 5,
+A2 is step 6, each with its own migration file and numbers following the
+merge order.*
+
 1. `locations`: uppercase `type`, map unknowns to `BIN` (notice), add the
    CHECK; add `stockable`; compute `path`; create the three system
    locations per branch and name them on the branch row.
-2. `inventory` rows with no location: point each at the default branch's
-   `UNASSIGNED` (notice with the count); then make `location_id` NOT NULL;
-   add `branch_id` and its trigger; add the stockable trigger.
+2. `inventory` rows with no location: a pre flight report, `core migrate
+   -report stock` (ADR 0006 A1's shape, read only), lists every such row
+   with its product and quantity and the count per product, so the
+   operator of a multi branch dealer can re-point a branch's counter
+   stock before upgrading rather than find it moved to the default
+   branch; the migration itself points what is left at the default
+   branch's `UNASSIGNED` (notice with the count). Then make
+   `location_id` NOT NULL; add `branch_id` and its trigger; add the
+   stockable trigger; recreate `v_inventory_with_branch` without the
+   join, as `SELECT * FROM inventory`: `i.*` now carries `branch_id`
+   itself, and a later `CREATE OR REPLACE` with the join's alias would
+   fail on the duplicate column.
 3. Merge duplicate `(product_id, location_id)` rows: sum `quantity` and
    `allocated` into the oldest row, delete the others, and report the count.
    Nothing references inventory ids yet, so the merge is safe.
 4. `products.tracking` (default `NONE`), `products.bundled`; `stock_lots`,
    `stock_bundles`; `inventory.lot_id`, `bundle_id`, `is_serial`;
-   `inventory_tally`; the unique indexes and checks of 2.1 and 2.5 (the
-   allocation CHECK `NOT VALID`, validated when clean).
+   `inventory_tally`; `line_tally_rows` gains its five act line foreign
+   key columns (2.4) and widens the `num_nonnulls` CHECK; the unique
+   indexes and checks of 2.1 and 2.5 (the allocation CHECK `NOT VALID`,
+   validated when clean).
 5. `stock_moves`; one `OPENING` move per row with a nonzero quantity, at
    the product's current average, with no journal entry (history is not
    invented, as in ADR 0005).
@@ -1610,7 +1919,9 @@ tested on rows that exist.
    gives matching and returns a receipt to name.
 4. `stock_allocations.state` and `receipt_line_id`;
    `special_order_po_requests`; `purchase_orders.ship_mode`,
-   `direct_ship_order_id`, `ship_to_snapshot`; `order_lines.direct_ship`.
+   `direct_ship_order_id`, `ship_to_snapshot`; `order_lines.direct_ship`;
+   cancel every empty `SPECIAL_ORDER` draft purchase order (5.1), with a
+   notice of the count.
 
 *D, `purchase_approval`.*
 1. `purchasing_limits`, `purchase_order_approvals` with the append only
@@ -1632,7 +1943,9 @@ tested on rows that exist.
    them. The old tables are renamed `*_legacy`.
 
 *F, `vendor_feeds`.*
-1. `vendor_items`, `vendor_item_costs`, `vendor_item_availability`.
+1. `vendor_items`, `vendor_item_availability`. No cost table is created:
+   `vendor_product_costs` is ADR 0006's, built by C3-2A-pricing's
+   migration and written through pricing's service (8.4).
 2. `edi_trading_partners.vendor_id`, backfilled where exactly one vendor's
    `name` equals the partner's `name`, else left null (notice).
    `edi_catalog_entries` rows of linked partners are copied into
@@ -1643,59 +1956,108 @@ tested on rows that exist.
 4. `vendor_document_outbox`, `edi_control_counters` (starting at 2 for any
    partner, because 1 has been used by every document so far).
 
+**Down files.** Each package's down reverses its own steps and refuses,
+naming the first row it cannot map back, wherever data written in the new
+shape has no place in the old one (a down never discards a dealer's data).
+A's down refuses while any lot, serial, bundle, tally row or stock move
+exists, and keeps the merged duplicate row: a merge cannot be split back,
+so the down reports the rows A merged and refuses rather than guess. B's
+down refuses while any adjustment reason is in use by an adjustment or
+count that is not cancelled. C's down refuses while any receipt, special
+order request or `RESERVED` allocation exists. D's down refuses while any
+purchase order is `PENDING_APPROVAL`, `APPROVED` or `CLOSED`. E's down
+refuses while any vendor return, vendor credit memo or match result
+exists. F's down refuses while any feed run, run row or outbox row exists.
+
 ### 13. The items
 
 #### 13.1 C4-1: six modules onto the recipe (35 to 60 dev hour equivalents)
 
-C4-1 builds:
+The split follows the run order of the Status: C4-1a (22 to 38) after
+C2-2b, C4-1b (13 to 22, the AP fixes) after C2-4.
 
-- inventory, purchase orders, AP, matching, EDI partners and vendors
-  converted per the recipe;
-- the C4-1 migration;
+**C4-1a builds:**
+
+- inventory, purchase orders, matching's routes as they are, EDI partners
+  and vendors converted per the recipe;
+- migration 097;
 - the existing routes on the envelope, with quantities as decimal strings,
   money in `_cents` and unit costs in `_ten_thousandths`;
 - purchase order numbers and revisions;
-- the receive act made correct in place (until package C replaces its route
-  with receipts): the purchase order locked, its status checked under the
-  lock, the over receipt rule, stock rows locked in order, and the average
-  under the product lock;
-- the AP fixes of 7.4;
+- the purchase line shape of section 1, held to the stocking unit when
+  C3-2A-units has not merged, and its cost defaulted through
+  `pricing.ResolveCost` once C3-2A-pricing has;
+- the receive act made correct in place (until package C replaces its
+  route with receipts): the purchase order locked, its status checked under
+  the lock, the over receipt rule, stock rows locked in order, and the
+  average under the product lock, its `Q` read once and the cost update's
+  error not dropped;
 - the A2A duplicate fix;
 - `stock_levels` and the `stock-levels` job;
 - the reorder payload of 10.3;
 - these events: `inventory.adjusted` (the old adjust route, until package B
   replaces it), `inventory.moved`, `stock.low`, `stock.recovered`,
-  `reorder.recommended`, `purchase_order.created`, `.sent`, `.received`,
-  `vendor_invoice.*` and `vendor.*`;
+  `reorder.recommended`, `purchase_order.created`, `.sent`, `.received`
+  and `vendor.*`;
 - the census and vocabulary entries.
 
 It tests, beyond the recipe's set:
 
 - each live failure as a test that fails at the base:
   - over receipt accepted;
-  - an AP entry with only the payable leg;
-  - an AP posting error swallowed;
   - a second purchase order from one A2A key under concurrency;
   - recommendations that ignore on order;
 - three concurrent receipts of one line that together exceed it, where
   exactly one passes the over receipt check;
+- the list wall, the STATUS queued item (5): the purchase order list
+  showing every branch when `default_branch_required` is false now applies
+  the wall (section 11);
 - `stock.low` written once on crossing and not again while low;
 - `reorder.recommended` data carrying `on_order`, `velocity` and
   `lead_time_days` with their sources;
 - a key holding only `purchase-orders:read` refused a write with an audit
   row.
 
+**C4-1b builds:**
+
+- the AP fixes of section 7.4: approve loads the lines, the entry posts
+  through `gl.PostEntry` in the approve transaction and a failure fails
+  the act, `VOIDED` is reachable by a transition that reverses the entry,
+  and a payment applies only to `approved` or `partial` invoices, locked
+  in id order;
+- migration 098;
+- the vendor invoice wire (Gable's `number` `AP-`, the vendor's as
+  `vendor_invoice_number`) and `vendor_invoice.*` events.
+
+It tests, beyond the recipe's set:
+
+- each live failure as a test that fails at the base:
+  - an AP entry with only the payable leg;
+  - an AP posting error swallowed;
+  - a payment applied to an unapproved invoice.
+
 #### 13.2 C4-2: the parity, in six packages (148 to 240 dev hour equivalents)
 
-Each package is its own pull request into `refactor/v1`, in this order:
-A, B, C, D, E, F. D and F depend only on C4-1 and may run beside A to C.
-Each has its own migration file and its own tests.
+Against the plan's 146 to 236: the delta of 2 to 4 at each end is the
+direct ship desk list and the post receipt freight fold of 3.5, both added
+in review round 1. Each package is its own pull request into
+`refactor/v1`, in the run order of the Status: A, then B, then C, with D
+after C4-1a, E after C4-1b, and F after C4-1a and C3-2A-pricing; D and F
+may run beside A to C. Each has its own migration file and its own tests.
+
+Package A carries the riskiest change of the cycle, every stock caller, so
+it merges in two steps, each its own pull request, its own migration file
+and its own review: **A1** (16 to 24) the identity columns, the move
+ledger, the single writer gate and the reconciliation read (migration A,
+steps 1 to 5); **A2** (22 to 34) the allocation rows, the pick policy, the
+reassignments, the counter line identity and the callers in order, invoice
+and POS (migration A, step 6). Together they are A's 38 to 58.
 
 | Package | Builds | Size |
 |---|---|---|
-| A, identity | 2.1 to 2.8: identity columns, lots, serials, bundles, tallies, the move ledger, the single writer gate, the reconciliation read, allocation rows and the pick policy, reassignments, transfers, counter line identity; the inventory service signatures and their callers in order, invoice and POS | 38 to 58 |
+| A, identity (A1 then A2) | 2.1 to 2.8: identity columns, lots, serials, bundles, tallies, the move ledger, the single writer gate, the reconciliation read, allocation rows and the pick policy, reassignments, transfers, counter line identity; the inventory service signatures and their callers in order, invoice and POS | 38 to 58 |
 | B, adjustments and counts | 2.9, 3.1 to 3.3, the adjustment and count postings | 20 to 34 |
-| C, receipts and special orders | 3.4 and 3.5 for receipts, section 4, section 5, the notification subscriber | 28 to 44 |
+| C, receipts and special orders | 3.4 and 3.5 for receipts, section 4, section 5, the notification subscriber, the direct ship list, the deletion of the quote's auto purchase order path | 28 to 44 |
 | D, approval | section 6 | 14 to 24 |
 | E, returns, credit memos, matching | section 7 | 24 to 40 |
 | F, feeds and the send outbox | section 8 | 24 to 40 |
@@ -1705,10 +2067,10 @@ and to its tests:
 
 | Exit line | Package | Tests |
 |---|---|---|
-| **A feed run posts once however often it is replayed** | F | the same body posted three times, sequentially, answers 201 then 200, 200 with `Feed-Run-Replayed: true`, one run, one stored body, one `vendor_feed.run_received`, and after processing one `vendor_feed.run_posted` and each cost row written once; the same body posted by three concurrent contenders at pool size 4 gives exactly one 201 and one run; the same body posted by the bound key and by a user is one run; a worker crash simulated after chunk 2 of 3 resumes from `processed_through` and the posted row count equals the file's; a file with two bad rows ends `partial`, the good rows posted, the bad rows `rejected` with codes; an unparseable file ends `failed` with nothing posted; a re-export with different bytes and the same rows is a new run whose rows are all `unchanged`; a key bound to feed X posting to feed Y is 403 with `key.feed_refused` |
-| **A PO above a buyer's limit waits for approval** | D | a buyer with a limit of 1,000.00 submits 1,500.00: 200, status `pending_approval`, `submitted` then `approval_requested`, one `SUBMITTED` row with `limit_cents` 100000; the buyer's own approve is 409 `limit_exceeded`; a key's approve is 403; a manager with a limit of 5,000.00 approves: `approved`, an `APPROVED` row and the audit row; a submission at 800.00 lands `approved` with `AUTO_APPROVED`; a draft edit after a reopen needs approval again; a receipt against `pending_approval` is 409; three concurrent approvers at pool size 4 give one approval; setting a limit by key is 403; the limit change writes its audit row; the approvals table refuses `UPDATE` |
-| **Stock moves by bin and lot** | A (with B and C) | a lot product received into bin B1 with lot L1 and into B2 with L2 shows two rows; a transfer of 5 of L1 from B1 to B3 moves exactly that identity (B1 L1 down 5, B3 L1 up 5, two moves under one act id, `inventory.moved`); allocation takes L1 before L2 by expiry, and the fulfilment's moves and the invoice line's `stock` name L1 and B3; a serial sold at the counter must be named, and a second receipt of the same serial is 409 `serial_on_hand`; a bundle transferred whole re-points its row, and a part transfer breaks it; a tallied bundle sold by tally decrements its lengths, and a length it lacks is 409 `tally_unavailable`; a transfer with `with_allocations` carries the allocation; for every row the quantity equals the sum of moves and the reconciliation read is empty after every test; the single writer gate fails when a test file outside the package writes `inventory` |
-| **A vendor credit memo matches** | E | 10 received at 4.00, 2 returned on a vendor return (`shipped`, `1050` debit 8.00, `1030` credit at average), a credit memo with one `RETURN` line of -2 at 4.00 posts and its match result is `matched`, and the return becomes `credited`; a credit memo crediting 3 against a return of 2 is 409 `exceeds_returned`; an invoice at 4.40 against a purchase line at 4.00 beyond tolerance is `exception`, and a credit memo `ALLOWANCE` of -10 at 0.40 on that invoice line re-runs the match to `matched`; the credit memo applied to an open invoice lowers both `amount_open`s; the credit memo entry balances (`2010` debit, `1050` and `5050` credits) |
+| **A feed run posts once however often it is replayed** | F | `vendorfeed.TestRunPostsOnceOnReplay`: the same body posted three times, sequentially, answers 201 then 200, 200 with `Feed-Run-Replayed: true`, one run, one stored body, one `vendor_feed.run_received`, and after processing one `vendor_feed.run_posted` and each cost row written once; the same body posted by three concurrent contenders at pool size 4 gives exactly one 201 and one run; the same body posted by the bound key and by a user is one run; a worker crash simulated after chunk 2 of 3 resumes from `processed_through` and the posted row count equals the file's; a file with two bad rows ends `partial`, the good rows posted, the bad rows `rejected` with codes; an unparseable file ends `failed` with nothing posted; a re-export with different bytes and the same rows is a new run whose rows are all `unchanged`; a key bound to feed X posting to feed Y is 403 with `key.feed_refused` |
+| **A PO above a buyer's limit waits for approval** | D | `purchase_order.TestApprovalAboveLimitWaits`: a buyer with a limit of 1,000.00 submits 1,500.00: 200, status `pending_approval`, `submitted` then `approval_requested`, one `SUBMITTED` row with `limit_cents` 100000; the buyer's own approve is 409 `limit_exceeded`; a key's approve is 403; an agent marked session's approve is 403 with `agent.approval_refused`; a manager with a limit of 5,000.00 approves: `approved`, an `APPROVED` row and the audit row; a submission at 800.00 lands `approved` with `AUTO_APPROVED`; a draft edit after a reopen needs approval again; a receipt against `pending_approval` is 409; three concurrent approvers at pool size 4 give one approval; setting a limit by key or by an agent marked session is 403 with the audit row; the limit change writes its audit row; the approvals table refuses `UPDATE` |
+| **Stock moves by bin and lot** | A (with B and C) | `inventory.TestStockMovesByBinAndLot`: a lot product received into bin B1 with lot L1 and into B2 with L2 shows two rows; a transfer of 5 of L1 from B1 to B3 moves exactly that identity (B1 L1 down 5, B3 L1 up 5, two moves under one act id, `inventory.moved`); allocation takes L1 before L2 by expiry, and the fulfilment's moves and the invoice line's `stock` name L1 and B3; a serial sold at the counter must be named, and a second receipt of the same serial is 409 `serial_on_hand`; a bundle transferred whole re-points its row, and a part transfer breaks it; a tallied bundle sold by tally decrements its lengths, and a length it lacks is 409 `tally_unavailable`; a transfer with `with_allocations` carries the allocation; for every row the quantity equals the sum of moves and the reconciliation read is empty after every test; the single writer gate fails when a test file outside the package writes `inventory` |
+| **A vendor credit memo matches** | E | `ap.TestVendorCreditMemoMatches`: 10 received at 4.00, 2 returned on a vendor return (`shipped`, `1050` debit 8.00, `1030` credit at average), a credit memo with one `RETURN` line of -2 at 4.00 posts and its match result is `matched`, and the return becomes `credited`; a credit memo crediting 3 against a return of 2 is 409 `exceeds_returned`; an invoice at 4.40 against a purchase line at 4.00 beyond tolerance is `exception`, and a credit memo `ALLOWANCE` of -10 at 0.40 on that invoice line re-runs the match to `matched`; the credit memo applied to an open invoice lowers both `amount_open`s; the credit memo entry balances (`2010` debit, `1050` credit; the `5050` leg is zero at a credit of 4.00 against a return cost of 4.00, and 3.4 omits zero legs); and the P2-7 case: receive 10, return 2 before invoicing, invoice 8, and both `1050` and `2040` end at zero |
 
 The other tests, by package:
 
@@ -1719,12 +2081,24 @@ The other tests, by package:
   - A direction mismatch is a 400 naming `lines[0].quantity`.
   - `CYCLE_COUNT` on the route is a 400.
   - A deactivated reason is refused.
-  - A count snapshot, then a sale, then a count posts `counted - expected`
-    and leaves the sale counted once.
+  - `inventory.TestCountSaleBeforeLineCounted`: a snapshot of 10, a sale
+    of 2, then a count of 8 leaves 8 on hand (the variance is 8 - 8 = 0,
+    not 8 - 10 = -2).
+  - `inventory.TestCountSaleAfterLineCounted`: a snapshot of 10, a count
+    of 10, then a sale of 2 leaves 8 (the sale is later than the count and
+    the post does not touch it).
   - `count_below_allocated` blocks the post.
 - **C.**
-  - A receipt posts `1030` against `2040` at the purchase line's cost per
-    stocking unit and moves the average by the formula.
+  - A receipt posts `1030` against `2040` at the receipt line's own
+    `Extend` on the purchase line's pair and price unit, and moves the
+    average by the formula.
+  - A purchase quantity that does not convert exactly into the stocking
+    unit is a 400 naming `lines[i].quantity` with the nearest exact
+    quantities.
+  - `order.TestSpecialOrderCostAtAverage`, the worked example of 3.4: 10
+    on hand at 5.00, a special order receipt of 10 at 9.00 (average
+    7.00), the order line fulfilled: the sale relieves 70.00 at `costOf`
+    and `1030` ends at 70.00, on hand x average.
   - A special order received while an older backorder exists for the same
     product goes to the special order, not the older one, and only the
     remainder is available.
@@ -1732,19 +2106,31 @@ The other tests, by package:
     of the receipt event allocates nothing twice.
   - A cancelled order's reservation is released and queues the next
     backorder.
+  - Two concurrent receipts on two purchase lines linked to one order
+    line may over reserve; the worker releases the excess and the
+    reservation ends no greater than the backorder (5.2).
   - A non stock special order line is refused billing before receipt
     (`special_order_not_received`) and costs from its receipt after.
   - A direct ship receipt moves no stock, posts `1030` against `2040`, and
     billing relieves it to `5010` at the purchase cost, so `1030` nets to
-    zero.
+    zero; `GET /purchase-orders/direct-ship-lines` shows the received
+    unbilled line and empties once it is billed.
+  - No purchase order line is created from a quote, and none for a priced
+    line that is not a special order line (5.1).
   - Receipt against special order linking under concurrency ends without
     deadlock.
 - **D.** As in the exit row.
 - **F.** The 850 for two purchase orders carries distinct control numbers
-  and the vendor SKUs. A purchase order with an unmapped line is 409
-  `vendor_item_unmapped`. A sender failure retries and parks after 10. A
-  sent purchase order's payload is the approved revision even when it is
-  reopened after.
+  and the vendor SKUs, and a partner that has sent 999999999 documents
+  wraps to 1 without a duplicate. A purchase order with an unmapped line
+  is 409 `vendor_item_unmapped`. A sender failure retries and parks after
+  10. A sent purchase order's payload is the approved revision even when
+  it is reopened after. A bound key is refused `POST /vendor-feeds` and
+  `PUT /vendor-feeds/{id}`, on its own feed included, each 403 with its
+  audit row (8.1). A run posted at the `vendor_feeds.max_bytes` limit with
+  an `Idempotency-Key` replays its stored answer (8.2). The A, B, A repost
+  act (8.2) creates a second run from the stored body with its reason and
+  audit row, and is refused for a key and after the body purge.
 
 ### 14. Where today's code contradicts this design
 
@@ -1752,22 +2138,22 @@ The other tests, by package:
 |---|---|---|
 | No unique stock identity; duplicate rows per product and location | migration 001 | C4-2 A |
 | Rows with a null location; the counter sells from them | `pos/service.go`, `inventory` | C4-2 A |
-| An adjustment's reason is accepted and dropped; nothing records a move | `inventory/service.go` `AdjustStock` | C4-1 (reason on the event), C4-2 A and B |
-| Read then write with no row lock on every stock change | `inventory/service.go` | C4-1 |
+| An adjustment's reason is accepted and dropped; nothing records a move | `inventory/service.go` `AdjustStock` | C4-1a (reason on the event), C4-2 A and B |
+| Read then write with no row lock on every stock change | `inventory/service.go` | C4-1a |
 | Allocation not tied to an order; a revert restocks the first row | `inventory/service.go` `Allocate`, `RevertFulfillment` | C4-2 A |
-| A receipt reads its purchase order unlocked, accepts any quantity, posts nothing | `purchase_order/service.go` `ReceivePO` | C4-1 (lock, over receipt), C4-2 C (document, posting) |
-| Average cost from `products.total_quantity`, its error ignored | `ReceivePO` | C4-1 |
-| Vendor statistics as `(old + new) / 2`, lead time measured to submit | `SubmitPO`, `ReceivePO` | C4-2 C |
-| Submit checks no status; no approval | `SubmitPO` | C4-1 (status), C4-2 D |
-| Special order purchase lines created outside any transaction, best effort | `CreateFromSOLine` | C4-2 C |
+| A receipt reads its purchase order unlocked, accepts any quantity, posts nothing | `purchase_order/service.go` `ReceivePO` | C4-1a (lock, over receipt), C4-2 C (document, posting) |
+| Average cost recomputed from a `total_quantity` that already includes the receipt (the receipt counts twice in `Q`), the cost update's error dropped | `ReceivePO` (`AdjustStock` runs first; `_ =` on `UpdateAverageCost`) | C4-1a |
+| Vendor statistics as `(old + new) / 2`, lead time `time.Since(CreatedAt)` at both submit and receive | `SubmitPO`, `ReceivePO` | C4-2 C |
+| `SubmitPO` checks no status (it sends a `RECEIVED` order) and there is no approval | `SubmitPO` | C4-1a (status), C4-2 D |
+| The automatic special order purchase order fires for any priced quote line with a product, passes the quote line id as `linked_so_line_id` (which `REFERENCES order_lines(id)`), commits an empty draft purchase order and drops the line's failure; the golden holds two empty `SPECIAL_ORDER` drafts | `triggerAutoPO` and `AutoPOService` (`quote/service.go`), `linked_so_line_id` (migration 011), `CreateFromSOLine` (`purchase_order/service.go`) | C4-2 C deletes all three; migration C cancels the empty drafts |
 | The 850's control numbers always 1, item codes `UNKNOWN`, a hard coded profile | `integrations/edi/x12/850.go`, `edi/service.go` | C4-2 F |
 | Catalogue import row by row, no transaction, no run, no replay guard | `edi/edi_repository.go` | C4-2 F |
-| AP approve posts only the payable leg; posting errors swallowed | `ap/service.go`, `gl/service.go` `SyncVendorInvoice` | C4-1 |
-| AP payments apply to pending invoices without locks | `ap/service.go` `PayVendor` | C4-1 |
-| Matching pairs lines by position, one invoice per purchase order | `matching/service.go` | C4-2 E (C4-1 converts the routes as they are) |
-| A2A creates the purchase order before its idempotency row | `purchase_order/a2a_receiver.go` | C4-1 |
-| Recommendations ignore on order and assume cost as 60 percent of price | `purchase_order/recommendations.go` | C4-1 |
-| `allocated` (10,4) and `quantity` (12,4) at different widths | migrations 001, 004 | C4-1 |
+| AP approve posts only the payable leg; posting errors swallowed | `ap/service.go`, `gl/service.go` `SyncVendorInvoice` | C4-1b |
+| AP payments apply to unapproved invoices without locks | `ap/service.go` `PayVendor` | C4-1b |
+| Matching pairs lines by position, one invoice per purchase order | `matching/service.go` | C4-2 E (C4-1a converts the routes as they are) |
+| A2A creates the purchase order before its idempotency row | `purchase_order/a2a_receiver.go` | C4-1a |
+| Recommendations ignore on order and assume cost as 60 percent of price | `purchase_order/recommendations.go` | C4-1a |
+| `allocated` (10,4) and `quantity` (12,4) at different widths | migrations 001, 004 | C3-1's migration 093 (PR 41) |
 
 ## Alternatives considered
 
@@ -1809,10 +2195,16 @@ schema change to moves. The cost is that a serial item's margin is the
 average's, not its own.
 
 **A per product valuation row maintained by every move,** instead of the
-product row lock taken only by receipts. It would give an exact running
-`Q` for the average, but it would put a hot row on every sale. A moving
-average read without that lock is still exact in the ledger, because every
-move records the cost it used.
+product row locks of 3.5. It would give an exact running `Q` without
+reading the stock rows, but it would put a hot row on every sale. A plain
+unlocked read of the product row is not safe: a sale that reads the
+average while a receipt moves it values at the old average against the new
+on hand, and `1030` keeps the difference for ever (the first draft of this
+record claimed otherwise, and review round 1 corrected it with a worked
+example). So 3.5 and section 9 step 6b give every valuing act a `FOR
+SHARE` lock on the product row and every average mover a `FOR UPDATE`
+one; share locks do not queue sales behind sales, so the hot row costs
+only what a receipt already cost.
 
 **Allocating special orders inside the receipt transaction,** by locking
 the order and updating its lines. The receipt would then take order locks
@@ -1920,19 +2312,17 @@ one job pass of lag.
   and exceptions routes), each with a CONTRACT-CHANGES row and the desk
   updated in the same pull request.
 
-## Open questions for the lead
+## The review round 1 decisions
 
-1. **Automatic billing of direct ship receipts.** A direct ship receipt
-   could queue the order's fulfilment the way delivery completion does (ADR
-   0005 section 5.5). That needs `order_fulfillment_requests` to be keyed by
-   something other than `delivery_id`, which is a change to ADR 0005, and
-   cycle 2 owns it. This record bills direct ships from the desk and
-   announces them by event. If the lead wants them billed automatically,
-   ADR 0005 is amended first, in its own pull request.
-2. **The counter's serial rule** adds a required field on serial products'
-   counter lines (C2-5's wire). It is listed as a contract change in
-   package A. The lead may prefer to defer it until a dealer stocks
-   serialized goods.
-3. **Freight applied after receipt** posts to `5050` instead of rewriting
-   the average (3.5). That is a behaviour change from today's freight
-   allocation, recorded as a CONTRACT-CHANGES row.
+The three questions this record left open are decided, as the reviewer
+recommended:
+
+1. **Direct ship billing stays manual in v1** (5.3): no automatic billing,
+   a desk list of received and unbilled direct ship lines instead, and a
+   later automatic path keyed on `receipt_id` in cycle 4's own files, not
+   a re-keying of ADR 0005's fulfilment queue.
+2. **The counter's required serial stays in package A** (2.7): effective
+   only when a dealer turns serial tracking on, additive on the wire.
+3. **Freight applied after receipt capitalizes the on hand share** (3.5):
+   `F x min(Q, q) / q` into `1030` and the average under the product lock,
+   the sold share to `5050`, 2 to 4 dev hour equivalents in package C.
