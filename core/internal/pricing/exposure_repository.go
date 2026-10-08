@@ -241,10 +241,10 @@ func (r *PostgresExposureRepository) ListActiveEscalatorsForIndex(ctx context.Co
 
 func (r *PostgresExposureRepository) ListEscalatorsForQuote(ctx context.Context, quoteID uuid.UUID) ([]PriceEscalator, error) {
 	q := `SELECT ` + escalatorColumns + `
-		FROM price_escalators pe
-		JOIN quote_lines ql ON ql.id = pe.quote_line_id
-		WHERE ql.quote_id = $1 AND pe.is_active = TRUE
-		ORDER BY pe.created_at`
+		FROM price_escalators
+		WHERE quote_line_id IN (SELECT id FROM quote_lines WHERE quote_id = $1)
+		  AND is_active = TRUE
+		ORDER BY created_at`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("list escalators for quote: %w", err)

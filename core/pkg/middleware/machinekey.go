@@ -105,6 +105,7 @@ var machineKeyModules = map[string]struct{}{
 	"deposits":        {},
 	"documents":       {},
 	"edi":             {},
+	"events":          {},
 	"gl":              {},
 	"governance":      {},
 	"inventory":       {},

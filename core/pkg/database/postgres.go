@@ -6,6 +6,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -125,6 +126,41 @@ func (db *DB) RunInTx(ctx context.Context, fn func(ctx context.Context) error) (
 	err = fn(ctxWithTx)
 	return err
 }
+
+// RunInSavepoint runs fn inside a savepoint of the transaction ctx carries,
+// so a failure inside fn can be undone without losing the rest of the
+// transaction. fn's context is the caller's: GetExecutor still resolves to
+// the same transaction. On an error or panic from fn, or a failed RELEASE
+// (fn swallowed a statement error, leaving the transaction aborted), the
+// work rolls back to the savepoint and the error is returned (a panic is
+// re-raised after the rollback). The savepoint is managed by name here
+// because pgx's nested transaction marks itself closed after a failed
+// RELEASE and then refuses the rollback. Outside a transaction there is
+// nothing to roll back to, so fn runs in a new transaction through RunInTx.
+func (db *DB) RunInSavepoint(ctx context.Context, fn func(ctx context.Context) error) (err error) {
+	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
+	if !ok {
+		return db.RunInTx(ctx, fn)
+	}
+	name := fmt.Sprintf("gable_sp_%d", savepointSeq.Add(1))
+	if _, err := tx.Exec(ctx, "SAVEPOINT "+name); err != nil {
+		return fmt.Errorf("failed to open savepoint: %w", err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+name)
+			panic(p)
+		} else if err != nil {
+			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+name)
+		} else if _, rerr := tx.Exec(ctx, "RELEASE SAVEPOINT "+name); rerr != nil {
+			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+name)
+			err = fmt.Errorf("failed to release savepoint: %w", rerr)
+		}
+	}()
+	return fn(ctx)
+}
+
+var savepointSeq atomic.Int64
 
 type txKey struct{}
 
