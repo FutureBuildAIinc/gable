@@ -100,6 +100,18 @@ def parse_manifest(path):
 
 m = parse_manifest("manifest.yaml")
 
+def only_keys(where, d, allowed):
+    extra = sorted(set(d) - set(allowed))
+    if extra:
+        fail("%s has unknown key(s) %s (allowed: %s)" % (where, ", ".join(extra), ", ".join(sorted(allowed))))
+
+only_keys("manifest.yaml", m, ["shape", "app", "name", "runtimes", "planned", "tenancy", "database", "observability", "frontends"])
+for blk, keys in (("database", ["extensions"]), ("observability", ["service"])):
+    if blk in m:
+        if not isinstance(m[blk], dict):
+            fail("manifest.yaml %s must be a block of keys" % blk)
+        only_keys("manifest.yaml " + blk, m[blk], keys)
+
 if m.get("shape") != "1":
     fail("manifest.yaml must declare shape: 1")
 if m.get("app") != "gable":
@@ -138,6 +150,7 @@ if not isinstance(fes, list) or not fes:
     fail("manifest.yaml frontends must be a non-empty list")
 ids = []
 for fe in fes:
+    only_keys("manifest.yaml frontend entry", fe, ["id", "name", "path", "planned"])
     fid = fe.get("id")
     if not fid or not re.fullmatch(r"[a-z][a-z0-9-]*", fid):
         fail("manifest.yaml frontend id %r is missing or not kebab-case" % fid)
