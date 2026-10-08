@@ -159,9 +159,15 @@ item; a later part of R1-7 validates every golden's response against its
 operation. The seam is already built: `core/internal/apicontract` loads
 the assembled document and `Spec.Find(method, concretePath)` resolves a
 recorded request to its operation and extracts the path parameters,
-exactly as the coverage test already uses it. The conformance test will
-Find each golden's request, then validate the golden's response body
-against the operation's declared response schema.
+exactly as the coverage test already uses it. Find strips any query
+string recorded with the request, and when a literal route and a
+templated route both match one concrete path it prefers the most specific
+pattern the way net/http's ServeMux ranks them: a literal segment beats a
+templated one at the first differing position, a longer run of leading
+literal segments beats a shorter one, and the pattern text is the
+deterministic backstop. The conformance test will Find each golden's
+request, then validate the golden's response body against the operation's
+declared response schema.
 
 ## The generated client
 

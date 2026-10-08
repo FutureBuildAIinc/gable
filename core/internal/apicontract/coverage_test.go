@@ -119,3 +119,59 @@ func TestFindResolvesConcretePaths(t *testing.T) {
 		t.Fatalf("a deeper path must not resolve, got %+v", op)
 	}
 }
+
+// TestFindPrefersTheMostSpecificTemplate pins the precedence the conformance
+// pass relies on when a literal route and a templated route both match one
+// concrete path, and the fact that a recorded query string never takes part
+// in matching: net/http's ServeMux serves /api/v1/quotes/analytics from its
+// own route, not from /api/v1/quotes/{id}, and a golden recorded as
+// /api/v1/invoices?limit=1 is the list route.
+func TestFindPrefersTheMostSpecificTemplate(t *testing.T) {
+	root, err := routecensus.FindModuleRoot(".")
+	if err != nil {
+		t.Fatalf("find module root: %v", err)
+	}
+	spec, err := Load(root + "/api/openapi.yaml")
+	if err != nil {
+		t.Fatalf("load contract: %v", err)
+	}
+
+	op, params := spec.Find("GET", "/api/v1/quotes/analytics")
+	if op == nil || op.ID != "quoteAnalytics" {
+		t.Fatalf("GET /api/v1/quotes/analytics must resolve to quoteAnalytics, not the {id} template, got %+v", op)
+	}
+	if len(params) != 0 {
+		t.Fatalf("a literal route extracts no path parameters, got %v", params)
+	}
+
+	op, _ = spec.Find("GET", "/api/v1/invoices?limit=1")
+	if op == nil || op.ID != "invoiceList" {
+		t.Fatalf("GET /api/v1/invoices?limit=1 must resolve to invoiceList, got %+v", op)
+	}
+
+	op, params = spec.Find("GET", "/api/v1/quotes/8f14e45f-ceea-467f-a830-a?include=lines")
+	if op == nil || op.ID != "quoteGet" {
+		t.Fatalf("GET /api/v1/quotes/{id}?include=lines must resolve to quoteGet, got %+v", op)
+	}
+	if params["id"] != "8f14e45f-ceea-467f-a830-a" {
+		t.Fatalf("the id parameter must survive the stripped query string, got %v", params)
+	}
+}
+
+// TestFindBreaksTiesDeterministically pins the backstop: the assembled
+// document cannot carry two templates of the same shape under different
+// parameter names (the merge tool refuses), but Find still answers in a
+// fixed order, never the map's, so a hand-built or future document cannot
+// make the same request resolve differently between calls.
+func TestFindBreaksTiesDeterministically(t *testing.T) {
+	s := &Spec{paths: map[string]map[string]Operation{
+		"/a/{x}": {"GET": {Method: "GET", Path: "/a/{x}", ID: "lexicographicallyFirst"}},
+		"/a/{y}": {"GET": {Method: "GET", Path: "/a/{y}", ID: "second"}},
+	}}
+	for i := 0; i < 100; i++ {
+		op, _ := s.Find("GET", "/a/concrete")
+		if op == nil || op.ID != "lexicographicallyFirst" {
+			t.Fatalf("call %d: a shape tie must resolve to the lexicographically first pattern, got %+v", i, op)
+		}
+	}
+}

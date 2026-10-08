@@ -106,25 +106,71 @@ func (s *Spec) Operations() []Operation {
 }
 
 // Find resolves a concrete request path to its operation: each templated
-// segment ({id}, {customerId}) matches exactly one concrete segment. It
-// returns the matched operation and the extracted path parameters, or nil
-// when no template matches. The conformance pass resolves every golden's
-// recorded request through this.
+// segment ({id}, {customerId}) matches exactly one concrete segment, and a
+// query string recorded with the request takes no part in matching. When
+// several templates match, the most specific one wins the way net/http's
+// ServeMux ranks patterns: a literal segment beats a templated one at the
+// first position where they differ, and a longer run of leading literal
+// segments beats a shorter one, with the pattern text as the deterministic
+// backstop so the answer never depends on map order. It returns the matched
+// operation and the extracted path parameters, or nil when no template
+// matches. The conformance pass resolves every golden's recorded request
+// through this.
 func (s *Spec) Find(method, concretePath string) (*Operation, map[string]string) {
 	m := strings.ToUpper(method)
+	if i := strings.IndexByte(concretePath, '?'); i >= 0 {
+		concretePath = concretePath[:i]
+	}
 	concrete := strings.Split(strings.Trim(concretePath, "/"), "/")
+	var matches []Operation
+	var matchParams []map[string]string
 	for path, methods := range s.paths {
 		op, ok := methods[m]
 		if !ok {
 			continue
 		}
 		params, ok := matchTemplate(path, concrete)
-		if ok {
-			found := op
-			return &found, params
+		if !ok {
+			continue
+		}
+		matches = append(matches, op)
+		matchParams = append(matchParams, params)
+	}
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	best := 0
+	for i := 1; i < len(matches); i++ {
+		if moreSpecific(matches[i].Path, matches[best].Path) {
+			best = i
 		}
 	}
-	return nil, nil
+	found := matches[best]
+	return &found, matchParams[best]
+}
+
+// moreSpecific reports whether pattern a outranks pattern b under ServeMux
+// precedence. Both patterns match the same concrete path, so they have the
+// same number of segments; the first segment where one is literal and the
+// other templated decides it, and an otherwise total tie falls to the
+// pattern text so the order is deterministic.
+func moreSpecific(a, b string) bool {
+	as := strings.Split(strings.Trim(a, "/"), "/")
+	bs := strings.Split(strings.Trim(b, "/"), "/")
+	for i := range as {
+		at := isTemplatedSegment(as[i])
+		bt := isTemplatedSegment(bs[i])
+		if at != bt {
+			return bt && !at
+		}
+	}
+	return a < b
+}
+
+// isTemplatedSegment reports whether the segment is a {parameter}.
+func isTemplatedSegment(seg string) bool {
+	_, ok := templateSegmentName(seg)
+	return ok
 }
 
 // matchTemplate matches a templated path against already split concrete
