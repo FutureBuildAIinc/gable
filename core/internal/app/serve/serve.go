@@ -782,7 +782,7 @@ func Run() {
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff
 	// reads back. Route list and the admin/owner guard: wire_staff.go.
-	wireStaffAdmin(mux, db, auditLog)
+	wireStaffAdmin(mux, db, auditLog, cfg.EventsOrg)
 
 	// Integration API. One X-Integration-Key-gated surface shared by the
 	// FB-Brain cross-system endpoints and by AI_LM (github.com/gablelbm/

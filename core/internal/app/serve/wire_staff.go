@@ -10,6 +10,7 @@ import (
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 )
 
 // wireStaffAdmin mounts the staff roster + module-grant administration surface:
@@ -34,9 +35,10 @@ import (
 // It is deliberately NOT branch-scoped: the roster is dealer-wide, and a staff
 // member's AI_LM entitlement does not depend on which branch the admin has
 // selected.
-func wireStaffAdmin(mux *http.ServeMux, db *database.DB, auditLog *audit.Logger) {
+func wireStaffAdmin(mux *http.ServeMux, db *database.DB, auditLog *audit.Logger, eventsOrg string) {
 	staffRepo := staff.NewRepository(db)
-	staffSvc := staff.NewService(staffRepo).WithAuditLog(auditLog)
+	staffSvc := staff.NewService(staffRepo).WithAuditLog(auditLog).
+		WithOutbox(outbox.NewWriter(db, eventsOrg)).WithTxRunner(db)
 	staffHandler := staff.NewHandler(staffSvc)
 	staffHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 }
