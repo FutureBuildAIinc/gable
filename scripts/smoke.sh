@@ -222,7 +222,7 @@ code=$(curl -sS -o "$TMP/refused.json" -w '%{http_code}' -X POST "$BASE/api/v1/q
 pass "a call with a key lacking quotes:write is refused with 403"
 # The mint writes the key.created audit row on the same entity (C5-1a), so
 # the refusal check pins the refusal row itself, by action and attribution.
-audit=$(psql_q "SELECT action || '|' || actor_kind || '|' || actor_id::text FROM audit_log WHERE action = 'key.scope_refused' AND actor_id = '$KEYID'::uuid ORDER BY created_at, id")
+audit=$(psql_q "SELECT action || '|' || actor_kind || '|' || actor_id::text FROM audit_log WHERE action = 'key.scope_refused' AND actor_id = '$KEYID' ORDER BY created_at, id")
 [ "$audit" = "key.scope_refused|key|$KEYID" ] || fail "the refusal is audited with the key's id" "audit rows: '$audit'"
 pass "the refusal is audited: key.scope_refused with actor_kind key and actor_id $KEYID"
 
