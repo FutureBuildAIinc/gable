@@ -229,7 +229,7 @@ describe('contacts', () => {
   })
 
   it('replaces with PUT and the contact revision', async () => {
-    await CustomerService.updateContact('ct-1', { first_name: 'A', last_name: 'B' }, 2)
+    await CustomerService.updateContact('ct-1', { first_name: 'A', last_name: 'B', can_place_orders: true, order_limit_cents: null }, 2)
     expect(lastUrl().pathname).toBe('/api/v1/contacts/ct-1')
     expect(lastInit().method).toBe('PUT')
     expect(lastHeader('If-Match')).toBe('"2"')
@@ -290,7 +290,7 @@ describe('error envelope', () => {
 
   it('flags a stale revision', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'stale_revision', message: 'changed' }, meta: { request_id: 'r' } }, 409))
-    const err = await CustomerService.updateCustomer('c-1', { account_number: 'A', name: 'N' }, 1).catch(e => e)
+    const err = await CustomerService.updateCustomer('c-1', { account_number: 'A', name: 'N', payment_terms_id: 't-1', po_required: false }, 1).catch(e => e)
     expect(err.isStaleRevision).toBe(true)
     expect(err.status).toBe(409)
   })

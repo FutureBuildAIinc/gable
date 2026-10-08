@@ -11,7 +11,7 @@ import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiErro
 import { keyed } from 'lit/directives/keyed.js';
 import { AccountService } from '../../services/AccountService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
-import type { Customer, CustomerRequest, PaymentTermsRecord } from '../../types/customer.ts';
+import type { Customer, CustomerRequest, CustomerUpdateRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
 import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
@@ -144,7 +144,13 @@ export class GableAccountDetail extends LitElement {
         this.editErrors = {};
         this.editMessage = '';
         try {
-            this.customer = await CustomerService.updateCustomer(this.customer.id, request, this.customer.revision);
+            // A PUT must name the controls it keeps, so a form that left one out sends the loaded value.
+            const update: CustomerUpdateRequest = {
+                ...request,
+                payment_terms_id: request.payment_terms_id ?? this.customer.payment_terms_id,
+                po_required: request.po_required ?? this.customer.po_required,
+            };
+            this.customer = await CustomerService.updateCustomer(this.customer.id, update, this.customer.revision);
             this.editing = false;
             ToastService.show('Customer saved', 'success');
             // The balance summary's limit may have moved with the header.

@@ -150,7 +150,7 @@ export class GableContactList extends LitElement {
                 await CustomerService.createContact(this.customerId, request);
                 ToastService.show('Contact added', 'success');
             } else {
-                await CustomerService.updateContact(target.id, request, target.revision);
+                await CustomerService.updateContact(target.id, { ...request, can_place_orders: d.can_place_orders, order_limit_cents: limit.cents }, target.revision);
                 ToastService.show('Contact saved', 'success');
             }
             this.editing = null;
