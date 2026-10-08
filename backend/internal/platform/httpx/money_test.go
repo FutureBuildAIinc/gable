@@ -11,8 +11,8 @@ import (
 )
 
 // RULE (ADR 0001 §7): cents parse exactly from database decimal strings,
-// never through float64. Postgres pads DECIMAL(19,4) columns to four
-// digits, so trailing zeros beyond the cents scale are accepted.
+// never through float64. Postgres pads NUMERIC columns to their declared
+// scale, so trailing zeros beyond the cents scale are accepted.
 func TestParseCents(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -24,7 +24,7 @@ func TestParseCents(t *testing.T) {
 		{"12", 1200},
 		{"12.3", 1230},
 		{"12.34", 1234},
-		{"12.3400", 1234}, // DECIMAL(19,4) money column
+		{"12.3400", 1234}, // a scale 4 column's zero padding
 		{"-12.34", -1234},
 		{"0.05", 5},
 		{"-0.05", -5},
@@ -80,9 +80,10 @@ func TestParseCentsOverflow(t *testing.T) {
 	}
 }
 
-// RULE: the unit price parses exactly at scale 4, the DECIMAL(19,4) wire
-// mirror. Trailing zeros beyond scale 4 are padding; a nonzero fifth digit
-// is a value the store cannot keep and is refused.
+// RULE: the unit price parses exactly at scale 4, the wire mirror of the
+// NUMERIC(12,4) unit price columns. Trailing zeros beyond scale 4 are
+// padding; a nonzero fifth digit is a value the store cannot keep and is
+// refused.
 func TestParsePrice(t *testing.T) {
 	cases := []struct {
 		in   string

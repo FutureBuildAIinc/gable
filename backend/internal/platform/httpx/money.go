@@ -10,10 +10,11 @@ import (
 )
 
 // PriceScale is the fixed scale of the wire unit price: four decimal
-// places, the exact scale of the database's DECIMAL(19,4) price columns
-// (ADR 0001 §7 records why scale 4 and not something finer: every value
-// the column keeps is representable and every wire value persists, with no
-// rounding in either direction).
+// places, the scale the database already keeps wherever sub cent precision
+// exists, its NUMERIC(12,4) unit price columns (ADR 0001 §7 records why
+// scale 4 and not something finer). A module exposing a
+// _ten_thousandths field against a price column still at scale 2 widens
+// the column in the same change, so no wire value is rounded on store.
 const PriceScale = 4
 
 // Cents is a monetary amount in minor units: int64 on the wire, field name
@@ -53,7 +54,7 @@ func (c Cents) DecimalString() string {
 }
 
 // DecimalString renders the price as the fixed four-digit decimal a
-// DECIMAL(19,4) column takes: Price(13725) is "1.3725". Exact; never float.
+// NUMERIC(12,4) column takes: Price(13725) is "1.3725". Exact; never float.
 func (p Price) DecimalString() string {
 	return formatFixed(int64(p), PriceScale)
 }
