@@ -85,9 +85,17 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 	}
 
 	// Insert Lines
+	// The legacy writers (the counter's account charge, the seed, tests) still
+	// hand over whole cents per sale unit; the line lands in the shared shape
+	// (ADR 0005 2.2) with the unit and description from the product, the pair
+	// 1 and 1 and the extension rounded once. C2-3 and C2-5 retire this path.
 	queryLine := `
-		INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at,
+			sku, description, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total)
+		SELECT $1, $2, $3, $4::numeric, $5::numeric, $6,
+			p.sku, COALESCE(p.description, p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $5::numeric,
+			ROUND($4::numeric * $5::numeric, 2)
+		FROM products p WHERE p.id = $3
 	`
 	for i := range inv.Lines {
 		line := &inv.Lines[i]
@@ -98,11 +106,14 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 		// Convert PriceEach (Cents -> Dollars)
 		priceEachFloat := float64(line.PriceEach) / 100.0
 
-		_, err = exec.Exec(ctx, queryLine,
+		tag, err := exec.Exec(ctx, queryLine,
 			line.ID, line.InvoiceID, line.ProductID, line.Quantity, priceEachFloat, now,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert invoice line: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("failed to insert invoice line: product %s does not exist", line.ProductID)
 		}
 	}
 
