@@ -25,8 +25,10 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -55,7 +57,7 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		t.Fatal(err)
 	}
 
-	svc := customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	svc := customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(customeraudit.New(audit.NewLogger(db)))
 	mux := http.NewServeMux()
 	customer.NewHandler(svc).RegisterRoutes(mux)
 	wallMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +75,7 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		ids := `SELECT id FROM customers WHERE account_number LIKE $1`
 		pat := f.prefix + "%"
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'customer' AND entity_id IN (`+ids+`)`, pat)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'customer' AND entity_id IN (`+ids+`)`, pat)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id IN (`+ids+`)`, pat)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_ship_tos WHERE customer_id IN (`+ids+`)`, pat)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_contacts WHERE customer_id IN (`+ids+`)`, pat)
@@ -91,7 +94,41 @@ type resp struct {
 	raw    []byte
 }
 
+var (
+	customerPutPath = regexp.MustCompile(`^/api/v1/customers/[^/]+$`)
+	contactPutPath  = regexp.MustCompile(`^/api/v1/contacts/[^/]+$`)
+)
+
+// do sends the request. A PUT of a customer or a contact must carry its
+// controls (payment_terms_id and po_required; can_place_orders and the order
+// limit); tests that are about something else get the neutral values added
+// when they leave them out, and doRaw sends the body exactly as given.
 func (f *fixture) do(method, path string, body any, headers ...string) resp {
+	f.t.Helper()
+	if m, ok := body.(map[string]any); ok && method == "PUT" {
+		withDefaults := map[string]any{}
+		for k, v := range m {
+			withDefaults[k] = v
+		}
+		set := func(k string, v any) {
+			if _, present := withDefaults[k]; !present {
+				withDefaults[k] = v
+			}
+		}
+		switch {
+		case customerPutPath.MatchString(path):
+			set("payment_terms_id", f.termsID("NET30"))
+			set("po_required", false)
+		case contactPutPath.MatchString(path):
+			set("can_place_orders", true)
+			set("order_limit_cents", nil)
+		}
+		body = withDefaults
+	}
+	return f.doRaw(method, path, body, headers...)
+}
+
+func (f *fixture) doRaw(method, path string, body any, headers ...string) resp {
 	f.t.Helper()
 	var rdr io.Reader
 	switch b := body.(type) {
@@ -1438,5 +1475,152 @@ func TestRegisterRoutes_GuardsWrapEveryRoute(t *testing.T) {
 		if rec.Code != http.StatusTeapot || seen[route.method+" "+route.path] != route.want {
 			t.Errorf("%s %s: status %d, guarded by %q, want the %s guard", route.method, route.path, rec.Code, seen[route.method+" "+route.path], route.want)
 		}
+	}
+}
+
+// RULE (review P2-4): a PUT cannot silently reset a control. A customer PUT
+// without payment_terms_id or po_required, and a contact PUT without
+// can_place_orders or the order limit key, is a 400 naming the field; an
+// explicit null order limit is still "no limit of the contact's own".
+func TestWire_PutRequiresTheControls(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	net60 := f.termsID("NET60")
+	c := f.create(map[string]any{"payment_terms_id": net60, "po_required": true}).body
+	id, acct := str(t, c, "id"), str(t, c, "account_number")
+
+	r := f.doRaw("PUT", "/api/v1/customers/"+id, map[string]any{"account_number": acct, "name": "Only a name"}, "If-Match", `"1"`)
+	if r.status != 400 {
+		t.Fatalf("a customer PUT without the controls = %d, want 400: %s", r.status, r.raw)
+	}
+	d := detailsOf(t, r)
+	if !hasField(d, "payment_terms_id") || !hasField(d, "po_required") {
+		t.Errorf("details = %v, want payment_terms_id and po_required named", fields(d))
+	}
+	if g := f.do("GET", "/api/v1/customers/"+id, nil); g.body["po_required"] != true || g.body["payment_terms"].(map[string]any)["code"] != "NET60" || num(t, g.body, "revision") != 1 {
+		t.Errorf("a refused PUT changed the customer: %s", g.raw)
+	}
+	ok := f.do("PUT", "/api/v1/customers/"+id, map[string]any{"account_number": acct, "name": "All given", "payment_terms_id": net60, "po_required": true}, "If-Match", `"1"`)
+	if ok.status != 200 {
+		t.Errorf("a customer PUT with the controls = %d: %s", ok.status, ok.raw)
+	}
+	// POST keeps its defaults.
+	if r := f.do("POST", "/api/v1/customers", f.body(nil)); r.status != 201 {
+		t.Errorf("a create without the controls = %d, want 201", r.status)
+	}
+
+	cid := str(t, c, "id")
+	ct := f.do("POST", "/api/v1/customers/"+cid+"/contacts", map[string]any{"first_name": "Pat", "last_name": "Lee", "can_place_orders": false, "order_limit_cents": 100})
+	contactPath := "/api/v1/contacts/" + str(t, ct.body, "id")
+	r = f.doRaw("PUT", contactPath, map[string]any{"first_name": "Pat", "last_name": "Lee"}, "If-Match", `"1"`)
+	if r.status != 400 {
+		t.Fatalf("a contact PUT without the controls = %d, want 400: %s", r.status, r.raw)
+	}
+	d = detailsOf(t, r)
+	if !hasField(d, "can_place_orders") || !hasField(d, "order_limit_cents") {
+		t.Errorf("details = %v, want can_place_orders and order_limit_cents named", fields(d))
+	}
+	if g := f.do("GET", contactPath, nil); g.body["can_place_orders"] != false || num(t, g.body, "order_limit_cents") != 100 {
+		t.Errorf("a refused PUT changed the contact: %s", g.raw)
+	}
+	ok = f.do("PUT", contactPath, map[string]any{"first_name": "Pat", "last_name": "Lee", "can_place_orders": true, "order_limit_cents": nil}, "If-Match", `"1"`)
+	if ok.status != 200 || ok.body["order_limit_cents"] != nil || ok.body["can_place_orders"] != true {
+		t.Errorf("a contact PUT with an explicit null limit = %d: %s", ok.status, ok.raw)
+	}
+	if r := f.do("POST", "/api/v1/customers/"+cid+"/contacts", map[string]any{"first_name": "No", "last_name": "Controls"}); r.status != 201 || r.body["can_place_orders"] != true {
+		t.Errorf("a contact create without the controls = %d: %s", r.status, r.raw)
+	}
+}
+
+// auditActions reads the audit rows of a customer, oldest first, as action and changes.
+func (f *fixture) auditRows(customerID string) (actions []string, changes []map[string]any) {
+	f.t.Helper()
+	rows, err := f.db.Pool.Query(context.Background(),
+		`SELECT action, changes FROM audit_log WHERE entity_type = 'customer' AND entity_id = $1 ORDER BY created_at, id`, customerID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var action string
+		var raw []byte
+		if err := rows.Scan(&action, &raw); err != nil {
+			f.t.Fatal(err)
+		}
+		var c map[string]any
+		_ = json.Unmarshal(raw, &c)
+		actions, changes = append(actions, action), append(changes, c)
+	}
+	return actions, changes
+}
+
+// RULE (review P3, audit): a change to the credit limit, the payment terms,
+// the PO requirement or a contact's order authority writes one audit row in
+// the act's transaction; any other customer write keeps its event only.
+func TestWire_ControlChangesAreAudited(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	c := f.create().body
+	id, acct := str(t, c, "id"), str(t, c, "account_number")
+	put := func(rev int64, extra map[string]any) resp {
+		b := map[string]any{"account_number": acct, "name": "Wire Test Co"}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return f.do("PUT", "/api/v1/customers/"+id, b, "If-Match", ifMatch(rev))
+	}
+
+	if r := put(1, map[string]any{"name": "Renamed only"}); r.status != 200 {
+		t.Fatal(r.raw)
+	}
+	if actions, _ := f.auditRows(id); len(actions) != 0 {
+		t.Errorf("a rename wrote audit rows %v, want none (event only)", actions)
+	}
+	r := put(2, map[string]any{"credit_limit_cents": 90000, "po_required": true, "payment_terms_id": f.termsID("NET60")})
+	if r.status != 200 {
+		t.Fatal(r.raw)
+	}
+	actions, changes := f.auditRows(id)
+	if len(actions) != 1 || actions[0] != "customer.controls_changed" {
+		t.Fatalf("audit rows = %v, want one customer.controls_changed", actions)
+	}
+	for _, field := range []string{"credit_limit_cents", "po_required", "payment_terms_id"} {
+		if _, ok := changes[0][field]; !ok {
+			t.Errorf("the audit row does not carry %s: %v", field, changes[0])
+		}
+	}
+	credit, _ := changes[0]["credit_limit_cents"].(map[string]any)
+	if credit["from"] != nil || fmt.Sprint(credit["to"]) != "90000" {
+		t.Errorf("credit_limit_cents change = %v, want from null to 90000", credit)
+	}
+	// An unchanged control is not audited again.
+	if r := put(3, map[string]any{"credit_limit_cents": 90000, "po_required": true, "payment_terms_id": f.termsID("NET60"), "phone": "555"}); r.status != 200 {
+		t.Fatal(r.raw)
+	}
+	if actions, _ := f.auditRows(id); len(actions) != 1 {
+		t.Errorf("an edit that changed no control wrote audit rows: %v", actions)
+	}
+
+	// A contact's order authority.
+	ct := f.do("POST", "/api/v1/customers/"+id+"/contacts", map[string]any{"first_name": "Pat", "last_name": "Lee"})
+	cpath := "/api/v1/contacts/" + str(t, ct.body, "id")
+	if r := f.do("PUT", cpath, map[string]any{"first_name": "Pat", "last_name": "Lee", "title": "Buyer", "can_place_orders": true, "order_limit_cents": nil}, "If-Match", `"1"`); r.status != 200 {
+		t.Fatal(r.raw)
+	}
+	if actions, _ := f.auditRows(id); len(actions) != 1 {
+		t.Errorf("a contact edit that left its authority alone wrote audit rows: %v", actions)
+	}
+	if r := f.do("PUT", cpath, map[string]any{"first_name": "Pat", "last_name": "Lee", "can_place_orders": false, "order_limit_cents": 25000}, "If-Match", `"2"`); r.status != 200 {
+		t.Fatal(r.raw)
+	}
+	actions, changes = f.auditRows(id)
+	if len(actions) != 2 || actions[1] != "contact.authority_changed" {
+		t.Fatalf("audit rows = %v, want a contact.authority_changed second", actions)
+	}
+	if fmt.Sprint(changes[1]["contact_id"]) != str(t, ct.body, "id") {
+		t.Errorf("the audit row does not name the contact: %v", changes[1])
+	}
+	if _, ok := changes[1]["can_place_orders"]; !ok {
+		t.Errorf("the audit row does not carry can_place_orders: %v", changes[1])
 	}
 }

@@ -564,7 +564,9 @@
         "address": "1 Golden Way, Kelowna BC",
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
+        "po_required": false,
         "tier": "gold"
       }
     },
@@ -596,6 +598,7 @@
         "credit_limit_cents": 10000000,
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
         "po_required": true,
         "tier": "gold"
@@ -648,7 +651,9 @@
         "address": "1 Golden Way, Kelowna BC",
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
+        "po_required": false,
         "tier": "gold"
       }
     },
@@ -667,7 +672,7 @@
     }
   },
   {
-    "name": "customer.update.primary_branch",
+    "name": "customer.update.missing_controls",
     "request": {
       "method": "PUT",
       "path": "/api/v1/customers/<id-2>",
@@ -680,6 +685,49 @@
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
         "phone": "250-555-0199",
+        "tier": "gold"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "payment_terms_id",
+              "message": "is required on a PUT: a left out field would reset the customer's terms"
+            },
+            {
+              "field": "po_required",
+              "message": "is required on a PUT: a left out field would clear the purchase order requirement"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "customer.update.primary_branch",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/customers/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "account_number": "GOLD-001",
+        "address": "1 Golden Way, Kelowna BC",
+        "email": "goldens@example.com",
+        "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
+        "phone": "250-555-0199",
+        "po_required": false,
         "primary_branch_id": "<id-1>",
         "tier": "gold"
       }
@@ -699,7 +747,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-25>"
+          "request_id": "<id-26>"
         }
       }
     }
@@ -718,7 +766,9 @@
         "currency": "EUR",
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
+        "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
+        "po_required": false,
         "tier": "gold"
       }
     },
@@ -737,7 +787,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-26>"
+          "request_id": "<id-27>"
         }
       }
     }

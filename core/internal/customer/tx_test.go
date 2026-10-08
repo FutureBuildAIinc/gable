@@ -21,8 +21,10 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -49,6 +51,7 @@ func newTxFixture(t *testing.T, db *database.DB) *txFixture {
 		pat := f.prefix + "%"
 		ids := `SELECT id FROM customers WHERE account_number LIKE $1`
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'customer' AND entity_id IN (`+ids+`)`, pat)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'customer' AND entity_id IN (`+ids+`)`, pat)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_ship_tos WHERE customer_id IN (`+ids+`)`, pat)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_contacts WHERE customer_id IN (`+ids+`)`, pat)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN (`+ids+`)`, pat)
@@ -66,7 +69,7 @@ func (f *txFixture) draft() *customer.Draft {
 }
 
 func (f *txFixture) service(events customer.EventRecorder, tx customer.TxRunner) *customer.Service {
-	return customer.NewService(customer.NewRepository(f.db)).WithOutbox(events).WithTxRunner(tx)
+	return customer.NewService(customer.NewRepository(f.db)).WithOutbox(events).WithTxRunner(tx).WithAudit(customeraudit.New(audit.NewLogger(f.db)))
 }
 
 func (f *txFixture) good() *customer.Service {
@@ -146,6 +149,8 @@ func TestEveryWriteKind_FailedEventWriteRollsItBack(t *testing.T) {
 
 	d := f.draft()
 	d.AccountNumber, d.Name = c.AccountNumber, "Renamed"
+	limit := httpx.Cents(1234)
+	d.CreditLimitCents = &limit // a control change: it writes an audit row before its event, and that must roll back too
 	sp := &customer.SalespersonDraft{}
 	policy := &customer.PolicyDraft{Policy: customer.PolicyMode(customer.PolicyRequireAck), ThresholdPercent: 70000}
 
@@ -170,7 +175,9 @@ func TestEveryWriteKind_FailedEventWriteRollsItBack(t *testing.T) {
 		},
 		"contact create": func() error { _, err := bad.CreateContact(ctx, c.ID, contactDraft("Zed")); return err },
 		"contact update": func() error {
-			_, err := bad.UpdateContact(ctx, contact.ID, contactDraft("Changed"), rev(contact.Revision))
+			changed := contactDraft("Changed")
+			changed.CanPlaceOrders = false // an authority change: audited before its event
+			_, err := bad.UpdateContact(ctx, contact.ID, changed, rev(contact.Revision))
 			return err
 		},
 		"contact delete": func() error { return bad.DeleteContact(ctx, contact.ID, rev(contact.Revision)) },
@@ -202,6 +209,9 @@ func TestEveryWriteKind_FailedEventWriteRollsItBack(t *testing.T) {
 	}
 	if n := f.count(`SELECT count(*) FROM customer_contacts WHERE id = $1 AND first_name = 'Pat' AND revision = 1`, contact.ID); n != 1 {
 		t.Error("the contact was changed or deleted")
+	}
+	if n := f.count(`SELECT count(*) FROM audit_log WHERE entity_type = 'customer' AND entity_id = $1`, c.ID); n != 0 {
+		t.Errorf("%d audit rows survived the rolled back writes", n)
 	}
 	if n := f.count(`SELECT count(*) FROM events_outbox WHERE entity_id = $1`, c.ID); n != 4 {
 		t.Errorf("%d events for the customer, want the 4 of its good writes", n)

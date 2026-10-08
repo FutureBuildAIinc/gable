@@ -29,6 +29,7 @@ import (
 	"github.com/gablelbm/gable/internal/configurator"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/deposit"
@@ -296,7 +297,8 @@ func Run() {
 	customerRepo := customer.NewRepository(db)
 	customerSvc := customer.NewService(customerRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db)
+		WithTxRunner(db).
+		WithAudit(customeraudit.New(auditLog))
 	customerHandler := customer.NewHandler(customerSvc)
 	customerHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"), scoped("admin", "owner", "finance"))
 

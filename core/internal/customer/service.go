@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -30,6 +31,14 @@ type TxRunner interface {
 	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
+// AuditLogger writes an audit row for a customer (entity type customer). Called
+// with the transaction's context the row joins the act's transaction. The
+// customer package cannot import pkg/audit (audit reaches pkg/middleware, which
+// imports this package), so customeraudit adapts the platform logger to it.
+type AuditLogger interface {
+	LogChange(ctx context.Context, action string, customerID uuid.UUID, changes map[string]any) error
+}
+
 // Event types the module writes to the outbox. Every state change of a
 // customer, its ship-tos, contacts and terms is customer.updated; its data
 // names the part (ADR 0005 section 7.4).
@@ -51,6 +60,7 @@ type Service struct {
 	repo   Repository
 	events EventRecorder // optional; nil records nothing (unit tests)
 	tx     TxRunner      // optional; nil runs each method unwrapped (unit tests)
+	audit  AuditLogger   // optional; nil writes no audit rows (unit tests)
 	now    func() time.Time
 }
 
@@ -61,6 +71,14 @@ func NewService(repo Repository) *Service {
 // WithOutbox wires the recorder of customer.created and customer.updated.
 func (s *Service) WithOutbox(events EventRecorder) *Service {
 	s.events = events
+	return s
+}
+
+// WithAudit wires the audit rows of the control changes: the credit limit, the
+// payment terms, the PO requirement and a contact's order authority. Every
+// other customer write keeps its event only.
+func (s *Service) WithAudit(a AuditLogger) *Service {
+	s.audit = a
 	return s
 }
 
@@ -310,6 +328,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		if out, err = s.repo.GetCustomer(ctx, id); err != nil {
 			return notFound(err)
 		}
+		if err := s.auditControls(ctx, cur, &next, changed); err != nil {
+			return err
+		}
 		part := PartHeader
 		if len(changed) == 1 && changed[0] == "payment_terms_id" {
 			part = PartTerms
@@ -526,4 +547,39 @@ func (s *Service) record(ctx context.Context, c *Customer, eventType, part strin
 	return s.events.Write(ctx, outbox.Event{
 		Type: eventType, EntityType: "customer", EntityID: c.ID, BranchID: &branch, Data: raw,
 	})
+}
+
+// auditControls writes one audit row, inside the transaction, when the update
+// changed the credit limit, the payment terms or the PO requirement. It names
+// each control that changed with its old and new value.
+func (s *Service) auditControls(ctx context.Context, cur, next *Customer, changed []string) error {
+	if s.audit == nil {
+		return nil
+	}
+	changes := map[string]any{}
+	for _, field := range changed {
+		switch field {
+		case "credit_limit_cents":
+			changes[field] = map[string]any{"from": centsPtrValue(cur.CreditLimitCents), "to": centsPtrValue(next.CreditLimitCents)}
+		case "payment_terms_id":
+			changes[field] = map[string]any{"from": cur.PaymentTermsID, "to": next.PaymentTermsID}
+		case "po_required":
+			changes[field] = map[string]any{"from": cur.POrequired, "to": next.POrequired}
+		}
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	changes["account_number"] = next.AccountNumber
+	if err := s.audit.LogChange(ctx, "customer.controls_changed", cur.ID, changes); err != nil {
+		return fmt.Errorf("failed to write audit log: %w", err)
+	}
+	return nil
+}
+
+func centsPtrValue(c *httpx.Cents) any {
+	if c == nil {
+		return nil
+	}
+	return int64(*c)
 }

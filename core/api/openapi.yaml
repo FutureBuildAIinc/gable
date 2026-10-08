@@ -1637,7 +1637,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CustomerRequest"
+              $ref: "#/components/schemas/CustomerUpdateRequest"
       responses:
         "200":
           description: The updated customer at its new revision.
@@ -2378,7 +2378,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ContactRequest"
+              $ref: "#/components/schemas/ContactUpdateRequest"
       responses:
         "200":
           description: The updated contact.
@@ -13302,6 +13302,53 @@ components:
           type: integer
           format: int64
           description: PUT only, beside If-Match; a revision on create is a 400.
+    CustomerUpdateRequest:
+      type: object
+      required: [account_number, name, payment_terms_id, po_required]
+      description: >-
+        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two controls, payment_terms_id and po_required, which are required so a left out field cannot reset them. primary_branch_id is refused.
+      properties:
+        account_number:
+          type: string
+        name:
+          type: string
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        address:
+          type: [string, "null"]
+        tier:
+          $ref: "#/components/schemas/CustomerTier"
+        is_active:
+          type: boolean
+        primary_branch_id:
+          type: string
+          format: uuid
+          description: Create only; fixed afterwards, and a PUT carrying it is a 400.
+        price_level_id:
+          type: [string, "null"]
+          format: uuid
+        salesperson_id:
+          type: [string, "null"]
+          format: uuid
+        credit_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          description: Null is no limit; zero is a limit of nothing; never negative.
+        currency:
+          type: [string, "null"]
+          description: An enabled ISO 4217 code with a minor unit of 0 or 2 places, or null for the dealer default.
+        payment_terms_id:
+          type: string
+          format: uuid
+          description: Active payment terms, or terms the customer already holds.
+        po_required:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match; a revision on create is a 400.
     CustomerSalespersonRequest:
       type: object
       required: [salesperson_id]
@@ -13543,6 +13590,38 @@ components:
         order_limit_cents:
           type: [integer, "null"]
           format: int64
+        revision:
+          type: integer
+          format: int64
+          description: PUT only, beside If-Match.
+    ContactUpdateRequest:
+      type: object
+      required: [first_name, last_name, can_place_orders, order_limit_cents]
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        title:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        role:
+          type: [string, "null"]
+          enum: [Buyer, AP, Owner, Site Super, null]
+        is_primary:
+          type: boolean
+        is_active:
+          type: boolean
+        can_place_orders:
+          type: boolean
+          description: Required on a PUT, so a left out field cannot re-grant order authority.
+        order_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          description: Required on a PUT; null is an explicit no limit of the contact's own.
         revision:
           type: integer
           format: int64

@@ -46,6 +46,14 @@ func r1bAGroups() []groupDef {
 func r1bACustomerContactsGroups() []groupDef {
 	if0 := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
 	policy := "/api/v1/customers/{a_customer}/escalation-policy"
+	// A contact PUT carries the controls it must not reset by leaving them out.
+	contactPut := func(extra map[string]any) map[string]any {
+		b := map[string]any{"first_name": "Golden", "last_name": "Contact", "role": "Buyer", "can_place_orders": true, "order_limit_cents": nil}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
 	contact := func(extra map[string]any) map[string]any {
 		b := map[string]any{"first_name": "Golden", "last_name": "Contact", "role": "Buyer"}
 		for k, v := range extra {
@@ -102,25 +110,26 @@ func r1bACustomerContactsGroups() []groupDef {
 			{name: "contact.get", method: "GET", path: "/api/v1/contacts/{a_contact}"},
 			{name: "contact.get.not_found", method: "GET", path: "/api/v1/contacts/" + r1bAMissingID},
 			{name: "contact.get.bad_id", method: "GET", path: "/api/v1/contacts/not-a-uuid"},
-			{name: "contact.update.without_revision", method: "PUT", path: "/api/v1/contacts/{a_contact}", body: contact(nil)},
+			{name: "contact.update.without_revision", method: "PUT", path: "/api/v1/contacts/{a_contact}", body: contactPut(nil)},
 			{
 				name:    "contact.update",
 				method:  "PUT",
 				path:    "/api/v1/contacts/{a_contact}",
 				headers: if0("1"),
-				body: contact(map[string]any{
+				body: contactPut(map[string]any{
 					"last_name": "Contact-Updated", "title": "Senior Purchasing",
 					"email": "golden.contact.updated@example.com", "role": "Owner", "is_primary": true,
 					"is_active": true, "can_place_orders": true, "order_limit_cents": 500000,
 				}),
 			},
-			{name: "contact.update.stale", method: "PUT", path: "/api/v1/contacts/{a_contact}", headers: if0("1"), body: contact(nil)},
+			{name: "contact.update.stale", method: "PUT", path: "/api/v1/contacts/{a_contact}", headers: if0("1"), body: contactPut(nil)},
+			{name: "contact.update.missing_controls", method: "PUT", path: "/api/v1/contacts/{a_contact}", headers: if0("2"), body: map[string]any{"first_name": "Golden", "last_name": "Contact"}},
 			{name: "contact.get.after_update", method: "GET", path: "/api/v1/contacts/{a_contact}"},
 			{name: "contact.update.bad_body", method: "PUT", path: "/api/v1/contacts/{a_contact}", headers: if0("2"), body: "not-an-object"},
 			{name: "contact.update.bad_id", method: "PUT", path: "/api/v1/contacts/not-a-uuid", headers: if0("1"),
-				body: map[string]any{"first_name": "X"}},
+				body: contactPut(map[string]any{"first_name": "X"})},
 			{name: "contact.update.not_found", method: "PUT", path: "/api/v1/contacts/" + r1bAMissingID, headers: if0("1"),
-				body: contact(map[string]any{"first_name": "Nobody", "last_name": "Here"})},
+				body: contactPut(map[string]any{"first_name": "Nobody", "last_name": "Here"})},
 
 			// Escalation policy, on the customer's revision (create 1, one per write).
 			{name: "escalation_policy.get_default", method: "GET", path: policy},

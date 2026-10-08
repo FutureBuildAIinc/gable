@@ -5,6 +5,7 @@ package customer
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -113,6 +114,9 @@ func (s *Service) UpdateContact(ctx context.Context, id uuid.UUID, d *ContactDra
 		cust, err := s.repo.GetCustomer(ctx, cur.CustomerID)
 		if err != nil {
 			return notFound(err)
+		}
+		if err := s.auditAuthority(ctx, cust, cur, out); err != nil {
+			return err
 		}
 		return s.record(ctx, cust, EventUpdated, PartContact, map[string]any{"contact_id": id, "action": "updated"})
 	})
@@ -361,4 +365,27 @@ func (s *Service) UpdateTerms(ctx context.Context, id uuid.UUID, d *TermsDraft, 
 		return nil, err
 	}
 	return out, nil
+}
+
+// auditAuthority writes one audit row, inside the transaction, when an edit
+// changed whether the contact may place orders or the contact's order limit.
+func (s *Service) auditAuthority(ctx context.Context, cust *Customer, before, after *Contact) error {
+	if s.audit == nil {
+		return nil
+	}
+	limitChanged := (before.OrderLimitCents == nil) != (after.OrderLimitCents == nil) ||
+		(before.OrderLimitCents != nil && *before.OrderLimitCents != *after.OrderLimitCents)
+	if before.CanPlaceOrders == after.CanPlaceOrders && !limitChanged {
+		return nil
+	}
+	changes := map[string]any{
+		"contact_id":        after.ID,
+		"account_number":    cust.AccountNumber,
+		"can_place_orders":  map[string]any{"from": before.CanPlaceOrders, "to": after.CanPlaceOrders},
+		"order_limit_cents": map[string]any{"from": centsPtrValue(before.OrderLimitCents), "to": centsPtrValue(after.OrderLimitCents)},
+	}
+	if err := s.audit.LogChange(ctx, "contact.authority_changed", cust.ID, changes); err != nil {
+		return fmt.Errorf("failed to write audit log: %w", err)
+	}
+	return nil
 }

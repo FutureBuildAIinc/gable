@@ -66,15 +66,21 @@ func customerGroups() []groupDef {
 	// envelope with filters that filter, and a revision every edit names in
 	// If-Match (the revision of a scripted customer is deterministic: create
 	// 1, then one per write).
-	header := func(extra map[string]any) map[string]any {
+	header := func(extras ...map[string]any) map[string]any {
 		b := map[string]any{
 			"account_number": "GOLD-001", "name": "Golden Harness Co", "email": "goldens@example.com",
 			"phone": "250-555-0199", "address": "1 Golden Way, Kelowna BC", "tier": "gold",
 		}
-		for k, v := range extra {
-			b[k] = v
+		for _, extra := range extras {
+			for k, v := range extra {
+				b[k] = v
+			}
 		}
 		return b
+	}
+	// A PUT carries the controls it must not reset by leaving them out.
+	putHeader := func(extra map[string]any) map[string]any {
+		return header(map[string]any{"payment_terms_id": "{myTerms}", "po_required": false}, extra)
 	}
 	return []groupDef{{
 		name: "customer",
@@ -86,7 +92,7 @@ func customerGroups() []groupDef {
 				body: header(map[string]any{
 					"credit_limit_cents": 10000000, "primary_branch_id": "{branch}",
 				}),
-				extract: map[string]string{"myCustomer": "/id"},
+				extract: map[string]string{"myCustomer": "/id", "myTerms": "/payment_terms_id"},
 			},
 			{name: "customer.get", method: "GET", path: "/api/v1/customers/{myCustomer}"},
 			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3"},
@@ -111,20 +117,22 @@ func customerGroups() []groupDef {
 				body: header(map[string]any{"account_number": "GOLD-002", "balance_due": 5})},
 			{name: "customer.create.duplicate", method: "POST", path: "/api/v1/customers", body: header(nil)},
 			// An edit names the revision; the first edit moves it to 2.
-			{name: "customer.update.without_revision", method: "PUT", path: "/api/v1/customers/{myCustomer}", body: header(nil)},
+			{name: "customer.update.without_revision", method: "PUT", path: "/api/v1/customers/{myCustomer}", body: putHeader(nil)},
 			{
 				name:    "customer.update",
 				method:  "PUT",
 				path:    "/api/v1/customers/{myCustomer}",
 				headers: map[string]string{"If-Match": `"1"`},
-				body:    header(map[string]any{"credit_limit_cents": 10000000, "po_required": true}),
+				body:    putHeader(map[string]any{"credit_limit_cents": 10000000, "po_required": true}),
 			},
 			{name: "customer.update.stale", method: "PUT", path: "/api/v1/customers/{myCustomer}",
-				headers: map[string]string{"If-Match": `"1"`}, body: header(nil)},
+				headers: map[string]string{"If-Match": `"1"`}, body: putHeader(nil)},
+			{name: "customer.update.missing_controls", method: "PUT", path: "/api/v1/customers/{myCustomer}",
+				headers: map[string]string{"If-Match": `"2"`}, body: header(nil)},
 			{name: "customer.update.primary_branch", method: "PUT", path: "/api/v1/customers/{myCustomer}",
-				headers: map[string]string{"If-Match": `"2"`}, body: header(map[string]any{"primary_branch_id": "{branch}"})},
+				headers: map[string]string{"If-Match": `"2"`}, body: putHeader(map[string]any{"primary_branch_id": "{branch}"})},
 			{name: "customer.update.currency_not_enabled", method: "PUT", path: "/api/v1/customers/{myCustomer}",
-				headers: map[string]string{"If-Match": `"2"`}, body: header(map[string]any{"currency": "EUR"})},
+				headers: map[string]string{"If-Match": `"2"`}, body: putHeader(map[string]any{"currency": "EUR"})},
 			{name: "customer.get.after_update", method: "GET", path: "/api/v1/customers/{myCustomer}"},
 		},
 	}}

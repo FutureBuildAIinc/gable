@@ -462,6 +462,7 @@
         "name": "Golden Contacts Co",
         "payment_terms_id": "<id-12>",
         "phone": "250-555-0177",
+        "po_required": false,
         "tier": "gold"
       }
     },

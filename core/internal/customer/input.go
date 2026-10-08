@@ -145,6 +145,9 @@ func (req *Request) parse(update bool) (*Draft, error) {
 	}
 
 	if update {
+		// A replace may not reset a control by leaving it out.
+		v.Check(req.PaymentTermsID != nil, "payment_terms_id", "is required on a PUT: a left out field would reset the customer's terms")
+		v.Check(req.POrequired != nil, "po_required", "is required on a PUT: a left out field would clear the purchase order requirement")
 		v.Check(req.PrimaryBranchID == nil, "primary_branch_id", "cannot be changed by an edit: it is fixed when the customer is created")
 		d.Revision = optRevision(v, req.Revision)
 	} else {
@@ -327,6 +330,12 @@ func (req *ContactRequest) Parse(update bool) (*ContactDraft, error) {
 	}
 	if req.CanPlaceOrders != nil {
 		d.CanPlaceOrders = *req.CanPlaceOrders
+	}
+	if update {
+		// A replace may not reset a control by leaving it out; an explicit
+		// null order limit is still "no limit of the contact's own".
+		v.Check(req.CanPlaceOrders != nil, "can_place_orders", "is required on a PUT: a left out field would re-grant order authority")
+		v.Check(len(bytes.TrimSpace(req.OrderLimitCents)) > 0, "order_limit_cents", "is required on a PUT: send the limit, or null for no limit of the contact's own")
 	}
 	if n, ok := v.Int("order_limit_cents", req.OrderLimitCents, false); ok {
 		v.Check(n >= 0, "order_limit_cents", "must not be negative; send null for no limit of the contact's own")

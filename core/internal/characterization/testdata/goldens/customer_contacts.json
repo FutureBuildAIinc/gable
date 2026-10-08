@@ -443,8 +443,10 @@
       "method": "PUT",
       "path": "/api/v1/contacts/<id-4>",
       "body": {
+        "can_place_orders": true,
         "first_name": "Golden",
         "last_name": "Contact",
+        "order_limit_cents": null,
         "role": "Buyer"
       }
     },
@@ -513,8 +515,10 @@
         "If-Match": "\"1\""
       },
       "body": {
+        "can_place_orders": true,
         "first_name": "Golden",
         "last_name": "Contact",
+        "order_limit_cents": null,
         "role": "Buyer"
       }
     },
@@ -528,6 +532,43 @@
         },
         "meta": {
           "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact.update.missing_controls",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/contacts/<id-4>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "first_name": "Golden",
+        "last_name": "Contact"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "can_place_orders",
+              "message": "is required on a PUT: a left out field would re-grant order authority"
+            },
+            {
+              "field": "order_limit_cents",
+              "message": "is required on a PUT: send the limit, or null for no limit of the contact's own"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-17>"
         }
       }
     }
@@ -579,7 +620,7 @@
           "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-18>"
         }
       }
     }
@@ -593,7 +634,11 @@
         "If-Match": "\"1\""
       },
       "body": {
-        "first_name": "X"
+        "can_place_orders": true,
+        "first_name": "X",
+        "last_name": "Contact",
+        "order_limit_cents": null,
+        "role": "Buyer"
       }
     },
     "response": {
@@ -611,7 +656,7 @@
           "message": "invalid contact id"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -625,8 +670,10 @@
         "If-Match": "\"1\""
       },
       "body": {
+        "can_place_orders": true,
         "first_name": "Nobody",
         "last_name": "Here",
+        "order_limit_cents": null,
         "role": "Buyer"
       }
     },
@@ -639,7 +686,7 @@
           "message": "contact not found"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -678,7 +725,7 @@
           "message": "customer not found"
         },
         "meta": {
-          "request_id": "<id-20>"
+          "request_id": "<id-21>"
         }
       }
     }
@@ -704,7 +751,7 @@
           "message": "invalid customer id"
         },
         "meta": {
-          "request_id": "<id-21>"
+          "request_id": "<id-22>"
         }
       }
     }
@@ -728,7 +775,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-22>"
+          "request_id": "<id-23>"
         }
       }
     }
@@ -828,7 +875,7 @@
           "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-23>"
+          "request_id": "<id-24>"
         }
       }
     }
@@ -861,7 +908,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-24>"
+          "request_id": "<id-25>"
         }
       }
     }
@@ -894,7 +941,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-25>"
+          "request_id": "<id-26>"
         }
       }
     }
@@ -927,7 +974,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-26>"
+          "request_id": "<id-27>"
         }
       }
     }
@@ -951,7 +998,7 @@
           "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-27>"
+          "request_id": "<id-28>"
         }
       }
     }
@@ -962,7 +1009,7 @@
       "method": "PATCH",
       "path": "/api/v1/customers/<id-2>/salesperson",
       "body": {
-        "salesperson_id": "<id-28>"
+        "salesperson_id": "<id-29>"
       }
     },
     "response": {
@@ -974,7 +1021,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-29>"
+          "request_id": "<id-30>"
         }
       }
     }
@@ -988,7 +1035,7 @@
         "If-Match": "\"3\""
       },
       "body": {
-        "salesperson_id": "<id-28>"
+        "salesperson_id": "<id-29>"
       }
     },
     "response": {
@@ -1018,7 +1065,7 @@
         "price_level_id": null,
         "primary_branch_id": "<id-1>",
         "revision": 4,
-        "salesperson_id": "<id-28>",
+        "salesperson_id": "<id-29>",
         "salesperson_name": "Heather Macdonald",
         "tier": "gold",
         "updated_at": "<ts+0d>"
@@ -1096,7 +1143,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-30>"
+          "request_id": "<id-31>"
         }
       }
     }
@@ -1128,7 +1175,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-31>"
+          "request_id": "<id-32>"
         }
       }
     }
@@ -1142,7 +1189,7 @@
         "If-Match": "\"5\""
       },
       "body": {
-        "salesperson_id": "<id-28>"
+        "salesperson_id": "<id-29>"
       }
     },
     "response": {
@@ -1160,7 +1207,7 @@
           "message": "invalid customer id"
         },
         "meta": {
-          "request_id": "<id-32>"
+          "request_id": "<id-33>"
         }
       }
     }
@@ -1192,7 +1239,7 @@
           "message": "a referenced record does not exist"
         },
         "meta": {
-          "request_id": "<id-33>"
+          "request_id": "<id-34>"
         }
       }
     }
@@ -1212,7 +1259,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-34>"
+          "request_id": "<id-35>"
         }
       }
     }
@@ -1235,7 +1282,7 @@
           "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-35>"
+          "request_id": "<id-36>"
         }
       }
     }
@@ -1275,7 +1322,7 @@
           "message": "contact not found"
         },
         "meta": {
-          "request_id": "<id-36>"
+          "request_id": "<id-37>"
         }
       }
     }
@@ -1304,7 +1351,7 @@
           "message": "invalid contact id"
         },
         "meta": {
-          "request_id": "<id-37>"
+          "request_id": "<id-38>"
         }
       }
     }
@@ -1324,7 +1371,7 @@
           "message": "contact not found"
         },
         "meta": {
-          "request_id": "<id-38>"
+          "request_id": "<id-39>"
         }
       }
     }
