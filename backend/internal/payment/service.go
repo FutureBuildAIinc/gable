@@ -199,7 +199,30 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 			return fmt.Errorf("failed to post to account ledger: %w", err)
 		}
 
-		return s.updateInvoiceStatus(ctx, invoiceID, inv)
+		if err := s.updateInvoiceStatus(ctx, invoiceID, inv); err != nil {
+			return err
+		}
+
+		// Audit log: inside the transaction, so it shares the payment's fate
+		// — a rolled back payment leaves no audit row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action:     "payment.processed",
+				EntityType: "payment",
+				EntityID:   p.ID,
+				Changes: map[string]interface{}{
+					"invoice_id":    invoiceID,
+					"amount_cents":  amountCents,
+					"method":        string(PaymentMethodCard),
+					"gateway_tx_id": result.TransactionID,
+					"card_brand":    result.CardBrand,
+					"card_last4":    result.CardLast4,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to write audit log: %w", err)
+			}
+		}
+		return nil
 	})
 
 	if err != nil {
