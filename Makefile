@@ -123,7 +123,7 @@ cover:
 contract: contract-go contract-ts
 
 contract-go:
-	cd core && go run ./api/tools/merge -check && go run ./cmd/pending
+	cd core && go run ./api/tools/merge -check && go run ./cmd/pending && go test -count=1 ./internal/apicontract/...
 
 contract-ts:
 	cd web/packages/api-client && npm ci && npm run drift && npm run typecheck
