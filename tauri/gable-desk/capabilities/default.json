@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window loads pages and holds no native permission: no shell, no filesystem, no IPC command. Deep links are handled on the Rust side.",
+  "windows": ["main"],
+  "permissions": []
+}

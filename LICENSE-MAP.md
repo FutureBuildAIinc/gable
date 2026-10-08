@@ -16,6 +16,7 @@ carries a matching `SPDX-License-Identifier` header, and
 | `core/pkg/apps/` | `LicenseRef-OpenLBM-Connector-1.0` | [LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt](LICENSES/LicenseRef-OpenLBM-Connector-1.0.txt) |
 | `web/apps/` *(the desk and the front door)* | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
 | `web/packages/` *(shared: auth, design-system)* | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
+| `tauri/` *(the native shells around the web apps)* | `LicenseRef-OpenLBM-Surface-1.0` | [LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt](LICENSES/LicenseRef-OpenLBM-Surface-1.0.txt) |
 | `docs/` | `LicenseRef-OpenLBM-Docs-1.0` | [LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt](LICENSES/LicenseRef-OpenLBM-Docs-1.0.txt) |
 
 ## Precedence

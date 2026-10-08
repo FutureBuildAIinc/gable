@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+[package]
+name = "gable-desk"
+version = "0.1.0"
+description = "Gable desktop shell: a Tauri 2 window around the front door"
+edition = "2021"
+rust-version = "1.90"
+license = "LicenseRef-OpenLBM-Surface-1.0"
+publish = false
+
+[lib]
+name = "gable_desk_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gable-desk"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.1", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.1", features = [] }
+tauri-plugin-deep-link = "=2.6.1"
+tauri-plugin-single-instance = { version = "=2.5.2", features = ["deep-link"] }
+
+[features]
+# `cargo tauri build` turns this on: the window then serves the embedded
+# front door bundle instead of the dev server URL.
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
