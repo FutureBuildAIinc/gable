@@ -101,6 +101,14 @@ rotating addresses inside one /64 draws on a single budget. A malformed entry
 (including a zone identifier or an IPv4-mapped prefix shorter than /96) stops
 the server at boot. `X-Real-IP` is never read.
 
+## Rate limit
+
+The global per-address limit is `RATE_LIMIT_PER_MINUTE` (default 120). A value
+below 1 (zero or negative, which would refuse every request or switch the
+limiter off by accident) stops the server at boot with an error naming the
+variable. It keys on the caller's address, so set it together with
+`TRUSTED_PROXIES` above when a proxy fronts the server.
+
 ## Event outbox retention
 
 The `worker` role deletes events outbox rows older than `OUTBOX_RETENTION_DAYS`

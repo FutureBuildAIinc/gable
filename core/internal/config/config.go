@@ -70,7 +70,8 @@ type Config struct {
 	TrustedProxies clientip.Trusted
 
 	// RateLimitPerMinute is the per-address request limit on the ERP API
-	// (RATE_LIMIT_PER_MINUTE, default 120). The Playwright stack raises it:
+	// (RATE_LIMIT_PER_MINUTE, default 120; a value below 1 stops the server at
+	// boot). The Playwright stack raises it:
 	// the desk makes many calls per page and a whole suite shares one address.
 	RateLimitPerMinute int
 
@@ -210,6 +211,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid TRUSTED_PROXIES: %w", err)
 	}
 	cfg.TrustedProxies = trusted
+
+	if cfg.RateLimitPerMinute < 1 {
+		return nil, fmt.Errorf("invalid RATE_LIMIT_PER_MINUTE %d: must be 1 or more", cfg.RateLimitPerMinute)
+	}
 
 	if cfg.OutboxRetentionDays > MaxOutboxRetentionDays {
 		slog.Warn("OUTBOX_RETENTION_DAYS above the cap, using the cap", "value", cfg.OutboxRetentionDays, "cap", MaxOutboxRetentionDays)
