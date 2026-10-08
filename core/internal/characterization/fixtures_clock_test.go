@@ -170,11 +170,77 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 			VALUES ($1, $2, 'golden clock window fixture line', 1, $3, $3, NULL, $4)`,
 			fmt.Sprintf("22222222-2222-4222-8222-22222222%04d", 200+i), id, b.total, at)
 	}
+	pinDispatchOrderRecency(t, db)
 }
 
 func mustExec(t *testing.T, db *sql.DB, query string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(query, args...); err != nil {
 		t.Fatalf("clock window fixture: %s: %v", query, err)
+	}
+}
+
+// dispatchRecencyOrder is the newest-first order the 13 dispatch-day orders are
+// given distinct created_at values in, by customer name. The first five are the
+// ones the dashboard's order-activity answer (the ten newest orders) shows, and
+// they are in the order the golden recorded them.
+var dispatchRecencyOrder = []string{
+	"Peachland Framing Crew",
+	"Summerland Roofers",
+	"Big White Cabin Co",
+	"Kelbrook Construction",
+	"Mission Hill Custom",
+	"Westbank Decks & Fence",
+	"Glenmore Heritage Reno",
+	"Vernon Valley Construction",
+	"Okanagan DIY Owner",
+	"Lake Country Builders",
+	"Predator Ridge Renos",
+	"Okanagan Homes Ltd",
+	"Knox Mountain Landscapes",
+}
+
+// pinDispatchOrderRecency breaks the one tie the order-activity golden used to
+// depend on. The seed writes all 13 dispatch-day orders with the same created_at
+// (the dispatch date's midnight, two days back), and the dashboard's recent
+// orders read is `ORDER BY created_at DESC LIMIT 10` with no tiebreak, so which
+// of the 13 made the ten, and in what order, followed the physical row order
+// and the plan's top-N sort: a different tuple layout (autovacuum timing, a
+// reordered heap) flipped the answer and with it a total_amount in the
+// transcript.
+//
+// The harness gives each dispatch order its own created_at, a few milliseconds
+// after the shared midnight so the day offset the normaliser records (<ts-2d>)
+// does not move, in the fixed newest-first order of dispatchRecencyOrder. No
+// golden byte changes; the read is simply no longer left to break a tie. The
+// guard fails the run loudly if the newest orders ever tie again.
+func pinDispatchOrderRecency(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	for rank, name := range dispatchRecencyOrder {
+		// Newest first: the earlier in the list, the larger the offset.
+		offsetMS := len(dispatchRecencyOrder) - rank
+		res, err := db.Exec(`UPDATE orders o
+			SET created_at = o.created_at + ($2 * interval '1 millisecond')
+			FROM customers c
+			WHERE c.id = o.customer_id AND c.name = $1
+			  AND o.status = 'CONFIRMED' AND o.scheduled_delivery_date IS NOT NULL`,
+			name, offsetMS)
+		if err != nil {
+			t.Fatalf("pin dispatch order recency for %q: %v", name, err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			t.Fatalf("pin dispatch order recency for %q: updated %d orders, want 1", name, n)
+		}
+	}
+
+	var ties int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM (
+			SELECT created_at FROM (SELECT created_at FROM orders ORDER BY created_at DESC LIMIT 25) newest
+			GROUP BY created_at HAVING COUNT(*) > 1) tied`).Scan(&ties); err != nil {
+		t.Fatalf("check order recency ties: %v", err)
+	}
+	if ties != 0 {
+		t.Fatalf("%d created_at values are shared by the newest orders: the order-activity read has no tiebreak, so its golden would depend on row layout", ties)
 	}
 }
