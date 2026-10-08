@@ -21,12 +21,13 @@ and integer money, `null` for empty lists, silent filter no-ops, a 500 for a
 missing unit of measure). Inside the repository the same inconsistencies show
 up as five different list envelope spellings across the modules.
 
-The HH reference (read for pattern only; nothing is copied from it) solved
-the first half of this for another product: one cursor envelope, cents,
-document numbers, contract first with drift gates. Its rules differ from the
-inputs in places (it forbids `total` in the envelope, its error body is a
-bare string, its enums are uppercase). Cycle 1 needs one rule set that a
-Gable module can be converted onto once, without a second breaking pass.
+Several of the questions this ADR answers (the list envelope, limit
+handling, the error body, enum casing, cursor integrity, money) have more
+than one defensible answer, and systems in this space have answered each of
+them differently. Cycle 1 needs one rule set that a Gable module can be
+converted onto once, without a second breaking pass. The decisions, the
+options weighed, and the reasons are recorded in Alternatives considered,
+near the end of this document.
 
 This ADR is that rule set. It governs every JSON route of the product: all
 of `/api/v1/*` and `/api/portal/v1/*`. Two seams are outside it and keep
@@ -93,10 +94,11 @@ The cursor is keyset friendly by construction: the handler resumes with a
 filters, which is index friendly and stable under concurrent inserts, unlike
 offsets.
 
-A cursor that is absent means first page. A cursor that is present and
-malformed is a 400, never silently treated as the first page: a client
-resuming from a corrupted token must learn that, because restarting from the
-top of a list repeats rows it may already have acted on. Malformed means:
+A cursor that is absent means first page. A cursor that is present but
+broken is a 400, never quietly treated as the first page: the client must be
+told its token is unusable, because silently winding it back to the head of
+the list would hand it a second copy of rows it may already have processed.
+Malformed means:
 not decodable base64url in canonical form, not well-formed JSON of exactly
 the three fields, a version other than 1, a missing or non-matching ordering
 scope, an empty keyset, keyset parts that are empty or carry control
@@ -111,10 +113,10 @@ credential. If cursors ever carry more authority than a row position, that
 decision is reopened.
 
 `limit` is strict too: an integer between 1 and 200, default 50. A malformed
-or out-of-range limit is a 400 naming the field. This deliberately does not
-copy the HH reference, whose clamped fail-quiet limit is recorded there as a
-pinned divergence; Gable's posture on the wire is uniform: if the server will
-not honor what the client sent, the server says so.
+or out-of-range limit is a 400 naming the field. Quietly clamping a bad
+limit to the default was considered and rejected: Gable's posture on the
+wire is uniform, and if the server will not honor what the client sent, the
+server says so.
 
 ### 3. The error envelope
 
@@ -292,22 +294,54 @@ generated `gable-sdk`, the frozen agentic UI experiment) break knowingly:
 the desk and portal are updated with each module conversion, and the SDK
 regenerates from the contract after the contract item completes.
 
-### Where HH's rules and the inputs differ, and what this ADR adopts
+## Alternatives considered
 
-| Question | Refactor inputs | HH reference | This ADR |
-|---|---|---|---|
-| List envelope | `{items, total, limit, offset}`, total always | `{items, next_cursor, limit}`, never total, never offset | cursor envelope; `total` opt-in via `?include=total` |
-| Bad limit | limits must be honored | clamped, fail-quiet (recorded there as a pinned divergence) | strict 400, matching the malformed cursor rule |
-| Error body | one envelope: code, message, details | `{error: string}`, no code, no details | the inputs' shape, in the exact field layout above, fixing the message drop |
-| Enum casing | one casing convention (lowercase) | DB CHECK vocabulary verbatim (uppercase) | lowercase wire enums, mapped at the module boundary |
-| Cursor integrity | cursor semantics that work | opaque string, version prefix, structural validation | structured keyset tuple, ordering-scope bound, strictly validated, unsigned |
-| Money | integer minor units or a money object | integer cents everywhere | integer cents, plus the scale-4 `_ten_thousandths` type the inputs' sub-cent unit pricing needs |
+Each question below is settled once, here, so that no converting module
+re-litigates it.
 
-The inputs' `offset` and always-on `total` are the only input requirements
-not adopted as written, and both are money-and-cost questions rather than
-shape questions: cursor pagination is stable under concurrent inserts where
-offsets are not, and an unconditional count doubles the work of every list
-page. The opt-in keeps the inputs' aggregate screens their totals.
+**The list envelope.** The options: an offset envelope carrying `total` on
+every page (the refactor inputs' shape); a cursor envelope that never
+carries `total`; a cursor envelope with an opt-in `total`. Adopted: the
+third. Cursor pagination stays correct under concurrent inserts where
+offsets drift, and an unconditional count doubles the work of every list
+page; making the count opt-in keeps the inputs' aggregate screens their
+totals without taxing every page. The inputs' `offset` and always-on
+`total` are the only input requirements not adopted as written, and both
+are cost questions rather than shape questions.
+
+**A limit the server will not honor.** The options: clamp the value and
+serve the page anyway; refuse the request with a 400 naming the field.
+Adopted: refusal, matching the malformed cursor rule. A silent clamp
+teaches the client a rule the server never stated, and the client only
+discovers it by counting rows.
+
+**The error body.** The options: a bare string body; an envelope of code,
+message and details that keeps only a generic status text (what today's
+helper writes); an envelope of code, message and details that carries the
+handler's message in full. Adopted: the last, with one carve-out for 500s
+(section 3). The client reads the real cause ("line 1: uom is required")
+instead of "Bad Request", and the specific cause no longer lives only in
+the server log.
+
+**Enum casing.** The options: expose the database CHECK vocabulary verbatim
+(uppercase); lowercase snake_case on the wire with the mapping done at the
+module boundary. Adopted: lowercase on the wire. One casing convention
+across every vocabulary lets clients drop their per-entity normalizers, and
+the database keeps its existing constraints untouched.
+
+**Cursor integrity.** The options: an opaque versioned string validated
+only structurally; a signed token; a structured keyset tuple bound to its
+ordering scope and strictly validated, but unsigned. Adopted: the third.
+Signing couples every core instance to a shared secret with a rotation
+story that invalidates in-flight cursors, and it buys little here: a forged
+cursor can only seek within the same ordering scope and the same
+server-side filters. It is a pagination token, not a credential.
+
+**Money.** The options: floats with agreed rounding rules; a money object
+carrying currency; integer minor units plus a scale 4 integer for sub cent
+unit prices. Adopted: the integers. Exactness on the wire costs less than
+rounding rules honored by every client and agent alike, and section 7
+records the scale decisions.
 
 ## Migration note for handlers
 
