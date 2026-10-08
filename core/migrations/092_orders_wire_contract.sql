@@ -118,9 +118,19 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 ALTER TABLE customer_transactions DROP COLUMN type_old;
 DROP TYPE IF EXISTS transaction_type;
-ALTER TABLE customer_transactions ADD COLUMN IF NOT EXISTS currency CHAR(3);
-UPDATE customer_transactions SET currency = (SELECT value FROM system_settings WHERE key = 'currency.default') WHERE currency IS NULL;
-ALTER TABLE customer_transactions ALTER COLUMN currency SET NOT NULL;
+-- The subledger's existing writers (account.PostTransaction) do not name a
+-- currency yet; the column takes the dealer default until the AR core
+-- (C2-4) writes it, the same treatment gl_journal_entries gets above.
+DO $$
+DECLARE default_code TEXT;
+BEGIN
+    SELECT value INTO default_code FROM system_settings WHERE key = 'currency.default';
+    IF default_code IS NULL THEN
+        default_code := 'USD';
+    END IF;
+    EXECUTE format('ALTER TABLE customer_transactions ADD COLUMN IF NOT EXISTS currency CHAR(3) NOT NULL DEFAULT %L', default_code);
+END $$;
+UPDATE customer_transactions SET currency = (SELECT value FROM system_settings WHERE key = 'currency.default');
 ALTER TABLE customer_transactions ADD COLUMN IF NOT EXISTS source_kind TEXT;
 
 -- 4. delivery_type: DELIVERY where a deliveries row or a scheduled date

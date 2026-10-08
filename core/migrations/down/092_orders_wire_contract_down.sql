@@ -84,6 +84,7 @@ ALTER TABLE orders DROP COLUMN IF EXISTS delivery_type;
 
 -- The subledger's type goes back to the four value enum the base knew.
 ALTER TABLE customer_transactions DROP COLUMN IF EXISTS source_kind;
+ALTER TABLE customer_transactions ALTER COLUMN currency DROP DEFAULT;
 ALTER TABLE customer_transactions DROP COLUMN IF EXISTS currency;
 CREATE TYPE transaction_type AS ENUM ('INVOICE', 'PAYMENT', 'ADJUSTMENT', 'REFUND');
 ALTER TABLE customer_transactions RENAME COLUMN type TO type_text;
