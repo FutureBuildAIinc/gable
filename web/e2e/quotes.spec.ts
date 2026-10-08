@@ -41,7 +41,8 @@ async function firstCustomerAndProduct(request: import('@playwright/test').APIRe
   // The product list is the cursor envelope, newest first; the product spec adds products with
   // E2E- SKUs, so the seeded products are the ones a quote is built for.
   const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string; stock_uom: string }[] };
-  const product = products.items.find((p) => !p.sku.startsWith('E2E-'))!;
+  // An EA stocked product: the convert test sells it per M by the each.
+  const product = products.items.find((p) => !p.sku.startsWith('E2E-') && p.stock_uom === 'EA')!;
   seeded = { customer, product };
   return seeded;
 }
