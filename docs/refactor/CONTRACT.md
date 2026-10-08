@@ -103,17 +103,6 @@ Transcription conventions (following the models' JSON tags):
   integration seam's lists, which the handler guarantees non null, are
   not.
 
-A known deviation: the create handlers (quote, customer and its contact,
-order, product, and the location, credit memo and integration creates)
-write their JSON body without setting a Content-Type header, so the wire
-answers those 201s as `text/plain; charset=utf-8` today, and the goldens
-record them wrapped as `{"text": "<json>"}`. The fragments keep declaring
-`application/json`, because the body is JSON and `text/plain` is simply a
-missing header, not a shape; a separate item now owns fixing the handlers
-to send the header, and until it lands the conformance pass must read
-those bodies through the golden wrapper rather than trust the declared
-content type.
-
 ## Regenerating
 
 From the Go module root (`core/`):
@@ -220,23 +209,40 @@ Fragments done (the pattern the rest copy):
 
 | Module | Fragment | Routes |
 |---|---|---|
-| quote | `quote.yaml` | 8 |
-| customer | `customer.yaml` | 12 |
+| quote | `quote.yaml` | 14 |
+| customer | `customer.yaml` | 14 |
 | order | `order.yaml` | 8 |
-| invoice | `invoice.yaml` | 4 |
+| invoice | `invoice.yaml` | 5 |
 | payment | `payment.yaml` | 5 |
-| product | `product.yaml` | 7 |
+| product, pim | `product.yaml` | 19 |
 | location | `location.yaml` | 18 |
 | integration (AI_LM) | `integration.yaml` | 10 |
+| delivery | `delivery.yaml` | 25 |
+| pos | `pos.yaml` | 19 |
+| inventory | `inventory.yaml` | 3 |
+| deposit | `deposits.yaml` | 4 |
+| account | `accounts.yaml` | 2 |
+| vendor | `vendors.yaml` | 3 |
+| salesteam | `salesteam.yaml` | 2 |
+| crm activities | `activities.yaml` | 3 |
+| portal | `portal.yaml` | 34 |
+| project | `project.yaml` | 4 |
+| partner | `partner.yaml` | 3 |
+| health and metrics | `health.yaml` | 4 |
+| uploads | `uploads.yaml` | 1 |
 | shared components | `_shared.yaml` | 0 |
 
-72 of 345 census routes covered. Pending (in `contract-pending.txt`,
-later parts R1-7b onward): portal, pricing, delivery, pos, reporting, gl,
-purchase_order, pim, techadmin, bankrecon, staff, edi, ap, dashboard,
-crm, configurator, tax, project, governance, deposit, matching, vendor,
-partner, inventory, document, salesteam, millwork, account, vision,
-parsing, the apps registry under `pkg/apps`, the A2A receiver, the health
-and metrics endpoints of `cmd/server`, and the `/uploads/` file pattern.
+200 of 345 census routes covered. Pending (in `contract-pending.txt`):
+pricing, reporting, gl, purchase_order, techadmin, bankrecon, staff, edi,
+ap, configurator, dashboard, matching, tax, governance, the apps registry
+under `pkg/apps`, document (two routes), millwork, parsing, vision and the
+metrics endpoint of `cmd/server`.
+
+Nullability is spelled the 3.1 way, `type: [T, "null"]`; the 3.0
+`nullable` keyword does not exist in 3.1 and the generated types would
+drop it. A nullable `$ref` is a `oneOf` with a `{type: "null"}` leg. The
+model shape test (`core/internal/apicontract/model_shape_test.go`) counts
+only those two forms.
 
 The AI_LM integration routes (`/api/integration/*`) keep their own
 published contract shapes: the ADR 0001 in place rule exempts that seam

@@ -11,8 +11,6 @@
 # Generated file. Do not edit by hand; regenerate from the Go module root:
 #
 #	go run ./api/tools/merge && go run ./cmd/pending -write
-*	/uploads/
-DELETE	/api/portal/v1/cart/items/{id}
 DELETE	/api/v1/admin/keys/{id}
 DELETE	/api/v1/admin/settings/ai
 DELETE	/api/v1/admin/settings/routing
@@ -23,29 +21,6 @@ DELETE	/api/v1/pricing/category-rules/{id}
 DELETE	/api/v1/reporting/saved/{id}
 DELETE	/api/v1/reporting/schedules/{id}
 DELETE	/api/v1/tax/exemptions/{id}
-GET	/api/partner/v1/dashboard
-GET	/api/partner/v1/quotes
-GET	/api/partner/v1/quotes/{id}
-GET	/api/portal/v1/cart
-GET	/api/portal/v1/catalog
-GET	/api/portal/v1/catalog/categories
-GET	/api/portal/v1/catalog/{id}
-GET	/api/portal/v1/catalog/{id}/volume-breaks
-GET	/api/portal/v1/config
-GET	/api/portal/v1/dashboard
-GET	/api/portal/v1/deliveries
-GET	/api/portal/v1/deliveries/{id}
-GET	/api/portal/v1/deliveries/{id}/reschedule
-GET	/api/portal/v1/invites
-GET	/api/portal/v1/invoices
-GET	/api/portal/v1/invoices/{id}
-GET	/api/portal/v1/orders
-GET	/api/portal/v1/orders/{id}
-GET	/api/portal/v1/projects
-GET	/api/portal/v1/projects/{id}
-GET	/api/portal/v1/quotes
-GET	/api/portal/v1/quotes/{id}
-GET	/api/portal/v1/users
 GET	/api/v1/admin/keys
 GET	/api/v1/admin/modules
 GET	/api/v1/admin/settings/ai
@@ -114,22 +89,6 @@ GET	/api/v1/reports/daily-till
 GET	/api/v1/reports/exposure
 GET	/api/v1/reports/sales-summary
 GET	/api/v1/tax/exemptions/{customerID}
-GET	/health
-GET	/healthz/live
-GET	/healthz/ready
-GET	/metrics
-POST	/api/portal/v1/cart/items
-POST	/api/portal/v1/checkout
-POST	/api/portal/v1/deliveries/{id}/reschedule
-POST	/api/portal/v1/invites
-POST	/api/portal/v1/login
-POST	/api/portal/v1/logout
-POST	/api/portal/v1/orders/reorder
-POST	/api/portal/v1/orders/{id}/cancel
-POST	/api/portal/v1/projects
-POST	/api/portal/v1/quotes
-POST	/api/portal/v1/quotes/{id}/accept
-POST	/api/portal/v1/quotes/{id}/decline
 POST	/api/v1/a2a/purchase-order
 POST	/api/v1/admin/exposure-scan
 POST	/api/v1/admin/keys
@@ -185,11 +144,6 @@ POST	/api/v1/reporting/schedules
 POST	/api/v1/tax/exemptions
 POST	/api/v1/tax/preview
 POST	/api/v1/vision/scan
-PUT	/api/portal/v1/cart/items/{id}
-PUT	/api/portal/v1/orders/{id}/project
-PUT	/api/portal/v1/projects/{id}
-PUT	/api/portal/v1/users/{id}/role
-PUT	/api/portal/v1/users/{id}/status
 PUT	/api/v1/admin/modules/{id}
 PUT	/api/v1/admin/settings/ai
 PUT	/api/v1/admin/settings/routing

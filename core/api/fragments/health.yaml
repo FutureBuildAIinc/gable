@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Health and metrics endpoints, transcribed from cmd/server and
+# internal/app/serve/serve.go as they behave today. All are public
+# (listed in the auth middleware's PublicPaths). The three health
+# routes answer application/json. The /metrics endpoint serves the
+# Prometheus text exposition format by default and OpenMetrics on
+# application/openmetrics-text request.
+paths:
+  /healthz/live:
+    get:
+      operationId: healthLive
+      tags: [health]
+      summary: Liveness probe
+      description: >-
+        Always 200 if the process is running. Used by Kubernetes liveness;
+        no dependency checks.
+      security: []
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+  /healthz/ready:
+    get:
+      operationId: healthReady
+      tags: [health]
+      summary: Readiness probe
+      description: >-
+        Checks the database connection pool. Returns 200 when the pool is
+        healthy; 503 Service Unavailable when Ping fails, with the same
+        JSON body and status degraded.
+      security: []
+      responses:
+        "200":
+          description: The service is ready; db pool is connected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyOK"
+        "503":
+          description: The service is degraded; db pool is disconnected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyDegraded"
+  /health:
+    get:
+      operationId: healthLegacy
+      tags: [health]
+      summary: Legacy health check
+      description: >-
+        Backward-compatible health endpoint. Checks the database pool Ping
+        and returns the connectivity status. No request ID is generated.
+      security: []
+      responses:
+        "200":
+          description: The health with db status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthLegacy"
+  /metrics:
+    get:
+      operationId: metricsPrometheus
+      tags: [health]
+      summary: Prometheus metrics
+      description: >-
+        The Prometheus scrape endpoint. By default serves the Prometheus
+        text exposition format (text/plain; version=0.0.4; charset=utf-8).
+        If the request carries an Accept header for application/openmetrics-text
+        the endpoint serves the OpenMetrics format instead. Public: listed
+        in the auth middleware PublicPaths so the scrape target can reach
+        it without a token.
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format or OpenMetrics format.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Prometheus text exposition format; see https://prometheus.io/docs/instrumenting/exposition_formats/.
+components:
+  schemas:
+    HealthReadyOK:
+      type: object
+      required: [status, uptime, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        uptime:
+          type: string
+          description: "Go time.Duration string: the time since server start."
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              $ref: "#/components/schemas/HealthReadyDBPool"
+    HealthReadyDegraded:
+      type: object
+      required: [status, uptime, checks]
+      description: The same shape as OK; status is degraded and db pool is disconnected.
+      properties:
+        status:
+          type: string
+          enum: [degraded]
+        uptime:
+          type: string
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              $ref: "#/components/schemas/HealthReadyDBPool"
+    HealthReadyDBPool:
+      type: object
+      required: [status, pool_total, pool_idle, pool_in_use, pool_max]
+      properties:
+        status:
+          type: string
+          enum: [connected, disconnected]
+        pool_total:
+          type: integer
+        pool_idle:
+          type: integer
+        pool_in_use:
+          type: integer
+        pool_max:
+          type: integer
+    HealthLegacy:
+      type: object
+      required: [status, db]
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        db:
+          type: string
+          enum: [connected, disconnected]

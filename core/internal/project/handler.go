@@ -31,7 +31,15 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) h
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {
+	writeJSONStatus(w, http.StatusOK, data)
+}
+
+// writeJSONStatus sets the Content-Type header before WriteHeader, the only
+// order in which the header reaches the wire. Handlers must never call
+// WriteHeader themselves ahead of a JSON body.
+func writeJSONStatus(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
@@ -85,8 +93,7 @@ func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to create project", http.StatusInternalServerError, err)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, p)
+	writeJSONStatus(w, http.StatusCreated, p)
 }
 
 func (h *Handler) HandleUpdateProject(w http.ResponseWriter, r *http.Request) {

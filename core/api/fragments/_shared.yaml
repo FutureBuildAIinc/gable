@@ -109,6 +109,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    UnprocessableEntity:
+      description: >-
+        The request is semantically invalid for this operation. Used by the
+        idempotency layer when an Idempotency-Key is reused with a request
+        body that differs from the original.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     PaymentRequired:
       description: The card charge or its persistence failed.
       content:
