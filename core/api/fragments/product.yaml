@@ -1,0 +1,350 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The product module, transcribed from internal/product/handler.go and
+# model.go as they behave today: float dollars base price, a UPPERCASE unit
+# of measure vocabulary shared with quotes and the integration seam, and
+# the PIM geometry carried as nullable fields where null means not
+# recorded.
+paths:
+  /api/v1/products:
+    get:
+      operationId: productList
+      tags: [product]
+      summary: List products
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: The page of products.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: productCreate
+      tags: [product]
+      summary: Create a product
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Product"
+      responses:
+        "201":
+          description: The created product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/reorder-alerts:
+    get:
+      operationId: productReorderAlerts
+      tags: [product]
+      summary: List products below their reorder point
+      description: >-
+        The alert rows omit on order quantity, velocity and lead time; they
+        carry the deficit only.
+      responses:
+        "200":
+          description: The alerts, a bare array that is null when nothing is below its reorder point.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReorderAlertList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}:
+    get:
+      operationId: productGet
+      tags: [product]
+      summary: Get one product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/products/{id}/margins:
+    patch:
+      operationId: productUpdateMarginRules
+      tags: [product]
+      summary: Set the target margin and commission rate
+      description: A bare 200 with no body on success.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductMarginUpdate"
+      responses:
+        "200":
+          description: Updated; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/dimensions:
+    patch:
+      operationId: productUpdateDimensions
+      tags: [product]
+      summary: Set the PIM parametric geometry
+      description: >-
+        All fields are nullable: an omitted or explicitly null field clears
+        the column to no geometry recorded, while a real zero is a recorded
+        zero dimension. The persisted geometry is returned.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Geometry"
+      responses:
+        "200":
+          description: The persisted geometry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Geometry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{id}/lead-time:
+    patch:
+      operationId: productUpdateLeadTime
+      tags: [product]
+      summary: Set the dealer side lead time
+      description: >-
+        The lead time in days published to the portal catalog. A null clears
+        it back to unpublished; zero asserts same day availability. The
+        request is echoed as the response.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductLeadTimeUpdate"
+      responses:
+        "200":
+          description: The echoed request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductLeadTimeUpdate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+components:
+  schemas:
+    UOM:
+      type: string
+      description: The database unit of measure vocabulary, verbatim.
+      enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
+    Product:
+      type: object
+      required: [id, sku, description, uom_primary, base_price, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, reorder_point, reorder_qty, total_quantity, total_allocated, average_unit_cost, target_margin, commission_rate, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        uom_primary:
+          $ref: "#/components/schemas/UOM"
+        base_price:
+          type: number
+          description: Float dollars.
+        vendor:
+          type: [string, "null"]
+          description: Denormalized display name.
+        vendor_id:
+          type: [string, "null"]
+          format: uuid
+        upc:
+          type: [string, "null"]
+        weight_lbs:
+          type: number
+        length_in:
+          type: [number, "null"]
+          description: Inches; null when the PIM has no geometry for the SKU.
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+        reorder_point:
+          type: number
+        reorder_qty:
+          type: number
+        total_quantity:
+          type: number
+          description: Aggregated from inventory.
+        total_allocated:
+          type: number
+        average_unit_cost:
+          type: number
+          description: Float dollars.
+        target_margin:
+          type: number
+        commission_rate:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductPage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    Geometry:
+      type: object
+      description: >-
+        The mutable parametric geometry slice; every field is always present
+        and nullable on purpose (nil means not recorded, zero is a recorded
+        zero).
+      required: [length_in, width_in, height_in, stackable, geometry_source]
+      properties:
+        length_in:
+          type: [number, "null"]
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+    ReorderAlert:
+      type: object
+      required: [product_id, sku, description, vendor, vendor_id, reorder_point, reorder_qty, current_stock, deficit]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        vendor:
+          type: [string, "null"]
+        vendor_id:
+          type: [string, "null"]
+          format: uuid
+        reorder_point:
+          type: number
+        reorder_qty:
+          type: number
+        current_stock:
+          type: number
+        deficit:
+          type: number
+    ReorderAlertList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/ReorderAlert"
+    ProductMarginUpdate:
+      type: object
+      required: [target_margin, commission_rate]
+      properties:
+        target_margin:
+          type: number
+        commission_rate:
+          type: number
+    ProductLeadTimeUpdate:
+      type: object
+      required: [lead_time_days]
+      properties:
+        lead_time_days:
+          type: [integer, "null"]
+          description: Days; null clears to unpublished, zero asserts same day.

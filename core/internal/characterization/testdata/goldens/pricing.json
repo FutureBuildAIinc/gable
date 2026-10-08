@@ -115,9 +115,18 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-8>\",\"name\":\"Golden quantity break\",\"rule_type\":\"QUANTITY_BREAK\",\"product_id\":\"<id-7>\",\"discount_pct\":5,\"min_quantity\":100,\"is_active\":false,\"priority\":5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "created_at": "<ts+0d>",
+        "discount_pct": 5,
+        "id": "<id-8>",
+        "is_active": false,
+        "min_quantity": 100,
+        "name": "Golden quantity break",
+        "priority": 5,
+        "product_id": "<id-7>",
+        "rule_type": "QUANTITY_BREAK",
+        "updated_at": "<ts+0d>"
       }
     }
   },

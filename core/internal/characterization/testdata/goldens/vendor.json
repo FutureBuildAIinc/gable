@@ -11,9 +11,22 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-1>\",\"name\":\"Golden Vendor Co\",\"contact_email\":null,\"phone\":null,\"address_line1\":null,\"city\":null,\"state\":null,\"zip\":null,\"payment_terms\":\"NET15\",\"average_lead_time_days\":0,\"fill_rate\":0,\"total_spend_ytd\":0,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "address_line1": null,
+        "average_lead_time_days": 0,
+        "city": null,
+        "contact_email": null,
+        "created_at": "<ts+0d>",
+        "fill_rate": 0,
+        "id": "<id-1>",
+        "name": "Golden Vendor Co",
+        "payment_terms": "NET15",
+        "phone": null,
+        "state": null,
+        "total_spend_ytd": 0,
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },
@@ -25,9 +38,22 @@
     },
     "response": {
       "status": 200,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-1>\",\"name\":\"Golden Vendor Co\",\"contact_email\":null,\"phone\":null,\"address_line1\":null,\"city\":null,\"state\":null,\"zip\":null,\"payment_terms\":\"NET15\",\"average_lead_time_days\":0,\"fill_rate\":0,\"total_spend_ytd\":0,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "address_line1": null,
+        "average_lead_time_days": 0,
+        "city": null,
+        "contact_email": null,
+        "created_at": "<ts+0d>",
+        "fill_rate": 0,
+        "id": "<id-1>",
+        "name": "Golden Vendor Co",
+        "payment_terms": "NET15",
+        "phone": null,
+        "state": null,
+        "total_spend_ytd": 0,
+        "updated_at": "<ts+0d>",
+        "zip": null
       }
     }
   },

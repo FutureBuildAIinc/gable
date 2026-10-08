@@ -11,9 +11,15 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-2>\",\"customer_id\":\"<id-1>\",\"activity_type\":\"NOTE\",\"description\":\"golden characterisation note\",\"activity_date\":\"<ts+0d>\",\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "activity_date": "<ts+0d>",
+        "activity_type": "NOTE",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-1>",
+        "description": "golden characterisation note",
+        "id": "<id-2>",
+        "updated_at": "<ts+0d>"
       }
     }
   },

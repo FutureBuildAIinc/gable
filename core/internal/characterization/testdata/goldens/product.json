@@ -144,9 +144,31 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-5>\",\"sku\":\"GOLD-HARNESS-2X4\",\"description\":\"Golden harness stud\",\"uom_primary\":\"PCS\",\"base_price\":4.25,\"vendor\":null,\"vendor_id\":null,\"upc\":null,\"weight_lbs\":0,\"length_in\":null,\"width_in\":null,\"height_in\":null,\"stackable\":null,\"geometry_source\":null,\"reorder_point\":10,\"reorder_qty\":50,\"total_quantity\":0,\"total_allocated\":0,\"average_unit_cost\":0,\"target_margin\":0,\"commission_rate\":0,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\"}\n"
+        "average_unit_cost": 0,
+        "base_price": 4.25,
+        "commission_rate": 0,
+        "created_at": "<ts+0d>",
+        "description": "Golden harness stud",
+        "geometry_source": null,
+        "height_in": null,
+        "id": "<id-5>",
+        "length_in": null,
+        "reorder_point": 10,
+        "reorder_qty": 50,
+        "sku": "GOLD-HARNESS-2X4",
+        "stackable": null,
+        "target_margin": 0,
+        "total_allocated": 0,
+        "total_quantity": 0,
+        "uom_primary": "PCS",
+        "upc": null,
+        "updated_at": "<ts+0d>",
+        "vendor": null,
+        "vendor_id": null,
+        "weight_lbs": 0,
+        "width_in": null
       }
     }
   },

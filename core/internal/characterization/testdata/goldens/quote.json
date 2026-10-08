@@ -23,9 +23,36 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-4>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":55,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-5>\",\"quote_id\":\"<id-4>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":10,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":55,\"created_at\":\"<ts+0d>\"}]}\n"
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-4>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-5>",
+            "line_total": 55,
+            "product_id": "<id-3>",
+            "quantity": 10,
+            "quote_id": "<id-4>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 55,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -279,9 +306,36 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-8>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":27.5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-9>\",\"quote_id\":\"<id-8>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":5,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":27.5,\"created_at\":\"<ts+0d>\"}]}\n"
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-8>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-9>",
+            "line_total": 27.5,
+            "product_id": "<id-3>",
+            "quantity": 5,
+            "quote_id": "<id-8>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 27.5,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -355,9 +409,36 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-10>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":27.5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-11>\",\"quote_id\":\"<id-10>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":5,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":27.5,\"created_at\":\"<ts+0d>\"}]}\n"
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-10>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-11>",
+            "line_total": 27.5,
+            "product_id": "<id-3>",
+            "quantity": 5,
+            "quote_id": "<id-10>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 27.5,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -477,9 +558,36 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-12>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":27.5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-13>\",\"quote_id\":\"<id-12>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":5,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":27.5,\"created_at\":\"<ts+0d>\"}]}\n"
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-12>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-13>",
+            "line_total": 27.5,
+            "product_id": "<id-3>",
+            "quantity": 5,
+            "quote_id": "<id-12>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 27.5,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -597,9 +705,36 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-14>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":27.5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-15>\",\"quote_id\":\"<id-14>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":5,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":27.5,\"created_at\":\"<ts+0d>\"}]}\n"
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-14>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-15>",
+            "line_total": 27.5,
+            "product_id": "<id-3>",
+            "quantity": 5,
+            "quote_id": "<id-14>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 27.5,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -722,9 +857,36 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-16>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":27.5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-17>\",\"quote_id\":\"<id-16>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":5,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":27.5,\"created_at\":\"<ts+0d>\"}]}\n"
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-16>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-17>",
+            "line_total": 27.5,
+            "product_id": "<id-3>",
+            "quantity": 5,
+            "quote_id": "<id-16>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 27.5,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -847,9 +1009,36 @@
     },
     "response": {
       "status": 201,
-      "content_type": "text/plain; charset=utf-8",
+      "content_type": "application/json",
       "body": {
-        "text": "{\"id\":\"<id-18>\",\"branch_id\":\"<id-1>\",\"customer_id\":\"<id-2>\",\"state\":\"DRAFT\",\"total_amount\":27.5,\"created_at\":\"<ts+0d>\",\"updated_at\":\"<ts+0d>\",\"delivery_type\":\"PICKUP\",\"freight_amount\":0,\"margin_total\":0,\"source\":\"manual\",\"exposure_state\":\"\",\"exposure_dollars\":0,\"lines\":[{\"id\":\"<id-19>\",\"quote_id\":\"<id-18>\",\"product_id\":\"<id-3>\",\"sku\":\"LUM-248-PREM\",\"description\":\"2x4x8 SPF Premium\",\"quantity\":5,\"uom\":\"PCS\",\"unit_price\":5.5,\"unit_cost\":3.5,\"line_total\":27.5,\"created_at\":\"<ts+0d>\"}]}\n"
+        "branch_id": "<id-1>",
+        "created_at": "<ts+0d>",
+        "customer_id": "<id-2>",
+        "delivery_type": "PICKUP",
+        "exposure_dollars": 0,
+        "exposure_state": "",
+        "freight_amount": 0,
+        "id": "<id-18>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "id": "<id-19>",
+            "line_total": 27.5,
+            "product_id": "<id-3>",
+            "quantity": 5,
+            "quote_id": "<id-18>",
+            "sku": "LUM-248-PREM",
+            "unit_cost": 3.5,
+            "unit_price": 5.5,
+            "uom": "PCS"
+          }
+        ],
+        "margin_total": 0,
+        "source": "manual",
+        "state": "DRAFT",
+        "total_amount": 27.5,
+        "updated_at": "<ts+0d>"
       }
     }
   },

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/database"
@@ -54,9 +55,13 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	// kind and the id on a row can never disagree. A machine key is never the
 	// implicit source of user_id: that column meant "a user" until actor_kind
 	// existed, and legacy reports grouping by it would list key ids among
-	// users. The key id lives in actor_id only.
+	// users. The key id lives in actor_id only. The decision rests on the key
+	// id being in the context, not on the actor's kind: an agent marker over
+	// a keyed request rewrites the kind to agent while the principal is still
+	// the key, and must not smuggle the key id into user_id either.
 	userID := entry.UserID
-	if userID == "" && act.Kind != actor.KindKey {
+	_, viaMachineKey := actor.KeyIDFromContext(ctx)
+	if userID == "" && !viaMachineKey {
 		userID = act.ID
 	}
 	// No attribution at all is stored as NULL, the value the 088 backfill
@@ -120,6 +125,70 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 		return err
 	}
 	return nil
+}
+
+// The refused path is caller controlled: stored verbatim, one refused
+// request writes an attacker sized audit_log row, and even a fully scopeless
+// key converts cheap requests into disk exhaustion. The row therefore stores
+// bounded copies, cut on a rune boundary and marked as truncated; the full
+// path is served only to the server log line, which the auth layer writes
+// for every refusal.
+const (
+	maxRefusalPathBytes  = 512
+	maxRefusalScopeBytes = 128
+)
+
+// cutRunes cuts s to at most limit bytes without splitting a UTF-8 rune,
+// reporting whether it cut anything.
+func cutRunes(s string, limit int) (string, bool) {
+	if len(s) <= limit {
+		return s, false
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut], true
+}
+
+// AuditKeyRefusal records a refused machine-key request (a valid key refused
+// for lacking a scope, for a user-only route, or for a path machine keys do
+// not address). It implements the middleware package's KeyRefusalAuditor
+// seam. The row's actor is the key: the ctx the auth core passes carries the
+// key id, so actor_id is the key's id and user_id stays NULL (a key is never
+// a user, even when agent headers rewrite actor_kind to agent). The stored
+// path and scope are bounded (see maxRefusalPathBytes); a refusal answers
+// before this write, so a bounded row carries everything the trail needs. A
+// failure to write is logged and swallowed: the refusal verdict has already
+// been served, and a full audit table must not turn a 403 into a 500.
+func (l *Logger) AuditKeyRefusal(ctx context.Context, keyID, action, scope, method, path string) {
+	id, err := uuid.Parse(keyID)
+	if err != nil {
+		// The id comes from the api_keys row the validator read; a
+		// non-uuid here is a wiring fault worth a loud log line.
+		slog.Error("audit: machine key refusal with non-uuid key id", "key_id", keyID, "action", action)
+		id = uuid.Nil
+	}
+	storedPath, pathTruncated := cutRunes(path, maxRefusalPathBytes)
+	storedScope, scopeTruncated := cutRunes(scope, maxRefusalScopeBytes)
+	changes := map[string]interface{}{"method": method, "path": storedPath}
+	if pathTruncated {
+		changes["path_truncated"] = true
+	}
+	if scopeTruncated {
+		changes["scope_truncated"] = true
+	}
+	if storedScope != "" {
+		changes["scope"] = storedScope
+	}
+	if err := l.Log(ctx, Entry{
+		Action:     action,
+		EntityType: "api_key",
+		EntityID:   id,
+		Changes:    changes,
+	}); err != nil {
+		slog.Error("audit: failed to write machine key refusal", "action", action, "key_id", keyID, "error", err)
+	}
 }
 
 // Drain is retained for graceful-shutdown callers: writes are synchronous

@@ -1,0 +1,501 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The customer module, transcribed from internal/customer/handler.go,
+# model.go and contacts.go as they behave today: float dollars credit fields,
+# a RETAIL/SILVER/GOLD/PLATINUM tier vocabulary, mixed case contact roles,
+# and bare array lists that are JSON null when empty.
+paths:
+  /api/v1/customers:
+    get:
+      operationId: customerList
+      tags: [customer]
+      summary: List customers
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of customers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: customerCreate
+      tags: [customer]
+      summary: Create a customer
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Customer"
+      responses:
+        "201":
+          description: The created customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/customers/{id}:
+    get:
+      operationId: customerGet
+      tags: [customer]
+      summary: Get one customer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/customers/{id}/salesperson:
+    patch:
+      operationId: customerUpdateSalesperson
+      tags: [customer]
+      summary: Assign or clear the salesperson
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerSalespersonUpdate"
+      responses:
+        "200":
+          description: The updated customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/customers/{id}/escalation-policy:
+    get:
+      operationId: customerGetEscalationPolicy
+      tags: [customer]
+      summary: Get the lumber index escalation policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: customerSetEscalationPolicy
+      tags: [customer]
+      summary: Set the lumber index escalation policy
+      description: >-
+        Validation failures (a missing agreement reference, an invalid
+        policy) are a 400; the reloaded row is returned so server side
+        normalization is visible.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EscalationPolicy"
+      responses:
+        "200":
+          description: The reloaded policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalationPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/customers/{customerId}/contacts:
+    get:
+      operationId: customerListContacts
+      tags: [customer]
+      summary: List a customer's contacts
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The contacts, a bare array that is null when the customer has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: customerCreateContact
+      tags: [customer]
+      summary: Create a contact
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Contact"
+      responses:
+        "201":
+          description: The created contact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/contacts/{id}:
+    get:
+      operationId: contactGet
+      tags: [customer]
+      summary: Get one contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The contact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: contactUpdate
+      tags: [customer]
+      summary: Update a contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Contact"
+      responses:
+        "200":
+          description: The updated contact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: contactDelete
+      tags: [customer]
+      summary: Delete a contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/price_levels:
+    get:
+      operationId: customerListPriceLevels
+      tags: [customer]
+      summary: List price levels
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: All price levels, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceLevelList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    Customer:
+      type: object
+      required: [id, primary_branch_id, name, account_number, tier, credit_limit, balance_due, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        primary_branch_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        account_number:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        tier:
+          type: string
+          enum: [RETAIL, SILVER, GOLD, PLATINUM]
+        price_level_id:
+          type: string
+          format: uuid
+        price_level:
+          $ref: "#/components/schemas/PriceLevel"
+        salesperson_id:
+          type: string
+          format: uuid
+        salesperson_name:
+          type: string
+        credit_limit:
+          type: number
+          description: Float dollars.
+        balance_due:
+          type: number
+          description: Float dollars. The account module carries the same fact in cents.
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerPage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    CustomerSalespersonUpdate:
+      type: object
+      required: [salesperson_id]
+      properties:
+        salesperson_id:
+          type: [string, "null"]
+          format: uuid
+          description: The salesperson to assign, or null to clear.
+    PriceLevel:
+      type: object
+      required: [id, name, multiplier, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        multiplier:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PriceLevelList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/PriceLevel"
+    EscalationPolicy:
+      type: object
+      required: [customer_id, policy, threshold_pct]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        policy:
+          type: string
+          description: The policy name; an unknown name is a 400 on set.
+        threshold_pct:
+          type: number
+        agreement_signed_at:
+          type: string
+          format: date-time
+        agreement_ref:
+          type: string
+          description: Required by the set validation for the policies that need a signed agreement.
+    Contact:
+      type: object
+      required: [id, customer_id, first_name, last_name, role, is_primary, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        title:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [Buyer, AP, Owner, Site Super]
+        is_primary:
+          type: boolean
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ContactList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/Contact"

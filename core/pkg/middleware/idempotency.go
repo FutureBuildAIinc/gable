@@ -73,12 +73,15 @@ func (w *idempotencyResponseWriter) Unwrap() http.ResponseWriter {
 //
 //   - the ERP API identifies itself with the JWT subject, which the auth
 //     middleware (outside which the global layer runs) puts in the context.
-//     Under AUTH_MODE=dev there is no JWT layer: a caller with no identity is
-//     the fixed dev principal, mirroring the devActor convention in
-//     internal/pricing. Outside dev an unidentifiable caller gets "": the
-//     request passes through uncached rather than joining a shared anonymous
-//     namespace (which could replay one anonymous caller's response to
-//     another).
+//     A scoped machine key is a principal of its own (R1-13): the auth layer
+//     puts the key id in the context and claims key on it, in every auth
+//     mode, so a keyed caller's retries share its namespace instead of
+//     passing uncached (outside dev) or joining the dev one. Under
+//     AUTH_MODE=dev a caller with no identity at all is the fixed dev
+//     principal, mirroring the devActor convention in internal/pricing.
+//     Outside dev an unidentifiable caller gets "": the request passes
+//     through uncached rather than joining a shared anonymous namespace
+//     (which could replay one anonymous caller's response to another).
 //   - the portal API authenticates per customer and user inside its own
 //     chain (portalMw), which runs after the global layer: the portal layer
 //     wraps inside it and reads the claims it injects.
@@ -90,6 +93,9 @@ func (w *idempotencyResponseWriter) Unwrap() http.ResponseWriter {
 func globalIdempotencyPrincipal(r *http.Request) string {
 	if claims := ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
 		return "user:" + claims.Subject
+	}
+	if keyID, ok := KeyIDFromContext(r.Context()); ok {
+		return "key:" + keyID
 	}
 	if devAuthMode() {
 		return "dev"

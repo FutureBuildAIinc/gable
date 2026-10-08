@@ -1,0 +1,545 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The quote module, transcribed from internal/quote/handler.go and model.go
+# as they behave today: float dollars money, the lifecycle field named state
+# with an UPPERCASE vocabulary, the {data,total,limit,offset} page, and no
+# list filters (a ?status= parameter is silently ignored).
+paths:
+  /api/v1/quotes:
+    get:
+      operationId: quoteList
+      tags: [quote]
+      summary: List quotes
+      description: >-
+        Offset paged quote list. No filters are implemented; any query
+        parameter other than limit and offset is silently ignored.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of quotes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: quoteCreate
+      tags: [quote]
+      summary: Create a quote
+      description: >-
+        Decodes the full quote shape (lines included) and the optional base64
+        original upload. Validation is loose: a line without a unit of
+        measure fails at the database cast and surfaces as a 500.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteCreateRequest"
+      responses:
+        "201":
+          description: The created quote, echoed with server filled fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/analytics:
+    get:
+      operationId: quoteAnalytics
+      tags: [quote]
+      summary: Quote analytics aggregates
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: Aggregated quote analytics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteAnalytics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}:
+    get:
+      operationId: quoteGet
+      tags: [quote]
+      summary: Get one quote with lines
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: quoteUpdate
+      tags: [quote]
+      summary: Replace a draft quote
+      description: >-
+        Full replace. Only a DRAFT quote can be edited; any other state is a
+        400. Lines are replaced; a line whose id survives keeps its customer
+        note.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteCreateRequest"
+      responses:
+        "200":
+          description: The updated quote with lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/state:
+    put:
+      operationId: quoteUpdateState
+      tags: [quote]
+      summary: Change the quote lifecycle state
+      description: >-
+        Sets the state directly; the service refuses transitions it does not
+        allow and the handler reports that refusal as a 400. Returns the
+        updated quote.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteStateUpdate"
+      responses:
+        "200":
+          description: The updated quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/convert:
+    post:
+      operationId: quoteConvertToOrderPayload
+      tags: [quote]
+      summary: Mark accepted and return the order creation payload
+      description: >-
+        Marks the quote ACCEPTED and returns the body the client is expected
+        to POST to /api/v1/orders itself; no order is created here. The
+        returned price_each is in float dollars, while POST /api/v1/orders
+        expects cents: the client converts.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order creation payload for the client to POST.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteOrderPayload"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/quotes/{id}/file:
+    get:
+      operationId: quoteDownloadOriginalFile
+      tags: [quote]
+      summary: Download the original uploaded file
+      description: >-
+        Streams the stored original upload of an AI sourced quote. The stored
+        content type is echoed; the filename in Content-Disposition is
+        sanitized. A quote with no stored file is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The file bytes; the stored content type is echoed.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  schemas:
+    QuoteState:
+      type: string
+      enum: [DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED]
+      description: "Today's lifecycle vocabulary: the field is named state and the values are UPPERCASE."
+    Quote:
+      type: object
+      required: [id, branch_id, customer_id, state, total_amount, created_at, updated_at, delivery_type, freight_amount, margin_total, source, exposure_state, exposure_dollars]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        job_id:
+          type: string
+          format: uuid
+        state:
+          $ref: "#/components/schemas/QuoteState"
+        total_amount:
+          type: number
+          description: Float dollars. The order and invoice modules carry cents; this module does not.
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        sent_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+        rejected_at:
+          type: string
+          format: date-time
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+        freight_amount:
+          type: number
+          description: Float dollars.
+        vehicle_id:
+          type: string
+          format: uuid
+        vehicle_name:
+          type: string
+        margin_total:
+          type: number
+        source:
+          type: string
+          enum: [manual, ai]
+        original_filename:
+          type: string
+        original_content_type:
+          type: string
+        parse_map:
+          description: The AI parse mapping, arbitrary JSON.
+        exposure_state:
+          type: string
+          description: The price protection rollup state; OK when no escalator is active.
+        exposure_dollars:
+          type: number
+        exposure_last_checked_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteLine"
+    QuoteLine:
+      type: object
+      required: [id, quote_id, product_id, sku, description, quantity, uom, unit_price, unit_cost, line_total, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        customer_note:
+          type: string
+          description: What a portal user asked for when requesting this line.
+        quantity:
+          type: number
+        uom:
+          type: string
+          enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
+        unit_price:
+          type: number
+          description: Float dollars per the line's uom.
+        unit_cost:
+          type: number
+          description: Float dollars.
+        line_total:
+          type: number
+          description: Float dollars.
+        created_at:
+          type: string
+          format: date-time
+    QuoteCreateRequest:
+      type: object
+      description: >-
+        The create and update body: the full quote shape plus the base64
+        original upload. Decoding is lenient and validation happens late, so
+        most invalid payloads surface as 500 today.
+      required: [customer_id]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        job_id:
+          type: string
+          format: uuid
+        state:
+          $ref: "#/components/schemas/QuoteState"
+        total_amount:
+          type: number
+        expires_at:
+          type: string
+          format: date-time
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+        freight_amount:
+          type: number
+        vehicle_id:
+          type: string
+          format: uuid
+        vehicle_name:
+          type: string
+        source:
+          type: string
+          enum: [manual, ai]
+        original_file:
+          type: string
+          description: Base64 of the original upload; over 5 MiB decoded is a 400.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteLineInput"
+    QuoteLineInput:
+      type: object
+      required: [product_id, quantity, uom, unit_price]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: number
+        uom:
+          type: string
+          enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
+        unit_price:
+          type: number
+        unit_cost:
+          type: number
+        customer_note:
+          type: string
+    QuoteStateUpdate:
+      type: object
+      required: [state]
+      properties:
+        state:
+          $ref: "#/components/schemas/QuoteState"
+    QuoteOrderPayload:
+      type: object
+      required: [customer_id, quote_id, lines]
+      description: What POST /api/v1/orders expects, except price_each here is float dollars while the order route expects cents.
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        quote_id:
+          type: string
+          format: uuid
+        lines:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity, price_each]
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: number
+              price_each:
+                type: number
+                description: Float dollars.
+    QuotePage:
+      type: object
+      required: [data, total, limit, offset]
+      description: Today's offset page envelope; data is never null on this route (the handler substitutes an empty array).
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Quote"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    QuoteAnalytics:
+      type: object
+      required: [total_quotes, draft_count, sent_count, accepted_count, rejected_count, expired_count, conversion_rate, avg_margin_accepted, avg_margin_rejected, avg_days_to_close, total_quote_value, total_accepted_value, ai_sourced_count, ai_conversion_rate, manual_conversion_rate, trend_data]
+      properties:
+        total_quotes:
+          type: integer
+        draft_count:
+          type: integer
+        sent_count:
+          type: integer
+        accepted_count:
+          type: integer
+        rejected_count:
+          type: integer
+        expired_count:
+          type: integer
+        conversion_rate:
+          type: number
+        avg_margin_accepted:
+          type: number
+        avg_margin_rejected:
+          type: number
+        avg_days_to_close:
+          type: number
+        total_quote_value:
+          type: number
+        total_accepted_value:
+          type: number
+        ai_sourced_count:
+          type: integer
+        ai_conversion_rate:
+          type: number
+        manual_conversion_rate:
+          type: number
+        trend_data:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteAnalyticsTrend"
+    QuoteAnalyticsTrend:
+      type: object
+      required: [date, created, accepted, rejected, total_value, accepted_value]
+      properties:
+        date:
+          type: string
+        created:
+          type: integer
+        accepted:
+          type: integer
+        rejected:
+          type: integer
+        total_value:
+          type: number
+        accepted_value:
+          type: number

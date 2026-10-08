@@ -1,0 +1,647 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The location module (locations, branches, user branch grants), transcribed
+# from internal/location/handler.go, model.go and user_repository.go as they
+# behave today: one row shape for every node kind, bare array lists that are
+# JSON null when empty, and the branch write endpoints soft archiving
+# through the location delete.
+paths:
+  /api/v1/locations:
+    get:
+      operationId: locationList
+      tags: [location]
+      summary: List every location node
+      responses:
+        "200":
+          description: All location nodes, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: locationCreate
+      tags: [location]
+      summary: Create a location node
+      description: The active flag defaults to true when the body does not mention it.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationCreateRequest"
+      responses:
+        "201":
+          description: The created location.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/locations/{id}:
+    get:
+      operationId: locationGet
+      tags: [location]
+      summary: Get one location node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The location.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: locationUpdate
+      tags: [location]
+      summary: Update a location node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Location"
+      responses:
+        "200":
+          description: The updated location.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: locationDelete
+      tags: [location]
+      summary: Soft archive a location node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Archived (active set false).
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/branches:
+    get:
+      operationId: branchList
+      tags: [location]
+      summary: List branches
+      parameters:
+        - name: include_inactive
+          in: query
+          description: Only the literal string true includes archived branches.
+          schema:
+            type: string
+            enum: ["true"]
+      responses:
+        "200":
+          description: The branches, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: branchCreate
+      tags: [location]
+      summary: Create a branch
+      description: Creates a location node with type BRANCH and no parent.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationCreateRequest"
+      responses:
+        "201":
+          description: The created branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/branches/{id}:
+    get:
+      operationId: branchGet
+      tags: [location]
+      summary: Get one branch
+      description: A node that exists but is not a branch is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: branchUpdate
+      tags: [location]
+      summary: Update a branch
+      description: Reuses the location update; the type column is not mutable here.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Location"
+      responses:
+        "200":
+          description: The updated branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: branchDelete
+      tags: [location]
+      summary: Soft archive a branch
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Archived (active set false).
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/branches/{id}/tree:
+    get:
+      operationId: branchTree
+      tags: [location]
+      summary: Get a branch's location tree
+      description: The branch with its children nested.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The tree, a bare array.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/branches/{id}/users:
+    get:
+      operationId: branchListUsers
+      tags: [location]
+      summary: List the users granted to a branch
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The grants, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserLocationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me/branches:
+    get:
+      operationId: myBranches
+      tags: [location]
+      summary: List the caller's branches
+      description: >-
+        The caller's grants with the home flag. Without auth claims (dev
+        mode) every active branch is returned with the first marked home.
+      responses:
+        "200":
+          description: The branch summaries, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchSummaryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users:
+    get:
+      operationId: locationListKnownUsers
+      tags: [location]
+      summary: List known user subjects
+      description: The union of distinct user subjects from grants and the audit log; feeds the admin user picker.
+      responses:
+        "200":
+          description: The subject strings, a bare array that is null when none exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StringList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{sub}/branches:
+    get:
+      operationId: userBranches
+      tags: [location]
+      summary: List a user's branch grants
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The branch summaries, a bare array that is null when the user has none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchSummaryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: userGrantBranch
+      tags: [location]
+      summary: Grant a branch to a user
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserBranchGrant"
+      responses:
+        "204":
+          description: Granted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{sub}/branches/{branch_id}:
+    delete:
+      operationId: userRevokeBranch
+      tags: [location]
+      summary: Revoke a user's branch grant
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{sub}/home-branch:
+    put:
+      operationId: userSetHomeBranch
+      tags: [location]
+      summary: Set a user's home branch
+      description: The user must already hold a grant on the branch.
+      parameters:
+        - name: sub
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HomeBranchSet"
+      responses:
+        "204":
+          description: Set.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    LocationType:
+      type: string
+      enum: [BRANCH, ZONE, AISLE, RACK, SHELF, BIN, YARD]
+    Location:
+      type: object
+      required: [id, path, type, code, active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        type:
+          $ref: "#/components/schemas/LocationType"
+        code:
+          type: string
+        description:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        phone:
+          type: string
+        tax_jurisdiction_code:
+          type: string
+        default_tax_rate:
+          type: [number, "null"]
+        timezone:
+          type: string
+        active:
+          type: boolean
+        branch_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+    LocationCreateRequest:
+      type: object
+      description: The location shape with the active flag told apart from an explicit false.
+      required: [path, type, code]
+      properties:
+        parent_id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        type:
+          $ref: "#/components/schemas/LocationType"
+        code:
+          type: string
+        description:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        phone:
+          type: string
+        tax_jurisdiction_code:
+          type: string
+        default_tax_rate:
+          type: number
+        timezone:
+          type: string
+        active:
+          type: [boolean, "null"]
+          description: Defaults to true when absent; an explicit false is honored.
+    LocationList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/Location"
+    BranchSummary:
+      type: object
+      required: [id, code, name, active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        active:
+          type: boolean
+        is_home:
+          type: boolean
+        timezone:
+          type: string
+    BranchSummaryList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/BranchSummary"
+    UserLocation:
+      type: object
+      required: [user_sub, branch_id, is_home, granted_at]
+      properties:
+        user_sub:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+        is_home:
+          type: boolean
+        granted_at:
+          type: string
+          format: date-time
+        granted_by:
+          type: string
+    UserLocationList:
+      type: [array, "null"]
+      items:
+        $ref: "#/components/schemas/UserLocation"
+    UserBranchGrant:
+      type: object
+      required: [branch_id, is_home]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        is_home:
+          type: boolean
+    HomeBranchSet:
+      type: object
+      required: [branch_id]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+    StringList:
+      type: [array, "null"]
+      items:
+        type: string
