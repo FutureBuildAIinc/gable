@@ -1266,6 +1266,240 @@ func TestIdempotency_IntegrationTenantlessCallers(t *testing.T) {
 	}
 }
 
+// --- the key itself is validated ------------------------------------------------
+
+// A key must be 1 to 255 printable ASCII characters: anything else is a
+// client bug answered with 400 validation_failed naming the header, before
+// any claim is made (an overlong key once travelled to the database and was
+// served through the fail-open path).
+func TestIdempotency_KeyValidation(t *testing.T) {
+	db := testutil.RequireDB(t)
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	longKey := strings.Repeat("a", 256)
+	deleteKeyRows(t, db, principal, longKey)
+
+	var calls int32
+	mw := Idempotency(db)
+	h := countingHandler(&calls, http.StatusCreated, `{}`)
+
+	for name, key := range map[string]string{
+		"overlong":          longKey,
+		"control character": "bad\x01key",
+		"non-ascii":         "café",
+		"spaceless-del":     "del\x7fkey",
+	} {
+		r := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, subject)
+		r.Header.Set(IdempotencyHeader, key)
+		w := serve(t, mw, h, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s key: status = %d, want 400", name, w.Code)
+		}
+		var e map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
+			t.Fatalf("%s key: body %q is not the error envelope: %v", name, w.Body.String(), err)
+		}
+		errObj := e["error"].(map[string]any)
+		if errObj["code"] != "validation_failed" {
+			t.Fatalf("%s key: code = %v, want validation_failed", name, errObj["code"])
+		}
+		if msg, _ := errObj["message"].(string); !strings.Contains(msg, IdempotencyHeader) {
+			t.Fatalf("%s key: message %q must name the header", name, msg)
+		}
+		details, ok := errObj["details"].([]any)
+		if !ok || len(details) != 1 {
+			t.Fatalf("%s key: details = %v, want one entry naming the header", name, errObj["details"])
+		}
+		entry, _ := details[0].(map[string]any)
+		if entry["field"] != IdempotencyHeader {
+			t.Fatalf("%s key: details entry = %v, want field %q", name, entry, IdempotencyHeader)
+		}
+	}
+
+	if calls != 0 {
+		t.Fatalf("handler calls = %d, want 0 (an invalid key never reaches it)", calls)
+	}
+	var rows int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM idempotency_keys WHERE key = $1`, longKey).Scan(&rows); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("rows claimed under an invalid key = %d, want 0", rows)
+	}
+
+	// The boundary is inclusive: 255 printable ASCII characters is a key.
+	boundaryKey := strings.Repeat("k", 255)
+	deleteKeyRows(t, db, principal, boundaryKey)
+	r := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, subject)
+	r.Header.Set(IdempotencyHeader, boundaryKey)
+	if w := serve(t, mw, h, r); w.Code != http.StatusCreated {
+		t.Fatalf("255-character key: status = %d, want 201", w.Code)
+	}
+}
+
+// --- read errors are classified ---------------------------------------------------
+
+// failingBody is a request body whose read fails with an arbitrary client
+// error (not the size limit), for telling the two read failures apart.
+type failingBody struct{ err error }
+
+func (f failingBody) Read([]byte) (int, error) { return 0, f.err }
+func (f failingBody) Close() error             { return nil }
+
+// Only the request size limit is a 413. Any other body read failure is the
+// client's (a dropped connection, a malformed chunked body): a 400, not a
+// 413.
+func TestIdempotency_BodyReadErrorClassification(t *testing.T) {
+	db := testutil.RequireDB(t)
+	subject := uuid.NewString()
+
+	var calls int32
+	mw := Idempotency(db)
+	h := countingHandler(&calls, http.StatusCreated, `{}`)
+
+	r := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", "", subject)
+	r.Body = failingBody{err: io.ErrUnexpectedEOF}
+	r.Header.Set(IdempotencyHeader, newKey())
+	w := serve(t, mw, h, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("non-size read error: status = %d, want 400", w.Code)
+	}
+	var e map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
+		t.Fatalf("non-size read error: body is not the envelope: %v", err)
+	}
+	if code := e["error"].(map[string]any)["code"]; code != "bad_request" {
+		t.Fatalf("non-size read error: code = %v, want bad_request", code)
+	}
+
+	// The size limit itself stays a 413 (MaxBytesReader's error).
+	sizeReq := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", "", subject)
+	sizeReq.Body = io.NopCloser(bytes.NewReader(make([]byte, 64)))
+	sizeReq.ContentLength = 64
+	sizeReq.Header.Set(IdempotencyHeader, newKey())
+	sizeW := httptest.NewRecorder()
+	MaxRequestSize(16)(mw(h)).ServeHTTP(sizeW, sizeReq)
+	if sizeW.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("size-limit read error: status = %d, want 413", sizeW.Code)
+	}
+	if calls != 0 {
+		t.Fatalf("handler calls = %d, want 0", calls)
+	}
+}
+
+// --- oversized stored responses are served, not stored ----------------------------
+
+// A stored response body is capped (1 MiB). A larger 2xx/3xx is still served
+// to its caller in full, but the claim is released rather than stored (and
+// the drop is logged), so the table cannot be used as unbounded storage; a
+// retry re-runs the handler.
+func TestIdempotency_LargeResponseBodyNotStored(t *testing.T) {
+	db := testutil.RequireDB(t)
+	key := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+
+	var calls int32
+	huge := strings.Repeat("x", 2<<20) // 2 MiB, over the 1 MiB stored cap
+	h := countingHandler(&calls, http.StatusCreated, huge)
+	mw := Idempotency(db)
+
+	r1 := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, subject)
+	r1.Header.Set(IdempotencyHeader, key)
+	w := serve(t, mw, h, r1)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("oversized response: status = %d, want 201", w.Code)
+	}
+	if got := w.Body.Len(); got != len(huge) {
+		t.Fatalf("oversized response: caller received %d bytes, want all %d", got, len(huge))
+	}
+
+	var rows int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM idempotency_keys WHERE principal = $1 AND key = $2`, principal, key).Scan(&rows); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("rows after an oversized response = %d, want 0 (served, released, not stored)", rows)
+	}
+
+	r2 := newPrincipalRequest(t, http.MethodPost, "/api/v1/quotes", `{"a":1}`, subject)
+	r2.Header.Set(IdempotencyHeader, key)
+	w = serve(t, mw, h, r2)
+	if w.Code != http.StatusCreated || w.Header().Get(IdempotencyReplayedHeader) == "true" {
+		t.Fatalf("retry after an oversized response: status = %d replayed = %q, want a fresh 201", w.Code, w.Header().Get(IdempotencyReplayedHeader))
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2 (nothing was stored)", calls)
+	}
+}
+
+// --- the claim itself holds under a thundering herd --------------------------------
+
+// Contenders arriving at a FRESH key simultaneously (not against an
+// already-held claim): exactly one handler run comes out of the herd. The
+// pool is capped at 4, the claim statements are short autocommitted
+// statements, and every loser gets a 409 idempotency_in_progress or, if the
+// winner finished first, its stored response, never a second run.
+func TestIdempotency_ConcurrentFreshKey(t *testing.T) {
+	db := requireDBMaxConns(t, 4)
+	key := newKey()
+	subject := uuid.NewString()
+	principal := "user:" + subject
+	deleteKeyRows(t, db, principal, key)
+
+	const contenders = 40
+	var calls int32
+	h := countingHandler(&calls, http.StatusCreated, `{"win":true}`)
+	mw := Idempotency(db)
+
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, contenders)
+	for i := 0; i < contenders; i++ {
+		go func() {
+			<-start
+			r := newPrincipalRequest(t, http.MethodPost, "/api/v1/orders", `{"line":1}`, subject)
+			r.Header.Set(IdempotencyHeader, key)
+			w := httptest.NewRecorder()
+			mw(h).ServeHTTP(w, r)
+			results <- w
+		}()
+	}
+	close(start)
+
+	originals, replays, conflicts := 0, 0, 0
+	for i := 0; i < contenders; i++ {
+		w := <-results
+		switch {
+		case w.Code == http.StatusCreated && w.Header().Get(IdempotencyReplayedHeader) == "":
+			originals++
+		case w.Code == http.StatusCreated && w.Header().Get(IdempotencyReplayedHeader) == "true":
+			replays++
+		case w.Code == http.StatusConflict:
+			conflicts++
+			var e map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
+				t.Errorf("409 body is not the envelope: %v", err)
+			} else if code := e["error"].(map[string]any)["code"]; code != "idempotency_in_progress" {
+				t.Errorf("409 code = %v, want idempotency_in_progress", code)
+			}
+		default:
+			t.Errorf("contender got status %d (body %s): want 201 or 409", w.Code, w.Body.String())
+		}
+	}
+	if originals != 1 {
+		t.Fatalf("original 201s = %d, want exactly 1", originals)
+	}
+	if replays+conflicts != contenders-1 {
+		t.Fatalf("replays %d + conflicts %d, want %d losers", replays, conflicts, contenders-1)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want exactly 1", calls)
+	}
+}
+
 // --- retention purge ---------------------------------------------------------
 
 func TestIdempotency_PurgeExpired(t *testing.T) {
