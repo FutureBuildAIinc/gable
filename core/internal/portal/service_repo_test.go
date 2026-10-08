@@ -482,6 +482,7 @@ func (f *fakeInventoryRepo) AllocateStockQty(context.Context, uuid.UUID, int64) 
 func (f *fakeInventoryRepo) DeallocateStockQty(context.Context, uuid.UUID, int64) error { return nil }
 func (f *fakeInventoryRepo) FulfillStockQty(context.Context, uuid.UUID, int64) error    { return nil }
 func (f *fakeInventoryRepo) RestockQty(context.Context, uuid.UUID, int64) error         { return nil }
+func (f *fakeInventoryRepo) UnstockQty(context.Context, uuid.UUID, int64) error         { return nil }
 
 type fakeOrderRepo struct {
 	created   []order.Order
