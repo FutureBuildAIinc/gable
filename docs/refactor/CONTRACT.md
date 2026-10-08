@@ -103,6 +103,17 @@ Transcription conventions (following the models' JSON tags):
   integration seam's lists, which the handler guarantees non null, are
   not.
 
+A known deviation: the create handlers (quote, customer and its contact,
+order, product, and the location, credit memo and integration creates)
+write their JSON body without setting a Content-Type header, so the wire
+answers those 201s as `text/plain; charset=utf-8` today, and the goldens
+record them wrapped as `{"text": "<json>"}`. The fragments keep declaring
+`application/json`, because the body is JSON and `text/plain` is simply a
+missing header, not a shape; a separate item now owns fixing the handlers
+to send the header, and until it lands the conformance pass must read
+those bodies through the golden wrapper rather than trust the declared
+content type.
+
 ## Regenerating
 
 From the Go module root (`core/`):
@@ -127,7 +138,10 @@ wire diffs to `docs/refactor/CONTRACT-CHANGES.md`.
 
 ## The gates
 
-Four checks guard the contract, all wired into CI:
+Four checks guard the contract, all wired into CI. All four also run behind
+one command at the repository root, `make contract`: its Go half
+(`make contract-go`) runs the first two in CI's backend job and its
+TypeScript half (`make contract-ts`) runs the last two in CI's frontend job.
 
 1. **Assembly drift** (`go run ./api/tools/merge -check`): reassembles
    the document in memory and fails when the committed `openapi.yaml`
@@ -168,6 +182,23 @@ literal segments beats a shorter one, and the pattern text is the
 deterministic backstop. The conformance test will Find each golden's
 request, then validate the golden's response body against the operation's
 declared response schema.
+
+What that test will need, beyond the seam above:
+
+- Response schema access: `Operation` carries only method, path and ID
+  today; it needs the response schemas of the operation it resolved.
+- A JSON Schema 2020-12 validator in Go. No validator is in `go.mod`, so
+  the dependency and its licence need a decision before the part starts.
+- Golden decoding rules: the normaliser's tokens (`<id-n>`, `<ts+0d>`,
+  `<days>`) must be ignored or mapped so format assertions stay off them;
+  the `{"text": ...}` wrapper the recorder writes for non JSON content
+  types must be unwrapped (or the body compared by content type), and an
+  empty `{"text": ""}` must count as the body of a 204.
+- A skip list for goldens whose routes are still pending, which shrinks
+  like `contract-pending.txt` as fragments land.
+- The status check comes first: the recorded status must be declared on
+  the operation, and only then is the body validated against that
+  status's schema.
 
 ## The generated client
 
