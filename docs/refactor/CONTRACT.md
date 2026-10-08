@@ -243,11 +243,8 @@ Fragments done (the pattern the rest copy):
 | a2a purchase order | `a2a.yaml` | 1 |
 | shared components | `_shared.yaml` | 0 |
 
-200 of 345 census routes covered. Pending (in `contract-pending.txt`):
-pricing, reporting, gl, purchase_order, techadmin, bankrecon, staff, edi,
-ap, configurator, dashboard, matching, tax, governance, the apps registry
-under `pkg/apps`, document (two routes), millwork, parsing, vision and the
-metrics endpoint of `cmd/server`.
+345 of 346 census routes covered. Pending (in `contract-pending.txt`): the
+events feed route, whose fragment lands in a later item.
 
 Nullability is spelled the 3.1 way, `type: [T, "null"]`; the 3.0
 `nullable` keyword does not exist in 3.1 and the generated types would
