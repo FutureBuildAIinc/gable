@@ -496,7 +496,7 @@ export class GableQuoteDetail extends LitElement {
                                 ${icon(X, 14)} Reject
                             </button>
                         ` : nothing}
-                        ${(quote.status === 'draft' || quote.status === 'sent' || quote.status === 'accepted') ? html`
+                        ${(quote.status === 'draft' || quote.status === 'sent') ? html`
                             <button @click=${() => this.handleConvert()} ?disabled=${this.processing}
                                 class="bg-gable-green text-black px-4 py-2 rounded hover:bg-gable-green/90 transition-colors flex items-center gap-2 text-sm font-bold disabled:opacity-50">
                                 ${icon(ShoppingCart, 14)} Convert to Order
