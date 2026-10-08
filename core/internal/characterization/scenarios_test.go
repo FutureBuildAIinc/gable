@@ -67,6 +67,7 @@ func allGroups() []groupDef {
 		integrationGroups(),
 		clockGroups(),
 		r1bPlatformGroups(),
+		r1bAGroups(),
 	)
 }
 

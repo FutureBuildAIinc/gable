@@ -1,0 +1,341 @@
+[
+  {
+    "name": "ap.a.invoice.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices",
+      "body": {
+        "due_date": "<day+30>",
+        "invoice_date": "<day+0>",
+        "invoice_number": "GOLD-AP-A01",
+        "lines": [
+          {
+            "description": "golden ap payable line",
+            "quantity": 2,
+            "unit_price": 50
+          }
+        ],
+        "tax_amount": 0,
+        "vendor_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "amount_paid": 0,
+        "created_at": "<ts+0d>",
+        "due_date": "<ts+30d>",
+        "id": "<id-2>",
+        "invoice_date": "<ts+0d>",
+        "invoice_number": "GOLD-AP-A01",
+        "status": "PENDING",
+        "subtotal": 10000,
+        "tax_amount": 0,
+        "total": 10000,
+        "vendor_id": "<id-1>"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.approve.no_claims",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices/<id-2>/approve"
+    },
+    "response": {
+      "status": 401,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNAUTHORIZED",
+          "message": "Unauthorized"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.approve.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices/not-a-uuid/approve"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ap.payments.list_empty_for_vendor",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/payments?vendor_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "ap.payment.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/payments",
+      "body": {
+        "amount": 40,
+        "check_number": "GOLD-CHK-1",
+        "invoice_ids": [
+          "<id-2>"
+        ],
+        "method": "CHECK",
+        "payment_date": "<day+0>",
+        "reference": "golden partial",
+        "vendor_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "amount": 4000,
+        "check_number": "GOLD-CHK-1",
+        "created_at": "<ts+0d>",
+        "id": "<id-5>",
+        "method": "CHECK",
+        "payment_date": "<ts+0d>",
+        "reference": "golden partial",
+        "status": "COMPLETE",
+        "vendor_id": "<id-1>"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.get.after_partial",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/invoices/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_paid": 4000,
+        "created_at": "<ts+0d>",
+        "due_date": "<ts+30d>",
+        "id": "<id-2>",
+        "invoice_date": "<ts+0d>",
+        "invoice_number": "GOLD-AP-A01",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden ap payable line",
+            "id": "<id-6>",
+            "invoice_id": "<id-2>",
+            "line_total": 10000,
+            "quantity": 2,
+            "unit_price": 5000
+          }
+        ],
+        "status": "PARTIAL",
+        "subtotal": 10000,
+        "tax_amount": 0,
+        "total": 10000,
+        "vendor_id": "<id-1>",
+        "vendor_name": "BC Roofing Wholesale"
+      }
+    }
+  },
+  {
+    "name": "ap.payment.create.settle",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/payments",
+      "body": {
+        "amount": 60,
+        "invoice_ids": [
+          "<id-2>"
+        ],
+        "method": "ACH",
+        "payment_date": "<day+0>",
+        "reference": "golden settle",
+        "vendor_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "amount": 6000,
+        "created_at": "<ts+0d>",
+        "id": "<id-7>",
+        "method": "ACH",
+        "payment_date": "<ts+0d>",
+        "reference": "golden settle",
+        "status": "COMPLETE",
+        "vendor_id": "<id-1>"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.get.after_settle",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/invoices/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_paid": 10000,
+        "created_at": "<ts+0d>",
+        "due_date": "<ts+30d>",
+        "id": "<id-2>",
+        "invoice_date": "<ts+0d>",
+        "invoice_number": "GOLD-AP-A01",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden ap payable line",
+            "id": "<id-6>",
+            "invoice_id": "<id-2>",
+            "line_total": 10000,
+            "quantity": 2,
+            "unit_price": 5000
+          }
+        ],
+        "status": "PAID",
+        "subtotal": 10000,
+        "tax_amount": 0,
+        "total": 10000,
+        "vendor_id": "<id-1>",
+        "vendor_name": "BC Roofing Wholesale"
+      }
+    }
+  },
+  {
+    "name": "ap.payments.list_vendor",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/payments?vendor_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "amount": 4000,
+          "check_number": "GOLD-CHK-1",
+          "created_at": "<ts+0d>",
+          "id": "<id-5>",
+          "method": "CHECK",
+          "payment_date": "<ts+0d>",
+          "reference": "golden partial",
+          "status": "COMPLETE",
+          "vendor_id": "<id-1>",
+          "vendor_name": "BC Roofing Wholesale"
+        },
+        {
+          "amount": 6000,
+          "created_at": "<ts+0d>",
+          "id": "<id-7>",
+          "method": "ACH",
+          "payment_date": "<ts+0d>",
+          "reference": "golden settle",
+          "status": "COMPLETE",
+          "vendor_id": "<id-1>",
+          "vendor_name": "BC Roofing Wholesale"
+        }
+      ]
+    }
+  },
+  {
+    "name": "ap.payment.create.bad_date",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/payments",
+      "body": {
+        "amount": 1,
+        "method": "CHECK",
+        "payment_date": "31/12/2000",
+        "vendor_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ap.payment.create.unknown_invoice",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/payments",
+      "body": {
+        "amount": 1,
+        "invoice_ids": [
+          "<id-9>"
+        ],
+        "method": "CHECK",
+        "payment_date": "<day+0>",
+        "vendor_id": "<id-1>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ap.payment.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/payments",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  }
+]

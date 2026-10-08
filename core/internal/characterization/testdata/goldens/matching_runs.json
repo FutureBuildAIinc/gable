@@ -1,0 +1,208 @@
+[
+  {
+    "name": "matching.exceptions.list_before",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/matching/exceptions"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "matching.results.none_yet",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/matching/results/<id-1>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "matching.run",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/matching/run/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "id": "<id-3>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden sheet goods",
+            "id": "<id-4>",
+            "invoice_unit_price": 0,
+            "invoiced_qty": 0,
+            "line_status": "EXCEPTION",
+            "match_result_id": "<id-3>",
+            "po_line_id": "<id-5>",
+            "po_qty": 20,
+            "po_unit_cost": 2400,
+            "price_variance_pct": -100,
+            "qty_variance_pct": -100,
+            "received_qty": 0
+          }
+        ],
+        "matched_at": "<ts+0d>",
+        "notes": "All 1 lines have exceptions",
+        "po_id": "<id-1>",
+        "status": "EXCEPTION"
+      }
+    }
+  },
+  {
+    "name": "matching.results",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/matching/results/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "id": "<id-3>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden sheet goods",
+            "id": "<id-4>",
+            "invoice_unit_price": 0,
+            "invoiced_qty": 0,
+            "line_status": "EXCEPTION",
+            "match_result_id": "<id-3>",
+            "po_line_id": "<id-5>",
+            "po_qty": 20,
+            "po_unit_cost": 2400,
+            "price_variance_pct": -100,
+            "qty_variance_pct": -100,
+            "received_qty": 0
+          }
+        ],
+        "matched_at": "<ts+0d>",
+        "notes": "All 1 lines have exceptions",
+        "po_id": "<id-1>",
+        "status": "EXCEPTION"
+      }
+    }
+  },
+  {
+    "name": "matching.exceptions.list_after",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/matching/exceptions"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "exception_count": 1,
+          "line_count": 1,
+          "match_result_id": "<id-3>",
+          "notes": "All 1 lines have exceptions",
+          "po_id": "<id-1>",
+          "status": "EXCEPTION"
+        }
+      ]
+    }
+  },
+  {
+    "name": "matching.run.unknown_po",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/matching/run/<id-6>"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "matching.run.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/matching/run/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "matching.results.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/matching/results/<id-6>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "matching.results.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/matching/results/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  }
+]

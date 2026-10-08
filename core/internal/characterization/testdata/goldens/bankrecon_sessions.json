@@ -1,0 +1,592 @@
+[
+  {
+    "name": "bankrecon.sessions.list_empty",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/sessions?bank_account_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": []
+    }
+  },
+  {
+    "name": "bankrecon.session.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/sessions",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "period_end": "<day+0>",
+        "period_start": "<day-30>",
+        "statement_balance": 1234.56
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "cleared_count": 0,
+        "cleared_total": 0,
+        "created_at": "<ts+0d>",
+        "difference": 0,
+        "gl_balance": 0,
+        "id": "<id-2>",
+        "outstanding_count": 0,
+        "outstanding_total": 0,
+        "period_end": "<ts+0d>",
+        "period_start": "<ts-30d>",
+        "statement_balance": 123456,
+        "status": "IN_PROGRESS"
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.create.bad_dates",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/sessions",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "period_end": "<day+0>",
+        "period_start": "last month",
+        "statement_balance": 1
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/sessions",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.import",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/import",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "csv_content": "date,amount,description,reference\n<day-3>,-731.19,GOLD BANK FEE,GOLD-REF-1\nnot-a-date,12.00,BAD ROW,GOLD-REF-2\n<day-2>,4421.07,GOLD DEPOSIT,GOLD-REF-3\n",
+        "reconciliation_id": "<id-2>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "auto_matched": 0,
+        "imported_rows": 2,
+        "skipped_rows": 1,
+        "total_rows": 3
+      }
+    }
+  },
+  {
+    "name": "bankrecon.import.empty",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/import",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "csv_content": ""
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "auto_matched": 0,
+        "imported_rows": 0,
+        "skipped_rows": 0,
+        "total_rows": 0
+      }
+    }
+  },
+  {
+    "name": "bankrecon.import.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/import",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/sessions/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "bank_account_name": "Golden Bank",
+        "cleared_count": 0,
+        "cleared_total": 0,
+        "created_at": "<ts+0d>",
+        "difference": -245532,
+        "gl_balance": 0,
+        "id": "<id-2>",
+        "outstanding_count": 2,
+        "outstanding_total": 368988,
+        "period_end": "<ts+0d>",
+        "period_start": "<ts-30d>",
+        "statement_balance": 123456,
+        "status": "IN_PROGRESS",
+        "transactions": [
+          {
+            "amount": 442107,
+            "bank_account_id": "<id-1>",
+            "created_at": "<ts+0d>",
+            "description": "GOLD DEPOSIT",
+            "id": "<id-6>",
+            "reconciliation_id": "<id-2>",
+            "reference": "GOLD-REF-3",
+            "status": "UNMATCHED",
+            "transaction_date": "<ts-2d>"
+          },
+          {
+            "amount": -73119,
+            "bank_account_id": "<id-1>",
+            "created_at": "<ts+0d>",
+            "description": "GOLD BANK FEE",
+            "id": "<id-7>",
+            "reconciliation_id": "<id-2>",
+            "reference": "GOLD-REF-1",
+            "status": "UNMATCHED",
+            "transaction_date": "<ts-3d>"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/sessions/<id-8>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/sessions/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.match",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/match",
+      "body": {
+        "bank_transaction_id": "<id-6>",
+        "journal_entry_id": "<id-11>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "matched"
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.get.after_match",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/sessions/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "bank_account_name": "Golden Bank",
+        "cleared_count": 1,
+        "cleared_total": 442107,
+        "created_at": "<ts+0d>",
+        "difference": 196575,
+        "gl_balance": 0,
+        "id": "<id-2>",
+        "outstanding_count": 1,
+        "outstanding_total": -73119,
+        "period_end": "<ts+0d>",
+        "period_start": "<ts-30d>",
+        "statement_balance": 123456,
+        "status": "IN_PROGRESS",
+        "transactions": [
+          {
+            "amount": 442107,
+            "bank_account_id": "<id-1>",
+            "created_at": "<ts+0d>",
+            "description": "GOLD DEPOSIT",
+            "id": "<id-6>",
+            "matched_journal_entry_id": "<id-11>",
+            "reconciliation_id": "<id-2>",
+            "reference": "GOLD-REF-3",
+            "status": "MATCHED",
+            "transaction_date": "<ts-2d>"
+          },
+          {
+            "amount": -73119,
+            "bank_account_id": "<id-1>",
+            "created_at": "<ts+0d>",
+            "description": "GOLD BANK FEE",
+            "id": "<id-7>",
+            "reconciliation_id": "<id-2>",
+            "reference": "GOLD-REF-1",
+            "status": "UNMATCHED",
+            "transaction_date": "<ts-3d>"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "bankrecon.match.unknown_transaction",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/match",
+      "body": {
+        "bank_transaction_id": "<id-8>",
+        "journal_entry_id": "<id-11>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.match.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/match",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.unmatch",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/unmatch",
+      "body": {
+        "bank_transaction_id": "<id-6>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "unmatched"
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.get.after_unmatch",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/sessions/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "bank_account_name": "Golden Bank",
+        "cleared_count": 0,
+        "cleared_total": 0,
+        "created_at": "<ts+0d>",
+        "difference": -245532,
+        "gl_balance": 0,
+        "id": "<id-2>",
+        "outstanding_count": 2,
+        "outstanding_total": 368988,
+        "period_end": "<ts+0d>",
+        "period_start": "<ts-30d>",
+        "statement_balance": 123456,
+        "status": "IN_PROGRESS",
+        "transactions": [
+          {
+            "amount": 442107,
+            "bank_account_id": "<id-1>",
+            "created_at": "<ts+0d>",
+            "description": "GOLD DEPOSIT",
+            "id": "<id-6>",
+            "reconciliation_id": "<id-2>",
+            "reference": "GOLD-REF-3",
+            "status": "UNMATCHED",
+            "transaction_date": "<ts-2d>"
+          },
+          {
+            "amount": -73119,
+            "bank_account_id": "<id-1>",
+            "created_at": "<ts+0d>",
+            "description": "GOLD BANK FEE",
+            "id": "<id-7>",
+            "reconciliation_id": "<id-2>",
+            "reference": "GOLD-REF-1",
+            "status": "UNMATCHED",
+            "transaction_date": "<ts-3d>"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "bankrecon.unmatch.unknown_transaction",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/unmatch",
+      "body": {
+        "bank_transaction_id": "<id-8>"
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.unmatch.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/unmatch",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.sessions.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/bankrecon/sessions?bank_account_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "bank_account_id": "<id-1>",
+          "bank_account_name": "Golden Bank",
+          "cleared_count": 0,
+          "cleared_total": 0,
+          "created_at": "<ts+0d>",
+          "difference": 0,
+          "gl_balance": 0,
+          "id": "<id-2>",
+          "outstanding_count": 0,
+          "outstanding_total": 0,
+          "period_end": "<ts+0d>",
+          "period_start": "<ts-30d>",
+          "statement_balance": 123456,
+          "status": "IN_PROGRESS"
+        }
+      ]
+    }
+  },
+  {
+    "name": "bankrecon.session.complete",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/sessions/<id-2>/complete"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "bank_account_id": "<id-1>",
+        "bank_account_name": "Golden Bank",
+        "cleared_count": 0,
+        "cleared_total": 0,
+        "completed_at": "<ts+0d>",
+        "created_at": "<ts+0d>",
+        "difference": 0,
+        "gl_balance": 0,
+        "id": "<id-2>",
+        "outstanding_count": 0,
+        "outstanding_total": 0,
+        "period_end": "<ts+0d>",
+        "period_start": "<ts-30d>",
+        "statement_balance": 123456,
+        "status": "COMPLETED"
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.complete.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/sessions/<id-2>/complete"
+    },
+    "response": {
+      "status": 422,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNPROCESSABLE_ENTITY",
+          "message": "Unprocessable Entity"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.complete.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/sessions/<id-8>/complete"
+    },
+    "response": {
+      "status": 422,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "UNPROCESSABLE_ENTITY",
+          "message": "Unprocessable Entity"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "bankrecon.session.complete.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/bankrecon/sessions/not-a-uuid/complete"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  }
+]

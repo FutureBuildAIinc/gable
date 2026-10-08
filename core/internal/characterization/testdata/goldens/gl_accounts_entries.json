@@ -1,0 +1,878 @@
+[
+  {
+    "name": "gl.account.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/accounts",
+      "body": {
+        "code": "1990",
+        "description": "golden characterisation account",
+        "name": "Golden Clearing",
+        "subtype": "Other",
+        "type": "ASSET"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "balance": 0,
+        "code": "1990",
+        "created_at": "<ts+0d>",
+        "description": "golden characterisation account",
+        "id": "<id-1>",
+        "is_active": true,
+        "name": "Golden Clearing",
+        "normal_balance": "DEBIT",
+        "subtype": "Other",
+        "type": "ASSET",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "gl.account.create.duplicate_code",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/accounts",
+      "body": {
+        "code": "1990",
+        "name": "Golden Clearing Twin",
+        "type": "ASSET"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.account.create.invalid_type",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/accounts",
+      "body": {
+        "code": "1991",
+        "name": "Golden Bad Type",
+        "type": "PETTY"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.account.create.missing_name",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/accounts",
+      "body": {
+        "code": "1992",
+        "type": "ASSET"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.account.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/accounts",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.account.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/gl/accounts/<id-1>",
+      "body": {
+        "code": "1990",
+        "description": "renamed",
+        "name": "Golden Clearing Renamed",
+        "normal_balance": "DEBIT",
+        "subtype": "Other",
+        "type": "ASSET"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "balance": 0,
+        "code": "1990",
+        "created_at": "<ts-106751d>",
+        "description": "renamed",
+        "id": "<id-1>",
+        "is_active": true,
+        "name": "Golden Clearing Renamed",
+        "normal_balance": "DEBIT",
+        "subtype": "Other",
+        "type": "ASSET",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "gl.account.update.bad_id",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/gl/accounts/not-a-uuid",
+      "body": {
+        "code": "1",
+        "name": "x",
+        "type": "ASSET"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.account.update.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/gl/accounts/<id-1>",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.account.update.not_found",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/gl/accounts/<id-8>",
+      "body": {
+        "code": "1993",
+        "name": "Ghost",
+        "normal_balance": "DEBIT",
+        "type": "ASSET"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "balance": 0,
+        "code": "1993",
+        "created_at": "<ts-106751d>",
+        "description": "",
+        "id": "<id-8>",
+        "is_active": true,
+        "name": "Ghost",
+        "normal_balance": "DEBIT",
+        "subtype": "",
+        "type": "ASSET",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "gl.a.entry_reverse.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries",
+      "body": {
+        "entry_date": "<day+0>",
+        "lines": [
+          {
+            "account_id": "<id-9>",
+            "credit": 0,
+            "debit": 25,
+            "description": "golden reverse source debit"
+          },
+          {
+            "account_id": "<id-10>",
+            "credit": 25,
+            "debit": 0,
+            "description": "golden reverse source credit"
+          }
+        ],
+        "memo": "golden reverse source"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "entry_date": "<ts+0d>",
+        "entry_number": 9,
+        "id": "<id-11>",
+        "lines": [
+          {
+            "account_id": "<id-9>",
+            "credit": 0,
+            "debit": 2500,
+            "description": "golden reverse source debit",
+            "id": "<id-12>",
+            "journal_entry_id": "<id-11>"
+          },
+          {
+            "account_id": "<id-10>",
+            "credit": 2500,
+            "debit": 0,
+            "description": "golden reverse source credit",
+            "id": "<id-13>",
+            "journal_entry_id": "<id-11>"
+          }
+        ],
+        "memo": "golden reverse source",
+        "posted_by": "",
+        "source": "MANUAL",
+        "status": "DRAFT",
+        "total_credit": 2500,
+        "total_debit": 2500,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "gl.a.entry_reverse.post",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-11>/post"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "posted"
+      }
+    }
+  },
+  {
+    "name": "gl.a.entry_void.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries",
+      "body": {
+        "entry_date": "<day+0>",
+        "lines": [
+          {
+            "account_id": "<id-9>",
+            "credit": 0,
+            "debit": 15,
+            "description": "golden void source debit"
+          },
+          {
+            "account_id": "<id-10>",
+            "credit": 15,
+            "debit": 0,
+            "description": "golden void source credit"
+          }
+        ],
+        "memo": "golden void source"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "entry_date": "<ts+0d>",
+        "entry_number": 10,
+        "id": "<id-14>",
+        "lines": [
+          {
+            "account_id": "<id-9>",
+            "credit": 0,
+            "debit": 1500,
+            "description": "golden void source debit",
+            "id": "<id-15>",
+            "journal_entry_id": "<id-14>"
+          },
+          {
+            "account_id": "<id-10>",
+            "credit": 1500,
+            "debit": 0,
+            "description": "golden void source credit",
+            "id": "<id-16>",
+            "journal_entry_id": "<id-14>"
+          }
+        ],
+        "memo": "golden void source",
+        "posted_by": "",
+        "source": "MANUAL",
+        "status": "DRAFT",
+        "total_credit": 1500,
+        "total_debit": 1500,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.void.draft_refused",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-14>/void"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.reverse.draft_refused",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-14>/reverse",
+      "body": {
+        "reason": "draft"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.a.entry_void.post",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-14>/post"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "posted"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/journal-entries/<id-11>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "entry_date": "<ts+0d>",
+        "entry_number": 9,
+        "id": "<id-11>",
+        "lines": [
+          {
+            "account_code": "1010",
+            "account_id": "<id-9>",
+            "account_name": "Cash",
+            "credit": 0,
+            "debit": 2500,
+            "description": "golden reverse source debit",
+            "id": "<id-12>",
+            "journal_entry_id": "<id-11>"
+          },
+          {
+            "account_code": "4010",
+            "account_id": "<id-10>",
+            "account_name": "Sales Revenue",
+            "credit": 2500,
+            "debit": 0,
+            "description": "golden reverse source credit",
+            "id": "<id-13>",
+            "journal_entry_id": "<id-11>"
+          }
+        ],
+        "memo": "golden reverse source",
+        "posted_by": "system",
+        "source": "MANUAL",
+        "status": "POSTED",
+        "total_credit": 2500,
+        "total_debit": 2500,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/journal-entries/<id-8>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Not Found"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/journal-entries/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.reverse",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-11>/reverse",
+      "body": {
+        "reason": "golden reversal"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "reversal_entry_id": "<id-21>"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.reverse.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-11>/reverse",
+      "body": {
+        "reason": "second"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.get.reversal",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/journal-entries/<id-21>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "entry_date": "<ts+0d>",
+        "entry_number": 11,
+        "id": "<id-21>",
+        "lines": [
+          {
+            "account_code": "4010",
+            "account_id": "<id-10>",
+            "account_name": "Sales Revenue",
+            "credit": 0,
+            "debit": 2500,
+            "description": "Reversal: golden reverse source credit",
+            "id": "<id-23>",
+            "journal_entry_id": "<id-21>"
+          },
+          {
+            "account_code": "1010",
+            "account_id": "<id-9>",
+            "account_name": "Cash",
+            "credit": 2500,
+            "debit": 0,
+            "description": "Reversal: golden reverse source debit",
+            "id": "<id-24>",
+            "journal_entry_id": "<id-21>"
+          }
+        ],
+        "memo": "Reversal of #9: golden reversal",
+        "posted_by": "system",
+        "source": "REVERSAL",
+        "source_ref_id": "<id-11>",
+        "status": "POSTED",
+        "total_credit": 2500,
+        "total_debit": 2500,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.reverse.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-8>/reverse"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.reverse.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/not-a-uuid/reverse"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.void",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-14>/void"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "status": "voided"
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.void.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-14>/void"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-27>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.void.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/<id-8>/void"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-28>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.void.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/gl/journal-entries/not-a-uuid/void"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-29>"
+        }
+      }
+    }
+  },
+  {
+    "name": "gl.journal_entry.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/gl/journal-entries"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 11,
+          "id": "<id-21>",
+          "memo": "Reversal of #9: golden reversal",
+          "posted_by": "system",
+          "source": "REVERSAL",
+          "source_ref_id": "<id-11>",
+          "status": "POSTED",
+          "total_credit": 2500,
+          "total_debit": 2500,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 10,
+          "id": "<id-14>",
+          "memo": "golden void source",
+          "posted_by": "",
+          "source": "MANUAL",
+          "status": "VOID",
+          "total_credit": 1500,
+          "total_debit": 1500,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 9,
+          "id": "<id-11>",
+          "memo": "golden reverse source",
+          "posted_by": "system",
+          "source": "MANUAL",
+          "status": "POSTED",
+          "total_credit": 2500,
+          "total_debit": 2500,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 8,
+          "id": "<id-30>",
+          "memo": "Vendor Payment <id-31>",
+          "posted_by": "system",
+          "source": "VENDOR_PAYMENT",
+          "source_ref_id": "<id-31>",
+          "status": "POSTED",
+          "total_credit": 6000,
+          "total_debit": 6000,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 7,
+          "id": "<id-32>",
+          "memo": "Vendor Payment <id-33>",
+          "posted_by": "system",
+          "source": "VENDOR_PAYMENT",
+          "source_ref_id": "<id-33>",
+          "status": "POSTED",
+          "total_credit": 4000,
+          "total_debit": 4000,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 6,
+          "id": "<id-34>",
+          "memo": "Customer deposit <id-35> applied to AR",
+          "posted_by": "system",
+          "source": "DEPOSIT",
+          "source_ref_id": "<id-35>",
+          "status": "POSTED",
+          "total_credit": 6000,
+          "total_debit": 6000,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 5,
+          "id": "<id-36>",
+          "memo": "Customer deposit <id-35> applied to AR",
+          "posted_by": "system",
+          "source": "DEPOSIT",
+          "source_ref_id": "<id-35>",
+          "status": "POSTED",
+          "total_credit": 4000,
+          "total_debit": 4000,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 4,
+          "id": "<id-37>",
+          "memo": "Customer deposit <id-35>",
+          "posted_by": "system",
+          "source": "DEPOSIT",
+          "source_ref_id": "<id-35>",
+          "status": "POSTED",
+          "total_credit": 10000,
+          "total_debit": 10000,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 3,
+          "id": "<id-38>",
+          "memo": "Customer deposit <id-39>",
+          "posted_by": "system",
+          "source": "DEPOSIT",
+          "source_ref_id": "<id-39>",
+          "status": "POSTED",
+          "total_credit": 25000,
+          "total_debit": 25000,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 2,
+          "id": "<id-40>",
+          "memo": "Invoice <id-41>",
+          "posted_by": "system",
+          "source": "INVOICE",
+          "source_ref_id": "<id-41>",
+          "status": "POSTED",
+          "total_credit": 3080,
+          "total_debit": 3080,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "created_at": "<ts+0d>",
+          "entry_date": "<ts+0d>",
+          "entry_number": 1,
+          "id": "<id-42>",
+          "memo": "golden characterisation entry",
+          "posted_by": "system",
+          "source": "MANUAL",
+          "status": "POSTED",
+          "total_credit": 10000,
+          "total_debit": 10000,
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  }
+]
