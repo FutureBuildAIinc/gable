@@ -25,10 +25,10 @@ identity (manifest), (b) gate their routes and nav on enablement, and
 | Term | Meaning |
 |---|---|
 | **App** | A feature slice a dealer can reason about: Millwork, POS, Bank Reconciliation. Usually 1 backend module + N frontend pages + nav entries. |
-| **Manifest** | Declared metadata: `key`, `name`, `summary`, `category`, `core`, `depends_on`. Backend manifest lives in the module (`manifest.go`); frontend manifest in `app/src/apps/<key>.ts` (routes + nav). |
+| **Manifest** | Declared metadata: `key`, `name`, `summary`, `category`, `core`, `depends_on`. Backend manifest lives in the module (`manifest.go`); frontend manifest in `web/apps/desk/src/apps/<key>.ts` (routes + nav). |
 | **Core app** | Cannot be disabled (product, inventory, order, invoice, customer, settings…). Still listed on the Apps page. |
 | **Registry (backend)** | `pkg/apps.Registry`: syncs manifests to the `apps` table at boot, answers `IsEnabled` (30s cache, same pattern as `ai.KeyStore`), gates routes, exposes `/api/v1/apps`. |
-| **Registry (frontend)** | `app/src/apps/registry.ts`: aggregates frontend manifests into the route table, the path→tag map, and generated nav items; filters by enablement via `AppsService`. |
+| **Registry (frontend)** | `web/apps/desk/src/apps/registry.ts`: aggregates frontend manifests into the route table, the path→tag map, and generated nav items; filters by enablement via `AppsService`. |
 
 ## 3. Backend design (as built in Phase 0)
 
@@ -74,7 +74,7 @@ reporting, pricing, location) converge on this shape during Phase 1.
 
 ## 4. Frontend design (as built in Phase 0)
 
-- **`app/src/apps/`**: `types.ts` (manifest shape), one manifest per
+- **`web/apps/desk/src/apps/`**: `types.ts` (manifest shape), one manifest per
   converted app (routes: `{path, tag, load, layout}`; nav:
   `{label, path, icon, section, order}`), `registry.ts` aggregating them.
 - **Single source of truth**: for converted apps, the manifest feeds
@@ -96,7 +96,7 @@ reporting, pricing, location) converge on this shape during Phase 1.
 1. Backend: add `manifest.go`; switch `RegisterRoutes` to `apps.Router`;
    register in `main.go` via `registry.Add(apps.App{...})` instead of a bare
    `RegisterRoutes` call; delete its row from `cmd/server/catalog.go`.
-2. Frontend: create `app/src/apps/<key>.ts`; move its routes out of
+2. Frontend: create `web/apps/desk/src/apps/<key>.ts`; move its routes out of
    `routes.ts` and its tag mappings out of `app.ts`; delete its hardcoded nav
    item(s); add nav entries to the manifest.
 3. Add/verify at least one backend smoke test for the module (22 modules
@@ -116,7 +116,7 @@ volume, so the UI could only ever have displayed fiction. The rebate routes and
 schema remain for whoever rebuilds it once accrual is real.
 
 A page that exists but cannot be reached is not a feature waiting to be
-enabled — it is a page nobody has run. `app/src/routes.test.ts` now fails if
+enabled — it is a page nobody has run. `web/apps/desk/src/routes.test.ts` now fails if
 any route resolves to the 404 component.
 
 ## 6. Phases
@@ -160,4 +160,4 @@ community app packaging (out-of-tree modules) if the OSS ecosystem wants it.
 - **Binary blobs in history:** not a risk here. The pre-release tree carried
   ~76 MB of committed binaries; this repository was published from a fresh
   snapshot that never contained them, and `.gitignore` now covers
-  `/docker-compose` and `backend/main`.
+  `/docker-compose` and `core/main`.

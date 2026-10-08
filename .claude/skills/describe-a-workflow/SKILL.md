@@ -25,9 +25,9 @@ Before the interview, spend a few minutes finding out what Gable does today, so 
 "what's different about yours?" instead of "how does quoting work?".
 
 ```bash
-ls backend/internal/                      # 41 domain modules — find the closest one
-ls app/src/pages/                          # the screens that exist today
-grep -rn "status" backend/internal/order/model.go | head -30
+ls core/internal/                      # 41 domain modules — find the closest one
+ls web/apps/desk/src/pages/                          # the screens that exist today
+grep -rn "status" core/internal/order/model.go | head -30
 ```
 
 Useful orientation reads:
@@ -111,7 +111,7 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 **Contributed by:** <name / role / yard type — "counter lead, 3-location independent, BC">
 **Date:** <yyyy-mm-dd>
-**Closest existing module:** `backend/internal/<module>` (or "none — greenfield")
+**Closest existing module:** `core/internal/<module>` (or "none — greenfield")
 **Related backlog item:** <CLAUDE.md Tier 1 item, or "none">
 
 ## 1 · What this is, in one paragraph
@@ -178,7 +178,7 @@ What number tells the owner this is working.
 - [ ] **Money/data integrity** — single writer, one transaction, no partial writes
 - [ ] **Migrations additive + reversible** — forward and down; idempotent
 - [ ] **No secrets committed**
-- [ ] **Boot wiring** — registered via `RegisterRoutes` in `backend/cmd/server/main.go`
+- [ ] **Boot wiring** — registered via `RegisterRoutes` in `core/cmd/server/main.go`
 - [ ] **Rollback plan**
 - [ ] **Observability** — what gets logged/measured; CI actually runs the new tests
 

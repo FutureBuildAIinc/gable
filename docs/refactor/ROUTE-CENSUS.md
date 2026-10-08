@@ -5,23 +5,23 @@
 
 Item R1-2. This document reconciles the generated route census with the
 planner's counts and the contract inventories. The census itself is
-`backend/api/ROUTES.txt`, generated from the Go sources; this document is
+`core/api/ROUTES.txt`, generated from the Go sources; this document is
 the narrative around it.
 
 ## The tool and the test
 
-- `backend/internal/routecensus` walks every non-test Go file of the module
+- `core/internal/routecensus` walks every non-test Go file of the module
   with `go/ast`, finds each `Handle` and `HandleFunc` call, resolves the
   pattern argument as a constant string (plain literals, concatenated and
   named constants, `net/http` method constants, function local and package
   level constants), and reports one route per registration: method, pattern,
   the registering package relative to the Go module root, and the handler
   expression as written.
-- `backend/cmd/census` prints the census; `go run ./cmd/census -write` from
+- `core/cmd/census` prints the census; `go run ./cmd/census -write` from
   the Go module root regenerates `api/ROUTES.txt`. Paths stay relative to
   the Go module root, so the move of `backend` to `core` (R1-3) needs no
   change in the tool, the file or the test.
-- `backend/internal/routecensus/routecensus_test.go` re-collects the census
+- `core/internal/routecensus/routecensus_test.go` re-collects the census
   from the sources and compares it with `api/ROUTES.txt`. On a difference it
   fails, naming every added and removed route, with the regenerate command
   in the message. It needs no database and runs under plain
@@ -56,7 +56,7 @@ Four failure modes, all loud:
    `http.StripPrefix` or a sub mux. Such a mount rewrites the paths of
    everything under it, so the census could not list the mounted routes
    under their real paths. The allow list in
-   `backend/internal/routecensus/routecensus.go` (`allowMounts`) names the
+   `core/internal/routecensus/routecensus.go` (`allowMounts`) names the
    mounts the repo has accepted. Today it holds one entry, the `/uploads/`
    file server of `cmd/server`, which the census lists as its outer route
    (no method prefix, answering every method); anything else on the list

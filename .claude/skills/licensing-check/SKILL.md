@@ -28,23 +28,23 @@ The directory mapping:
 
 | Path prefix | SPDX identifier | Profile |
 |---|---|---|
-| `backend/internal/` | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
-| `backend/pkg/` *(except `backend/pkg/apps/`)* | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
-| `backend/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
-| `backend/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
-| **`backend/pkg/apps/`** | **`LicenseRef-OpenLBM-Connector-1.0`** | **Connector** |
-| `app/` | `LicenseRef-OpenLBM-Surface-1.0` | Surface |
+| `core/internal/` | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
+| `core/pkg/` *(except `core/pkg/apps/`)* | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
+| `core/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
+| `core/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` | Commons |
+| **`core/pkg/apps/`** | **`LicenseRef-OpenLBM-Connector-1.0`** | **Connector** |
+| `web/apps/desk/` | `LicenseRef-OpenLBM-Surface-1.0` | Surface |
 | `docs/` | `LicenseRef-OpenLBM-Docs-1.0` | Docs |
 | `.claude/` | `LicenseRef-OpenLBM-Docs-1.0` | Docs |
 
-**Precedence: the most specific path wins.** `backend/pkg/apps/` is deliberately carved out of
-the `backend/pkg/` Commons default, so a file there is **Connector**, not Commons. This is the
+**Precedence: the most specific path wins.** `core/pkg/apps/` is deliberately carved out of
+the `core/pkg/` Commons default, so a file there is **Connector**, not Commons. This is the
 single most common mistake — and it matters, because Connector is the permissive seam that
 lets third parties plug in without copyleft crossing the boundary.
 
 The same ordering rule is encoded in `REUSE.toml`: when a path matches more than one
-`[[annotations]]` block, the **last** matching block wins, which is why the `backend/pkg/apps`
-block sits after the broader `backend/pkg` one. Don't reorder it.
+`[[annotations]]` block, the **last** matching block wins, which is why the `core/pkg/apps`
+block sits after the broader `core/pkg` one. Don't reorder it.
 
 `LICENSE-MAP.md` also notes two licenses that are **not** directory-scoped and so don't appear
 in the table: `LicenseRef-OpenLBM-Community-Source-1.0` (applied per-work, by version notice —
@@ -111,9 +111,9 @@ One Standard, several **Profiles**, one shared **Definitions Core**.
 
 | Profile | Covers | The bargain, roughly |
 |---|---|---|
-| **Commons** | The core ERP (`backend/internal`, `backend/pkg`, `backend/cmd`, migrations) | Reciprocity that scales with your size — improvements to the commons flow back |
-| **Surface** | The client apps (`app/`) | Reciprocity triggered by distribution of the surface |
-| **Connector** | The plug-in seam (`backend/pkg/apps/`) | Permissive, no copyleft — build on it without your code being pulled in |
+| **Commons** | The core ERP (`core/internal`, `core/pkg`, `core/cmd`, migrations) | Reciprocity that scales with your size — improvements to the commons flow back |
+| **Surface** | The client apps (`web/apps/desk/`) | Reciprocity triggered by distribution of the surface |
+| **Connector** | The plug-in seam (`core/pkg/apps/`) | Permissive, no copyleft — build on it without your code being pulled in |
 | **Community-Source** | Community satellites (e.g. AI_LM) | Free for community members, fee for others |
 | **Docs** | Documentation and specs | Docs-appropriate terms |
 | **Trademark** | The Gable marks | A brand-use policy — it grants **no** code rights, and no code license grants trademark rights |
@@ -147,9 +147,9 @@ the canonical text, and say explicitly: *this is not legal advice — have couns
 Standard.*
 
 **"If I write a plug-in, do I have to publish it?"**
-The `backend/pkg/apps/` Connector seam exists precisely so the answer can be no. That's the
+The `core/pkg/apps/` Connector seam exists precisely so the answer can be no. That's the
 design intent. But whether *your* plug-in stays on the permissive side of the boundary depends
-on what it links to — a plug-in that imports `backend/internal/...` has reached across into
+on what it links to — a plug-in that imports `core/internal/...` has reached across into
 Commons. Point at the boundary, then point at counsel.
 
 **"What license is my contribution under?"**
@@ -171,7 +171,7 @@ specifications — that's an IP problem this project has explicitly cleaned up o
 
 If a file's header disagrees with `LICENSE-MAP.md`/`REUSE.toml`, or a directory isn't covered
 at all, that's a real finding worth reporting. Note that `REUSE.toml` currently annotates
-`backend/**`, `app/**`, and `docs/**` — root-level markdown and `.claude/**` are **not**
+`core/**`, `web/apps/desk/**`, and `docs/**` — root-level markdown and `.claude/**` are **not**
 covered by annotations, which is why files in those places carry their headers inline.
 
 Do **not** edit `REUSE.toml` or `LICENSE-MAP.md` to "fix" it yourself — those are maintainer-
@@ -186,5 +186,5 @@ the map implies.
   money attached, point at the canonical Standard and a lawyer.
 - **Always state the draft status** (§2) when quoting a license text from `LICENSES/`.
 - **Never call this "open source"** without the fair-source qualifier.
-- **Most specific path wins** — `backend/pkg/apps/` is Connector, not Commons.
+- **Most specific path wins** — `core/pkg/apps/` is Connector, not Commons.
 - **Trademark is separate.** No code license grants rights in the marks.

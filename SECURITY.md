@@ -27,7 +27,7 @@ Use one of these private channels instead:
 To help us triage quickly, please include:
 
 - The affected component and path. Gable is licensed **per component** — naming
-  the directory (e.g. `backend/internal/...`, `backend/pkg/apps/...`, `app/...`)
+  the directory (e.g. `core/internal/...`, `core/pkg/apps/...`, `web/apps/desk/...`)
   from [`LICENSE-MAP.md`](./LICENSE-MAP.md) helps us route the report.
 - The commit SHA or branch you tested against.
 - A minimal reproduction, proof of concept, or the vulnerable code path.
@@ -82,9 +82,9 @@ Gable ships an authentication bypass for local development. When
 `AUTH_MODE=dev` is set:
 
 - The backend **skips JWT/JWKS verification entirely**. The auth middleware is
-  never constructed (`backend/cmd/server/main.go:144-145`), so requests carry no
+  never constructed (`core/cmd/server/main.go:144-145`), so requests carry no
   claims at all, and `RequireRole` passes through whenever claims are nil
-  (`backend/pkg/middleware/auth.go`). No user is impersonated — the request is
+  (`core/pkg/middleware/auth.go`). No user is impersonated — the request is
   simply unauthenticated and every role gate opens for it. The effect is full
   admin/owner reach for any anonymous caller.
 - The B2B portal auth is likewise bypassed and injects demo customer claims.

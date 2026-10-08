@@ -35,7 +35,7 @@ make help
 | **Backend** | ✅ merge gate | `go vet ./...`, `go build ./...`, `go run ./cmd/migrate`, `go test -race -coverprofile=… ./...` |
 | **Frontend** | ✅ merge gate | `npm ci`, `npx tsc --noEmit`, `npm run lint`, tests with coverage, `npm run build` |
 | **License (REUSE)** | ✅ merge gate | `reuse lint` (report) then `python3 .github/scripts/reuse_gate.py` (the gate) |
-| **Docker Build** | ✅ merge gate | builds `backend/Dockerfile` and `app/Dockerfile` |
+| **Docker Build** | ✅ merge gate | builds `core/Dockerfile` and `web/apps/desk/Dockerfile` |
 | **Vulnerabilities** | ⚠️ **advisory only** | pinned `govulncheck` — `continue-on-error`, also runs nightly |
 
 `govulncheck` is deliberately **not** a merge gate: an upstream CVE landing overnight must not
@@ -51,7 +51,7 @@ git status --short
 git diff --stat origin/staging...HEAD 2>/dev/null || git diff --stat
 ```
 
-Note which top-level areas are touched — `backend/`, `app/`, `docs/`, `.github/`, root. That
+Note which top-level areas are touched — `core/`, `web/apps/desk/`, `docs/`, `.github/`, root. That
 determines which gates matter and which license applies (§4).
 
 ## 2 · Run the gates
@@ -69,18 +69,18 @@ build) + `license-check`. If it passes, you're clear.
 
 ```bash
 # Backend
-make build            # cd backend && go build ./...
-make vet              # cd backend && go vet ./...
-make test             # cd backend && go test -race ./...     (needs Postgres)
-make test-short       # cd backend && go test -short ./...    (no Postgres — DB tests self-skip)
+make build            # cd core && go build ./...
+make vet              # cd core && go vet ./...
+make test             # cd core && go test -race ./...     (needs Postgres)
+make test-short       # cd core && go test -short ./...    (no Postgres — DB tests self-skip)
 make cover            # coverage profile + function summary
 
 # Frontend
-make fe-install       # cd app && npm ci
-make fe-typecheck     # cd app && npx tsc --noEmit
-make fe-lint          # cd app && npm run lint
-make fe-test          # cd app && npm run test -- --run
-make fe-build         # cd app && npm run build
+make fe-install       # cd web/apps/desk && npm ci
+make fe-typecheck     # cd web/apps/desk && npx tsc --noEmit
+make fe-lint          # cd web/apps/desk && npm run lint
+make fe-test          # cd web/apps/desk && npm run test -- --run
+make fe-build         # cd web/apps/desk && npm run build
 
 # Licensing
 make license-check    # reuse lint (report) + .github/scripts/reuse_gate.py (the gate)
@@ -142,17 +142,17 @@ matching its directory, per [`LICENSE-MAP.md`](../../../LICENSE-MAP.md) and
 
 | Path prefix | Required identifier |
 |---|---|
-| `backend/internal/` | `LicenseRef-OpenLBM-Commons-1.0` |
-| `backend/pkg/` *(except `backend/pkg/apps/`)* | `LicenseRef-OpenLBM-Commons-1.0` |
-| `backend/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` |
-| `backend/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` |
-| `backend/pkg/apps/` | `LicenseRef-OpenLBM-Connector-1.0` |
-| `app/` | `LicenseRef-OpenLBM-Surface-1.0` |
+| `core/internal/` | `LicenseRef-OpenLBM-Commons-1.0` |
+| `core/pkg/` *(except `core/pkg/apps/`)* | `LicenseRef-OpenLBM-Commons-1.0` |
+| `core/cmd/` | `LicenseRef-OpenLBM-Commons-1.0` |
+| `core/migrations/` | `LicenseRef-OpenLBM-Commons-1.0` |
+| `core/pkg/apps/` | `LicenseRef-OpenLBM-Connector-1.0` |
+| `web/apps/desk/` | `LicenseRef-OpenLBM-Surface-1.0` |
 | `docs/` | `LicenseRef-OpenLBM-Docs-1.0` |
 | `.claude/` | `LicenseRef-OpenLBM-Docs-1.0` |
 
-**Most specific path wins.** `backend/pkg/apps/` is the connector seam, carved out of the
-`backend/pkg/` Commons default — a new file there is **Connector**, not Commons. Getting that
+**Most specific path wins.** `core/pkg/apps/` is the connector seam, carved out of the
+`core/pkg/` Commons default — a new file there is **Connector**, not Commons. Getting that
 backwards is the most common licensing mistake in this repo.
 
 Check every file you added:
@@ -208,20 +208,20 @@ From [`CLAUDE.md`](../../../CLAUDE.md) § Pre-Flight Checks — verify each that
 - [ ] **New DB columns**: UUID v4 PKs (`uuid_generate_v4()`), `DECIMAL(19,4)` for physical
       quantities (never float), money-as-cents in application code, every quantity paired
       with a UOM id.
-- [ ] **New migration**: plain numbered SQL in `backend/migrations/`, continuing the sequence;
+- [ ] **New migration**: plain numbered SQL in `core/migrations/`, continuing the sequence;
       additive and reversible; applies from empty.
 - [ ] **New endpoint**: under the correct prefix (`/api/v1`, `/api/portal/v1`,
       `/api/integration`, `/api/v1/a2a`) **and** wired into a `RegisterRoutes` call in
-      `backend/cmd/server/main.go`. An endpoint that isn't wired in silently doesn't exist.
+      `core/cmd/server/main.go`. An endpoint that isn't wired in silently doesn't exist.
 - [ ] **New public path**: if it must skip auth, it has to be in the whitelist in
-      `backend/cmd/server/main.go` — and adding one deserves a security review.
-- [ ] **Money on ERP pages**: rendered with `formatCents()` from `app/src/lib/utils.ts`, never
+      `core/cmd/server/main.go` — and adding one deserves a security review.
+- [ ] **Money on ERP pages**: rendered with `formatCents()` from `web/apps/desk/src/lib/utils.ts`, never
       `.toFixed(2)` on a cents field. Portal pages receive dollars and must not use it.
-- [ ] **UI**: design tokens from `app/tailwind.config.js`, no hardcoded colours; JetBrains
+- [ ] **UI**: design tokens from `web/apps/desk/tailwind.config.js`, no hardcoded colours; JetBrains
       Mono for numbers/SKUs/prices/dimensions.
-- [ ] **New page**: component under `app/src/pages/…`, registered in `app/src/routes.ts` with
+- [ ] **New page**: component under `web/apps/desk/src/pages/…`, registered in `web/apps/desk/src/routes.ts` with
       a lazy `load: () => import(...)` and the correct `layout`. (Converted apps declare routes
-      in `app/src/apps/<key>.ts` instead.)
+      in `web/apps/desk/src/apps/<key>.ts` instead.)
 - [ ] **HTTP from the frontend**: via `services/fetchClient.ts`, never a bare `fetch`.
 - [ ] **Financial operations**: audit-logged via `pkg/audit.Logger`.
 
@@ -255,7 +255,7 @@ make fe-typecheck          PASS
 make fe-lint               PASS
 make fe-test               PASS
 make fe-build              PASS
-make license-check         FAIL — backend/pkg/apps/foo.go has Commons, needs Connector
+make license-check         FAIL — core/pkg/apps/foo.go has Commons, needs Connector
 make vuln (advisory)       SKIPPED — not a merge gate
 secrets / binaries         clean
 PR target                  staging
