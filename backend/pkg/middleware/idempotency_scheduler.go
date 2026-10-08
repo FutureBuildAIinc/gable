@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/robfig/cron/v3"
@@ -61,10 +62,12 @@ func (r *dbIdempotencySettingsReader) Get(ctx context.Context, key string) (stri
 // holds its key until the lease lapses, so the table only shrinks when this
 // runs; that is why it is enabled by default rather than opt-in.
 type IdempotencyScheduler struct {
-	db       *database.DB
-	settings idempotencySettingsReader
-	cron     *cron.Cron
-	enabled  bool
+	db        *database.DB
+	settings  idempotencySettingsReader
+	cron      *cron.Cron
+	enabled   bool
+	jobCtx    context.Context
+	jobCancel context.CancelFunc
 }
 
 // NewIdempotencyScheduler wires the scheduler to its dependencies. Call
@@ -95,7 +98,13 @@ func (s *IdempotencyScheduler) Start(ctx context.Context) error {
 	}
 
 	expr := s.settingString(ctx, settingIdempotencyPurgeCron, defaultIdempotencyPurgeCron)
-	if _, err := s.cron.AddFunc(expr, func() { s.runPurge(context.Background()) }); err != nil {
+	// The job runs on its own cancellable context, independent of the Start
+	// context (which only covers the settings read): Stop cancels it, so a
+	// purge still running at shutdown stops before the pool closes.
+	s.jobCtx, s.jobCancel = context.WithCancel(context.Background())
+	if _, err := s.cron.AddFunc(expr, func() { s.runPurge(s.jobCtx) }); err != nil {
+		s.jobCancel()
+		s.jobCancel = nil
 		return fmt.Errorf("register idempotency purge cron %q: %w", expr, err)
 	}
 
@@ -104,11 +113,29 @@ func (s *IdempotencyScheduler) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop halts the cron engine. In-flight jobs continue running until they
-// return; Stop only signals "no new ticks".
+// idempotencyStopDrainTimeout bounds how long Stop waits for an in-flight
+// purge. It is well under the server's 15s shutdown deadline, and the job's
+// context is already cancelled by then, so the wait is only for the statement
+// in flight to unwind; the worst case past it is a partially executed purge,
+// whose batches each stand alone.
+const idempotencyStopDrainTimeout = 5 * time.Second
+
+// Stop halts the cron engine, cancels the job's context and waits for a run
+// already in flight to finish, so a purge batch cannot still be executing
+// when the database pool closes in the next shutdown step. Safe on a
+// scheduler that was never started, and safe to call twice.
 func (s *IdempotencyScheduler) Stop() {
-	if s.cron != nil {
-		s.cron.Stop()
+	if s.jobCancel != nil {
+		s.jobCancel()
+	}
+	if s.cron == nil {
+		return
+	}
+	drained := s.cron.Stop()
+	select {
+	case <-drained.Done():
+	case <-time.After(idempotencyStopDrainTimeout):
+		log.Printf("idempotency scheduler: a purge was still running after %s; shutting down anyway", idempotencyStopDrainTimeout)
 	}
 }
 
