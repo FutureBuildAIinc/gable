@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -48,8 +47,10 @@ func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
 // caller's branch wall (ADR 0007 section 2.3): the record's branch must be
 // one the caller may target, the same rule a branch named in a body is held
 // to. A purchase order that does not exist belongs to no branch and passes;
-// the service answers for it. A refusal is 403 forbidden (the ADR 0001
-// envelope) naming id. It reports whether the request may proceed.
+// the service answers for it. A refusal is a 403 in the legacy error shape
+// every other error on these unconverted routes carries (the refusal naming
+// id goes to the module's conversion record). It reports whether the request
+// may proceed.
 func (h *Handler) checkPOBranch(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
 	if h.guard == nil {
 		return true
@@ -64,12 +65,7 @@ func (h *Handler) checkPOBranch(w http.ResponseWriter, r *http.Request, id uuid.
 	}
 	if err := h.guard.CheckPayloadBranch(r.Context(), *branch); err != nil {
 		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
-			httpx.WriteError(w, r, &httpx.Error{
-				Status:  http.StatusForbidden,
-				Code:    httpx.CodeForbidden,
-				Message: "purchase order is outside the branches this caller may target",
-				Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}},
-			})
+			httputil.RespondError(w, r, "purchase order is outside the branches this caller may target", http.StatusForbidden, err)
 			return false
 		}
 		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)

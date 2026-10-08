@@ -557,6 +557,14 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
 	}
+
+	// The purchase order routes are unconverted: the wall's 403 carries the
+	// same legacy error shape as every other error on them, not the ADR 0001
+	// envelope.
+	_, poBody := f.callBody(t, "GET", "/api/v1/purchase-orders/"+f.poB.String(), "", "purchasing", "u-a", "")
+	if !strings.Contains(string(poBody), `"code":"FORBIDDEN"`) {
+		t.Errorf("foreign po 403 body is not the legacy shape: %s", poBody)
+	}
 }
 
 // The document print and email routes run behind the branch middleware, so
