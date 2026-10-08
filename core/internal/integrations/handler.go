@@ -18,6 +18,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -266,7 +267,10 @@ func (h *Handler) CreateQuote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expires := httpx.TimestampOf(time.Now().AddDate(0, 0, 30))
-	q, err := h.quoteSvc.Create(r.Context(), &quote.Draft{
+	// The quote payload and record checks fail closed on a branch-free
+	// context; this seam authenticates with its own integration key and acts
+	// for the platform, so it calls the quote service as a system caller.
+	q, err := h.quoteSvc.Create(branchctx.WithSystem(r.Context()), &quote.Draft{
 		CustomerID:   customerID,
 		DeliveryType: quote.DeliveryPickup,
 		Source:       "manual",
@@ -307,7 +311,7 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 	// 1. Load the quote first. We intentionally do NOT mark it ACCEPTED yet —
 	//    QuoteStateAccepted is terminal, so accepting it before the order is
 	//    created would strand the quote un-reconvertible if order creation fails.
-	q, err := h.quoteSvc.GetQuote(ctx, quoteID)
+	q, err := h.quoteSvc.GetQuote(branchctx.WithSystem(ctx), quoteID)
 	if err != nil {
 		slog.Error("failed to get quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
 		writeError(w, http.StatusInternalServerError, "failed to get quote")
@@ -359,7 +363,7 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// 3. Now that the order exists, mark the quote accepted.
-	if err := h.quoteSvc.UpdateState(ctx, quoteID, quote.QuoteStateAccepted); err != nil {
+	if err := h.quoteSvc.UpdateState(branchctx.WithSystem(ctx), quoteID, quote.QuoteStateAccepted); err != nil {
 		slog.Error("order created but quote not marked accepted", "error", err, "order_id", o.ID, "quote_id", idStr)
 		writeError(w, http.StatusInternalServerError, "order "+o.ID.String()+" created but quote could not be accepted")
 		return

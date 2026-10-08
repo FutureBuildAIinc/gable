@@ -20,7 +20,9 @@ import (
 
 // Receiving names a location per line (ADR 0007 section 2.3): a caller bound
 // to one branch may not receive stock into another branch's location. The
-// refusal comes before the service is reached, so the service is not needed.
+// purchase order here does not exist, so the path id branch wall passes and
+// the refusal comes from the lines' locations, before the receipt is
+// attempted; the service is needed only for the path id's branch lookup.
 func TestReceivePO_RefusesForeignBranchLocation(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
@@ -41,7 +43,8 @@ func TestReceivePO_RefusesForeignBranchLocation(t *testing.T) {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, own, other)
 	})
 
-	h := purchase_order.NewHandler(nil, nil).WithBranchGuard(middleware.NewBranchGuard(db))
+	h := purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil).
+		WithBranchGuard(middleware.NewBranchGuard(db))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 

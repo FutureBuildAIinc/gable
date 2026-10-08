@@ -117,7 +117,7 @@ POST	/api/v1/branches	internal/location	h.CreateBranch
 DELETE	/api/v1/branches/{id}	internal/location	h.DeleteBranch
 GET	/api/v1/branches/{id}	internal/location	h.GetBranch
 PUT	/api/v1/branches/{id}	internal/location	h.UpdateBranch
-GET	/api/v1/branches/{id}/tree	internal/location	h.GetBranchTree
+GET	/api/v1/branches/{id}/tree	internal/location	tree
 GET	/api/v1/branches/{id}/users	internal/location	h.ListBranchUsers
 POST	/api/v1/configurator/build-sku	internal/configurator	h.handleBuildSKU
 GET	/api/v1/configurator/options	internal/configurator	h.handleGetOptions
@@ -212,10 +212,10 @@ GET	/api/v1/invoices/{id}	internal/invoice	h.HandleGet
 POST	/api/v1/invoices/{id}/credit-memo	internal/invoice	h.HandleCreateCreditMemo
 POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
 GET	/api/v1/invoices/{id}/payments	internal/payment	h.GetPaymentHistory
-GET	/api/v1/locations	internal/location	h.ListLocations
+GET	/api/v1/locations	internal/location	list
 POST	/api/v1/locations	internal/location	create
 DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation
-GET	/api/v1/locations/{id}	internal/location	h.GetLocation
+GET	/api/v1/locations/{id}	internal/location	read
 PUT	/api/v1/locations/{id}	internal/location	h.UpdateLocation
 GET	/api/v1/market-indices	internal/pricing	h.HandleListMarketIndices
 PUT	/api/v1/market-indices/{id}	internal/pricing	h.HandleUpdateMetadata

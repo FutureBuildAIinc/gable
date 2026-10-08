@@ -40,6 +40,25 @@ func BranchIDForQuery(ctx context.Context) *uuid.UUID {
 	return branchctx.IDForQuery(ctx)
 }
 
+// GrantsSubForQuery is the list-read companion of BranchIDForQuery and the
+// list form of the record rule CheckPayloadBranch applies (ADR 0007 section
+// 2.3): with no context branch, a branch-scoped list covers the branches
+// granted to the user, not every branch. It returns the user sub whose
+// user_locations rows scope such a list, and nil when the list covers every
+// branch: a context branch (BranchIDForQuery scopes it), an administrator
+// without a header (the single-branch switch makes every caller one), an
+// unbound key with no user, or no branch middleware on the route. A
+// branch-scoped query joins both: "$1 is not null AND branch_id = $1", else
+// branch_id in the sub's grants, else (both nil) every branch.
+func GrantsSubForQuery(ctx context.Context) *string {
+	bc := BranchFromContext(ctx)
+	if bc == nil || bc.BranchID != nil || bc.IsAdmin || bc.UserSub == "" {
+		return nil
+	}
+	sub := bc.UserSub
+	return &sub
+}
+
 // defaultBranchCache stores the resolved system_settings.default_branch_id
 // for the lifetime of the process. Admins changing the default require a
 // restart, which matches the kill-switch behavior.

@@ -240,6 +240,23 @@ func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, e
 	return &po, nil
 }
 
+// GetPOBranch returns the branch the purchase order belongs to, or nil when
+// no such purchase order exists. Unlike GetPO it never filters by the
+// caller's branch context: the branch wall needs the record's own branch to
+// hold it against.
+func (r *Repository) GetPOBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	var branch *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT branch_id FROM purchase_orders WHERE id = $1`, id).Scan(&branch)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get PO branch: %w", err)
+	}
+	return branch, nil
+}
+
 func (r *Repository) UpdatePO(ctx context.Context, po *PurchaseOrder) error {
 	query := `UPDATE purchase_orders SET status = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, po.Status, po.ID)

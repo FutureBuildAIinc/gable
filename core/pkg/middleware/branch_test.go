@@ -214,3 +214,45 @@ func TestBranchIDForQuery_AdminAllBranches(t *testing.T) {
 		t.Errorf("expected nil BranchID for admin all-branches; got %v", got)
 	}
 }
+
+func TestGrantsSubForQuery_NilContext(t *testing.T) {
+	// No branch middleware on the route: no grants scoping from here.
+	if sub := GrantsSubForQuery(context.Background()); sub != nil {
+		t.Errorf("expected nil for empty context; got %s", *sub)
+	}
+}
+
+func TestGrantsSubForQuery_WithBranchIsNil(t *testing.T) {
+	// A context branch scopes the list through BranchIDForQuery, not grants.
+	bid := uuid.New()
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &bid, UserSub: "u-1"})
+	if sub := GrantsSubForQuery(ctx); sub != nil {
+		t.Errorf("expected nil with a context branch; got %s", *sub)
+	}
+}
+
+func TestGrantsSubForQuery_AdminWithoutHeaderIsNil(t *testing.T) {
+	// An administrator without a header, and the single-branch switch (which
+	// makes every caller an administrator), lists every branch.
+	ctx := branchctx.With(context.Background(), &branchctx.Context{IsAdmin: true, UserSub: "boss"})
+	if sub := GrantsSubForQuery(ctx); sub != nil {
+		t.Errorf("expected nil for an admin; got %s", *sub)
+	}
+}
+
+func TestGrantsSubForQuery_UnboundKeyIsNil(t *testing.T) {
+	ctx := branchctx.With(context.Background(), &branchctx.Context{})
+	if sub := GrantsSubForQuery(ctx); sub != nil {
+		t.Errorf("expected nil for a caller with no user; got %s", *sub)
+	}
+}
+
+func TestGrantsSubForQuery_BoundUserWithoutHeaderIsItsSub(t *testing.T) {
+	// The middleware's no-header case for a bound non-admin user: the list
+	// scopes to the branches granted to this sub.
+	ctx := branchctx.With(context.Background(), &branchctx.Context{UserSub: "u-1"})
+	sub := GrantsSubForQuery(ctx)
+	if sub == nil || *sub != "u-1" {
+		t.Errorf("expected u-1; got %v", sub)
+	}
+}
