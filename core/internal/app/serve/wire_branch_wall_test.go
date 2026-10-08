@@ -37,6 +37,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -176,11 +177,28 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall := newBranchWall(db) // reads the settings just written
 
 	mux := http.NewServeMux()
+	invSvc := inventory.NewService(inventory.NewRepository(db))
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)), location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
-	wall.inventory(mux, inventory.NewService(inventory.NewRepository(db)))
+	wall.inventory(mux, invSvc)
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
-	wall.purchaseOrders(mux, purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil))
+	// The recommendation service is wired as serve wires it (serve.go), so
+	// the recommendations route answers from the real stock and velocity
+	// reads instead of 503: the route is behind the branch middleware and
+	// both reads must scope to the same branches.
+	poRecSvc := purchase_order.NewRecommendationService(purchase_order.NewRepository(db), invSvc,
+		product.NewService(product.NewRepository(db)), vendor.NewService(vendor.NewRepository(db))).
+		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
+	// The PO service wires its velocity repo too: the refresh-reorder-targets
+	// route shares the same compute-from-every-branch path the cron runs
+	// (serve.go wires the velocity repo on the PO service; the recommendation
+	// service has its own copy). The product service is what the recompute
+	// reads products from and writes the recomputed targets to; the wire test
+	// for refresh-reorder-targets needs it on the PO service too.
+	poProductSvc := product.NewService(product.NewRepository(db))
+	poSvc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, poProductSvc, nil).
+		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
+	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
 	docSvc := document.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
@@ -442,6 +460,30 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 	if !strings.Contains(string(listBody), f.yardB.String()) {
 		t.Errorf("switch off, location list does not carry branch B's yard")
 	}
+
+	// The same for the quote list: the single branch deployment is one
+	// branch, so a bound caller reads every row.
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLQ-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLQ-"+quoteB.String()[:8])
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+	_, quoteBody := f.callBody(t, "GET", "/api/v1/quotes", "", "sales", "u-a", "")
+	if !strings.Contains(string(quoteBody), quoteA.String()) || !strings.Contains(string(quoteBody), quoteB.String()) {
+		t.Errorf("switch off, quote list does not carry both branches' quotes")
+	}
+	for _, yard := range []uuid.UUID{f.yardA, f.yardB} {
+		if _, err := db.Pool.Exec(context.Background(),
+			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, 5)`,
+			f.productID, yard, "wl-inv-"+yard.String()[:8]); err != nil {
+			t.Fatalf("seed inventory: %v", err)
+		}
+	}
+	_, invBody := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", "warehouse", "u-a", "")
+	if !strings.Contains(string(invBody), f.yardA.String()) || !strings.Contains(string(invBody), f.yardB.String()) {
+		t.Errorf("switch off, inventory list does not carry both branches' rows")
+	}
 }
 
 // The branch wall on records a path id addresses (ADR 0007 section 2.3): a
@@ -650,5 +692,532 @@ func TestBranchWall_MatchingExceptions(t *testing.T) {
 		if got := strings.Contains(string(body), f.poB.String()); got != c.wantB {
 			t.Errorf("matching exceptions, %s: branch B's exception present = %v, want %v", c.name, got, c.wantB)
 		}
+	}
+}
+
+// seedWallQuote inserts one quote directly at the named branch, the list
+// tests' row. The fixture's customer is the header; the caller cleans up.
+func seedWallQuote(t *testing.T, db *database.DB, id, branch, customer uuid.UUID, number string) {
+	t.Helper()
+	if _, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO quotes (id, number, customer_id, state, branch_id, total_amount)
+		 VALUES ($1, $2, $3, 'DRAFT', $4, 10)`, id, number, customer, branch); err != nil {
+		t.Fatalf("seed quote: %v", err)
+	}
+}
+
+// The quote list is filtered by the caller's branches (ADR 0007 section 2.3,
+// the list form of the record rule): a sales user held to branch A reads only
+// branch A's quotes, through its context branch or, with none, through its
+// grants; a bound user with no grants reads none; an administrator without a
+// header reads every branch's.
+func TestBranchWall_QuoteListGrants(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLQ-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLQ-"+quoteB.String()[:8])
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantA, wantB            bool
+	}{
+		{"sales, header A", "sales", "u-a", A, true, false},
+		{"sales, no header", "sales", "u-a", "", true, false},
+		{"sales u-none, no header", "sales", "u-none", "", false, false},
+		{"admin, no header", "admin", "boss", "", true, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/quotes", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("quote list, %s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), quoteA.String()); got != c.wantA {
+			t.Errorf("quote list, %s: branch A's quote present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), quoteB.String()); got != c.wantB {
+			t.Errorf("quote list, %s: branch B's quote present = %v, want %v", c.name, got, c.wantB)
+		}
+	}
+
+	// The pager total counts the same filtered set the page draws from: with
+	// include=total and a one row page, the total agrees with what the page
+	// carries in every arm (a one row total is a one row page and the last
+	// one, so no next cursor; an exact total only for the arms whose filtered
+	// set is this fixture's rows alone, a lower bound for the admin, whose
+	// set includes other tests' quotes).
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantTotal               int
+		wantTotalExact          bool
+	}{
+		{"sales, header A", "sales", "u-a", A, 1, true},
+		{"sales, no header", "sales", "u-a", "", 1, true},
+		{"sales u-none, no header", "sales", "u-none", "", 0, true},
+		{"admin, no header", "admin", "boss", "", 2, false},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/quotes?include=total&limit=1", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("quote page total, %s: %d, want 200", c.name, status)
+			continue
+		}
+		var page struct {
+			Items      []json.RawMessage `json:"items"`
+			NextCursor *string           `json:"next_cursor"`
+			Total      *int64            `json:"total"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("quote page total, %s: body: %v\n%s", c.name, err, body)
+		}
+		if page.Total == nil {
+			t.Errorf("quote page total, %s: no total on the include=total page", c.name)
+			continue
+		}
+		total := int(*page.Total)
+		if total < c.wantTotal || (c.wantTotalExact && total != c.wantTotal) {
+			t.Errorf("quote page total, %s: total = %d, want %d", c.name, total, c.wantTotal)
+		}
+		wantPage := total
+		if wantPage > 1 {
+			wantPage = 1
+		}
+		if len(page.Items) != wantPage {
+			t.Errorf("quote page total, %s: page carries %d items, want %d (the total's page at limit 1)", c.name, len(page.Items), wantPage)
+			continue
+		}
+		if total > len(page.Items) && page.NextCursor == nil {
+			t.Errorf("quote page total, %s: total %d over a %d row page with no next cursor", c.name, total, len(page.Items))
+		}
+		if total == len(page.Items) && page.NextCursor != nil {
+			t.Errorf("quote page total, %s: total %d is the whole set but a next cursor was minted", c.name, total)
+		}
+	}
+}
+
+// The inventory levels list is filtered by the caller's branches like the
+// module's writes: a warehouse user held to branch A reads only branch A's
+// rows, through its context branch or, with none, through its grants; a bound
+// user with no grants reads none; an administrator without a header reads
+// every branch's.
+func TestBranchWall_InventoryListGrants(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	for _, r := range []struct {
+		yard uuid.UUID
+		name string
+	}{
+		{f.yardA, "wl-inv-a-" + f.yardA.String()[:8]},
+		{f.yardB, "wl-inv-b-" + f.yardB.String()[:8]},
+	} {
+		if _, err := db.Pool.Exec(context.Background(),
+			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, 5)`,
+			f.productID, r.yard, r.name); err != nil {
+			t.Fatalf("seed inventory: %v", err)
+		}
+	}
+	// The fixture's cleanup already deletes this product's inventory rows.
+	// One legacy row with only the deprecated location text and no
+	// location_id: it has no branch on its joined location, so no scoped arm
+	// matches it, and it stays visible to an administrator without a header
+	// and to callers with no branch context only (the contract row names the
+	// choice; C4-1 migrates legacy rows onto locations).
+	legacyName := "wl-inv-legacy-" + f.productID.String()[:8]
+	if _, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO inventory (product_id, location, quantity) VALUES ($1, $2, 7)`,
+		f.productID, legacyName); err != nil {
+		t.Fatalf("seed legacy inventory: %v", err)
+	}
+
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantA, wantB            bool
+		wantLegacy              bool
+	}{
+		{"warehouse, header A", "warehouse", "u-a", A, true, false, false},
+		{"warehouse, no header", "warehouse", "u-a", "", true, false, false},
+		{"warehouse u-none, no header", "warehouse", "u-none", "", false, false, false},
+		{"admin, no header", "admin", "boss", "", true, true, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/inventory?product_id="+f.productID.String(), "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("inventory list, %s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), f.yardA.String()); got != c.wantA {
+			t.Errorf("inventory list, %s: branch A's row present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), f.yardB.String()); got != c.wantB {
+			t.Errorf("inventory list, %s: branch B's row present = %v, want %v", c.name, got, c.wantB)
+		}
+		if got := strings.Contains(string(body), legacyName); got != c.wantLegacy {
+			t.Errorf("inventory list, %s: legacy row present = %v, want %v", c.name, got, c.wantLegacy)
+		}
+	}
+}
+
+// poRecSummary is the part of the recommendations response the test reads.
+type poRecSummary struct {
+	Items []struct {
+		ProductID     string  `json:"product_id"`
+		CurrentStock  float64 `json:"current_stock"`
+		AvgDailySales float64 `json:"avg_daily_sales"`
+	} `json:"items"`
+}
+
+// The purchase order recommendations route runs behind the branch middleware,
+// so its stock read and its sales velocity read must scope to the SAME branch
+// set: a bound purchasing user held to branch A is recommended from branch
+// A's stock and branch A's sales, never its branches' stock against every
+// branch's demand; a bound user with no grants sees no stock and no sales,
+// so the product carries no recommendation at all; an administrator without
+// a header reads every branch's stock and demand, as before.
+func TestBranchWall_PORecommendationScoping(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	ctx := context.Background()
+
+	for _, r := range []struct {
+		yard uuid.UUID
+		qty  int
+	}{{f.yardA, 5}, {f.yardB, 50}} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, $3, $4)`,
+			f.productID, r.yard, "wl-rec-"+r.yard.String()[:8], r.qty); err != nil {
+			t.Fatalf("seed inventory: %v", err)
+		}
+	}
+	// Demand in the 90 day lookback: 90 units sold at branch A (1 a day),
+	// 900 at branch B (10 a day). The fixture's cleanup deletes this
+	// product's inventory rows; the order rows clean up after the fixture's,
+	// because order_lines restricts on the product.
+	orderA, orderB := uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN ($1, $2)`, orderA, orderB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id IN ($1, $2)`, orderA, orderB)
+	})
+	for _, o := range []struct {
+		id     uuid.UUID
+		branch uuid.UUID
+		qty    int
+	}{{orderA, f.branchA, 90}, {orderB, f.branchB, 900}} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency)
+			 VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`,
+			o.id, f.docCust, o.branch); err != nil {
+			t.Fatalf("seed order: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, description)
+			 VALUES ($1, $2, $3, $4, 'PCS', 'PCS', 1, 1, 1, $4, 'wall')`,
+			uuid.New(), o.id, f.productID, o.qty); err != nil {
+			t.Fatalf("seed order line: %v", err)
+		}
+	}
+
+	itemFor := func(t *testing.T, body []byte, productID string) (found bool, stock, sales float64) {
+		t.Helper()
+		var sum poRecSummary
+		if err := json.Unmarshal(body, &sum); err != nil {
+			t.Fatalf("recommendations body: %v\n%s", err, body)
+		}
+		for _, it := range sum.Items {
+			if it.ProductID == productID {
+				return true, it.CurrentStock, it.AvgDailySales
+			}
+		}
+		return false, 0, 0
+	}
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantStock               float64
+		wantSales               float64
+		wantSalesAsserted       bool
+	}{
+		// The fixture product carries no sales history outside the seeded
+		// orders, so a caller that sees neither stock nor real sales falls
+		// back to the synthetic velocity proxy; only the stock number is
+		// asserted there.
+		{"purchasing, header A", "purchasing", "u-a", A, 5, 1, true},
+		{"purchasing, no header", "purchasing", "u-a", "", 5, 1, true},
+		{"purchasing u-none, no header", "purchasing", "u-none", "", 0, 0, false},
+		{"admin, no header", "admin", "boss", "", 55, 11, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/purchase-orders/recommendations", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("recommendations, %s: %d, want 200", c.name, status)
+			continue
+		}
+		found, stock, sales := itemFor(t, body, f.productID.String())
+		if !found {
+			t.Errorf("recommendations, %s: product absent from the recommendations", c.name)
+			continue
+		}
+		if stock != c.wantStock {
+			t.Errorf("recommendations, %s: current_stock = %v, want %v", c.name, stock, c.wantStock)
+		}
+		if c.wantSalesAsserted && sales != c.wantSales {
+			t.Errorf("recommendations, %s: avg_daily_sales = %v, want %v", c.name, sales, c.wantSales)
+		}
+	}
+}
+
+// quoteAnalytics is the part of the analytics response the test reads.
+type quoteAnalytics struct {
+	TotalQuotes          int   `json:"total_quotes"`
+	DraftCount           int   `json:"draft_count"`
+	TotalQuoteValueCents int64 `json:"total_quote_value_cents"`
+	TrendData            []struct {
+		Created int `json:"created"`
+	} `json:"trend_data"`
+}
+
+// The quote analytics route reads the same table as the quote list, so its
+// three queries carry the same three arm branch predicate (ADR 0007 section
+// 2.3): a caller held to branch A counts branch A's quotes only, through its
+// context branch or, with none, through its grants; a bound user with no
+// grants counts none; an administrator without a header counts every
+// branch's, and the other packages' quotes mean its count is at least the
+// fixture's two, never assumed exact.
+func TestBranchWall_QuoteAnalytics(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLQ-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLQ-"+quoteB.String()[:8])
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+
+	read := func(t *testing.T, body []byte) quoteAnalytics {
+		t.Helper()
+		var a quoteAnalytics
+		if err := json.Unmarshal(body, &a); err != nil {
+			t.Fatalf("analytics body: %v\n%s", err, body)
+		}
+		return a
+	}
+	trendCreated := func(a quoteAnalytics) int {
+		n := 0
+		for _, d := range a.TrendData {
+			n += d.Created
+		}
+		return n
+	}
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantTotal               int
+		wantTotalLowerBound     bool
+	}{
+		{"sales, header A", "sales", "u-a", A, 1, false},
+		{"sales, no header", "sales", "u-a", "", 1, false},
+		{"sales u-none, no header", "sales", "u-none", "", 0, false},
+		{"admin, no header", "admin", "boss", "", 2, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/quotes/analytics", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("quote analytics, %s: %d, want 200", c.name, status)
+			continue
+		}
+		a := read(t, body)
+		if c.wantTotalLowerBound {
+			if a.TotalQuotes < c.wantTotal {
+				t.Errorf("quote analytics, %s: total_quotes = %d, want at least %d", c.name, a.TotalQuotes, c.wantTotal)
+			}
+			continue
+		}
+		if a.TotalQuotes != c.wantTotal {
+			t.Errorf("quote analytics, %s: total_quotes = %d, want %d", c.name, a.TotalQuotes, c.wantTotal)
+		}
+		if a.DraftCount != c.wantTotal {
+			t.Errorf("quote analytics, %s: draft_count = %d, want %d", c.name, a.DraftCount, c.wantTotal)
+		}
+		if want := int64(c.wantTotal) * 1000; a.TotalQuoteValueCents != want {
+			t.Errorf("quote analytics, %s: total_quote_value_cents = %d, want %d", c.name, a.TotalQuoteValueCents, want)
+		}
+		if got := trendCreated(a); got != c.wantTotal {
+			t.Errorf("quote analytics, %s: trend created total = %d, want %d", c.name, got, c.wantTotal)
+		}
+	}
+}
+
+// poRefreshSummary is the part of the refresh-reorder-targets response the
+// test reads. The full set the service returns lives in service.go's
+// RefreshResult; the test pins the count and the proposal product set.
+type poRefreshSummary struct {
+	DryRun          bool `json:"dry_run"`
+	ProductsUpdated int  `json:"products_updated"`
+	ProductsSkipped int  `json:"products_skipped"`
+}
+
+// The purchase order refresh-reorder-targets route runs behind the branch
+// middleware, so before this fix a bound purchasing user's refresh would
+// compute from the caller's branches' sales and write the resulting targets
+// onto a per product field that is shared across every branch, while the
+// scheduler (context.Background, no branch context) wrote targets from every
+// branch's sales. The handler now strips the BranchContext the middleware
+// set and marks the resulting context as a system caller, the seam the
+// scheduler already is, so the velocity read sees every branch's data and a
+// bound user's refresh writes the same targets an administrator's would.
+// The cron path is identical: Scheduler.runRefresh calls the same service
+// with context.Background, which is arm 3. The test pins both: as
+// purchasing with header A and as admin with no header, the same proposal
+// set is returned (the fixture's seed sets branch A to 90 units and branch
+// B to 900 in the lookback window, so the fixture product is in the
+// proposal set on both arms; the proposal counts match exactly); the
+// write mode lands the recomputed target on the products row, and an
+// admin's write equals a bound user's write.
+func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	ctx := context.Background()
+
+	// Reset the fixture product's targets so the proposal set is the one
+	// the recompute would write from scratch (no leftover baseline from an
+	// earlier test or migration).
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET reorder_point = 0, reorder_qty = 0 WHERE id = $1`, f.productID); err != nil {
+		t.Fatalf("reset product reorder targets: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `UPDATE products SET reorder_point = 0, reorder_qty = 0 WHERE id = $1`, f.productID)
+	})
+
+	// Demand in the 90 day lookback: 90 units sold at branch A (1 a day),
+	// 900 at branch B (10 a day). The fixture's cleanup deletes this
+	// product's inventory rows; the order rows clean up after the fixture's,
+	// because order_lines restricts on the product.
+	orderA, orderB := uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN ($1, $2)`, orderA, orderB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id IN ($1, $2)`, orderA, orderB)
+	})
+	for _, o := range []struct {
+		id     uuid.UUID
+		branch uuid.UUID
+		qty    int
+	}{{orderA, f.branchA, 90}, {orderB, f.branchB, 900}} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency)
+			 VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`,
+			o.id, f.docCust, o.branch); err != nil {
+			t.Fatalf("seed order: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, description)
+			 VALUES ($1, $2, $3, $4, 'PCS', 'PCS', 1, 1, 1, $4, 'wall')`,
+			uuid.New(), o.id, f.productID, o.qty); err != nil {
+			t.Fatalf("seed order line: %v", err)
+		}
+	}
+
+	readSummary := func(t *testing.T, body []byte) poRefreshSummary {
+		t.Helper()
+		var s poRefreshSummary
+		if err := json.Unmarshal(body, &s); err != nil {
+			t.Fatalf("refresh body: %v\n%s", err, body)
+		}
+		return s
+	}
+	readProduct := func(t *testing.T) (reorderPoint, reorderQty float64) {
+		t.Helper()
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT reorder_point, reorder_qty FROM products WHERE id = $1`,
+			f.productID).Scan(&reorderPoint, &reorderQty); err != nil {
+			t.Fatalf("read product: %v", err)
+		}
+		return
+	}
+
+	// Bound purchasing with header A: dry_run=true first so we can read the
+	// proposal set without committing. The fixture product's recomputed
+	// target uses every branch's sales (90 + 900 = 990 units over 90 days,
+	// 11 units/day, lead time 7 days, 1.5 safety => point = ceil(11*7*1.5)
+	// = 116; qty = ceil(11*30) = 330). The proposal set must contain the
+	// fixture product; the count must match.
+	status, body := f.callBody(t, "POST", "/api/v1/purchase-orders/refresh-reorder-targets",
+		`{"dry_run":true,"lookback_days":90}`, "purchasing", "u-a", A)
+	if status != http.StatusOK {
+		t.Fatalf("refresh dry-run, purchasing header A: %d, want 200: %s", status, body)
+	}
+	dryRunPurchasing := readSummary(t, body)
+	if dryRunPurchasing.DryRun != true {
+		t.Errorf("refresh dry-run, purchasing header A: dry_run = %v, want true", dryRunPurchasing.DryRun)
+	}
+	if dryRunPurchasing.ProductsUpdated < 1 {
+		t.Errorf("refresh dry-run, purchasing header A: products_updated = %d, want at least 1 (the fixture product)",
+			dryRunPurchasing.ProductsUpdated)
+	}
+
+	// Dry run must not have written the products row.
+	if pp, pq := readProduct(t); pp != 0 || pq != 0 {
+		t.Errorf("refresh dry-run wrote the products row: point = %v, qty = %v, want both 0", pp, pq)
+	}
+
+	// Administrator with no header: dry-run proposal set and count must
+	// match the bound purchasing user's proposal set and count exactly
+	// (the recompute sees every branch's data on both arms now, so both
+	// produce the same proposal).
+	status, body = f.callBody(t, "POST", "/api/v1/purchase-orders/refresh-reorder-targets",
+		`{"dry_run":true,"lookback_days":90}`, "admin", "boss", "")
+	if status != http.StatusOK {
+		t.Fatalf("refresh dry-run, admin no header: %d, want 200: %s", status, body)
+	}
+	dryRunAdmin := readSummary(t, body)
+	if dryRunAdmin.ProductsUpdated != dryRunPurchasing.ProductsUpdated {
+		t.Errorf("refresh dry-run: admin products_updated = %d, want %d (matches the bound purchasing arm)",
+			dryRunAdmin.ProductsUpdated, dryRunPurchasing.ProductsUpdated)
+	}
+	if dryRunAdmin.ProductsSkipped != dryRunPurchasing.ProductsSkipped {
+		t.Errorf("refresh dry-run: admin products_skipped = %d, want %d (matches the bound purchasing arm)",
+			dryRunAdmin.ProductsSkipped, dryRunPurchasing.ProductsSkipped)
+	}
+
+	// The bound write: a bound purchasing user with header A must write
+	// the same target an administrator's write would. The point for the
+	// fixture product is ceil(11*7*1.5) = 116 and the qty is ceil(11*30)
+	// = 330. After both writes the products row carries these numbers.
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET reorder_point = 0, reorder_qty = 0 WHERE id = $1`, f.productID); err != nil {
+		t.Fatalf("reset before bound write: %v", err)
+	}
+	status, body = f.callBody(t, "POST", "/api/v1/purchase-orders/refresh-reorder-targets",
+		`{"dry_run":false,"lookback_days":90}`, "purchasing", "u-a", A)
+	if status != http.StatusOK {
+		t.Fatalf("refresh write, purchasing header A: %d, want 200: %s", status, body)
+	}
+	boundPoint, boundQty := readProduct(t)
+
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET reorder_point = 0, reorder_qty = 0 WHERE id = $1`, f.productID); err != nil {
+		t.Fatalf("reset before admin write: %v", err)
+	}
+	status, body = f.callBody(t, "POST", "/api/v1/purchase-orders/refresh-reorder-targets",
+		`{"dry_run":false,"lookback_days":90}`, "admin", "boss", "")
+	if status != http.StatusOK {
+		t.Fatalf("refresh write, admin no header: %d, want 200: %s", status, body)
+	}
+	adminPoint, adminQty := readProduct(t)
+
+	if boundPoint != adminPoint {
+		t.Errorf("refresh write: bound purchasing wrote reorder_point = %v, admin wrote %v, want equal",
+			boundPoint, adminPoint)
+	}
+	if boundQty != adminQty {
+		t.Errorf("refresh write: bound purchasing wrote reorder_qty = %v, admin wrote %v, want equal",
+			boundQty, adminQty)
+	}
+	// Pin the actual numbers too: any future change to the lead time
+	// default or the safety factor will surface here.
+	if wantPoint, wantQty := 116.0, 330.0; adminPoint != wantPoint || adminQty != wantQty {
+		t.Errorf("refresh write: admin wrote point = %v, qty = %v, want %v, %v (every branch's sales: 90 + 900 = 990 over 90 days)",
+			adminPoint, adminQty, wantPoint, wantQty)
 	}
 }

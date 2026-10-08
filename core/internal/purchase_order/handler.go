@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -279,7 +280,27 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 // (the same logic the scheduler runs on cron). Body: {"dry_run": bool,
 // "lookback_days": int} — both optional. Defaults to dry_run=true so the
 // curl-once-and-look workflow can't accidentally rewrite the catalog.
+//
+// Reorder targets live on the products table (reorder_point and reorder_qty
+// are per product, not per product and branch) and are shared across every
+// branch. The recompute's velocity read therefore must see every branch's
+// sales, the way the cron path does (Scheduler.runRefresh calls the same
+// service with context.Background and no branch context: the velocity read's
+// predicate arm 3 fires, every branch's data flows). The HTTP route is
+// mounted behind the branch middleware, which would otherwise populate a
+// BranchContext that scopes the velocity read to the caller (a bound
+// purchasing user with header A reads arm 1, branch A's sales only; an
+// administrator without a header still reads arm 3 today because IsAdmin
+// suppresses GrantsSubForQuery). To keep the HTTP and cron paths writing
+// the same targets, this handler strips the BranchContext the middleware
+// put on the request and marks the resulting context as a system caller,
+// the seam the cron path already is, so the velocity read sees every
+// branch's data and a bound user's refresh writes the same targets an
+// administrator's would.
 func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Request) {
+	ctx := context.WithValue(r.Context(), branchctx.Key, (*branchctx.Context)(nil))
+	ctx = branchctx.WithSystem(ctx)
+
 	var req struct {
 		DryRun       *bool `json:"dry_run"`
 		LookbackDays int   `json:"lookback_days"`
@@ -289,7 +310,7 @@ func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Req
 	if req.DryRun != nil {
 		dryRun = *req.DryRun
 	}
-	result, err := h.service.RefreshReorderTargets(r.Context(), dryRun, req.LookbackDays)
+	result, err := h.service.RefreshReorderTargets(ctx, dryRun, req.LookbackDays)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to refresh reorder targets", http.StatusInternalServerError, err)
 		return

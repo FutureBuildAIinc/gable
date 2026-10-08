@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -48,9 +49,16 @@ func (r *VelocityRepository) ListSalesVelocity(ctx context.Context, lookbackDays
 		WHERE ol.product_id IS NOT NULL
 		  AND o.status <> 'CANCELLED'
 		  AND ol.created_at >= now() - ($1::int * INTERVAL '1 day')
+		  AND (
+		    ($2::uuid IS NOT NULL AND o.branch_id = $2)
+		    OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND o.branch_id IN
+		        (SELECT branch_id FROM user_locations WHERE user_sub = $3))
+		    OR ($2::uuid IS NULL AND $3::text IS NULL)
+		  )
 		GROUP BY ol.product_id
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, lookbackDays)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, lookbackDays,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("query sales velocity: %w", err)
 	}
