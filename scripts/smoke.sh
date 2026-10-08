@@ -3,8 +3,8 @@
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
 # The smoke run of the local stack: step 3 of the refactor's exit test against
-# the stack `make up` started. Uses curl, jq (python3 when jq is missing) and
-# psql inside the Postgres container. Prints each check and exits non zero on
+# the stack `make up` started. Requires curl and python3 on the host; psql runs
+# inside the Postgres container. Prints each check and exits non zero on
 # the first failure.
 #
 #   make up && make smoke && make down
@@ -13,6 +13,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# The stack's own compose project (the Makefile sets the same), so the exec
+# calls below reach the stack's Postgres and never a developer's.
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-gable-stack}"
 BASE="http://127.0.0.1:${GABLE_WEB_PORT:-8080}"
 PG_USER="${POSTGRES_USER:-gable_user}"
 PG_DB="${POSTGRES_DB:-gable_db}"
@@ -22,40 +25,35 @@ trap 'rm -rf "$TMP"' EXIT
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1" >&2; [ -n "${2:-}" ] && echo "     $2" >&2; exit 1; }
 
-# json <expr> reads JSON on stdin and prints the jq expression's raw result.
-if command -v jq >/dev/null 2>&1; then
-  json() { jq -r "$1"; }
-else
-  # python3 stand in for the few jq forms used below: .a.b[0].c paths,
-  # `| length`, and `// empty`.
-  json() {
-    python3 -c '
+# json <expr> reads JSON on stdin and prints the value of a jq style path
+# (.a.b[0].c, optionally `| length`). It exits non zero, printing nothing, when
+# the path is missing or null, so a field the response lacks fails the run
+# instead of passing as the string "null". Callers add `|| fail "..."`.
+json() {
+  python3 -c '
 import json, re, sys
 expr = sys.argv[1]
 data = json.load(sys.stdin)
 length = expr.endswith("| length")
-expr = re.sub(r"\s*\|\s*length$", "", expr)
-default_empty = "// empty" in expr
-expr = expr.replace("// empty", "").strip()
+expr = re.sub(r"\s*\|\s*length$", "", expr).strip()
 cur = data
-try:
-    for part in re.findall(r"\.([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\]", expr):
+for part in re.findall(r"\.([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\]", expr):
+    try:
         cur = cur[part[0]] if part[0] else cur[int(part[1])]
-except (KeyError, IndexError, TypeError):
-    cur = None
+    except (KeyError, IndexError, TypeError):
+        sys.exit(1)
+if cur is None:
+    sys.exit(1)
 if length:
     cur = len(cur)
-if cur is None:
-    print("" if default_empty else "null")
-elif isinstance(cur, bool):
+if isinstance(cur, bool):
     print("true" if cur else "false")
 elif isinstance(cur, (dict, list)):
     print(json.dumps(cur))
 else:
     print(cur)
 ' "$1"
-  }
-fi
+}
 
 # psql_q runs one query inside the Postgres container.
 psql_q() { docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -At -c "$1"; }
@@ -70,7 +68,7 @@ pass "the front door is served at /"
 
 code=$(curl -sS -o "$TMP/apps.json" -w '%{http_code}' "$BASE/api/v1/apps")
 [ "$code" = 200 ] || fail "front door catalog: GET /api/v1/apps is 200" "got $code"
-enabled=$(json '.apps | length' < "$TMP/apps.json")
+enabled=$(json '.apps | length' < "$TMP/apps.json") || fail "front door catalog has an apps array"
 [ "$enabled" -gt 0 ] || fail "front door catalog lists apps" "empty catalog"
 grep -q '"enabled": *true' "$TMP/apps.json" || fail "front door catalog has an enabled app" "none enabled"
 pass "the catalog the door reads lists $enabled apps, at least one enabled"
@@ -104,11 +102,12 @@ JSON
 code=$(curl -sS -o "$TMP/q1.json" -w '%{http_code}' -X POST "$BASE/api/v1/quotes" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" --data @"$TMP/quote.json")
 [ "$code" = 201 ] || fail "create a quote: POST /api/v1/quotes is 201" "got $code: $(cat "$TMP/q1.json")"
-QID=$(json '.id' < "$TMP/q1.json")
-number=$(json '.number' < "$TMP/q1.json")
-status=$(json '.status' < "$TMP/q1.json")
+QID=$(json '.id' < "$TMP/q1.json") || fail "the created quote carries an id" "$(cat "$TMP/q1.json")"
+number=$(json '.number' < "$TMP/q1.json") || fail "the created quote carries a number" "$(cat "$TMP/q1.json")"
+status=$(json '.status' < "$TMP/q1.json") || fail "the created quote carries a status" "$(cat "$TMP/q1.json")"
+[ -n "$QID" ] || fail "the created quote id is not empty"
 echo "$number" | grep -Eq '^Q-[0-9]{6,}$' || fail "the quote has a document number like Q-000123" "number is '$number'"
-[ "$status" = "$(echo "$status" | tr 'A-Z' 'a-z')" ] && [ -n "$status" ] || fail "the quote status is lowercase" "status is '$status'"
+echo "$status" | grep -Eq '^[a-z_]+$' || fail "the quote status is lowercase" "status is '$status'"
 python3 - "$TMP/q1.json" <<'PY' || fail "every _cents field of the quote is an integer"
 import json, sys
 q = json.load(open(sys.argv[1]))
@@ -174,7 +173,8 @@ code=$(curl -sS -D "$TMP/q2.hdr" -o "$TMP/q2.json" -w '%{http_code}' -X POST "$B
 [ "$code" = 201 ] || fail "the replay after a core restart is 201" "got $code: $(cat "$TMP/q2.json")"
 cmp -s "$TMP/q1.json" "$TMP/q2.json" || fail "the replay returns the first response byte for byte" "$(cat "$TMP/q2.json")"
 made=$(psql_q "SELECT count(*) FROM quotes WHERE id = '$QID'")
-total=$(psql_q "SELECT count(*) FROM quotes WHERE id = '$(json '.id' < "$TMP/q2.json")'")
+id2=$(json '.id' < "$TMP/q2.json") || fail "the replayed quote carries an id" "$(cat "$TMP/q2.json")"
+total=$(psql_q "SELECT count(*) FROM quotes WHERE id = '$id2'")
 [ "$made" = 1 ] && [ "$total" = 1 ] || fail "the replay made no second quote" "rows: $made / $total"
 same=$(psql_q "SELECT count(*) FROM quotes WHERE number = '$number'")
 [ "$same" = 1 ] || fail "one quote under the number $number" "rows: $same"
@@ -213,9 +213,9 @@ pass "reading again from the returned cursor yields nothing new"
 code=$(curl -sS -o "$TMP/key.json" -w '%{http_code}' -X POST "$BASE/api/v1/admin/keys" \
   -H 'Content-Type: application/json' --data '{"name":"smoke-read-only","scopes":["quotes:read"]}')
 [ "$code" = 201 ] || [ "$code" = 200 ] || fail "mint a scoped key (quotes:read)" "got $code"
-APIKEY=$(json '.api_key' < "$TMP/key.json")
-KEYID=$(json '.key.id' < "$TMP/key.json")
-[ -n "$APIKEY" ] && [ "$APIKEY" != null ] && [ -n "$KEYID" ] && [ "$KEYID" != null ] || fail "the minted key carries api_key and key.id"
+APIKEY=$(json '.api_key' < "$TMP/key.json") || fail "the minted key carries api_key"
+KEYID=$(json '.key.id' < "$TMP/key.json") || fail "the minted key carries key.id"
+[ -n "$APIKEY" ] && [ -n "$KEYID" ] || fail "the minted api_key and key.id are not empty"
 code=$(curl -sS -o "$TMP/refused.json" -w '%{http_code}' -X POST "$BASE/api/v1/quotes" \
   -H "Authorization: Bearer $APIKEY" -H 'Content-Type: application/json' --data @"$TMP/quote.json")
 [ "$code" = 403 ] || fail "a key without quotes:write is refused with 403" "got $code: $(cat "$TMP/refused.json")"
