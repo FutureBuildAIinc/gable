@@ -124,9 +124,9 @@ jobs:
     instance_size_slug: basic-xxs
     # App Platform exec-splits run_command on whitespace and passes the tokens
     # as argv to the first binary (no implicit /bin/sh). Wrapping with `sh -c`
-    # is required so the `&&` chain runs ./seed after ./migrate. Without it,
-    # only ./migrate executes and the seed binary is silently skipped.
-    run_command: sh -c 'set -e; ./migrate; if [ "$DEMO_SEED" = true ]; then echo seeding demo data; ./seed; else echo skipping demo seed, DEMO_SEED is not true; fi'
+    # is required so the chain runs `core seed` after `core migrate`. Without it,
+    # only the migrate subcommand executes and the seed is silently skipped.
+    run_command: sh -c 'set -e; ./core migrate; if [ "$DEMO_SEED" = true ]; then echo seeding demo data; ./core seed; else echo skipping demo seed, DEMO_SEED is not true; fi'
     envs:
       - key: DATABASE_URL
         value: ${gable-db.DATABASE_URL}
