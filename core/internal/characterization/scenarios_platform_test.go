@@ -125,6 +125,39 @@ func governanceGroups() []groupDef {
 				extract: map[string]string{"myRFC": "/id"},
 			},
 			{name: "governance.rfc.get", method: "GET", path: "/api/v1/governance/rfcs/{myRFC}"},
+			// The recipe's golden pins: the validation 400 with every field,
+			// the filter that filters and the one refused, the unsupported
+			// parameter, the missing and stale revision, the refused
+			// transition, and the module's events off the events feed.
+			{
+				name:   "governance.rfc.create.missing_fields",
+				method: "POST",
+				path:   "/api/v1/governance/rfcs",
+				body:   map[string]any{"title": "", "problem_statement": "", "proposed_solution": ""},
+			},
+			{name: "governance.rfc.create.carries_status", method: "POST", path: "/api/v1/governance/rfcs",
+				body: map[string]any{"title": "T", "problem_statement": "p", "proposed_solution": "s", "status": "review"}},
+			{name: "governance.rfc.list", method: "GET", path: "/api/v1/governance/rfcs?status=draft&limit=5"},
+			{name: "governance.rfc.list.uppercase_status", method: "GET", path: "/api/v1/governance/rfcs?status=DRAFT"},
+			{name: "governance.rfc.list.unknown_parameter", method: "GET", path: "/api/v1/governance/rfcs?author=none"},
+			{name: "governance.rfc.update.missing_revision", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "Golden RFC v2"}},
+			{name: "governance.rfc.update.stale_revision", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "Golden RFC v2", "revision": 9}},
+			{name: "governance.rfc.update", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "Golden RFC v2", "revision": 1}},
+			{name: "governance.rfc.update.carries_status", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "T", "revision": 2}},
+			// draft -> approved is not an edge; draft -> review is.
+			{name: "governance.rfc.transition.refused", method: "POST", path: "/api/v1/governance/rfcs/{myRFC}/transitions",
+				body: map[string]any{"to": "approved", "revision": 2}},
+			{name: "governance.rfc.transition", method: "POST", path: "/api/v1/governance/rfcs/{myRFC}/transitions",
+				body: map[string]any{"to": "review", "revision": 2}},
+			{
+				name: "governance.rfc.events",
+				method: "GET",
+				path:   "/api/v1/events?types=rfc.created,rfc.updated,rfc.review&limit=50",
+			},
 		},
 	}}
 }
@@ -194,6 +227,21 @@ func techadminGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/admin/keys",
 				body:   map[string]any{"name": "golden-key", "scopes": []any{"quotes:read"}},
+				extract: map[string]string{"myKeyID": "/key/id"},
+			},
+			{name: "techadmin.keys.list.after_create", method: "GET", path: "/api/v1/admin/keys?limit=2"},
+			{name: "techadmin.keys.list.unknown_parameter", method: "GET", path: "/api/v1/admin/keys?status=active"},
+			// Revoking an unknown key is a 404; revoking the golden key is a
+			// 204, and revoking it again changes nothing.
+			{name: "techadmin.key.revoke.unknown", method: "DELETE",
+				path: "/api/v1/admin/keys/00000000-0000-0000-0000-0000000000e1"},
+			{name: "techadmin.key.revoke", method: "DELETE", path: "/api/v1/admin/keys/{myKeyID}"},
+			{name: "techadmin.key.revoke.again", method: "DELETE", path: "/api/v1/admin/keys/{myKeyID}"},
+			{
+				name:   "techadmin.key.create.missing_name",
+				method: "POST",
+				path:   "/api/v1/admin/keys",
+				body:   map[string]any{"name": "", "scopes": []any{""}},
 			},
 		},
 	}}
@@ -203,7 +251,10 @@ func staffGroups() []groupDef {
 	return []groupDef{{
 		name: "staff",
 		steps: []stepDef{
-			{name: "staff.list", method: "GET", path: "/api/v1/admin/staff"},
+			// The seeded roster's own order is not stable across runs (three
+			// rows seeded in one instant, random ids), so the list steps read
+			// pages that are: the newest member alone (this group's own
+			// create) and the empty inactive page.
 			{
 				name:   "staff.create",
 				method: "POST",
@@ -213,6 +264,10 @@ func staffGroups() []groupDef {
 				},
 				extract: map[string]string{"myStaff": "/id"},
 			},
+			{name: "staff.list", method: "GET", path: "/api/v1/admin/staff?limit=1"},
+			{name: "staff.list.active_filter", method: "GET", path: "/api/v1/admin/staff?active=false"},
+			{name: "staff.list.bad_filter", method: "GET", path: "/api/v1/admin/staff?active=maybe"},
+			{name: "staff.get", method: "GET", path: "/api/v1/admin/staff/{myStaff}"},
 			{name: "staff.modules", method: "GET", path: "/api/v1/admin/modules"},
 			{name: "staff.create.missing_fields", method: "POST", path: "/api/v1/admin/staff",
 				body: map[string]any{"email": "", "full_name": ""}},

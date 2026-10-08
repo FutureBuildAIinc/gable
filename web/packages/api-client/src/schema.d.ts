@@ -95,13 +95,13 @@ export interface paths {
         };
         /**
          * List machine API keys
-         * @description Admin or owner only. Newest first, revoked keys included. Not paginated. Answers null, not an empty array, when there are no keys. Only the 12 character prefix identifies a key; the secret is never retrievable.
+         * @description Admin or owner only (a machine key is refused here whatever its scopes). The cursor list envelope, newest first, revoked keys included; scopes is never null. Only the 12 character prefix identifies a key; the secret and its hash are never served. total appears only under include=total.
          */
         get: operations["adminListKeys"];
         put?: never;
         /**
          * Create a machine API key
-         * @description Admin or owner only. The raw key (sk_live_ followed by 43 URL safe base64 characters) is returned here and nowhere else; only its salted Argon2 hash is stored. Success is a 200, not a 201. Neither name nor scopes is validated; omitted scopes are stored as null.
+         * @description Admin or owner only. The raw key (sk_live_ followed by 43 URL safe base64 characters) is returned here and nowhere else; only its salted Argon2 hash is stored. The scopes are stored verbatim (ADR 0002: a grant reads back as written); grammar validation at the mint is C5-2a's (ADR 0007 section 5.3), so this parse checks only that the name is present and each scope is a printable, non-empty string. The mint, its audit row and the key.created event are one transaction.
          */
         post: operations["adminCreateKey"];
         delete?: never;
@@ -122,7 +122,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke a machine API key
-         * @description Admin or owner only. Sets revoked_at; the row is kept. Unknown ids and already revoked keys are a 204 too (an UPDATE that matches nothing is not an error). A malformed id the database refuses is a 500. DELETE is outside the idempotency layer.
+         * @description Admin or owner only. Sets revoked_at; the row is kept. An unknown id is a 404 (a typo no longer looks like success); revoking an already revoked key is an idempotent 204 that writes nothing. A revoke that flips the row writes its audit row and the key.revoked event in one transaction. DELETE is outside the idempotency layer.
          */
         delete: operations["adminRevokeKey"];
         options?: never;
@@ -139,18 +139,18 @@ export interface paths {
         };
         /**
          * Show the OpenRouter key status
-         * @description Admin or owner only. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and is absent when no key is configured. base_url is present only when an admin override is stored, never for the environment or built in default.
+         * @description Admin or owner, or a key holding admin:settings. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and null when no key is configured. base_url is present only when an admin override is stored, null otherwise. revision is the resource's revision anchor and rides the ETag.
          */
         get: operations["adminGetAISettings"];
         /**
          * Save the OpenRouter key and base URL
-         * @description Admin or owner only. The key is stored and never echoed back. base_url absent or null leaves the stored override alone; an empty string clears the override; any other value must be an absolute https URL (plain http only for loopback hosts) or the call is a 400 and nothing, key included, is saved. A key is required. A 500 also answers when the key store is not wired.
+         * @description Admin or owner, or a key holding admin:settings. api_key is required. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
          */
         put: operations["adminSaveAISettings"];
         post?: never;
         /**
-         * Remove the stored OpenRouter key and base URL override
-         * @description Admin or owner only. Deletes the admin stored key and the base URL override together, so both revert to the environment or default. DELETE is outside the idempotency layer.
+         * Remove the OpenRouter admin override
+         * @description Admin or owner, or a key holding admin:settings. Removes the key and the base URL override together, so both revert to their environment defaults. Takes the If-Match precondition; the deletion moves the revision (never backwards) and writes the admin_settings.deleted event.
          */
         delete: operations["adminDeleteAISettings"];
         options?: never;
@@ -167,60 +167,20 @@ export interface paths {
         };
         /**
          * Show the OpenRouteService key status
-         * @description Admin or owner only. Same shape and masking as the AI settings, key only: key_hint is the first 10 and last 4 characters (four asterisks for a key of 12 characters or fewer), and base_url is never present.
+         * @description Admin or owner, or a key holding admin:settings. The AI settings' shape without the base URL; its revision anchor is its own.
          */
         get: operations["adminGetRoutingSettings"];
         /**
          * Save the OpenRouteService key
-         * @description Admin or owner only. The key is stored and never echoed back. A key is required (400). A 500 also answers when the key store is not wired.
+         * @description Admin or owner, or a key holding admin:settings. api_key is required; the write takes the same precondition as the AI settings save and answers the new revision in body and ETag.
          */
         put: operations["adminSaveRoutingSettings"];
         post?: never;
         /**
-         * Remove the stored OpenRouteService key
-         * @description Admin or owner only. Deletes the admin stored key so the environment value, if any, applies again. DELETE is outside the idempotency layer.
+         * Remove the OpenRouteService admin override
+         * @description Admin or owner, or a key holding admin:settings. Takes the If-Match precondition and answers 204.
          */
         delete: operations["adminDeleteRoutingSettings"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/modules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the integration modules and their global flag
-         * @description Admin or owner only. A fixed catalog (today only ai_lm); enabled is true only when the modules.<id>.enabled setting is exactly true.
-         */
-        get: operations["adminListModules"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/modules/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Switch an integration module on or off globally
-         * @description Admin or owner only. Writes the modules.<id>.enabled setting for any id, known or not, and revokes access for every staff member at once when switched off without deleting grants. The id is not checked against the catalog. The response echoes the id and the new flag with an empty name.
-         */
-        put: operations["adminSetModuleEnabled"];
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -235,13 +195,13 @@ export interface paths {
         };
         /**
          * List the staff roster
-         * @description Admin or owner only. Ordered by full name, with each member's raw module grants. Not paginated. Never null.
+         * @description Admin or owner, or a key holding admin:staff. The cursor list envelope, newest first. active filters on the flag (true or false; a value outside is a 400). Each item carries the member's granted module ids, never null and NOT filtered by the global enable flag. total appears only under include=total.
          */
         get: operations["adminListStaff"];
         put?: never;
         /**
-         * Add a staff member
-         * @description Admin or owner only. Email and full_name are required (400 when empty). Role defaults to staff and active to true. A duplicate email the database refuses surfaces as a 500.
+         * Create a staff member
+         * @description Admin or owner, or a key holding admin:staff. email and full_name are required; staff_no is optional (null by default); role defaults to staff and active to true. A duplicate email or staff number is a 409 naming the field. The create, its audit row and the staff.created event are one transaction.
          */
         post: operations["adminCreateStaff"];
         delete?: never;
@@ -258,13 +218,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a staff member
-         * @description Admin or owner only.
+         * Read one staff member
+         * @description Admin or owner, or a key holding admin:staff.
          */
         get: operations["adminGetStaff"];
         /**
          * Update a staff member
-         * @description Admin or owner only. A partial update: absent or null fields are left unchanged (a null staff_no cannot clear the stored value). An empty body returns the current record, or 404 when the id is unknown.
+         * @description Admin or owner, or a key holding admin:staff. Every field is optional: nil leaves it alone, so a PUT that only flips active must not blank out the email it did not send; a staff_no of null clears the number. Takes If-Match or the body revision (428 without, 409 stale) and answers the member with its new revision and ETag.
          */
         put: operations["adminUpdateStaff"];
         post?: never;
@@ -285,9 +245,9 @@ export interface paths {
         put?: never;
         /**
          * Grant a module to a staff member
-         * @description Admin or owner only. Idempotent at the database (a repeat grant is a no-op) and audit logged. The module id is not checked against the catalog. An unknown staff id is refused by the database and is a 500. When the re-read of the member fails after the grant, the answer is still 200 with the bare status object granted.
+         * @description Admin or owner, or a key holding admin:staff. The modules list is part of the staff document: a grant that adds one moves the revision and takes the same precondition; an idempotent re-grant changes nothing and writes nothing. module_id must name a module in the catalog (ai_lm). Answers the member with its new revision and ETag.
          */
-        post: operations["adminGrantStaffModule"];
+        post: operations["adminGrantModule"];
         delete?: never;
         options?: never;
         head?: never;
@@ -306,9 +266,49 @@ export interface paths {
         post?: never;
         /**
          * Revoke a module from a staff member
-         * @description Admin or owner only. Idempotent and audit logged; an unknown staff id or a grant that does not exist still succeeds, with the bare status object revoked (the re-read finds no member). DELETE is outside the idempotency layer.
+         * @description Admin or owner, or a key holding admin:staff. The grant route's mirror: takes the If-Match precondition, moves the revision only when a grant was actually removed, and answers the member. An unknown module id is a 400 naming module_id.
          */
-        delete: operations["adminRevokeStaffModule"];
+        delete: operations["adminRevokeModule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the integration modules
+         * @description Admin or owner, or a key holding admin:modules. The catalog of integration modules with each flag's global state and its revision anchor, in the list envelope (a fixed catalog: next_cursor is null on the single page). The flag is the kill switch; the per staff grants live on the staff document.
+         */
+        get: operations["adminListModules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/modules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Toggle a module's global enable flag
+         * @description Admin or owner, or a key holding admin:modules. The kill switch: turning a module off revokes it for every staff member at once WITHOUT deleting any grant, so turning it back on restores the roster. Takes If-Match or the body revision against the flag's own anchor; a toggle that changes nothing writes nothing; a flip writes the module.enabled or module.disabled event. An unknown module id is a 404.
+         */
+        put: operations["adminSetModuleEnabled"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2003,15 +2003,15 @@ export interface paths {
         };
         /**
          * List RFCs
-         * @description Admin or owner only. Newest first. Not paginated. Answers null, not an empty array, when there are no RFCs.
+         * @description The cursor list envelope, newest first, one summary per RFC (the body never rides the list). status filters on the lowercase vocabulary (a comma separated list); total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary (uppercase included), a malformed cursor or an out of range limit is a 400.
          */
-        get: operations["governanceListRfcs"];
+        get: operations["governanceListRFCs"];
         put?: never;
         /**
          * Draft an RFC
-         * @description Admin or owner only. The content is expanded from a fixed Markdown template (no model is called). The new RFC is always status draft. The request keys are the Go field names matched case insensitively; the snake_case spelling of ProblemStatement, ProposedSolution and AuthorID is ignored without an error.
+         * @description Creates an RFC in draft. The content is generated from the triple by the provider (a template today), never sent by the client; a request carrying content, status or revision is a 400 naming the field. The number is minted from the sequence (RFC-000001), the create, its audit row and rfc.created are one transaction, and the answer carries the revision and its ETag.
          */
-        post: operations["governanceCreateRfc"];
+        post: operations["governanceCreateRFC"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2026,16 +2026,36 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get an RFC
-         * @description Admin or owner only. Any lookup failure, including a database fault, answers 404.
+         * Read one RFC
+         * @description The full document with its revision and ETag.
          */
-        get: operations["governanceGetRfc"];
+        get: operations["governanceGetRFC"];
         /**
-         * Replace an RFC's editable fields
-         * @description Admin or owner only. A full overwrite: title, status, problem statement, proposed solution and content are all set from the body, so an omitted key blanks the stored value. Status is not validated by the handler and the database has no check on it: any string up to 50 characters is stored (an empty one when the key is omitted), and only a longer one is a 500. An unknown id is a 500, not a 404.
+         * Update an RFC
+         * @description Every editable field is optional: nil leaves it alone. status moves through the transitions route (a request carrying it is a 400 naming it and pointing there); author_id is set once at create. Takes If-Match or the body revision (428 without, 409 stale) and answers the document with its new revision and ETag. An RFC under review may still be edited; an approved or rejected one refuses the edit with a 409 blocker until it is reopened.
          */
-        put: operations["governanceUpdateRfc"];
+        put: operations["governanceUpdateRFC"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/governance/rfcs/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move an RFC along its lifecycle
+         * @description The allowed edges are draft to review, review to approved, review to rejected and rejected back to draft (a reopen); approved is terminal. A forbidden edge is a 409 invalid_state_transition. Takes If-Match or the body revision like every write, and writes the transition's event (rfc.review, rfc.approved, rfc.rejected, rfc.reopened).
+         */
+        post: operations["governanceTransitionRFC"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5943,14 +5963,13 @@ export interface components {
             /** Format: date-time */
             activity_date?: string;
         };
-        /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never serialized. prefix is the first 12 characters of the raw key (sk_live_ plus four). */
-        TechAdminKey: {
-            /** @description A database UUID rendered as text. */
+        /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never leaves the package; only the 12 character prefix identifies a key. */
+        ApiKey: {
+            /** Format: uuid */
             id: string;
             name: string;
             prefix: string;
-            /** @description Null when the key was created without scopes. */
-            scopes: string[] | null;
+            scopes: string[];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -5958,99 +5977,113 @@ export interface components {
             /** Format: date-time */
             revoked_at: string | null;
         };
-        /** @description Go type techadmin.CreateKeyRequest. Nothing is validated. */
-        TechAdminCreateKeyRequest: {
-            name?: string;
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        ApiKeyPage: {
+            items: components["schemas"]["ApiKey"][];
+            next_cursor: string | null;
+            limit: number;
+            total?: number;
+        };
+        /** @description Go type techadmin.CreateKeyRequest. Scopes are minted verbatim; validation of the grammar is C5-2a's. */
+        AdminCreateKeyRequest: {
+            name: string;
             scopes?: string[];
         };
-        /** @description Go type techadmin.CreateKeyResponse. */
-        TechAdminCreateKeyResponse: {
-            /** @description The raw secret key, returned this once and never retrievable again. */
+        /** @description Go type techadmin.CreatedKey. The raw key appears here and nowhere else. */
+        AdminCreateKeyResponse: {
             api_key: string;
-            key: components["schemas"]["TechAdminKey"] | null;
+            key: components["schemas"]["ApiKey"];
         };
-        /** @description Go type techadmin.AISettingsResponse, used by both the AI and routing settings. The key itself is never present. key_hint and base_url are omitted when empty. */
-        TechAdminSettingsStatus: {
+        /** @description Go type techadmin.AISettings. source is admin (a stored override), env (a key from the environment only) or none. key_hint and base_url are null when absent, never omitted. */
+        AISettings: {
             configured: boolean;
-            /**
-             * @description admin when a database override holds the key, env when only the environment does, none when unset.
-             * @enum {string}
-             */
-            source: "admin" | "env" | "none";
-            /** @description First 10 and last 4 characters of the key joined by three dots, or four asterisks for a key of 12 characters or fewer. */
-            key_hint?: string;
-            /** @description The admin override of the OpenRouter base URL; AI settings only. */
-            base_url?: string;
-        };
-        /** @description The anonymous request struct of SaveAISettings. */
-        TechAdminSaveAISettingsRequest: {
-            /** @description The OpenRouter key. Never returned by any route. */
-            api_key: string;
-            /** @description Absent or null leaves the override as is; empty clears it; otherwise an absolute https URL (http only for loopback hosts). */
-            base_url?: string | null;
-        };
-        /** @description The anonymous request struct of SaveRoutingSettings. */
-        TechAdminSaveRoutingSettingsRequest: {
-            /** @description The OpenRouteService key. Never returned by any route. */
-            api_key: string;
-        };
-        /** @description The map literal both save routes answer. */
-        TechAdminSaveResult: {
             /** @enum {string} */
-            status: "saved";
+            source: "admin" | "env" | "none";
+            key_hint: string | null;
+            base_url: string | null;
+            revision: number;
         };
-        /** @description Go type staff.Staff. staff_no is a pointer with omitempty, absent when unset. modules is the raw set of granted module ids, not filtered by the global enable flag. */
+        /** @description Go type techadmin.RoutingSettings, the AI settings' shape without the base URL. */
+        RoutingSettings: {
+            configured: boolean;
+            /** @enum {string} */
+            source: "admin" | "env" | "none";
+            key_hint: string | null;
+            revision: number;
+        };
+        /** @description Go type techadmin.SaveAISettingsRequest. base_url is a pointer: absent leaves the override, empty clears it, a URL sets it. revision is the body form of the If-Match precondition. */
+        AdminSaveAISettingsRequest: {
+            api_key: string;
+            base_url?: string | null;
+            revision?: number;
+        };
+        /** @description Go type techadmin.SaveRoutingSettingsRequest. */
+        AdminSaveRoutingSettingsRequest: {
+            api_key: string;
+            revision?: number;
+        };
+        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. */
         StaffMember: {
             /** Format: uuid */
             id: string;
             email: string;
             full_name: string;
-            staff_no?: string;
-            /** @description A free text label, default staff; it does not govern module access. */
+            staff_no: string | null;
             role: string;
             active: boolean;
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
             modules: string[];
         };
-        /** @description Go type staff.CreateStaffInput. Empty email or full_name is a 400. */
-        StaffCreateRequest: {
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        StaffPage: {
+            items: components["schemas"]["StaffMember"][];
+            next_cursor: string | null;
+            limit: number;
+            total?: number;
+        };
+        /** @description Go type staff.CreateStaffInput. role defaults to staff, active to true, staff_no to null; a revision is refused. */
+        AdminCreateStaffRequest: {
             email: string;
             full_name: string;
             staff_no?: string | null;
-            /** @description Defaults to staff when empty. */
             role?: string;
-            /** @description Defaults to true when absent or null. */
-            active?: boolean | null;
+            active?: boolean;
         };
-        /** @description Go type staff.UpdateStaffInput. Absent or null means leave unchanged. */
-        StaffUpdateRequest: {
+        /** @description Go type staff.UpdateStaffInput. Every field is a pointer: nil leaves it alone; a null staff_no clears it. */
+        AdminUpdateStaffRequest: {
             email?: string | null;
             full_name?: string | null;
             staff_no?: string | null;
             role?: string | null;
             active?: boolean | null;
+            revision?: number;
         };
-        /** @description The unexported grantModuleRequest struct. An empty module_id is a 400. */
-        StaffGrantModuleRequest: {
+        /** @description Go type staff.GrantModuleInput. module_id must name a module in the catalog (ai_lm). */
+        AdminGrantModuleRequest: {
             module_id: string;
+            revision?: number;
         };
-        /** @description The bare map literal answered when the member re-read fails after a grant or revoke. */
-        StaffModuleStatus: {
-            /** @enum {string} */
-            status: "granted" | "revoked";
-        };
-        /** @description Go type staff.Module. */
+        /** @description Go type staff.Module. The global state of an integration module, the kill switch. */
         StaffModule: {
             id: string;
             name: string;
             enabled: boolean;
+            revision: number;
         };
-        /** @description The unexported setModuleEnabledRequest struct. An absent flag means false. */
-        StaffSetModuleEnabledRequest: {
-            enabled?: boolean;
+        /** @description The list envelope over the fixed module catalog. */
+        StaffModulePage: {
+            items: components["schemas"]["StaffModule"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        /** @description Go type staff.SetModuleEnabledInput. */
+        AdminSetModuleEnabledRequest: {
+            enabled: boolean;
+            revision?: number;
         };
         /** @description The map literal HandleAdminScan answers. */
         AdminExposureScanResult: {
@@ -7642,40 +7675,72 @@ export interface components {
             /** Format: int64 */
             retained_earnings: number;
         };
-        /** @description Go type governance.RFC. */
-        GovernanceRFC: {
+        /** @description Go type governance.RFCSummary, the list item; the full document embeds it. */
+        RFCSummary: {
             /** Format: uuid */
             id: string;
+            /** @description The human readable document number (RFC-000001), minted from the sequence. */
+            number: string;
             title: string;
-            /** @description Normally one of draft, review, approved or rejected. The database has no check on it, so an RFC updated with another string (or with the key omitted, which stores an empty string) reads back with that value. */
-            status: string;
-            problem_statement: string;
-            proposed_solution: string;
-            /** @description Markdown. */
-            content: string;
+            /** @enum {string} */
+            status: "draft" | "review" | "approved" | "rejected";
             /** Format: uuid */
             author_id: string | null;
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type governance.CreateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored. */
-        GovernanceCreateRFCRequest: {
-            Title?: string;
-            ProblemStatement?: string;
-            ProposedSolution?: string;
+        /** @description Go type governance.RFC, the summary fields spelled out with the body behind them. content is generated by the provider at create and null only on rows the legacy seed wrote without one. */
+        RFC: {
             /** Format: uuid */
-            AuthorID?: string | null;
+            id: string;
+            /** @description The human readable document number (RFC-000001), minted from the sequence. */
+            number: string;
+            title: string;
+            /** @enum {string} */
+            status: "draft" | "review" | "approved" | "rejected";
+            /** Format: uuid */
+            author_id: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            problem_statement: string;
+            proposed_solution: string;
+            content: string | null;
         };
-        /** @description Go type governance.UpdateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored. Every field is written, so an omitted key becomes the empty string. */
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        RFCPage: {
+            items: components["schemas"]["RFCSummary"][];
+            next_cursor: string | null;
+            limit: number;
+            total?: number;
+        };
+        /** @description Go type governance.CreateRFCInput. content, status and revision are refused on a create. */
+        GovernanceCreateRFCRequest: {
+            title: string;
+            problem_statement: string;
+            proposed_solution: string;
+            /** Format: uuid */
+            author_id?: string | null;
+        };
+        /** @description Go type governance.UpdateRFCInput. Every editable field is a pointer: nil leaves it alone. */
         GovernanceUpdateRFCRequest: {
-            Title?: string;
-            /** @description Stored as sent; the handler does not check it against the status vocabulary (draft, review, approved, rejected). */
-            Status?: string;
-            ProblemStatement?: string;
-            ProposedSolution?: string;
-            Content?: string;
+            title?: string | null;
+            problem_statement?: string | null;
+            proposed_solution?: string | null;
+            content?: string | null;
+            revision?: number;
+        };
+        /** @description Go type governance.TransitionRequest. */
+        GovernanceTransitionRequest: {
+            /** @enum {string} */
+            to: "draft" | "review" | "approved" | "rejected";
+            revision?: number;
         };
         HealthReadyOK: {
             /** @enum {string} */
@@ -11471,6 +11536,15 @@ export interface components {
                 "application/json": components["schemas"]["WireError"];
             };
         };
+        /** @description A dependency the route needs is down, in the ADR 0001 error envelope (code unavailable); retry later. */
+        WireUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
         /** @description The card charge or its persistence failed. */
         PaymentRequired: {
             headers: {
@@ -11848,25 +11922,33 @@ export interface operations {
     };
     adminListKeys: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Every key, or null when none exist. */
+            /** @description The page of keys. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminKey"][] | null;
+                    "application/json": components["schemas"]["ApiKeyPage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminCreateKey: {
@@ -11881,26 +11963,28 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TechAdminCreateKeyRequest"];
+                "application/json": components["schemas"]["AdminCreateKeyRequest"];
             };
         };
         responses: {
-            /** @description The new key record and the raw key, shown once. */
-            200: {
+            /** @description The new key row and the raw key, shown once. */
+            201: {
                 headers: {
+                    /** @description The new key's own URL. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminCreateKeyResponse"];
+                    "application/json": components["schemas"]["AdminCreateKeyResponse"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminRevokeKey: {
@@ -11921,9 +12005,11 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminGetAISettings: {
@@ -11935,17 +12021,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The key status. */
+            /** @description The settings document. */
             200: {
                 headers: {
+                    /** @description The revision in quotes, the strong form If-Match reads. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSettingsStatus"];
+                    "application/json": components["schemas"]["AISettings"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminSaveAISettings: {
@@ -11954,38 +12043,46 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted ("3"); the weak form W/"3" is accepted. */
+                "If-Match"?: string;
             };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TechAdminSaveAISettingsRequest"];
+                "application/json": components["schemas"]["AdminSaveAISettingsRequest"];
             };
         };
         responses: {
-            /** @description Saved. */
+            /** @description The settings document after the save. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSaveResult"];
+                    "application/json": components["schemas"]["AISettings"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminDeleteAISettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12000,7 +12097,9 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminGetRoutingSettings: {
@@ -12012,17 +12111,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The key status. */
+            /** @description The settings document. */
             200: {
                 headers: {
+                    /** @description The revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSettingsStatus"];
+                    "application/json": components["schemas"]["RoutingSettings"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminSaveRoutingSettings: {
@@ -12031,38 +12133,46 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match"?: string;
             };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TechAdminSaveRoutingSettingsRequest"];
+                "application/json": components["schemas"]["AdminSaveRoutingSettingsRequest"];
             };
         };
         responses: {
-            /** @description Saved. */
+            /** @description The settings document after the save. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSaveResult"];
+                    "application/json": components["schemas"]["RoutingSettings"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminDeleteRoutingSettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12077,89 +12187,42 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    adminListModules: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The modules. Never null. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StaffModule"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    adminSetModuleEnabled: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StaffSetModuleEnabledRequest"];
-            };
-        };
-        responses: {
-            /** @description The module with its new flag; name is always the empty string here. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StaffModule"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminListStaff: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Filter on the active flag. */
+                active?: "true" | "false";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The roster. */
+            /** @description The page of staff. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StaffMember"][];
+                    "application/json": components["schemas"]["StaffPage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminCreateStaff: {
@@ -12174,26 +12237,30 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StaffCreateRequest"];
+                "application/json": components["schemas"]["AdminCreateStaffRequest"];
             };
         };
         responses: {
-            /** @description The created member, with an empty modules array. */
+            /** @description The new staff member. */
             201: {
                 headers: {
+                    /** @description The new member's own URL. */
+                    Location?: string;
+                    /** @description The revision (1) in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminGetStaff: {
@@ -12207,20 +12274,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The member with its raw module grants. */
+            /** @description The staff member. */
             200: {
                 headers: {
+                    /** @description The revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminUpdateStaff: {
@@ -12229,6 +12298,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -12237,35 +12308,40 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StaffUpdateRequest"];
+                "application/json": components["schemas"]["AdminUpdateStaffRequest"];
             };
         };
         responses: {
-            /** @description The updated member. */
+            /** @description The member after the update. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    adminGrantStaffModule: {
+    adminGrantModule: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The staff revision this write preconditions on, quoted. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -12274,32 +12350,39 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StaffGrantModuleRequest"];
+                "application/json": components["schemas"]["AdminGrantModuleRequest"];
             };
         };
         responses: {
-            /** @description The member with its grants, or the bare status object. */
+            /** @description The member after the grant. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StaffMember"] | components["schemas"]["StaffModuleStatus"];
+                    "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    adminRevokeStaffModule: {
+    adminRevokeModule: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The staff revision this write preconditions on, quoted. */
+                "If-Match": string;
+            };
             path: {
                 id: string;
                 module_id: string;
@@ -12308,19 +12391,97 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The member with its remaining grants, or the bare status object. */
+            /** @description The member after the revoke. */
+            200: {
+                headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminListModules: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The module catalog. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StaffMember"] | components["schemas"]["StaffModuleStatus"];
+                    "application/json": components["schemas"]["StaffModulePage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminSetModuleEnabled: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The flag's revision this write preconditions on, quoted. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSetModuleEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description The module after the toggle. */
+            200: {
+                headers: {
+                    /** @description The flag's new revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffModule"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminExposureScan: {
@@ -15954,31 +16115,40 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
-    governanceListRfcs: {
+    governanceListRFCs: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Comma separated lowercase statuses (draft, review, approved, rejected). */
+                status?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Every RFC, or null when none exist. */
+            /** @description The page of RFC summaries. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"][] | null;
+                    "application/json": components["schemas"]["RFCPage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    governanceCreateRfc: {
+    governanceCreateRFC: {
         parameters: {
             query?: never;
             header?: {
@@ -15997,23 +16167,27 @@ export interface operations {
             /** @description The drafted RFC. */
             201: {
                 headers: {
+                    /** @description The new RFC's own URL. */
+                    Location?: string;
+                    /** @description The revision (1) in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"];
+                    "application/json": components["schemas"]["RFC"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
+            503: components["responses"]["WireUnavailable"];
         };
     };
-    governanceGetRfc: {
+    governanceGetRFC: {
         parameters: {
             query?: never;
             header?: never;
@@ -16027,33 +16201,29 @@ export interface operations {
             /** @description The RFC. */
             200: {
                 headers: {
+                    /** @description The revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"];
+                    "application/json": components["schemas"]["RFC"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description The RFC does not exist (or the lookup failed), or the governance app is disabled (the app_disabled body). The standard envelope in the first case. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"] | components["schemas"]["AppsDisabledError"];
-                };
-            };
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    governanceUpdateRfc: {
+    governanceUpdateRFC: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted ("3"); the weak form is accepted. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -16066,23 +16236,68 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated RFC. */
+            /** @description The RFC after the update. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"];
+                    "application/json": components["schemas"]["RFC"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    governanceTransitionRFC: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GovernanceTransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description The RFC after the transition. */
+            200: {
+                headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RFC"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     healthLive: {

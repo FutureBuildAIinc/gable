@@ -184,7 +184,7 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 201,
       "content_type": "application/json",
       "body": {
         "api_key": "<api-key>",
