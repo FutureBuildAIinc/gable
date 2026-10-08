@@ -17,6 +17,14 @@ module recipe, the `httpx` helpers it names (`Extend`, `CheckLineSign`,
 `testutil.RequireDBMaxConns`, and the quote convert route whose refusal of
 pairs other than 1 and 1 section 5.8 lifts.
 
+ADR 0006 (units and pricing, item C3-0) supersedes five pieces of this
+record from the moment its item C3-2B lands: the units row of section 1, the
+`uom` rule of section 2.2, the unit of section 5.4's allocation invariant
+(it reads on `stock_quantity`, equal to `quantity` on every line cycle 2
+writes), the unit of section 5.6's fulfilment `lines[].quantity` (the
+line's `stock_uom`) with a new optional `lines[].tally` (ADR 0006 section
+4.4), and section 5.8's `unit_not_stock_unit` refusal.
+
 The items land in a chain: C2-1 (which may start at once), then C2-2, then
 C2-3, then C2-4, then C2-5. Each item below names what it builds and, where a
 piece of this record arrives with a later item, says so at that piece.
