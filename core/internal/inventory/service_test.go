@@ -244,3 +244,19 @@ func TestAllocate_HonorsBranchContext(t *testing.T) {
 		t.Fatalf("expected branch-B allocation to succeed, got %v", err)
 	}
 }
+
+func (m *MockRepository) LockBranchInventory(ctx context.Context, productID, branchID uuid.UUID) ([]Inventory, error) {
+	return nil, nil
+}
+func (m *MockRepository) AllocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	return nil
+}
+func (m *MockRepository) DeallocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	return nil
+}
+func (m *MockRepository) FulfillStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	return nil
+}
+func (m *MockRepository) RestockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	return nil
+}
