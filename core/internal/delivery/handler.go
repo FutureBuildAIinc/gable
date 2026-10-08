@@ -5,6 +5,7 @@ package delivery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
@@ -259,6 +261,13 @@ func (h *Handler) HandleAssignOrder(w http.ResponseWriter, r *http.Request) {
 
 	d, capacityWarning, err := h.service.AssignOrderToRoute(r.Context(), req)
 	if err != nil {
+		// A pickup (will-call) order is never routed: 409 with the blocker
+		// pickup_order, in the platform's envelope (ADR 0005 5.5).
+		var he *httpx.Error
+		if errors.As(err, &he) {
+			httpx.WriteError(w, r, he)
+			return
+		}
 		slog.Error("AssignOrderToRoute failed", "error", err)
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return

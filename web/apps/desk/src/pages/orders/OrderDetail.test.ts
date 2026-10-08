@@ -11,6 +11,12 @@ import './OrderDetail'
 import type { GableOrderDetail } from './OrderDetail'
 import type { Order } from '../../types/order'
 import { mountAsync, text, jsonResponse } from '../../test/dom'
+import { ToastService } from '../../lib/toast-service.ts'
+
+// the header's Fulfil Order button
+function fulfilButton(el: Element): HTMLButtonElement {
+  return Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Fulfil Order')) as HTMLButtonElement
+}
 
 function order(overrides: Partial<Order> = {}): Order {
   const line = {
@@ -142,5 +148,146 @@ describe('gable-order-detail - the order contract', () => {
     expect(body).toContain('per MBF')
     expect(body).toContain('$500.00')
     expect(body).toContain('$500.00')
+  })
+
+  it('shows the stock side of each line and a back order with its allocate retry', async () => {
+    const short = order({ status: 'backordered' })
+    short.lines[0].quantity_allocated = '6'
+    short.lines[0].quantity_backordered = '18'
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(short)))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: short.id })
+    const body = text(el)
+    expect(body).toContain('6 allocated')
+    expect(body).toContain('18 back ordered')
+    expect(body).toContain('Allocate Stock')
+    expect(body).toContain('Fulfil Order')
+  })
+
+  it('shows no allocation figure for lines that never allocate (a dash), the figure for stocked lines', async () => {
+    const mixed = order()
+    const stocked = { ...mixed.lines[0], quantity_allocated: '6' }
+    const nonStock = {
+      ...mixed.lines[0],
+      id: '00000000-0000-4000-8000-000000000l02',
+      position: 1,
+      product_id: null,
+      sku: null,
+      description: 'Custom millwork',
+      quantity_allocated: '0',
+      quantity_backordered: '0',
+      quantity_fulfilled: '0',
+    }
+    const freight = {
+      ...mixed.lines[0],
+      id: '00000000-0000-4000-8000-000000000l03',
+      position: 2,
+      line_type: 'charge' as const,
+      product_id: null,
+      sku: null,
+      charge_code: 'FREIGHT',
+      description: 'Delivery',
+      quantity: '1',
+      quantity_allocated: '0',
+      quantity_backordered: '0',
+      quantity_fulfilled: '0',
+    }
+    const note = {
+      ...mixed.lines[0],
+      id: '00000000-0000-4000-8000-000000000l04',
+      position: 3,
+      line_type: 'text' as const,
+      product_id: null,
+      sku: null,
+      description: 'Leave at the side gate',
+      quantity_allocated: '0',
+      quantity_backordered: '0',
+      quantity_fulfilled: '0',
+    }
+    mixed.lines = [stocked, nonStock, freight, note]
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(mixed)))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: mixed.id })
+    const cells = Array.from(el.querySelectorAll('[data-testid="line-stock"]'))
+    expect(cells.length).toBe(4)
+    expect(cells[0].textContent).toContain('6 allocated')
+    for (const cell of cells.slice(1)) {
+      expect(cell.textContent).not.toContain('allocated')
+      expect(cell.textContent?.trim()).toBe('\u2014')
+    }
+  })
+
+  it('offers the fulfilment of a confirmed order; a pickup order names who collected it', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    expect(text(el)).toContain('Fulfil Order')
+    // the name is asked inside the fulfil action, not in the header row
+    expect(el.querySelector('input[aria-label="Picked up by"]')).toBeNull()
+    fulfilButton(el).click()
+    await el.updateComplete
+    expect(el.querySelector('[data-testid="fulfil-pickup"] input[aria-label="Picked up by"]')).not.toBeNull()
+    const delivery = order({ delivery_type: 'delivery' })
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(delivery)))
+    const el2 = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: delivery.id })
+    expect(text(el2)).toContain('Fulfil Order')
+    expect(el2.querySelector('input[aria-label="Picked up by"]')).toBeNull()
+  })
+
+  it('keeps every header button label on one line', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const header = el.querySelector('h1')!.closest('div.border-b')!
+    const buttons = Array.from(header.querySelectorAll('button'))
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const b of buttons) expect(b.className).toContain('whitespace-nowrap')
+  })
+
+  it('shows the missing name beside the field, not as a toast, and Cancel closes the form', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const toasts: string[] = []
+    const onToast = (e: Event) => toasts.push((e as CustomEvent).detail.message)
+    ToastService.addEventListener('toast', onToast)
+    try {
+      fulfilButton(el).click()
+      await el.updateComplete
+      const confirm = Array.from(el.querySelectorAll('[data-testid="fulfil-pickup"] button')).find((b) => b.textContent?.includes('Confirm')) as HTMLButtonElement
+      confirm.click()
+      await el.updateComplete
+      expect(el.querySelector('[data-testid="fulfil-pickup"] [role="alert"]')?.textContent).toContain('Enter the name')
+      expect(toasts).toEqual([])
+      const cancel = Array.from(el.querySelectorAll('[data-testid="fulfil-pickup"] button')).find((b) => b.textContent?.includes('Cancel')) as HTMLButtonElement
+      cancel.click()
+      await el.updateComplete
+      expect(el.querySelector('[data-testid="fulfil-pickup"]')).toBeNull()
+    } finally {
+      ToastService.removeEventListener('toast', onToast)
+    }
+  })
+
+  it('fulfils through the fulfilments route on the loaded revision, with picked_up_by', async () => {
+    const fulfilled = order({ status: 'fulfilled', revision: 3, invoice_ids: ['00000000-0000-4000-8000-0000000000i1'] })
+    fulfilled.lines[0].quantity_allocated = '0'
+    fulfilled.lines[0].quantity_fulfilled = '24'
+    const calls: { url: string; init?: RequestInit }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.endsWith('/fulfillments')) {
+        return new Response(JSON.stringify(fulfilled), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json', Location: '/api/v1/invoices/00000000-0000-4000-8000-0000000000i1' },
+        })
+      }
+      return jsonResponse(order())
+    }))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    fulfilButton(el).click()
+    await el.updateComplete
+    const input = el.querySelector('input[aria-label="Picked up by"]') as HTMLInputElement
+    input.value = 'Counter customer'
+    input.dispatchEvent(new Event('input'))
+    const confirm = Array.from(el.querySelectorAll('[data-testid="fulfil-pickup"] button')).find((b) => b.textContent?.includes('Confirm')) as HTMLButtonElement
+    confirm.click()
+    await new Promise((r) => setTimeout(r, 20))
+    const call = calls.find((c) => c.url.endsWith('/fulfillments'))
+    expect(call).toBeTruthy()
+    expect(JSON.parse(String(call!.init!.body))).toEqual({ revision: 2, picked_up_by: 'Counter customer' })
+    expect(new Headers(call!.init!.headers).get('If-Match')).toBe('"2"')
+    expect(text(el)).toContain('Fulfilled')
   })
 })

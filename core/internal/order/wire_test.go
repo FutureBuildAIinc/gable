@@ -1138,6 +1138,7 @@ func roleClaims(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if role := r.Header.Get("X-Test-Role"); role != "" {
 			claims := &middleware.UserClaims{Role: role, Roles: []string{role}}
+			claims.Subject = r.Header.Get("X-Test-Sub")
 			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
 		}
 		next.ServeHTTP(w, r)

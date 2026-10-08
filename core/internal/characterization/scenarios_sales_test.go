@@ -370,7 +370,7 @@ func orderGroups() []groupDef {
 				path:   "/api/v1/orders",
 				body: map[string]any{
 					"customer_id":   "{myCustomer}",
-					"delivery_type": "pickup",
+					"delivery_type": "delivery",
 					"lines": []map[string]any{
 						{"product_id": "{product}", "quantity": "5"},
 					},
@@ -382,7 +382,7 @@ func orderGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/orders",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "delivery_type": "pickup",
+					"customer_id": "{myCustomer}", "delivery_type": "delivery",
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "0"}},
 				},
 			},
@@ -391,7 +391,7 @@ func orderGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/orders",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "delivery_type": "pickup",
+					"customer_id": "{myCustomer}", "delivery_type": "delivery",
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "1",
 						"unit_price_ten_thousandths": 100000}},
 				},
@@ -404,7 +404,8 @@ func orderGroups() []groupDef {
 				path:   "/api/v1/orders/{myOrder}",
 				body: map[string]any{
 					"customer_id":   "{myCustomer}",
-					"delivery_type": "pickup",
+					"delivery_type": "delivery",
+					"customer_po":   "GOLD-PO-1",
 					"revision":      1,
 					"lines": []map[string]any{
 						{"product_id": "{product}", "quantity": "6"},
@@ -420,13 +421,13 @@ func orderGroups() []groupDef {
 				method: "PUT",
 				path:   "/api/v1/orders/{myOrder}",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "delivery_type": "pickup", "revision": 1,
+					"customer_id": "{myCustomer}", "delivery_type": "delivery", "revision": 1,
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "6"}},
 				},
 			},
 			{name: "order.update.missing_precondition", method: "PUT",
 				path: "/api/v1/orders/{myOrder}",
-				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "pickup",
+				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "delivery",
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "6"}}}},
 			{name: "order.list.status_filter", method: "GET", path: "/api/v1/orders?status=draft&limit=2"},
 			{name: "order.list.unsupported_parameter", method: "GET", path: "/api/v1/orders?customer=none"},
@@ -448,7 +449,7 @@ func orderGroups() []groupDef {
 				path:   "/api/v1/orders",
 				body: map[string]any{
 					"customer_id":   "{myCustomer}",
-					"delivery_type": "pickup",
+					"delivery_type": "delivery",
 					"lines": []map[string]any{
 						{"product_id": "{product}", "quantity": "1"},
 					},
@@ -464,11 +465,12 @@ func orderGroups() []groupDef {
 				body: map[string]any{"to": "cancelled", "reason": "second attempt"}},
 			// An edit of a cancelled order: the recipe's edit rule.
 			{name: "order.update.not_draft", method: "PUT", path: "/api/v1/orders/{myCancelOrder}",
-				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "pickup", "revision": 2,
+				body: map[string]any{"customer_id": "{myCustomer}", "delivery_type": "delivery", "revision": 2,
 					"lines": []map[string]any{{"product_id": "{product}", "quantity": "1"}}}},
 			// A forbidden edge of the transition table.
 			{name: "order.transition.forbidden", method: "POST", path: "/api/v1/orders/{myOrder}/transitions",
-				body: map[string]any{"to": "fulfilled", "revision": "{myOrderRevision}", "reason": "not yet"}},
+				headers: map[string]string{"If-Match": `"{myOrderRevision}"`},
+				body:    map[string]any{"to": "fulfilled", "reason": "not yet"}},
 			// The module's events, read back from the feed (ADR 0003).
 			{name: "order.events", method: "GET", path: "/api/v1/events?entity_type=order&limit=25", sortPrimaryArray: true,
 				maskBody: true},
@@ -488,29 +490,34 @@ func invoiceGroups() []groupDef {
 			// The confirm is the transition now (ADR 0005 5.2): a 200 with
 			// the confirmed order body.
 			{name: "order.confirm", method: "POST", path: "/api/v1/orders/{myOrder}/transitions",
-				body: map[string]any{"to": "confirmed", "revision": "{myOrderRevision}"}},
-			// The ERP mints invoices at fulfilment (ADR 0005 5.6), whose
-			// route lands with C2-2b; until then this step seeds the
-			// fulfilment's invoice directly, in the shape the fulfilment
-			// writes, so the invoice module's characterization keeps
-			// running, and records the count that proves it. C2-2b's PR
-			// replaces the seed with POST
-			// /api/v1/orders/{myOrder}/fulfillments.
-			{
-				name: "order.fulfill",
-				sql:  `SELECT count(*) AS invoices FROM invoices WHERE order_id = '{myOrder}'::uuid`,
-				setup: func(t *testing.T, h *harness) {
-					goldenExec(t, h, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status,
-						total_amount, subtotal, tax_rate, tax_amount, due_date, payment_terms, created_at, updated_at)
-						VALUES (gen_random_uuid(), '{myOrder}'::uuid, '{myCustomer}'::uuid,
-						(SELECT branch_id FROM orders WHERE id = '{myOrder}'::uuid), 'UNPAID',
-						ROUND((SELECT total_amount FROM orders WHERE id = '{myOrder}'::uuid), 2),
-						ROUND((SELECT subtotal FROM orders WHERE id = '{myOrder}'::uuid), 2),
-						COALESCE((SELECT tax_rate FROM orders WHERE id = '{myOrder}'::uuid), 0),
-						ROUND((SELECT tax_amount FROM orders WHERE id = '{myOrder}'::uuid), 2),
-						CURRENT_DATE + 30, 'NET30', NOW(), NOW())`)
-				},
-			},
+				headers: map[string]string{"If-Match": `"{myOrderRevision}"`},
+				body:    map[string]any{"to": "confirmed"}},
+			// The allocate retry on a confirmed order with nothing on back
+			// order is a clean 200 (ADR 0005 5.4).
+			{name: "order.allocate", method: "POST", path: "/api/v1/orders/{myOrder}/allocate",
+				headers: map[string]string{"If-Match": `"3"`}},
+			// The ERP mints invoices at fulfilment (ADR 0005 5.6): the
+			// fulfilments route bills the allocated quantities, answering 201
+			// with the order and the invoice's Location, and posts the
+			// invoice's entry with its cost of goods sold.
+			{name: "order.fulfill", method: "POST", path: "/api/v1/orders/{myOrder}/fulfillments",
+				headers: map[string]string{"If-Match": `"3"`}, body: map[string]any{}},
+			// Fulfilling again: the order is fulfilled, nothing to bill.
+			{name: "order.fulfill.again", method: "POST", path: "/api/v1/orders/{myOrder}/fulfillments",
+				headers: map[string]string{"If-Match": `"4"`}, body: map[string]any{}},
+			// A cancelled order can be neither allocated nor fulfilled.
+			{name: "order.allocate.not_allocatable", method: "POST", path: "/api/v1/orders/{myCancelOrder}/allocate",
+				headers: map[string]string{"If-Match": `"2"`}},
+			{name: "order.fulfill.not_fulfillable", method: "POST", path: "/api/v1/orders/{myCancelOrder}/fulfillments",
+				headers: map[string]string{"If-Match": `"2"`}, body: map[string]any{}},
+			{name: "order.fulfill.missing_precondition", method: "POST", path: "/api/v1/orders/{myCancelOrder}/fulfillments",
+				body: map[string]any{}},
+			// The fulfilment request queue (ADR 0005 5.5): empty here, the
+			// retry of an unknown request is a 404, an unknown filter a 400.
+			{name: "order.fulfillment_requests.list", method: "GET", path: "/api/v1/orders/fulfillment-requests?parked=true"},
+			{name: "order.fulfillment_requests.unsupported_parameter", method: "GET", path: "/api/v1/orders/fulfillment-requests?bogus=1"},
+			{name: "order.fulfillment_requests.retry_unknown", method: "POST",
+				path: "/api/v1/orders/fulfillment-requests/00000000-0000-0000-0000-0000000000aa/retry"},
 			// Newest invoice is the one fulfilment just created.
 			{name: "invoice.list_newest", method: "GET", path: "/api/v1/invoices?limit=1",
 				extract: map[string]string{"myInvoice": "/data/0/id"}},

@@ -34,6 +34,7 @@ type Config struct {
 	AvalaraLicenseKey  string
 	AvalaraEnvironment string // "sandbox" or "production"
 	AvalaraCompanyCode string
+	AvalaraBaseURL     string // AVALARA_BASE_URL: overrides the environment's URL (a self hosted AvaTax compatible endpoint, and the local stub of the wiring tests); empty uses the environment
 
 	// Google Maps — deprecated, superseded by OpenRouteService (kept for one
 	// back-compat release; no longer wired in main.go).
@@ -147,6 +148,7 @@ func Load() (*Config, error) {
 		AvalaraLicenseKey:  getEnv("AVALARA_LICENSE_KEY", ""),
 		AvalaraEnvironment: getEnv("AVALARA_ENV", "sandbox"),
 		AvalaraCompanyCode: getEnv("AVALARA_COMPANY_CODE", ""),
+		AvalaraBaseURL:     getEnv("AVALARA_BASE_URL", ""),
 
 		// Google Maps — deprecated (see struct comment)
 		GoogleMapsAPIKey: getEnv("GOOGLE_MAPS_API_KEY", ""),

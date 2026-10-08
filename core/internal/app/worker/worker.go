@@ -18,8 +18,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/notification"
+	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/pricing"
+	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/eventbus"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -91,7 +101,8 @@ func Run() {
 	// subscriber today; it dedups on the outbox event id. The drain runs only
 	// here, so serve replicas never contend for the cursors. A start failure
 	// is logged, not fatal, as for the scheduler above.
-	drain := newOutboxDrain(db, logger)
+	orderSvc := newOrderService(db, cfg)
+	drain := newOutboxDrain(db, logger, orderSvc)
 	drainErr := drain.Start(context.Background())
 	if drainErr != nil {
 		logger.Error("outbox drain failed to start; event subscribers receive nothing until it runs", "error", drainErr)
@@ -111,7 +122,17 @@ func Run() {
 		logger.Error("outbox purge failed to start; the outbox grows until it runs", "error", err)
 	}
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge")
+	// The order queues (ADR 0005 5.4): the back order release, served oldest
+	// first, one order per transaction. It runs only here, beside the drain
+	// whose subscriber fills it, never in serve.
+	allocation := newQueueRunner("order-allocation", orderSvc.ServeAllocationRequest, logger)
+	allocation.Start()
+	// The fulfilment requests of completed deliveries (ADR 0005 5.5), oldest
+	// first; a failure is counted on the request and parks it after ten.
+	fulfilment := newQueueRunner("order-fulfilment", orderSvc.ServeFulfilmentRequest, logger)
+	fulfilment.Start()
+
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,order-allocation,order-fulfilment")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -119,6 +140,9 @@ func Run() {
 	// Step 1: stop the background jobs. Same reasoning as serve's job stops:
 	// no purge statement may start against a draining pool, and an in-flight
 	// batch (or drain window) finishes before step 2 closes it.
+	logger.Info("Shutdown step 1/2: stopping the order queue jobs...")
+	allocation.Stop()
+	fulfilment.Stop()
 	logger.Info("Shutdown step 1/2: stopping outbox purge...")
 	purge.Stop()
 	logger.Info("Shutdown step 1/2: outbox purge stopped")
@@ -140,11 +164,47 @@ func Run() {
 // newOutboxDrain builds the drain with its subscribers registered. The
 // exposure notifier receives every quote.exposure.* event; its email service
 // is the log-only LogEmailService, as in serve, until a real sender exists.
-func newOutboxDrain(db *database.DB, logger *slog.Logger) *outbox.DrainRunner {
+func newOutboxDrain(db *database.DB, logger *slog.Logger, orderSvc *order.Service) *outbox.DrainRunner {
 	drain := outbox.NewDrainRunner(db, logger)
 	notifier := notification.NewExposureNotifier(notification.NewLogEmailService(logger), db, logger)
 	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
+	// The order module's subscriber for purchase_order.received queues the
+	// back ordered orders that wait on the received products and does nothing
+	// else (ADR 0005 5.4).
+	drain.Subscribe(order.SubjectPurchaseOrderReceived, "order-allocation-requests",
+		func(ctx context.Context, ev eventbus.Event) error {
+			return orderSvc.HandlePurchaseOrderReceived(ctx, ev)
+		})
 	return drain
+}
+
+// newOrderService builds the order service the worker's queue jobs and
+// subscriber use, through the same constructor serve uses (orderwire.New):
+// the outbox, the transaction runner, the audit log, inventory, the invoice
+// writer, the price engine and, with them, the configured tax provider behind
+// the rate resolver and the exposure gate, so the delivery completions this
+// role bills are priced exactly as the desk's fulfilments are.
+func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
+	return orderwire.New(orderwire.Deps{
+		DB:         db,
+		Config:     cfg,
+		Logger:     slog.Default(),
+		Inventory:  inventory.NewService(inventory.NewRepository(db)),
+		Invoices:   newInvoiceService(db),
+		Pricing:    pricing.NewService(pricing.NewRepository(db)),
+		Customers:  customer.NewService(customer.NewRepository(db)),
+		Escalators: pricing.NewEscalatorRepository(db),
+		QuoteLines: quote.NewRepository(db),
+	})
+}
+
+// newInvoiceService builds the invoice service the fulfilment worker writes
+// through: the real GL and account ledger, the audit log.
+func newInvoiceService(db *database.DB) *invoice.Service {
+	logger := slog.Default()
+	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
+	return invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(account.NewRepository(db), db, logger), db).
+		WithAuditLog(audit.NewLogger(db))
 }
 
 // newOutboxPurge builds the retention job from the configured age in days.
