@@ -21,6 +21,7 @@ import (
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
@@ -101,7 +102,20 @@ var modelBoundSchemas = []struct {
 	// quote / exposure
 	{"QuoteExposureEvent", pricing.QuoteExposureEvent{}},
 	{"ExposureRow", pricing.ExposureRow{}},
-	// pos - fragment schema names differ from Go model names; excluded from shape test
+	// pos
+	{"PosTransaction", pos.POSTransaction{}},
+	{"PosLineItem", pos.POSLineItem{}},
+	{"PosTender", pos.POSTender{}},
+	{"PosTransactionSummary", pos.TransactionSummary{}},
+	{"PosSearchResult", pos.QuickSearchResult{}},
+	{"PosCatalogProduct", pos.CatalogProduct{}},
+	{"PosTillSession", pos.TillSession{}},
+	{"PosTillReport", pos.TillReport{}},
+	{"PosZReport", pos.ZReport{}},
+	{"PosReturn", pos.POSReturn{}},
+	{"PosReturnLine", pos.POSReturnLine{}},
+	{"PosSyncResponse", pos.OfflineSyncResponse{}},
+	{"PosSyncError", pos.SyncError{}},
 }
 
 // TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md

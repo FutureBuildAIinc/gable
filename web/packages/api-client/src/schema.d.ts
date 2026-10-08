@@ -1404,6 +1404,169 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List transaction summaries */
+        get: operations["posTransactionList"];
+        put?: never;
+        /**
+         * Start a transaction
+         * @description register_id defaults to REG-01 and a missing cashier_id is replaced by a random UUID.
+         */
+        post: operations["posTransactionStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a transaction with its lines and tenders */
+        get: operations["posTransactionGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a line item */
+        post: operations["posTransactionItemAdd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/items/{itemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a line item */
+        delete: operations["posTransactionItemRemove"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a transaction with tenders
+         * @description An empty tenders list answers 400. Every service failure (an under-tendered sale, a declined card, a transaction not OPEN) answers 422.
+         */
+        post: operations["posTransactionComplete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a transaction */
+        post: operations["posTransactionVoid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/products/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Typeahead product search */
+        get: operations["posProductSearch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay offline transactions
+         * @description A missing batch_id or an empty items list answers 400.
+         */
+        post: operations["posSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Product catalog for the offline cache */
+        get: operations["posCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/till/open": {
         parameters: {
             query?: never;
@@ -1413,7 +1576,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Open a till session */
+        /**
+         * Open a till session
+         * @description register_id defaults to REG-01. Every service failure, such as a session already open on the register, answers 409.
+         */
         post: operations["posTillOpen"];
         delete?: never;
         options?: never;
@@ -1428,8 +1594,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get current till session for a register */
+        /** The open till session of a register */
         get: operations["posTillCurrent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/{id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live X report of a session
+         * @description An unknown session answers 500.
+         */
+        get: operations["posTillReport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1447,25 +1633,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Close a till session */
+        /**
+         * Close a till session
+         * @description Every service failure, such as a session not OPEN, answers 409.
+         */
         post: operations["posTillClose"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/till/{id}/report": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get X report for a till session */
-        get: operations["posTillReport"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1479,180 +1651,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Z report for a till session */
-        get: operations["posTillZReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/transactions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List POS transactions */
-        get: operations["posTransactionList"];
-        put?: never;
-        /** Start a POS transaction */
-        post: operations["posTransactionCreate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/transactions/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get one POS transaction */
-        get: operations["posTransactionGet"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/transactions/{id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Complete a POS transaction */
-        post: operations["posTransactionComplete"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/transactions/{id}/items": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Add item to transaction */
-        post: operations["posTransactionAddItem"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/transactions/{id}/void": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Void a POS transaction */
-        post: operations["posTransactionVoid"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/transactions/{id}/items/{itemId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Remove item from transaction */
-        delete: operations["posTransactionRemoveItem"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/returns": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List POS returns */
-        get: operations["posReturnList"];
-        put?: never;
-        /** Create a POS return */
-        post: operations["posReturnCreate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/returns/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get one POS return */
-        get: operations["posReturnGet"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/catalog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get POS product catalog */
-        get: operations["posCatalog"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pos/products/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Search POS products */
-        get: operations["posProductSearch"];
+        /** The Z report of a closed session */
+        get: operations["posZReportGet"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1678,17 +1678,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/pos/sync": {
+    "/api/v1/pos/returns": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List returns */
+        get: operations["posReturnList"];
         put?: never;
-        /** Sync POS data */
-        post: operations["posSync"];
+        /**
+         * Record a return and refund
+         * @description register_id defaults to REG-01. Every service failure, including validation, answers 400.
+         */
+        post: operations["posReturnCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/returns/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a return with its lines */
+        get: operations["posReturnGet"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3470,57 +3491,218 @@ export interface components {
             created_at: string;
         };
         PaymentList: components["schemas"]["Payment"][] | null;
+        /** @description The refusal body for a machine key on a cashier route. The code is lower case, unlike the standard envelope. */
+        PosCashierRefusal: {
+            error: {
+                /** @enum {string} */
+                code: "forbidden";
+                message: string;
+            };
+            meta: {
+                request_id: string;
+            };
+        };
+        /** @enum {string} */
+        PosTransactionStatus: "OPEN" | "COMPLETED" | "VOIDED" | "RETURNED" | "HELD";
+        /** @description POSLineItem. */
+        PosLineItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            transaction_id: string;
+            /** Format: uuid */
+            product_id: string;
+            description: string;
+            quantity: number;
+            uom: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            unit_price: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            line_total: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description POSTender. The reference and card fields are omitted when empty. */
+        PosTender: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            transaction_id: string;
+            /** @description CASH, CARD, CHECK or ACCOUNT. */
+            method: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            amount: number;
+            reference?: string;
+            card_last4?: string;
+            card_brand?: string;
+            gateway_tx_id?: string;
+            auth_code?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description POSTransaction. The customer, till session, completion time, sync fields and the lines and tenders are omitted when empty; only the read and mutation routes after the first line fill the lists. */
+        PosTransaction: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            branch_id: string;
+            register_id: string;
+            /** Format: uuid */
+            cashier_id: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            subtotal: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            tax_amount: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total: number;
+            /**
+             * Format: int64
+             * @description Cents, set at completion.
+             */
+            change_due: number;
+            /** Format: uuid */
+            till_session_id?: string;
+            status: components["schemas"]["PosTransactionStatus"];
+            /** Format: date-time */
+            completed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Absent for a live sale, offline-v1 for a synced one. */
+            synced_from?: string;
+            /** Format: date-time */
+            client_created_at?: string;
+            line_items?: components["schemas"]["PosLineItem"][];
+            tenders?: components["schemas"]["PosTender"][];
+        };
+        /** @description TransactionSummary. */
+        PosTransactionSummary: {
+            /** Format: uuid */
+            id: string;
+            register_id: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total: number;
+            status: components["schemas"]["PosTransactionStatus"];
+            item_count: number;
+            /** Format: date-time */
+            completed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description QuickSearchResult. */
+        PosSearchResult: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            /** @description Float dollars. */
+            unit_price: number;
+            uom: string;
+            in_stock: number;
+        };
+        /** @description CatalogProduct. */
+        PosCatalogProduct: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            /** @description Float dollars. */
+            price: number;
+            uom: string;
+            in_stock: number;
+        };
+        /** @description TillSession. Everything set at close, and the branch, is omitted when empty. */
         PosTillSession: {
             /** Format: uuid */
             id: string;
             register_id: string;
             /** Format: uuid */
-            cashier_id: string;
+            branch_id?: string;
             /** Format: uuid */
-            branch_id?: string | null;
+            cashier_id: string;
             /** @enum {string} */
             status: "OPEN" | "CLOSED";
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             opening_float: number;
             /** Format: date-time */
             opened_at: string;
             /** Format: date-time */
-            closed_at?: string | null;
-            notes?: string;
-        };
-        PosTillOpenRequest: {
-            register_id: string;
-            /** @description Float dollars (wire convention). */
-            opening_float: number;
-        };
-        PosTillCloseRequest: {
-            /** @description Float dollars by method. */
-            counted_by_method: {
+            closed_at?: string;
+            /** @description Cents keyed by tender method. */
+            expected_by_method?: {
                 [key: string]: number;
             };
-            notes?: string;
+            /** @description Cents keyed by tender method. */
+            counted_by_method?: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int64
+             * @description Cents; negative means short.
+             */
+            over_short?: number;
+            /** Format: uuid */
+            gl_entry_id?: string;
+            notes: string;
         };
-        PosTillCurrentResponse: {
-            session: components["schemas"]["PosTillSession"];
+        /** @description The current session wrapper. */
+        PosTillCurrent: {
+            session: components["schemas"]["PosTillSession"] | null;
         };
+        /** @description TillReport. */
         PosTillReport: {
             session: components["schemas"]["PosTillSession"];
             sale_count: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             sales_total: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             tax_total: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             change_given: number;
-            /** @description Cents. */
+            /** @description Cents keyed by tender method. */
             tendered_by_method: {
                 [key: string]: number;
             };
-            /** @description Cents. */
+            /** @description Cents keyed by tender method. */
             expected_by_method: {
                 [key: string]: number;
             };
         };
+        /** @description ZReport. */
         PosZReport: {
             /** Format: uuid */
             id: string;
@@ -3528,105 +3710,21 @@ export interface components {
             till_session_id: string;
             register_id: string;
             /** Format: uuid */
-            branch_id?: string | null;
-            /** @description Cents. */
+            branch_id?: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             over_short: number;
-            /** @description JSON raw message of the TillReport. */
-            payload?: string;
+            /** @description The frozen closing report, a JSON object. */
+            payload: components["schemas"]["PosTillReport"];
             /** Format: date-time */
             generated_at: string;
         };
-        PosTransaction: {
-            /** Format: uuid */
-            id: string;
-            register_id: string;
-            /** Format: uuid */
-            till_session_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** Format: uuid */
-            cashier_id: string;
-            /** Format: uuid */
-            customer_id?: string | null;
-            /** @enum {string} */
-            status: "OPEN" | "COMPLETED" | "VOIDED";
-            /** @description Cents. */
-            subtotal?: number;
-            /** @description Cents. */
-            tax_amount?: number;
-            /** @description Cents. */
-            total?: number;
-            /** @description Cents. */
-            change_due?: number;
-            /** Format: date-time */
-            created_at: string;
-            lines?: components["schemas"]["PosLineItem"][] | null;
+        PosZReportList: {
+            z_reports: components["schemas"]["PosZReport"][] | null;
         };
-        PosTransactionCreate: {
-            register_id: string;
-            /** Format: uuid */
-            customer_id?: string;
-        };
-        PosTransactionComplete: {
-            tenders: components["schemas"]["PosTenderInput"][];
-        };
-        PosLineItem: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            product_id: string;
-            description: string;
-            quantity: number;
-            uom: string;
-            /** @description Cents. */
-            unit_price: number;
-            /** @description Cents. */
-            line_total: number;
-        };
-        PosLineItemInput: {
-            /** Format: uuid */
-            product_id: string;
-            quantity: number;
-            uom?: string;
-            /** @description Float dollars. */
-            unit_price?: number;
-        };
-        PosTenderInput: {
-            method: string;
-            /** @description Float dollars. */
-            amount: number;
-            gateway_tx_id?: string;
-        };
-        PosReturn: {
-            /** Format: uuid */
-            id: string;
-            register_id: string;
-            /** Format: uuid */
-            till_session_id?: string | null;
-            /** Format: uuid */
-            original_transaction_id?: string | null;
-            /** Format: uuid */
-            customer_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** Format: uuid */
-            cashier_id: string;
-            /** @description Cents. */
-            subtotal: number;
-            /** @description Cents. */
-            tax_amount: number;
-            /** @description Cents. */
-            total: number;
-            /** @enum {string} */
-            refund_method: "CASH" | "CARD" | "ACCOUNT";
-            reason: string;
-            status: string;
-            /** Format: uuid */
-            gl_entry_id?: string | null;
-            /** Format: date-time */
-            created_at: string;
-            lines?: components["schemas"]["PosReturnLine"][] | null;
-        };
+        /** @description POSReturnLine. */
         PosReturnLine: {
             /** Format: uuid */
             id: string;
@@ -3637,50 +3735,161 @@ export interface components {
             description: string;
             quantity: number;
             uom: string;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             unit_price: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             line_total: number;
             restock: boolean;
         };
-        PosReturnRequest: {
+        /** @description POSReturn. The till session, original transaction, customer, branch, ledger entry and lines are omitted when empty. */
+        PosReturn: {
+            /** Format: uuid */
+            id: string;
             register_id: string;
+            /** Format: uuid */
+            till_session_id?: string;
             /** Format: uuid */
             original_transaction_id?: string;
             /** Format: uuid */
             customer_id?: string;
-            /** @enum {string} */
-            refund_method: "CASH" | "CARD" | "ACCOUNT";
-            reason?: string;
-            gateway_tx_id?: string;
-            lines: components["schemas"]["PosReturnLineRequest"][];
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            cashier_id: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            subtotal: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            tax_amount: number;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            total: number;
+            /** @description CASH, CARD or ACCOUNT. */
+            refund_method: string;
+            reason: string;
+            status: string;
+            /** Format: uuid */
+            gl_entry_id?: string;
+            /** Format: date-time */
+            created_at: string;
+            lines?: components["schemas"]["PosReturnLine"][];
         };
+        PosReturnList: {
+            returns: components["schemas"]["PosReturn"][] | null;
+        };
+        /** @description SyncError. */
+        PosSyncError: {
+            client_id: string;
+            reason: string;
+        };
+        /** @description OfflineSyncResponse. errors is omitted when empty. */
+        PosSyncResponse: {
+            batch_id: string;
+            synced_count: number;
+            duplicate_count: number;
+            error_count: number;
+            errors?: components["schemas"]["PosSyncError"][];
+        };
+        PosTransactionCreate: {
+            /** @description Defaults to REG-01. */
+            register_id?: string;
+            /** Format: uuid */
+            cashier_id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+        };
+        PosAddItem: {
+            /** Format: uuid */
+            product_id: string;
+            quantity: number;
+            uom?: string;
+        };
+        /** @description AddTenderRequest. */
+        PosTenderInput: {
+            /** @description CASH, CARD, CHECK or ACCOUNT. */
+            method: string;
+            /** @description Float dollars. */
+            amount: number;
+            reference?: string;
+            /** @description Card token from the payment processor. */
+            token_id?: string;
+        };
+        PosComplete: {
+            tenders: components["schemas"]["PosTenderInput"][];
+        };
+        /** @description OfflineTransaction. */
+        PosOfflineTransaction: {
+            /** Format: uuid */
+            client_id: string;
+            register_id: string;
+            /** Format: uuid */
+            cashier_id: string;
+            /** Format: uuid */
+            customer_id?: string;
+            items: components["schemas"]["PosAddItem"][];
+            tenders: components["schemas"]["PosTenderInput"][];
+            /** Format: date-time */
+            client_created_at: string;
+        };
+        /** @description OfflineSyncRequest. */
+        PosSyncRequest: {
+            batch_id: string;
+            register_id?: string;
+            items: components["schemas"]["PosOfflineTransaction"][];
+        };
+        PosTillOpen: {
+            /** @description Defaults to REG-01. */
+            register_id?: string;
+            /** @description Float dollars; converted to cents on the server. */
+            opening_float: number;
+        };
+        PosTillClose: {
+            /** @description Float dollars keyed by tender method. */
+            counted_by_method: {
+                [key: string]: number;
+            };
+            notes?: string;
+        };
+        /** @description ReturnLineRequest. */
         PosReturnLineRequest: {
             /** Format: uuid */
             product_id: string;
             description?: string;
+            /** @description Positive units returned. */
             quantity: number;
             uom?: string;
             /** @description Float dollars. */
             unit_price: number;
+            /** @description Defaults to true; false for damaged goods. */
             restock?: boolean;
         };
-        PosProduct: {
+        /** @description ReturnRequest. */
+        PosReturnRequest: {
+            /** @description Defaults to REG-01. */
+            register_id?: string;
             /** Format: uuid */
-            id: string;
-            sku: string;
-            name: string;
-            description?: string;
-            /** @description Float dollars. */
-            price?: number;
-            uom?: string;
-        };
-        PosCatalog: {
-            products: components["schemas"]["PosProduct"][];
-        };
-        PosSyncResponse: {
-            /** Format: date-time */
-            synced_at?: string;
+            original_transaction_id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** @description CASH, CARD or ACCOUNT, case insensitive; defaults to CASH. */
+            refund_method?: string;
+            reason?: string;
+            /** @description The original card transaction to reverse. */
+            gateway_tx_id?: string;
+            lines: components["schemas"]["PosReturnLineRequest"][];
         };
         /**
          * @description The database unit of measure vocabulary, verbatim.
@@ -7200,169 +7409,12 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    posTillOpen: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PosTillOpenRequest"];
-            };
-        };
-        responses: {
-            /** @description The opened till session. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosTillSession"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posTillCurrent: {
-        parameters: {
-            query: {
-                register_id: string;
-            };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current till session with session data. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosTillCurrentResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posTillClose: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PosTillCloseRequest"];
-            };
-        };
-        responses: {
-            /** @description The closing report. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosTillReport"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posTillReport: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The X report. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosTillReport"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posTillZReport: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The Z report snapshot. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosZReport"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
     posTransactionList: {
         parameters: {
             query?: {
+                /** @description Filter to one register. */
                 register_id?: string;
+                /** @description The day to list; today when omitted or unparseable. */
                 date?: string;
             };
             header?: {
@@ -7374,13 +7426,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of transactions. */
+            /** @description Summaries; an empty array when none. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PosTransaction"][];
+                    "application/json": components["schemas"]["PosTransactionSummary"][];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -7388,7 +7440,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    posTransactionCreate: {
+    posTransactionStart: {
         parameters: {
             query?: never;
             header?: {
@@ -7406,7 +7458,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created transaction. */
+            /** @description The new OPEN transaction, attached to the register's open till session when there is one. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -7417,7 +7469,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
+                };
+            };
             500: components["responses"]["InternalError"];
         };
     };
@@ -7448,6 +7508,70 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    posTransactionItemAdd: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosAddItem"];
+            };
+        };
+        responses: {
+            /** @description The transaction with totals recalculated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionItemRemove: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The transaction with totals recalculated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -7467,11 +7591,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PosTransactionComplete"];
+                "application/json": components["schemas"]["PosComplete"];
             };
         };
         responses: {
-            /** @description The completed transaction. */
+            /** @description The COMPLETED transaction. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7483,44 +7607,15 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posTransactionAddItem: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PosLineItemInput"];
-            };
-        };
-        responses: {
-            /** @description The updated transaction. */
-            200: {
+            /** @description The completion failed (under-tendered sale, declined card, transaction not OPEN). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PosTransaction"];
+                    "application/json": components["schemas"]["Error"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
         };
     };
     posTransactionVoid: {
@@ -7539,7 +7634,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The voided transaction. */
+            /** @description The VOIDED transaction. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7551,11 +7646,169 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
-    posTransactionRemoveItem: {
+    posProductSearch: {
+        parameters: {
+            query?: {
+                /** @description SKU, description or barcode. An empty or one character query answers an empty array. */
+                q?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 20 matches; a bare array. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSearchResult"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSync: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description The batch result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSyncResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posCatalog: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The whole catalog as a bare array. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosCatalogProduct"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillOpen: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTillOpen"];
+            };
+        };
+        responses: {
+            /** @description The OPEN session. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
+                };
+            };
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillCurrent: {
+        parameters: {
+            query?: {
+                /** @description Defaults to REG-01. */
+                register_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open session, or null when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillCurrent"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillReport: {
         parameters: {
             query?: never;
             header?: {
@@ -7564,32 +7817,95 @@ export interface operations {
             };
             path: {
                 id: string;
-                itemId: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The updated transaction. */
+            /** @description The report. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PosTransaction"];
+                    "application/json": components["schemas"]["PosTillReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillClose: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTillClose"];
+            };
+        };
+        responses: {
+            /** @description The closing Z report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    posZReportGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The frozen Z snapshot. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosZReport"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
         };
     };
-    posReturnList: {
+    posZReportList: {
         parameters: {
             query?: {
                 register_id?: string;
+                /** @description An unparseable date is ignored. */
                 date?: string;
             };
             header?: {
@@ -7601,13 +7917,43 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of returns. */
+            /** @description Z reports wrapped in an object. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PosReturn"][];
+                    "application/json": components["schemas"]["PosZReportList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posReturnList: {
+        parameters: {
+            query?: {
+                register_id?: string;
+                /** @description An unparseable date is ignored. */
+                date?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returns wrapped in an object. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosReturnList"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -7633,7 +7979,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The completed return. */
+            /** @description The return with its lines. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -7644,7 +7990,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description The caller's roles do not include one the route requires, or the caller authenticated with a machine key: a cashier must be a user. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] | components["schemas"]["PosCashierRefusal"];
+                };
+            };
             500: components["responses"]["InternalError"];
         };
     };
@@ -7675,116 +8029,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posCatalog: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The product catalog. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosCatalog"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posProductSearch: {
-        parameters: {
-            query?: {
-                q?: string;
-            };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Search results. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosProduct"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posZReportList: {
-        parameters: {
-            query?: {
-                register_id?: string;
-                date?: string;
-            };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Array of Z reports. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosZReport"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    posSync: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Sync result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PosSyncResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
         };
     };
     productList: {
