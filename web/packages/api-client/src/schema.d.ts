@@ -2784,15 +2784,35 @@ export interface paths {
         };
         /**
          * List the options of a category
-         * @description Admin, owner or sales. Ordered by name. Not paginated. Answers null, not an empty array, when the category has no options.
+         * @description The cursor list envelope, newest first on (created_at, id); total appears only under include=total. category is required and filters; a parameter the route does not declare, a missing or repeated category, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["millworkListOptions"];
         put?: never;
         /**
          * Create an option
-         * @description Admin, owner or sales. No field is validated by the handler; a value the table refuses (a category over 50 characters, a name over 100) surfaces as a 500.
+         * @description category (at most 50 characters), name (at most 100) and price_adjustment_cents are required; the adjustment may be negative (a discount option); attributes is any JSON the dealer sends, stored as sent and null when absent. Writes the audit row millwork_option.created and the event millwork_option.created in the same transaction, the event last.
          */
         post: operations["millworkCreateOption"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/millwork/options/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one option
+         * @description The option with its ETag, so the create's Location resolves.
+         */
+        get: operations["millworkGetOption"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8224,29 +8244,45 @@ export interface components {
             line_count: number;
             exception_count: number;
         };
-        /** @description Go type millwork.MillworkOption. */
+        /** @description One catalog option. The price adjustment is integer cents; attributes is whatever JSON the create carried, null when it carried none. */
         MillworkOption: {
             /** Format: uuid */
             id: string;
             category: string;
             name: string;
-            /** @description Float dollars today. */
-            price_adjustment: number;
-            /** @description Any JSON value stored as sent (an object in practice); null when the create request omitted it. */
-            attributes: unknown;
+            /**
+             * Format: int64
+             * @description A positive option adds to the configured price, a negative one discounts it.
+             */
+            price_adjustment_cents: number;
+            /** @description Any JSON value stored as sent (an object in practice). */
+            attributes: Record<string, never> | unknown[] | string | number | boolean | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type millwork.CreateOptionRequest. */
+        /** @description Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. */
         MillworkCreateOptionRequest: {
-            category?: string;
-            name?: string;
-            /** @description Float dollars today; absent means 0. */
-            price_adjustment?: number;
-            /** @description Any JSON value; stored as sent. Absent is stored as null. */
-            attributes?: unknown;
+            /** @description 1 to 50 characters. */
+            category: string;
+            /** @description 1 to 100 characters. */
+            name: string;
+            /** Format: int64 */
+            price_adjustment_cents: number;
+            /** @description Optional; stored as sent, null when absent. */
+            attributes?: Record<string, never> | unknown[] | string | number | boolean;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        MillworkOptionPage: {
+            items: components["schemas"]["MillworkOption"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         /**
          * @description The lifecycle, lowercase on the wire (ADR 0001 section 6; ADR 0005 section 5.2). The database keeps its uppercase CHECK.
@@ -17466,8 +17502,14 @@ export interface operations {
     millworkListOptions: {
         parameters: {
             query: {
-                /** @description Exact match on the category column. An empty or missing value is a 400. */
+                /** @description Exact match on the category column. */
                 category: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: never;
             path?: never;
@@ -17475,20 +17517,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The options, or null when none match. */
+            /** @description The page of options. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MillworkOption"][] | null;
+                    "application/json": components["schemas"]["MillworkOptionPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     millworkCreateOption: {
@@ -17507,9 +17549,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created option. */
+            /** @description The created option, with its ETag and a Location header. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17520,10 +17565,39 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    millworkGetOption: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The option. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MillworkOption"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     orderList: {

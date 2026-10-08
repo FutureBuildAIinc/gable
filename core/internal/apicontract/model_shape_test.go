@@ -198,7 +198,7 @@ var modelBoundSchemas = []struct {
 	// and orphaned; the embedded struct is bound, the two extras checked by hand.
 	{"AppsManifestStatus", apps.Manifest{}},
 	{"GovernanceRFC", governance.RFC{}},
-	{"MillworkOption", millwork.MillworkOption{}},
+	{"MillworkOption", millwork.Option{}},
 	{"ConfiguratorRule", configurator.ConfiguratorRule{}},
 	{"ConfiguratorPreset", configurator.ConfiguratorPreset{}},
 	{"ConfiguratorAvailableOption", configurator.AvailableOption{}},

@@ -75,11 +75,16 @@ func millworkGroups() []groupDef {
 				path:   "/api/v1/millwork/options",
 				body: map[string]any{
 					"category": "Species", "name": "Golden Douglas Fir",
-					"price_adjustment": 1.5, "attributes": map[string]any{"grade": "Clear"},
+					"price_adjustment_cents": 150, "attributes": map[string]any{"grade": "Clear"},
 				},
 				extract: map[string]string{"myMillworkOption": "/id"},
 			},
-			{name: "millwork.option.list", method: "GET", path: "/api/v1/millwork/options?category=Species"},
+			{name: "millwork.option.get", method: "GET", path: "/api/v1/millwork/options/{myMillworkOption}"},
+			{name: "millwork.option.list", method: "GET", path: "/api/v1/millwork/options?category=Species&limit=2"},
+			{name: "millwork.option.list.unknown_param", method: "GET", path: "/api/v1/millwork/options?category=Species&zzz=1"},
+			// The module's event, read back from the feed (ADR 0003).
+			{name: "millwork.option.events", method: "GET",
+				path: "/api/v1/events?types=millwork_option.created&limit=1"},
 		},
 	}}
 }

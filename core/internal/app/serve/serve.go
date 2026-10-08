@@ -651,9 +651,13 @@ func Run() {
 
 	// Millwork App (converted — reference conversion #1)
 	// One app, two backend modules: millwork (option catalogs) + configurator
-	// (rules/validation/build-sku) both gate on the "millwork" app key.
-	millworkRepo := millwork.NewRepository(db)
-	millworkSvc := millwork.NewService(millworkRepo)
+	// (rules/validation/build-sku) both gate on the "millwork" app key. The
+	// millwork catalog is on the wire contract: its create runs in one
+	// transaction with its audit row and millwork_option.created event.
+	millworkSvc := millwork.NewService(millwork.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog)
 	millworkHandler := millwork.NewHandler(millworkSvc)
 	configuratorRepo := configurator.NewRepository(db)
 	configuratorSvc := configurator.NewService(configuratorRepo)
