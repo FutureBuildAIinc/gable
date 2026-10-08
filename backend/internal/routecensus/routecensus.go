@@ -407,6 +407,26 @@ func Collect(moduleRoot string) (Result, error) {
 		ast.Inspect(fu.file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
+				// A Handle or HandleFunc method value bound by assignment
+				// (f := mux.HandleFunc) hides every later call through the
+				// variable from this walk, so the binding itself is
+				// reported as unresolved. A method value passed on as an
+				// argument (an event bus handler, a callback) is not a
+				// registration and stays quiet.
+				if as, ok := n.(*ast.AssignStmt); ok {
+					for _, rhs := range as.Rhs {
+						sel := parenSelector(rhs)
+						if sel == nil || !isRouterMethod(sel.Sel.Name) {
+							continue
+						}
+						result.Unresolved = append(result.Unresolved, Unresolved{
+							File:   fu.relPath,
+							Line:   fset.Position(sel.Pos()).Line,
+							Callee: sel.Sel.Name,
+							Detail: "bound to a variable; a registration through the variable is invisible to the census",
+						})
+					}
+				}
 				return true
 			}
 			if gatedCalls[call] {
@@ -417,7 +437,7 @@ func Collect(moduleRoot string) (Result, error) {
 				return true
 			}
 			callee := sel.Sel.Name
-			if callee != "Handle" && callee != "HandleFunc" {
+			if !isRouterMethod(callee) {
 				return true
 			}
 			enclosing := enclosingFunc(fu.file, call)
@@ -526,6 +546,27 @@ func isGatedRouterMethod(fd *ast.FuncDecl) bool {
 	}
 	ident, ok := t.(*ast.Ident)
 	return ok && ident.Name == "gatedRouter"
+}
+
+// isRouterMethod reports whether name is one of the mux registration
+// methods the census tracks.
+func isRouterMethod(name string) bool {
+	return name == "Handle" || name == "HandleFunc"
+}
+
+// parenSelector returns the selector expression e is, through any
+// parentheses, or nil when e is not a selector.
+func parenSelector(e ast.Expr) *ast.SelectorExpr {
+	for {
+		switch t := e.(type) {
+		case *ast.ParenExpr:
+			e = t.X
+		case *ast.SelectorExpr:
+			return t
+		default:
+			return nil
+		}
+	}
 }
 
 // enclosingFunc finds the function declaration holding n, or nil.

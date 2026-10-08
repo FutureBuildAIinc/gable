@@ -88,6 +88,22 @@ func TestGatedRouterOutsidePkgAppsIsCounted(t *testing.T) {
 	}
 }
 
+// TestHandleFuncMethodValueIsUnresolved pins the fix for the review's F2: a
+// HandleFunc method value bound to a variable is reported as unresolved
+// instead of silently hiding the route.
+func TestHandleFuncMethodValueIsUnresolved(t *testing.T) {
+	result := collectFixture(t, "methodvalue")
+	if len(result.Routes) != 0 {
+		t.Fatalf("want no routes, got %+v", result.Routes)
+	}
+	for _, u := range result.Unresolved {
+		if u.Callee == "HandleFunc" && u.File == "internal/zz/zz.go" {
+			return
+		}
+	}
+	t.Fatalf("want an unresolved HandleFunc binding in internal/zz/zz.go, got %+v", result.Unresolved)
+}
+
 // diffRoutes compares two rendered censuses by route key and returns one
 // human line per added and removed route.
 func diffRoutes(oldRender, newRender string) (added, removed []string) {
