@@ -507,15 +507,8 @@ func Run() {
 
 	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
 
-	// Idempotency retention: purge expired idempotency_keys rows nightly so
-	// completed replays and lapsed claims do not accumulate. On by default
-	// (the middleware writes a row per keyed POST/PUT); opt out with
-	// idempotency.purge_enabled=false in system_settings. Stops in step 3.8
-	// of graceful shutdown, before the DB pool closes.
-	idempotencyScheduler := middleware.NewIdempotencyScheduler(db)
-	if err := idempotencyScheduler.Start(context.Background()); err != nil {
-		logger.Error("idempotency purge scheduler failed to start", "error", err)
-	}
+	// The idempotency retention purge no longer runs here: R1-4 moved it to
+	// the worker role (internal/app/worker), so `core worker` owns it.
 
 	// Delivery Module
 	deliveryRepo := delivery.NewRepository(db)
@@ -957,12 +950,8 @@ func Run() {
 	exposureWiring.Shutdown(ctx)
 	logger.Info("Shutdown step 3.7/4: exposure wiring stopped")
 
-	// Step 3.8: Stop the idempotency retention cron. Same reasoning as 3.5
-	// and 3.6: no purge statement may start against a draining pool, and an
-	// in-flight batch finishes before step 4 closes it.
-	logger.Info("Shutdown step 3.8/4: stopping idempotency purge scheduler...")
-	idempotencyScheduler.Stop()
-	logger.Info("Shutdown step 3.8/4: idempotency purge scheduler stopped")
+	// (Step 3.8, the idempotency retention cron, moved to the worker role
+	// with the purge itself; see internal/app/worker.)
 
 	// Step 4: Close database connection pool
 	logger.Info("Shutdown step 4/4: closing database pool...")
