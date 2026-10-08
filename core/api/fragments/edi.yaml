@@ -175,8 +175,10 @@ paths:
         Roles admin, owner. The request body is the raw file (50 MiB limit),
         not multipart. format=x12 (default, an 832 document) or format=csv; any
         other value is treated as x12 but echoed back as given. An unreadable
-        file is a 422. The partner id is not checked for existence. Entries
-        upsert on (partner, vendor_sku).
+        file is a 422. Entries upsert on (partner, vendor_sku). The partner id
+        is not looked up first, but catalog entries carry a foreign key to the
+        partner: an unknown partner id answers 500 when at least one entry
+        parses, and 200 with saved_count 0 when none does.
       parameters:
         - name: id
           in: path
