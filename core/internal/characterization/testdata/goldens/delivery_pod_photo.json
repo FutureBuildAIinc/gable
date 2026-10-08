@@ -6,7 +6,7 @@
     },
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/deliveries/{c_delivery2}/pod-photo",
+      "path": "/api/v1/delivery/deliveries/<id-1>/pod-photo",
       "body": {
         "field": "photo",
         "filename": "pod.png",
@@ -15,16 +15,14 @@
       }
     },
     "response": {
-      "status": 400,
+      "status": 201,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-1>"
-        }
+        "delivery_id": "<id-1>",
+        "id": "<id-2>",
+        "photo_type": "site",
+        "photo_url": "<pod-photo-url>",
+        "uploaded_at": "<ts+0d>"
       }
     }
   },
@@ -36,20 +34,20 @@
     },
     "request": {
       "method": "GET",
-      "path": "/api/v1/delivery/deliveries/{c_delivery2}/pod-photos"
+      "path": "/api/v1/delivery/deliveries/<id-1>/pod-photos"
     },
     "response": {
-      "status": 400,
+      "status": 200,
       "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-2>"
+      "body": [
+        {
+          "delivery_id": "<id-1>",
+          "id": "<id-2>",
+          "photo_type": "site",
+          "photo_url": "<pod-photo-url>",
+          "uploaded_at": "<ts+0d>"
         }
-      }
+      ]
     }
   }
 ]

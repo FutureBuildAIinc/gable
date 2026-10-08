@@ -10,11 +10,12 @@
       "content_type": "application/json",
       "body": {
         "by_method": {
+          "CASH": 10,
           "CHECK": 306222.76
         },
         "date": "<day+0>",
-        "total_collected": 306222.76,
-        "transaction_count": 36
+        "total_collected": 306232.76,
+        "transaction_count": 37
       }
     }
   },
@@ -28,11 +29,36 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": 0,
+        "close_balance": -45,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+0>",
-        "lines": null,
+        "lines": [
+          {
+            "balance": -5,
+            "credit": 5,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "Credit Memo: golden characterisation",
+            "type": "REFUND"
+          },
+          {
+            "balance": -15,
+            "credit": 10,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "Payment GOLD-PAY-1",
+            "type": "PAYMENT"
+          },
+          {
+            "balance": -45,
+            "credit": 30,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "POS return credit #<id-2>",
+            "type": "REFUND"
+          }
+        ],
         "open_balance": 0,
         "start_date": "<day-30>"
       }
@@ -48,12 +74,12 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": 0,
+        "close_balance": -45,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+401>",
         "lines": null,
-        "open_balance": 0,
+        "open_balance": -45,
         "start_date": "<day+400>"
       }
     }
@@ -73,7 +99,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-2>"
+          "request_id": "<id-3>"
         }
       }
     }

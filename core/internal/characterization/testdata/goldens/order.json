@@ -6,11 +6,11 @@
       "path": "/api/v1/orders",
       "body": {
         "customer_id": "<id-1>",
+        "delivery_type": "pickup",
         "lines": [
           {
-            "price_each": 550,
             "product_id": "<id-2>",
-            "quantity": 5
+            "quantity": "5"
           }
         ]
       }
@@ -20,28 +20,149 @@
       "content_type": "application/json",
       "body": {
         "branch_id": "<id-3>",
+        "confirmed_at": null,
         "created_at": "<ts+0d>",
+        "currency": "USD",
         "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "customer_po": null,
+        "delivery_type": "pickup",
+        "hold_note": null,
+        "hold_reason": null,
         "id": "<id-4>",
+        "invoice_ids": [],
+        "job_id": null,
         "lines": [
           {
-            "commission_rate": 0,
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
             "id": "<id-5>",
             "is_special_order": false,
-            "order_id": "<id-4>",
-            "price_each": 550,
+            "line_total_cents": 2338,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
             "product_id": "<id-2>",
-            "quantity": 5,
-            "unit_cost": 0
+            "quantity": "5",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
-        "margin_percent": 0,
-        "status": "DRAFT",
-        "total_amount": 2750,
-        "total_commission": 0,
-        "total_cost": 0,
-        "total_margin": 0,
+        "margin_percent": "25.1497",
+        "number": "SO-000088",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 1,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": 2338,
+        "tax_cents": 281,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 2619,
+        "total_commission_cents": 0,
+        "total_cost_cents": 1750,
+        "total_margin_cents": 588,
         "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "order.create.validation",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders",
+      "body": {
+        "customer_id": "<id-1>",
+        "delivery_type": "pickup",
+        "lines": [
+          {
+            "product_id": "<id-2>",
+            "quantity": "0"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "lines[0].quantity",
+              "message": "must be greater than zero on a sales document"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "order.create.override_without_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders",
+      "body": {
+        "customer_id": "<id-1>",
+        "delivery_type": "pickup",
+        "lines": [
+          {
+            "product_id": "<id-2>",
+            "quantity": "1",
+            "unit_price_ten_thousandths": 100000
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "lines[0].override_reason",
+              "message": "is required when a stocked product line sends unit_price_ten_thousandths: a price beside the engine's is an override"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
       }
     }
   },
@@ -55,32 +176,346 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-6>",
+        "branch_id": "<id-3>",
+        "confirmed_at": null,
         "created_at": "<ts+0d>",
+        "currency": "USD",
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
+        "customer_po": null,
+        "delivery_type": "pickup",
+        "hold_note": null,
+        "hold_reason": null,
         "id": "<id-4>",
+        "invoice_ids": [],
+        "job_id": null,
         "lines": [
           {
-            "commission_rate": 0,
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
             "id": "<id-5>",
             "is_special_order": false,
-            "order_id": "<id-4>",
-            "price_each": 550,
+            "line_total_cents": 2338,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
             "product_id": "<id-2>",
-            "product_name": "2x4x8 SPF Premium",
-            "product_sku": "LUM-248-PREM",
-            "quantity": 5,
-            "unit_cost": 350
+            "quantity": "5",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
-        "margin_percent": 36.36363636363637,
-        "status": "DRAFT",
-        "total_amount": 2750,
-        "total_commission": 0,
-        "total_cost": 1750,
-        "total_margin": 1000,
+        "margin_percent": "25.1497",
+        "number": "SO-000088",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 1,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": 2338,
+        "tax_cents": 281,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 2619,
+        "total_commission_cents": 0,
+        "total_cost_cents": 1750,
+        "total_margin_cents": 588,
         "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "order.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/orders/<id-4>",
+      "body": {
+        "customer_id": "<id-1>",
+        "delivery_type": "pickup",
+        "lines": [
+          {
+            "product_id": "<id-2>",
+            "quantity": "6"
+          }
+        ],
+        "revision": 1
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-3>",
+        "confirmed_at": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "customer_po": null,
+        "delivery_type": "pickup",
+        "hold_note": null,
+        "hold_reason": null,
+        "id": "<id-4>",
+        "invoice_ids": [],
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-8>",
+            "is_special_order": false,
+            "line_total_cents": 2805,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-2>",
+            "quantity": "6",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "margin_percent": "25.1336",
+        "number": "SO-000088",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 2,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": 2805,
+        "tax_cents": 337,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 3142,
+        "total_commission_cents": 0,
+        "total_cost_cents": 2100,
+        "total_margin_cents": 705,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "order.update.stale_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/orders/<id-4>",
+      "body": {
+        "customer_id": "<id-1>",
+        "delivery_type": "pickup",
+        "lines": [
+          {
+            "product_id": "<id-2>",
+            "quantity": "6"
+          }
+        ],
+        "revision": 1
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "order.update.missing_precondition",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/orders/<id-4>",
+      "body": {
+        "customer_id": "<id-1>",
+        "delivery_type": "pickup",
+        "lines": [
+          {
+            "product_id": "<id-2>",
+            "quantity": "6"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "order.list.status_filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/orders?status=draft&limit=2"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-3>",
+            "confirmed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "customer_po": null,
+            "delivery_type": "pickup",
+            "hold_note": null,
+            "hold_reason": null,
+            "id": "<id-4>",
+            "invoice_ids": [],
+            "job_id": null,
+            "margin_percent": "25.1336",
+            "number": "SO-000088",
+            "ordered_by_contact_id": null,
+            "quote_id": null,
+            "revision": 2,
+            "salesperson_id": null,
+            "salesperson_name": "",
+            "scheduled_delivery_date": null,
+            "ship_to_id": null,
+            "status": "draft",
+            "subtotal_cents": 2805,
+            "tax_cents": 337,
+            "tax_exempt": false,
+            "tax_rate_percent": "12",
+            "tax_source": "branch_rate",
+            "total_cents": 3142,
+            "total_commission_cents": 0,
+            "total_cost_cents": 2100,
+            "total_margin_cents": 705,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "branch_id": "<id-3>",
+            "confirmed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-11>",
+            "customer_name": "Kelbrook Construction",
+            "customer_po": null,
+            "delivery_type": "pickup",
+            "hold_note": null,
+            "hold_reason": null,
+            "id": "<id-12>",
+            "invoice_ids": [],
+            "job_id": null,
+            "margin_percent": "36.3636",
+            "number": "SO-000087",
+            "ordered_by_contact_id": null,
+            "quote_id": "<id-13>",
+            "revision": 1,
+            "salesperson_id": "<id-14>",
+            "salesperson_name": "Priya Brar",
+            "scheduled_delivery_date": null,
+            "ship_to_id": null,
+            "status": "draft",
+            "subtotal_cents": 11000,
+            "tax_cents": 1320,
+            "tax_exempt": false,
+            "tax_rate_percent": "12",
+            "tax_source": "branch_rate",
+            "total_cents": 12320,
+            "total_commission_cents": 0,
+            "total_cost_cents": 7000,
+            "total_margin_cents": 4000,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 2,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "order.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/orders?customer=none"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "customer",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
       }
     }
   },
@@ -108,25 +543,45 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "data": [
+        "items": [
           {
-            "branch_id": "<id-6>",
+            "branch_id": "<id-3>",
+            "confirmed_at": null,
             "created_at": "<ts+0d>",
+            "currency": "USD",
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
+            "customer_po": null,
+            "delivery_type": "pickup",
+            "hold_note": null,
+            "hold_reason": null,
             "id": "<id-4>",
-            "margin_percent": 0,
-            "status": "DRAFT",
-            "total_amount": 2750,
-            "total_commission": 0,
-            "total_cost": 0,
-            "total_margin": 0,
+            "invoice_ids": [],
+            "job_id": null,
+            "margin_percent": "25.1336",
+            "number": "SO-000088",
+            "ordered_by_contact_id": null,
+            "quote_id": null,
+            "revision": 2,
+            "salesperson_id": null,
+            "salesperson_name": "",
+            "scheduled_delivery_date": null,
+            "ship_to_id": null,
+            "status": "draft",
+            "subtotal_cents": 2805,
+            "tax_cents": 337,
+            "tax_exempt": false,
+            "tax_rate_percent": "12",
+            "tax_source": "branch_rate",
+            "total_cents": 3142,
+            "total_commission_cents": 0,
+            "total_cost_cents": 2100,
+            "total_margin_cents": 705,
             "updated_at": "<ts+0d>"
           }
         ],
         "limit": 1,
-        "offset": 0,
-        "total": 87
+        "next_cursor": "<cursor>"
       }
     }
   },
@@ -137,11 +592,11 @@
       "path": "/api/v1/orders",
       "body": {
         "customer_id": "<id-1>",
+        "delivery_type": "pickup",
         "lines": [
           {
-            "price_each": 550,
             "product_id": "<id-2>",
-            "quantity": 1
+            "quantity": "1"
           }
         ]
       }
@@ -151,27 +606,75 @@
       "content_type": "application/json",
       "body": {
         "branch_id": "<id-3>",
+        "confirmed_at": null,
         "created_at": "<ts+0d>",
+        "currency": "USD",
         "customer_id": "<id-1>",
-        "id": "<id-7>",
+        "customer_name": "Golden Harness Co",
+        "customer_po": null,
+        "delivery_type": "pickup",
+        "hold_note": null,
+        "hold_reason": null,
+        "id": "<id-16>",
+        "invoice_ids": [],
+        "job_id": null,
         "lines": [
           {
-            "commission_rate": 0,
-            "id": "<id-8>",
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-17>",
             "is_special_order": false,
-            "order_id": "<id-7>",
-            "price_each": 550,
+            "line_total_cents": 468,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
             "product_id": "<id-2>",
-            "quantity": 1,
-            "unit_cost": 0
+            "quantity": "1",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
-        "margin_percent": 0,
-        "status": "DRAFT",
-        "total_amount": 550,
-        "total_commission": 0,
-        "total_cost": 0,
-        "total_margin": 0,
+        "margin_percent": "25.2136",
+        "number": "SO-000089",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 1,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": 468,
+        "tax_cents": 56,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 524,
+        "total_commission_cents": 0,
+        "total_cost_cents": 350,
+        "total_margin_cents": 118,
         "updated_at": "<ts+0d>"
       }
     }
@@ -180,16 +683,88 @@
     "name": "order.cancel",
     "request": {
       "method": "POST",
-      "path": "/api/v1/orders/<id-7>/cancel",
+      "path": "/api/v1/orders/<id-16>/transitions",
       "body": {
-        "reason": "golden characterisation cancel"
+        "reason": "golden characterisation cancel",
+        "revision": 1,
+        "to": "cancelled"
       }
     },
     "response": {
-      "status": 204,
-      "content_type": "",
+      "status": 200,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "branch_id": "<id-3>",
+        "confirmed_at": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "customer_po": null,
+        "delivery_type": "pickup",
+        "hold_note": null,
+        "hold_reason": null,
+        "id": "<id-16>",
+        "invoice_ids": [],
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-17>",
+            "is_special_order": false,
+            "line_total_cents": 468,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-2>",
+            "quantity": "1",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "margin_percent": "25.2136",
+        "number": "SO-000089",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 2,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "cancelled",
+        "subtotal_cents": 468,
+        "tax_cents": 56,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 524,
+        "total_commission_cents": 0,
+        "total_cost_cents": 350,
+        "total_margin_cents": 118,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -197,9 +772,41 @@
     "name": "order.cancel.already_cancelled",
     "request": {
       "method": "POST",
-      "path": "/api/v1/orders/<id-7>/cancel",
+      "path": "/api/v1/orders/<id-16>/transitions",
       "body": {
-        "reason": "second attempt"
+        "reason": "second attempt",
+        "to": "cancelled"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "order.update.not_draft",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/orders/<id-16>",
+      "body": {
+        "customer_id": "<id-1>",
+        "delivery_type": "pickup",
+        "lines": [
+          {
+            "product_id": "<id-2>",
+            "quantity": "1"
+          }
+        ],
+        "revision": 2
       }
     },
     "response": {
@@ -207,13 +814,64 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "CONFLICT",
-          "message": "Conflict"
+          "code": "conflict",
+          "details": [
+            {
+              "code": "order_not_draft",
+              "message": "the order is cancelled"
+            }
+          ],
+          "message": "only draft orders can be edited"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-19>"
         }
       }
+    }
+  },
+  {
+    "name": "order.transition.forbidden",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders/<id-4>/transitions",
+      "body": {
+        "reason": "not yet",
+        "revision": "2",
+        "to": "fulfilled"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "revision",
+              "message": "must be an integer (no decimal point, exponent or quotes)"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "order.events",
+    "sort_primary_array": true,
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?entity_type=order&limit=25"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": "<body>"
     }
   },
   {
@@ -237,18 +895,18 @@
     "name": "order.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/orders/<id-10>"
+      "path": "/api/v1/orders/<id-21>"
     },
     "response": {
       "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "order not found"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-22>"
         }
       }
     }

@@ -155,6 +155,30 @@
           "total_cost": 21811.92,
           "updated_at": "<ts+0d>",
           "vendor_id": "<vendor>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-17>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-18>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "branch_id": "<id-1>",
+          "created_at": "<ts+0d>",
+          "id": "<id-19>",
+          "source": "SPECIAL_ORDER",
+          "status": "DRAFT",
+          "updated_at": "<ts+0d>"
         }
       ]
     }

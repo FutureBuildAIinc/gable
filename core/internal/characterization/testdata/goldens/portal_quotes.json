@@ -621,10 +621,10 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "accepted_at": null,
+          "accepted_at": "<ts+0d>",
           "created_at": "<ts+0d>",
           "delivery_type": "PICKUP",
-          "erp_state": "SENT",
+          "erp_state": "ACCEPTED",
           "expires_at": null,
           "freight_amount": 0,
           "id": "<id-31>",
@@ -649,7 +649,7 @@
           "project_name": null,
           "rejected_at": null,
           "sent_at": "<ts+0d>",
-          "status": "PRICED",
+          "status": "ACCEPTED",
           "total_amount": 110,
           "updated_at": "<ts+0d>"
         },

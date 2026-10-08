@@ -6,11 +6,11 @@
       "path": "/api/v1/orders",
       "body": {
         "customer_id": "<id-1>",
+        "delivery_type": "delivery",
         "lines": [
           {
-            "price_each": 550,
             "product_id": "<id-2>",
-            "quantity": 2
+            "quantity": "2"
           }
         ]
       }
@@ -20,27 +20,75 @@
       "content_type": "application/json",
       "body": {
         "branch_id": "<id-3>",
+        "confirmed_at": null,
         "created_at": "<ts+0d>",
+        "currency": "USD",
         "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "customer_po": null,
+        "delivery_type": "delivery",
+        "hold_note": null,
+        "hold_reason": null,
         "id": "<id-4>",
+        "invoice_ids": [],
+        "job_id": null,
         "lines": [
           {
-            "commission_rate": 0,
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
             "id": "<id-5>",
             "is_special_order": false,
-            "order_id": "<id-4>",
-            "price_each": 550,
+            "line_total_cents": 935,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
             "product_id": "<id-2>",
-            "quantity": 2,
-            "unit_cost": 0
+            "quantity": "2",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
-        "margin_percent": 0,
-        "status": "DRAFT",
-        "total_amount": 1100,
-        "total_commission": 0,
-        "total_cost": 0,
-        "total_margin": 0,
+        "margin_percent": "25.1336",
+        "number": "SO-000094",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 1,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": 935,
+        "tax_cents": 0,
+        "tax_exempt": true,
+        "tax_rate_percent": "0",
+        "tax_source": "exempt",
+        "total_cents": 935,
+        "total_commission_cents": 0,
+        "total_cost_cents": 700,
+        "total_margin_cents": 235,
         "updated_at": "<ts+0d>"
       }
     }
@@ -224,8 +272,8 @@
         {
           "lines": 1,
           "status": "UNPAID",
-          "tax_amount": "1.32",
-          "total_amount": "12.32"
+          "tax_amount": "1.12",
+          "total_amount": "10.48"
         }
       ]
     }

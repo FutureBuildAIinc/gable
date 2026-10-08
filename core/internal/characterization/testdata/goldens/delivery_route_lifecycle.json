@@ -9,10 +9,26 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "legs": null,
-        "optimized_order": null,
-        "total_distance_miles": 0,
-        "total_duration_mins": 0
+        "legs": [
+          {
+            "distance_miles": 5,
+            "duration_mins": 15,
+            "eta": "<ts+0d>",
+            "stop_index": 0
+          },
+          {
+            "distance_miles": 5,
+            "duration_mins": 15,
+            "eta": "<ts+0d>",
+            "stop_index": 1
+          }
+        ],
+        "optimized_order": [
+          0,
+          1
+        ],
+        "total_distance_miles": 10,
+        "total_duration_mins": 30
       }
     }
   },
@@ -63,7 +79,46 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": [
+        {
+          "address": "1 Golden Way, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
+          "delivery_instructions": "r1b c first stop",
+          "estimated_arrival": "<ts+0d>",
+          "id": "<id-4>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-5>",
+          "order_number": "<id-5>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-1>",
+          "status": "PENDING",
+          "stop_sequence": 1,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "address": "1 Golden Way, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
+          "delivery_instructions": null,
+          "estimated_arrival": "<ts+0d>",
+          "id": "<id-6>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-7>",
+          "order_number": "<id-7>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-1>",
+          "status": "PENDING",
+          "stop_sequence": 2,
+          "updated_at": "<ts+0d>"
+        }
+      ]
     }
   },
   {
@@ -73,22 +128,16 @@
       "path": "/api/v1/delivery/routes/<id-1>/reorder",
       "body": {
         "ordered_delivery_ids": [
-          "{c_delivery2}",
-          "{c_delivery}"
+          "<id-6>",
+          "<id-4>"
         ]
       }
     },
     "response": {
-      "status": 400,
-      "content_type": "application/json",
+      "status": 200,
+      "content_type": "",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-4>"
-        }
+        "text": ""
       }
     }
   },
@@ -110,7 +159,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -131,7 +180,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-9>"
         }
       }
     }
@@ -143,7 +192,7 @@
       "path": "/api/v1/delivery/routes/<id-1>/reorder",
       "body": {
         "ordered_delivery_ids": [
-          "<id-7>"
+          "<id-10>"
         ]
       }
     },
@@ -165,7 +214,46 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": [
+        {
+          "address": "1 Golden Way, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
+          "delivery_instructions": null,
+          "estimated_arrival": "<ts+0d>",
+          "id": "<id-6>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-7>",
+          "order_number": "<id-7>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-1>",
+          "status": "PENDING",
+          "stop_sequence": 1,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "address": "1 Golden Way, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
+          "delivery_instructions": "r1b c first stop",
+          "estimated_arrival": "<ts+0d>",
+          "id": "<id-4>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-5>",
+          "order_number": "<id-5>",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "route_id": "<id-1>",
+          "status": "PENDING",
+          "stop_sequence": 2,
+          "updated_at": "<ts+0d>"
+        }
+      ]
     }
   },
   {
@@ -183,7 +271,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -203,7 +291,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -223,7 +311,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -257,7 +345,7 @@
           "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -277,7 +365,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -286,7 +374,7 @@
     "name": "delivery.route.dispatch.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-7>/dispatch"
+      "path": "/api/v1/delivery/routes/<id-10>/dispatch"
     },
     "response": {
       "status": 500,
@@ -297,7 +385,7 @@
           "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-16>"
         }
       }
     }
@@ -306,7 +394,7 @@
     "name": "delivery.delivery.status.partial",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/{c_delivery}/status",
+      "path": "/api/v1/delivery/deliveries/<id-4>/status",
       "body": {
         "pod_proof_url": "/uploads/pod/golden.png",
         "pod_signed_by": "R1C Receiver",
@@ -315,16 +403,10 @@
       }
     },
     "response": {
-      "status": 400,
-      "content_type": "application/json",
+      "status": 200,
+      "content_type": "",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-14>"
-        }
+        "text": ""
       }
     }
   },
@@ -332,21 +414,21 @@
     "name": "delivery.delivery.status.missing_pod",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/{c_delivery2}/status",
+      "path": "/api/v1/delivery/deliveries/<id-6>/status",
       "body": {
         "status": "DELIVERED"
       }
     },
     "response": {
-      "status": 400,
+      "status": 500,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-17>"
         }
       }
     }
@@ -355,21 +437,21 @@
     "name": "delivery.delivery.status.invalid",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/{c_delivery2}/status",
+      "path": "/api/v1/delivery/deliveries/<id-6>/status",
       "body": {
         "status": "TELEPORTED"
       }
     },
     "response": {
-      "status": 400,
+      "status": 500,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-18>"
         }
       }
     }
@@ -392,7 +474,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -401,7 +483,7 @@
     "name": "delivery.delivery.status.bad_body",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/{c_delivery2}/status",
+      "path": "/api/v1/delivery/deliveries/<id-6>/status",
       "body": "not an object"
     },
     "response": {
@@ -413,7 +495,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -422,7 +504,7 @@
     "name": "delivery.delivery.status.not_found",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-7>/status",
+      "path": "/api/v1/delivery/deliveries/<id-10>/status",
       "body": {
         "status": "FAILED"
       }
@@ -450,7 +532,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-21>"
         }
       }
     }
@@ -459,22 +541,16 @@
     "name": "delivery.delivery.status.failed",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/{c_delivery2}/status",
+      "path": "/api/v1/delivery/deliveries/<id-6>/status",
       "body": {
         "status": "FAILED"
       }
     },
     "response": {
-      "status": 400,
-      "content_type": "application/json",
+      "status": 200,
+      "content_type": "",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-20>"
-        }
+        "text": ""
       }
     }
   },
@@ -483,19 +559,28 @@
     "mask_mock_geo": true,
     "request": {
       "method": "GET",
-      "path": "/api/v1/delivery/deliveries/{c_delivery}"
+      "path": "/api/v1/delivery/deliveries/<id-4>"
     },
     "response": {
-      "status": 400,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-21>"
-        }
+        "created_at": "<ts+0d>",
+        "customer_name": "Golden Harness Co",
+        "delivery_instructions": "r1b c first stop",
+        "estimated_arrival": "<ts+0d>",
+        "id": "<id-4>",
+        "latitude": 49.888,
+        "longitude": -119.496,
+        "order_id": "<id-5>",
+        "order_number": "<id-5>",
+        "pod_proof_url": "/uploads/pod/golden.png",
+        "pod_signed_by": "R1C Receiver",
+        "pod_timestamp": "<ts+0d>",
+        "route_id": "<id-1>",
+        "status": "PARTIAL",
+        "stop_sequence": 2,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -506,16 +591,10 @@
       "path": "/api/v1/delivery/routes/<id-1>/complete"
     },
     "response": {
-      "status": 400,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-22>"
-        }
+        "status": "completed"
       }
     }
   },
@@ -531,15 +610,15 @@
       "body": [
         {
           "created_at": "<ts+0d>",
-          "driver_id": "<id-23>",
+          "driver_id": "<id-22>",
           "driver_name": "R1C Driver Renamed",
           "id": "<id-1>",
           "notes": "r1b c main route",
           "scheduled_date": "<ts+2d>",
-          "status": "IN_TRANSIT",
-          "stop_count": 0,
+          "status": "COMPLETED",
+          "stop_count": 2,
           "updated_at": "<ts+0d>",
-          "vehicle_id": "<id-24>",
+          "vehicle_id": "<id-23>",
           "vehicle_name": "R1C Truck Renamed"
         }
       ]
@@ -560,7 +639,7 @@
           "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-25>"
+          "request_id": "<id-24>"
         }
       }
     }

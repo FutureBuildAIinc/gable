@@ -3,18 +3,15 @@
     "name": "document.print_invoice",
     "request": {
       "method": "GET",
-      "path": "/api/v1/documents/print/invoice/{myInvoice}"
+      "path": "/api/v1/documents/print/invoice/<id-1>"
     },
     "response": {
-      "status": 400,
-      "content_type": "application/json",
+      "status": 200,
+      "content_type": "application/pdf",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-1>"
+        "binary": {
+          "length": 4193,
+          "text_sha256": "eb26a3e439b15e3752965cb617df79b8cc3e1c77a7f3eca2d2b90e19ea1d730c"
         }
       }
     }
@@ -63,19 +60,13 @@
     "name": "invoice.email",
     "request": {
       "method": "POST",
-      "path": "/api/v1/invoices/{myInvoice}/email"
+      "path": "/api/v1/invoices/<id-1>/email"
     },
     "response": {
-      "status": 400,
+      "status": 202,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-5>"
-        }
+        "status": "queued"
       }
     }
   },
@@ -94,7 +85,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-5>"
         }
       }
     }
@@ -114,7 +105,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-6>"
         }
       }
     }

@@ -616,22 +616,80 @@
       }
     },
     "response": {
-      "status": 409,
+      "status": 201,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "conflict",
-          "details": [
-            {
-              "code": "tax_rate_not_configured",
-              "message": "set the branch's default tax rate (or the ship-to's rate) before confirming or saving the order"
-            }
-          ],
-          "message": "no tax rate is configured for this order's branch"
-        },
-        "meta": {
-          "request_id": "<id-21>"
-        }
+        "branch_id": "<id-1>",
+        "confirmed_at": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-2>",
+        "customer_name": "Kelbrook Construction",
+        "customer_po": null,
+        "delivery_type": "pickup",
+        "hold_note": null,
+        "hold_reason": null,
+        "id": "<id-21>",
+        "invoice_ids": [],
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-22>",
+            "is_special_order": false,
+            "line_total_cents": 11000,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "quote",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 55000,
+            "product_id": "<id-3>",
+            "quantity": "20",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": "<id-18>",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 55000,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "margin_percent": "36.3636",
+        "number": "SO-000087",
+        "ordered_by_contact_id": null,
+        "quote_id": "<id-4>",
+        "revision": 1,
+        "salesperson_id": "<id-23>",
+        "salesperson_name": "Priya Brar",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": 11000,
+        "tax_cents": 1320,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 12320,
+        "total_commission_cents": 0,
+        "total_cost_cents": 7000,
+        "total_margin_cents": 4000,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -652,11 +710,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "stale_revision",
-          "message": "the document was changed after this revision was read; reload and retry"
+          "code": "invalid_state_transition",
+          "message": "cannot transition from accepted to sent"
         },
         "meta": {
-          "request_id": "<id-22>"
+          "request_id": "<id-24>"
         }
       }
     }
@@ -688,7 +746,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-23>"
+          "request_id": "<id-25>"
         }
       }
     }
@@ -729,20 +787,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-24>",
+        "id": "<id-26>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-25>",
+            "id": "<id-27>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-24>",
+            "quote_id": "<id-26>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -771,7 +829,7 @@
     "name": "quote.state.draft_to_accepted",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-24>/transitions",
+      "path": "/api/v1/quotes/<id-26>/transitions",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -794,20 +852,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-24>",
+        "id": "<id-26>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-25>",
+            "id": "<id-27>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-24>",
+            "quote_id": "<id-26>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -868,20 +926,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-26>",
+        "id": "<id-28>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-27>",
+            "id": "<id-29>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-26>",
+            "quote_id": "<id-28>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -910,7 +968,7 @@
     "name": "quote.state.draft_to_rejected",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-26>/transitions",
+      "path": "/api/v1/quotes/<id-28>/transitions",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -933,20 +991,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-26>",
+        "id": "<id-28>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-27>",
+            "id": "<id-29>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-26>",
+            "quote_id": "<id-28>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -975,7 +1033,7 @@
     "name": "quote.state.rejected_to_draft",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-26>/transitions",
+      "path": "/api/v1/quotes/<id-28>/transitions",
       "headers": {
         "If-Match": "\"2\""
       },
@@ -998,20 +1056,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-26>",
+        "id": "<id-28>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-27>",
+            "id": "<id-29>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-26>",
+            "quote_id": "<id-28>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1072,20 +1130,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-28>",
+        "id": "<id-30>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-29>",
+            "id": "<id-31>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-28>",
+            "quote_id": "<id-30>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1114,7 +1172,7 @@
     "name": "quote.state.draft_to_expired",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-28>/transitions",
+      "path": "/api/v1/quotes/<id-30>/transitions",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -1137,20 +1195,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-28>",
+        "id": "<id-30>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-29>",
+            "id": "<id-31>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-28>",
+            "quote_id": "<id-30>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1179,7 +1237,7 @@
     "name": "quote.state.expired_to_draft",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-28>/transitions",
+      "path": "/api/v1/quotes/<id-30>/transitions",
       "headers": {
         "If-Match": "\"2\""
       },
@@ -1202,20 +1260,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-28>",
+        "id": "<id-30>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-29>",
+            "id": "<id-31>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-28>",
+            "quote_id": "<id-30>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1276,20 +1334,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-30>",
+        "id": "<id-32>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-31>",
+            "id": "<id-33>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-30>",
+            "quote_id": "<id-32>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1318,7 +1376,7 @@
     "name": "quote.state.draft_to_sent",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-30>/transitions",
+      "path": "/api/v1/quotes/<id-32>/transitions",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -1341,20 +1399,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-30>",
+        "id": "<id-32>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-31>",
+            "id": "<id-33>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-30>",
+            "quote_id": "<id-32>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1383,7 +1441,7 @@
     "name": "quote.state.sent_to_accepted",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-30>/transitions",
+      "path": "/api/v1/quotes/<id-32>/transitions",
       "headers": {
         "If-Match": "\"2\""
       },
@@ -1406,20 +1464,20 @@
         "exposure_last_checked_at": "<ts+0d>",
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-30>",
+        "id": "<id-32>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-31>",
+            "id": "<id-33>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-30>",
+            "quote_id": "<id-32>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1480,20 +1538,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-32>",
+        "id": "<id-34>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-33>",
+            "id": "<id-35>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-32>",
+            "quote_id": "<id-34>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1522,7 +1580,7 @@
     "name": "quote.state.draft_to_sent",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-32>/transitions",
+      "path": "/api/v1/quotes/<id-34>/transitions",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -1545,20 +1603,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-32>",
+        "id": "<id-34>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-33>",
+            "id": "<id-35>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-32>",
+            "quote_id": "<id-34>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1587,7 +1645,7 @@
     "name": "quote.state.sent_to_rejected",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-32>/transitions",
+      "path": "/api/v1/quotes/<id-34>/transitions",
       "headers": {
         "If-Match": "\"2\""
       },
@@ -1610,20 +1668,20 @@
         "exposure_last_checked_at": "<ts+0d>",
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-32>",
+        "id": "<id-34>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-33>",
+            "id": "<id-35>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-32>",
+            "quote_id": "<id-34>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1684,20 +1742,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-34>",
+        "id": "<id-36>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-35>",
+            "id": "<id-37>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-34>",
+            "quote_id": "<id-36>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1726,7 +1784,7 @@
     "name": "quote.state.draft_to_sent",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-34>/transitions",
+      "path": "/api/v1/quotes/<id-36>/transitions",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -1749,20 +1807,20 @@
         "exposure_last_checked_at": null,
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-34>",
+        "id": "<id-36>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-35>",
+            "id": "<id-37>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-34>",
+            "quote_id": "<id-36>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1791,7 +1849,7 @@
     "name": "quote.state.sent_to_expired",
     "request": {
       "method": "POST",
-      "path": "/api/v1/quotes/<id-34>/transitions",
+      "path": "/api/v1/quotes/<id-36>/transitions",
       "headers": {
         "If-Match": "\"2\""
       },
@@ -1814,20 +1872,20 @@
         "exposure_last_checked_at": "<ts+0d>",
         "exposure_state": "ok",
         "freight_cents": 0,
-        "id": "<id-34>",
+        "id": "<id-36>",
         "job_id": null,
         "lines": [
           {
             "created_at": "<ts+0d>",
             "customer_note": null,
             "description": "2x4x8 SPF Premium",
-            "id": "<id-35>",
+            "id": "<id-37>",
             "line_total_cents": 2750,
             "price_uom": "PCS",
             "price_uom_qty": "1",
             "product_id": "<id-3>",
             "quantity": "5",
-            "quote_id": "<id-34>",
+            "quote_id": "<id-36>",
             "sku": "LUM-248-PREM",
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
@@ -1877,7 +1935,7 @@
               "id": "<id-4>",
               "kind": "quote"
             },
-            "event_id": "<id-36>",
+            "event_id": "<id-38>",
             "org": "default",
             "type": "quote.created"
           },
@@ -1892,10 +1950,10 @@
               "total_cents": 2750
             },
             "entity": {
-              "id": "<id-24>",
+              "id": "<id-26>",
               "kind": "quote"
             },
-            "event_id": "<id-37>",
+            "event_id": "<id-39>",
             "org": "default",
             "type": "quote.created"
           },
@@ -1910,10 +1968,10 @@
               "total_cents": 2750
             },
             "entity": {
-              "id": "<id-26>",
+              "id": "<id-28>",
               "kind": "quote"
             },
-            "event_id": "<id-38>",
+            "event_id": "<id-40>",
             "org": "default",
             "type": "quote.created"
           }
@@ -1949,9 +2007,28 @@
               "id": "<id-4>",
               "kind": "quote"
             },
-            "event_id": "<id-39>",
+            "event_id": "<id-41>",
             "org": "default",
             "type": "quote.sent"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-1>",
+            "data": {
+              "customer_id": "<id-2>",
+              "from_status": "sent",
+              "number": "Q-000021",
+              "revision": 3,
+              "status": "accepted",
+              "total_cents": 11000
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "quote"
+            },
+            "event_id": "<id-42>",
+            "org": "default",
+            "type": "quote.accepted"
           },
           {
             "at": "<ts+0d>",
@@ -1965,10 +2042,10 @@
               "total_cents": 2750
             },
             "entity": {
-              "id": "<id-24>",
+              "id": "<id-26>",
               "kind": "quote"
             },
-            "event_id": "<id-40>",
+            "event_id": "<id-43>",
             "org": "default",
             "type": "quote.accepted"
           },
@@ -1984,31 +2061,12 @@
               "total_cents": 2750
             },
             "entity": {
-              "id": "<id-26>",
+              "id": "<id-28>",
               "kind": "quote"
             },
-            "event_id": "<id-41>",
+            "event_id": "<id-44>",
             "org": "default",
             "type": "quote.rejected"
-          },
-          {
-            "at": "<ts+0d>",
-            "branch_id": "<id-1>",
-            "data": {
-              "customer_id": "<id-2>",
-              "from_status": "rejected",
-              "number": "Q-000023",
-              "revision": 3,
-              "status": "draft",
-              "total_cents": 2750
-            },
-            "entity": {
-              "id": "<id-26>",
-              "kind": "quote"
-            },
-            "event_id": "<id-42>",
-            "org": "default",
-            "type": "quote.reopened"
           }
         ],
         "limit": 4,
@@ -2026,19 +2084,19 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "accepted_count": 10,
+        "accepted_count": 11,
         "ai_conversion_rate": 0,
         "ai_sourced_count": 0,
         "avg_days_to_close": "<days>",
         "avg_margin_accepted_cents": 0,
         "avg_margin_rejected_cents": 0,
-        "conversion_rate": 76.92307692307693,
+        "conversion_rate": 78.57142857142857,
         "draft_count": 6,
         "expired_count": 2,
-        "manual_conversion_rate": 37.03703703703704,
+        "manual_conversion_rate": 40.74074074074074,
         "rejected_count": 1,
-        "sent_count": 8,
-        "total_accepted_value_cents": 13855289,
+        "sent_count": 7,
+        "total_accepted_value_cents": 13866289,
         "total_quote_value_cents": 22349253,
         "total_quotes": 27,
         "trend_data": [
@@ -2275,8 +2333,8 @@
             "total_value_cents": 0
           },
           {
-            "accepted": 3,
-            "accepted_value_cents": 1577319,
+            "accepted": 4,
+            "accepted_value_cents": 1588319,
             "created": 8,
             "date": "<day+0>",
             "rejected": 1,

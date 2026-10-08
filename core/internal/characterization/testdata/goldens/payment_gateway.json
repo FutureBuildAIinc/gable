@@ -6,20 +6,20 @@
       "path": "/api/v1/payments/card",
       "body": {
         "amount": 100,
-        "invoice_id": "{myInvoice}",
+        "invoice_id": "<id-1>",
         "token_id": "tok_golden"
       }
     },
     "response": {
-      "status": 400,
+      "status": 402,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "PAYMENT_REQUIRED",
+          "message": "Payment Required"
         },
         "meta": {
-          "request_id": "<id-1>"
+          "request_id": "<id-2>"
         }
       }
     }
@@ -31,7 +31,7 @@
       "path": "/api/v1/payments/card",
       "body": {
         "amount": 100,
-        "invoice_id": "{myInvoice}"
+        "invoice_id": "<id-1>"
       }
     },
     "response": {
@@ -43,7 +43,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-2>"
+          "request_id": "<id-3>"
         }
       }
     }
@@ -64,7 +64,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-4>"
         }
       }
     }
@@ -76,20 +76,20 @@
       "path": "/api/v1/payments/refund",
       "body": {
         "amount": 100,
-        "payment_id": "{myPayment}",
+        "payment_id": "<id-5>",
         "reason": "golden refund"
       }
     },
     "response": {
-      "status": 400,
+      "status": 500,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-4>"
+          "request_id": "<id-6>"
         }
       }
     }
@@ -110,7 +110,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-7>"
         }
       }
     }

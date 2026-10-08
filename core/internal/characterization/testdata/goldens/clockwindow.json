@@ -106,12 +106,21 @@
             "days_61_90": 0,
             "over_90": 0,
             "total": 5894.12
+          },
+          {
+            "current": 31.42,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 31.42
           }
         ],
-        "grand_total": 99811.34999999999,
+        "grand_total": 99842.76999999999,
         "total_31_60": 8994.43,
         "total_61_90": 12373.56,
-        "total_current": 58835.5,
+        "total_current": 58866.92,
         "total_over_90": 19607.86
       }
     }
@@ -127,11 +136,11 @@
       "content_type": "application/json",
       "body": {
         "end_date": "<day+0>",
-        "invoice_count": 10,
-        "outstanding_ar": 23293.34,
+        "invoice_count": 11,
+        "outstanding_ar": 23324.76,
         "start_date": "<day-30>",
-        "total_collected": 308647,
-        "total_invoiced": 76359.72
+        "total_collected": 308657,
+        "total_invoiced": 76391.14
       }
     }
   },
@@ -146,11 +155,11 @@
       "content_type": "application/json",
       "body": {
         "active_orders": 20,
-        "outstanding_ar": 9981135,
-        "outstanding_ar_count": 14,
-        "pending_dispatch": 27,
-        "today_revenue": 30622276,
-        "today_revenue_change": 303060.83556083555
+        "outstanding_ar": 9984277,
+        "outstanding_ar_count": 15,
+        "pending_dispatch": 28,
+        "today_revenue": 30623276,
+        "today_revenue_change": 303070.7355707356
       }
     }
   },
@@ -178,7 +187,7 @@
         },
         {
           "date": "<day+0>",
-          "revenue": 30622276
+          "revenue": 30623276
         }
       ]
     }
@@ -241,80 +250,80 @@
       "body": {
         "recent_orders": [
           {
-            "created_at": "<ts-1d>",
+            "created_at": "<ts+0d>",
             "customer_name": "<customer>",
             "order_id": "<id-2>",
+            "status": "CANCELLED",
+            "total_amount": 524
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-3>",
+            "status": "DRAFT",
+            "total_amount": 3142
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-4>",
+            "status": "DRAFT",
+            "total_amount": 12320
+          },
+          {
+            "created_at": "<ts-1d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-5>",
             "status": "DRAFT",
             "total_amount": 1022502
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-3>",
+            "order_id": "<id-6>",
             "status": "FULFILLED",
             "total_amount": 1820808
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-4>",
+            "order_id": "<id-7>",
             "status": "CONFIRMED",
             "total_amount": 341800
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-5>",
+            "order_id": "<id-8>",
             "status": "CONFIRMED",
             "total_amount": 348500
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-6>",
+            "order_id": "<id-9>",
             "status": "CONFIRMED",
             "total_amount": 169450
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-7>",
+            "order_id": "<id-10>",
             "status": "CONFIRMED",
             "total_amount": 186600
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-8>",
-            "status": "CONFIRMED",
-            "total_amount": 219400
-          },
-          {
-            "created_at": "<ts-2d>",
-            "customer_name": "<customer>",
-            "order_id": "<id-9>",
-            "status": "CONFIRMED",
-            "total_amount": 297108
-          },
-          {
-            "created_at": "<ts-2d>",
-            "customer_name": "<customer>",
-            "order_id": "<id-10>",
-            "status": "CONFIRMED",
-            "total_amount": 350100
-          },
-          {
-            "created_at": "<ts-2d>",
-            "customer_name": "<customer>",
             "order_id": "<id-11>",
             "status": "CONFIRMED",
-            "total_amount": 197575
+            "total_amount": 219400
           }
         ],
         "status_breakdown": {
-          "CANCELLED": 2,
+          "CANCELLED": 3,
           "CONFIRMED": 14,
-          "DRAFT": 4,
+          "DRAFT": 6,
           "FULFILLED": 8
         }
       }
