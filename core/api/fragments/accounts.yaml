@@ -2,100 +2,111 @@
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
 # The accounts module, transcribed from internal/account/handler.go and model.go
-# as they behave today: cents for amounts, nullability per golden records.
+# as they behave today: cents for amounts, the transaction list is a nil slice (null when empty)
+# and is not paginated, and every service error answers 500.
 paths:
   /api/v1/accounts/{id}:
     get:
       operationId: accountSummary
-      tags: [accounts]
+      tags:
+      - accounts
       summary: Get account summary
-      description: >-
-        Returns the customer's account summary including balance due, credit limit,
-        and available credit. All amounts are in cents.
+      description: Balance due, credit limit and available credit, all in cents. Any service error, including
+        an unknown customer, answers 500.
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The account summary.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AccountSummary"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/AccountSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/accounts/{id}/transactions:
     get:
       operationId: accountTransactions
-      tags: [accounts]
+      tags:
+      - accounts
       summary: List account transactions
-      description: >-
-        Returns the customer's account transaction history. All amounts are in cents;
-        negative amounts represent debits (payments, refunds) and positive amounts
-        represent credits (invoices).
+      description: 'The list is not paginated: limit and offset are not read.'
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
-          description: Array of transactions.
+        '200':
+          description: Every transaction of the customer, newest first. The body is null when there are
+            none.
           content:
             application/json:
               schema:
-                type: array
+                type:
+                - array
+                - 'null'
                 items:
-                  $ref: "#/components/schemas/CustomerTransaction"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                  $ref: '#/components/schemas/CustomerTransaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   schemas:
     AccountSummary:
       type: object
-      required: [customer_id, balance_due, credit_limit, available_credit]
+      required:
+      - customer_id
+      - balance_due
+      - credit_limit
+      - available_credit
       properties:
         customer_id:
           type: string
           format: uuid
         balance_due:
           type: integer
+          format: int64
           description: Cents.
         credit_limit:
           type: integer
+          format: int64
           description: Cents.
         available_credit:
           type: integer
+          format: int64
           description: Cents.
     CustomerTransaction:
       type: object
-      required: [id, customer_id, type, amount, balance_after, reference_id, description, created_at]
+      required:
+      - id
+      - customer_id
+      - type
+      - amount
+      - balance_after
+      - reference_id
+      - description
+      - created_at
       properties:
         id:
           type: string
@@ -105,17 +116,24 @@ components:
           format: uuid
         type:
           type: string
-          enum: [INVOICE, PAYMENT, ADJUSTMENT, REFUND]
+          enum:
+          - INVOICE
+          - PAYMENT
+          - ADJUSTMENT
+          - REFUND
         amount:
           type: integer
-          description: Cents. Negative for debits.
+          format: int64
+          description: Cents.
         balance_after:
           type: integer
+          format: int64
           description: Cents.
         reference_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
-          nullable: true
         description:
           type: string
         created_at:

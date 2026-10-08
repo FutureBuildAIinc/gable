@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/integrations"
 	"github.com/gablelbm/gable/internal/inventory"
@@ -76,7 +77,15 @@ var modelBoundSchemas = []struct {
 	{"IntegrationOrder", integrations.IntegrationOrderResponse{}},
 	{"IntegrationDeliveryRouteResponse", integrations.DeliveryRouteResponse{}},
 	{"IntegrationValidateStaffResponse", integrations.ValidateStaffResponse{}},
-	// delivery — fragment schemas are partial response views; excluded from shape test
+	// delivery
+	{"DeliveryVehicle", delivery.Vehicle{}},
+	{"DeliveryDriver", delivery.Driver{}},
+	{"DeliveryRoute", delivery.Route{}},
+	{"Delivery", delivery.Delivery{}},
+	{"DeliveryPodPhoto", delivery.PODPhoto{}},
+	{"DeliveryCapacityWarning", delivery.CapacityWarning{}},
+	{"DeliveryRouteLeg", delivery.RouteLeg{}},
+	{"DeliveryRouteOptimizationResult", delivery.RouteOptimizationResult{}},
 	// inventory
 	{"Inventory", inventory.Inventory{}},
 	// deposits
@@ -84,7 +93,7 @@ var modelBoundSchemas = []struct {
 	// accounts
 	{"AccountSummary", account.AccountSummary{}},
 	{"CustomerTransaction", account.CustomerTransaction{}},
-	// vendors — fragment schema is partial response view; excluded from shape test
+	// vendors - fragment schema is partial response view; excluded from shape test
 	// sales-team
 	{"SalesPerson", salesteam.SalesPerson{}},
 	// activities / crm
@@ -92,7 +101,7 @@ var modelBoundSchemas = []struct {
 	// quote / exposure
 	{"QuoteExposureEvent", pricing.QuoteExposureEvent{}},
 	{"ExposureRow", pricing.ExposureRow{}},
-	// pos — fragment schema names differ from Go model names; excluded from shape test
+	// pos - fragment schema names differ from Go model names; excluded from shape test
 }
 
 // TestSchemasMatchModelJsonTags enforces the transcription rule CONTRACT.md
@@ -122,8 +131,7 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			Schemas map[string]struct {
 				Required   []string `yaml:"required"`
 				Properties map[string]struct {
-					Type     any  `yaml:"type"`
-					Nullable bool `yaml:"nullable"`
+					Type any `yaml:"type"`
 				} `yaml:"properties"`
 			} `yaml:"schemas"`
 		} `yaml:"components"`
@@ -163,7 +171,7 @@ func TestSchemasMatchModelJsonTags(t *testing.T) {
 			if omitempty && required[name] {
 				problems = append(problems, where+": omitted when empty (omitempty) but listed in required")
 			}
-			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type, prop.Nullable) {
+			if !omitempty && isNullableGoType(f.Type) && !carriesNullLeg(prop.Type) {
 				problems = append(problems, where+": a nil pointer serializes as null today but the type carries no null leg")
 			}
 		}
@@ -206,21 +214,17 @@ func isNullableGoType(t reflect.Type) bool {
 	return strings.HasPrefix(s, "sql.Null") || strings.HasPrefix(s, "pgtype.")
 }
 
-// carriesNullLeg reports whether an OpenAPI type — a string, a list of types,
-// or a struct with a Nullable boolean — includes "null".
-func carriesNullLeg(typ any, nullableField any) bool {
-	// OpenAPI 3.1 array form: type: ["string", "null"]
+// carriesNullLeg reports whether an OpenAPI 3.1 type includes "null". Only
+// the type array form counts: the 3.0 nullable keyword does not exist in 3.1.
+func carriesNullLeg(typ any) bool {
 	list, ok := typ.([]any)
-	if ok {
-		for _, item := range list {
-			if s, ok := item.(string); ok && s == "null" {
-				return true
-			}
-		}
+	if !ok {
+		return false
 	}
-	// OpenAPI 3.0 nullable field: nullable: true
-	if nb, ok := nullableField.(bool); ok && nb {
-		return true
+	for _, item := range list {
+		if s, ok := item.(string); ok && s == "null" {
+			return true
+		}
 	}
 	return false
 }

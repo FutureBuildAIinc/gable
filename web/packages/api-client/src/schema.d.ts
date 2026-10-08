@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * Get account summary
-         * @description Returns the customer's account summary including balance due, credit limit, and available credit. All amounts are in cents.
+         * @description Balance due, credit limit and available credit, all in cents. Any service error, including an unknown customer, answers 500.
          */
         get: operations["accountSummary"];
         put?: never;
@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * List account transactions
-         * @description Returns the customer's account transaction history. All amounts are in cents; negative amounts represent debits (payments, refunds) and positive amounts represent credits (invoices).
+         * @description The list is not paginated: limit and offset are not read.
          */
         get: operations["accountTransactions"];
         put?: never;
@@ -211,60 +211,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/delivery/drivers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List delivery drivers */
-        get: operations["deliveryDriverList"];
-        put?: never;
-        /** Create a delivery driver */
-        post: operations["deliveryDriverCreate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/drivers/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get one delivery driver */
-        get: operations["deliveryDriverGet"];
-        /** Update a delivery driver */
-        put: operations["deliveryDriverUpdate"];
-        post?: never;
-        /** Delete a delivery driver */
-        delete: operations["deliveryDriverDelete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/drivers/{id}/photo": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Upload a driver photo */
-        post: operations["deliveryDriverPhoto"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/delivery/vehicles": {
         parameters: {
             query?: never;
@@ -272,10 +218,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List delivery vehicles */
+        /** List vehicles */
         get: operations["deliveryVehicleList"];
         put?: never;
-        /** Create a delivery vehicle */
+        /** Create a vehicle */
         post: operations["deliveryVehicleCreate"];
         delete?: never;
         options?: never;
@@ -290,12 +236,18 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get one delivery vehicle */
+        /**
+         * Get a vehicle
+         * @description Any repository error, not only a missing row, answers 404.
+         */
         get: operations["deliveryVehicleGet"];
-        /** Update a delivery vehicle */
+        /**
+         * Update a vehicle
+         * @description A missing vehicle answers 500, not 404.
+         */
         put: operations["deliveryVehicleUpdate"];
         post?: never;
-        /** Delete a delivery vehicle */
+        /** Delete a vehicle */
         delete: operations["deliveryVehicleDelete"];
         options?: never;
         head?: never;
@@ -311,8 +263,186 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Upload a vehicle photo */
-        post: operations["deliveryVehiclePhoto"];
+        /**
+         * Upload a vehicle photo
+         * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         */
+        post: operations["deliveryVehiclePhotoUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/drivers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List drivers */
+        get: operations["deliveryDriverList"];
+        put?: never;
+        /** Create a driver */
+        post: operations["deliveryDriverCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/drivers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a driver
+         * @description Any repository error, not only a missing row, answers 404.
+         */
+        get: operations["deliveryDriverGet"];
+        /**
+         * Update a driver
+         * @description A missing driver answers 500, not 404.
+         */
+        put: operations["deliveryDriverUpdate"];
+        post?: never;
+        /** Delete a driver */
+        delete: operations["deliveryDriverDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/drivers/{id}/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload a driver photo
+         * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         */
+        post: operations["deliveryDriverPhotoUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List routes */
+        get: operations["deliveryRouteList"];
+        put?: never;
+        /**
+         * Create a route
+         * @description An unparseable scheduled_date answers 500.
+         */
+        post: operations["deliveryRouteCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch a route
+         * @description Only a DRAFT or SCHEDULED route can be dispatched, otherwise 500. The route becomes IN_TRANSIT.
+         */
+        post: operations["deliveryRouteDispatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reorder the stops of a route */
+        post: operations["deliveryRouteReorder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/optimize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Optimize the stop order of a route */
+        post: operations["deliveryRouteOptimize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a route
+         * @description Every failure answers 400: a route with no deliveries, a delivery not yet DELIVERED, FAILED or PARTIAL, or a repository fault.
+         */
+        post: operations["deliveryRouteComplete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the deliveries of a route */
+        get: operations["deliveryRouteDeliveryList"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -328,7 +458,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create a delivery */
+        /**
+         * Assign an order to a route
+         * @description A missing route, an order blocked by unresolved index exposure or any other failure answers 500.
+         */
         post: operations["deliveryCreate"];
         delete?: never;
         options?: never;
@@ -343,7 +476,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get one delivery */
+        /**
+         * Get a delivery
+         * @description A missing delivery answers 500, not 404.
+         */
         get: operations["deliveryGet"];
         put?: never;
         post?: never;
@@ -361,8 +497,11 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Update delivery status */
-        put: operations["deliveryUpdateStatus"];
+        /**
+         * Complete a delivery
+         * @description Only DELIVERED, FAILED and PARTIAL are accepted. DELIVERED and PARTIAL need pod_proof_url and pod_signed_by. Any other value or a missing proof answers 500.
+         */
+        put: operations["deliveryStatusUpdate"];
         post?: never;
         delete?: never;
         options?: never;
@@ -379,7 +518,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Adjust delivery quantity */
+        /** Adjust delivered quantities on site */
         post: operations["deliveryAdjustQty"];
         delete?: never;
         options?: never;
@@ -396,8 +535,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Upload proof of delivery photo */
-        post: operations["deliveryPodPhoto"];
+        /**
+         * Attach a proof of delivery photo
+         * @description A missing photo, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         */
+        post: operations["deliveryPodPhotoUpload"];
         delete?: never;
         options?: never;
         head?: never;
@@ -411,113 +553,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get proof of delivery photos */
-        get: operations["deliveryPodPhotos"];
+        /** List the proof of delivery photos */
+        get: operations["deliveryPodPhotoList"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/routes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List delivery routes */
-        get: operations["deliveryRouteList"];
-        put?: never;
-        /** Create a delivery route */
-        post: operations["deliveryRouteCreate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/routes/{id}/deliveries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List deliveries for a route */
-        get: operations["deliveryRouteDeliveries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/routes/{id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Mark route as complete */
-        post: operations["deliveryRouteComplete"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/routes/{id}/dispatch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Dispatch route */
-        post: operations["deliveryRouteDispatch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/routes/{id}/optimize": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Optimize route */
-        post: operations["deliveryRouteOptimize"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/routes/{id}/reorder": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reorder route stops */
-        post: operations["deliveryRouteReorder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2297,11 +2336,20 @@ export interface components {
         AccountSummary: {
             /** Format: uuid */
             customer_id: string;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             balance_due: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             credit_limit: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             available_credit: number;
         };
         CustomerTransaction: {
@@ -2311,9 +2359,15 @@ export interface components {
             customer_id: string;
             /** @enum {string} */
             type: "INVOICE" | "PAYMENT" | "ADJUSTMENT" | "REFUND";
-            /** @description Cents. Negative for debits. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             amount: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents.
+             */
             balance_after: number;
             /** Format: uuid */
             reference_id: string | null;
@@ -2461,193 +2515,283 @@ export interface components {
             /** Format: date-time */
             activity_date?: string;
         };
-        DeliveryDriver: {
-            /** Format: uuid */
-            id: string;
-            name: string;
-            phone_number: string;
-            license_number: string;
-            email?: string | null;
-            cdl_class?: string | null;
-            /** Format: date-time */
-            cdl_expiry?: string | null;
-            photo_url?: string | null;
-            /** @enum {string} */
-            status: "ACTIVE" | "INACTIVE";
-            /** Format: date-time */
-            hire_date?: string | null;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        DeliveryDriverCreate: {
-            name: string;
-            phone_number: string;
-            license_number: string;
-            email?: string;
-            cdl_class?: string;
-            /** Format: date-time */
-            cdl_expiry?: string;
-            /** Format: date-time */
-            hire_date?: string;
-        };
-        DeliveryDriverUpdate: {
-            name?: string;
-            phone_number?: string;
-            license_number?: string;
-            email?: string;
-            cdl_class?: string;
-            /** Format: date-time */
-            cdl_expiry?: string;
-            /** @enum {string} */
-            status?: "ACTIVE" | "INACTIVE";
-            /** Format: date-time */
-            hire_date?: string;
-        };
+        /** @description Transcribed from delivery.Vehicle. The expiry and service dates are stored as dates and serialized as date-times. */
         DeliveryVehicle: {
             /** Format: uuid */
             id: string;
             name: string;
-            /** @enum {string} */
-            vehicle_type: "BOX_TRUCK" | "FLATBED" | "PICKUP" | "VAN" | "CRANE";
+            vehicle_type: components["schemas"]["DeliveryVehicleType"];
             license_plate: string;
-            make?: string | null;
-            model?: string | null;
-            year?: number | null;
-            vin?: string | null;
-            capacity_weight_lbs: number;
-            /** @description Float miles. */
-            odometer_miles?: number | null;
+            capacity_weight_lbs: number | null;
+            vin: string | null;
+            year: number | null;
+            make: string | null;
+            model: string | null;
             /** Format: date-time */
-            insurance_expiry?: string | null;
+            insurance_expiry: string | null;
             /** Format: date-time */
-            next_service_date?: string | null;
-            photo_url?: string | null;
-            notes?: string | null;
+            next_service_date: string | null;
+            odometer_miles: number | null;
+            notes: string | null;
+            photo_url: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /** @enum {string} */
+        DeliveryVehicleType: "BOX_TRUCK" | "FLATBED" | "PICKUP" | "VAN" | "CRANE";
+        /** @description CreateVehicleRequest. Nothing is validated; an unparseable date is silently dropped. */
         DeliveryVehicleCreate: {
-            name: string;
-            /** @enum {string} */
-            vehicle_type: "BOX_TRUCK" | "FLATBED" | "PICKUP" | "VAN" | "CRANE";
-            license_plate: string;
-            make?: string;
-            model?: string;
-            year?: number;
-            vin?: string;
-            capacity_weight_lbs: number;
-            /** Format: date-time */
-            insurance_expiry?: string;
-            /** Format: date-time */
-            next_service_date?: string;
-            notes?: string;
+            name?: string;
+            vehicle_type?: components["schemas"]["DeliveryVehicleType"];
+            license_plate?: string;
+            capacity_weight_lbs?: number | null;
+            vin?: string | null;
+            year?: number | null;
+            make?: string | null;
+            model?: string | null;
+            /** Format: date */
+            insurance_expiry?: string | null;
+            /** Format: date */
+            next_service_date?: string | null;
+            odometer_miles?: number | null;
+            notes?: string | null;
         };
+        /** @description UpdateVehicleRequest. The handler overwrites every field: an omitted optional date or value clears it. */
         DeliveryVehicleUpdate: {
             name?: string;
-            /** @enum {string} */
-            vehicle_type?: "BOX_TRUCK" | "FLATBED" | "PICKUP" | "VAN" | "CRANE";
+            vehicle_type?: components["schemas"]["DeliveryVehicleType"];
             license_plate?: string;
-            make?: string;
-            model?: string;
-            year?: number;
-            vin?: string;
-            capacity_weight_lbs?: number;
-            odometer_miles?: number;
-            /** Format: date-time */
-            insurance_expiry?: string;
-            /** Format: date-time */
-            next_service_date?: string;
-            notes?: string;
+            capacity_weight_lbs?: number | null;
+            vin?: string | null;
+            year?: number | null;
+            make?: string | null;
+            model?: string | null;
+            /** Format: date */
+            insurance_expiry?: string | null;
+            /** Format: date */
+            next_service_date?: string | null;
+            odometer_miles?: number | null;
+            notes?: string | null;
         };
+        DeliveryPhotoUpload: {
+            /**
+             * Format: binary
+             * @description jpg, jpeg, png or webp, at most 10 MB.
+             */
+            photo: string;
+        };
+        DeliveryPhotoUrl: {
+            photo_url: string;
+        };
+        /** @enum {string} */
+        DeliveryDriverStatus: "ACTIVE" | "INACTIVE" | "ON_LEAVE";
+        /** @description Transcribed from delivery.Driver. */
+        DeliveryDriver: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            license_number: string | null;
+            status: components["schemas"]["DeliveryDriverStatus"];
+            phone_number: string | null;
+            cdl_class: string | null;
+            /** Format: date-time */
+            cdl_expiry: string | null;
+            /** Format: date-time */
+            hire_date: string | null;
+            email: string | null;
+            photo_url: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description CreateDriverRequest. Nothing is validated. */
+        DeliveryDriverCreate: {
+            name?: string;
+            license_number?: string | null;
+            phone_number?: string | null;
+            cdl_class?: string | null;
+            /** Format: date */
+            cdl_expiry?: string | null;
+            /** Format: date */
+            hire_date?: string | null;
+            email?: string | null;
+        };
+        /** @description UpdateDriverRequest. */
+        DeliveryDriverUpdate: {
+            name?: string;
+            license_number?: string | null;
+            phone_number?: string | null;
+            cdl_class?: string | null;
+            /** Format: date */
+            cdl_expiry?: string | null;
+            /** Format: date */
+            hire_date?: string | null;
+            email?: string | null;
+            status?: components["schemas"]["DeliveryDriverStatus"];
+        };
+        /** @enum {string} */
+        DeliveryRouteStatus: "DRAFT" | "SCHEDULED" | "IN_TRANSIT" | "COMPLETED" | "CANCELLED";
+        /** @description Transcribed from delivery.Route. The two totals and the joined vehicle and driver names are omitted when empty. */
+        DeliveryRoute: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vehicle_id: string;
+            /** Format: uuid */
+            driver_id: string;
+            /** Format: date-time */
+            scheduled_date: string;
+            status: components["schemas"]["DeliveryRouteStatus"];
+            notes: string | null;
+            total_duration_mins?: number;
+            total_distance_miles?: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            vehicle_name?: string;
+            driver_name?: string;
+            stop_count: number;
+        };
+        DeliveryRouteCreate: {
+            /** Format: uuid */
+            vehicle_id: string;
+            /** Format: uuid */
+            driver_id: string;
+            /** Format: date */
+            scheduled_date: string;
+            notes?: string | null;
+        };
+        DeliveryRouteReorder: {
+            ordered_delivery_ids: string[];
+        };
+        /** @enum {string} */
+        DeliveryStatus: "PENDING" | "OUT_FOR_DELIVERY" | "DELIVERED" | "FAILED" | "PARTIAL";
+        /** @description Transcribed from delivery.PODPhoto. */
+        DeliveryPodPhoto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            delivery_id: string;
+            photo_url: string;
+            /** @description signature, site or damage; site when the form leaves it empty. */
+            photo_type: string;
+            /** Format: date-time */
+            uploaded_at: string;
+        };
+        /** @description Transcribed from delivery.Delivery. route_id is null for a stop not yet on a route. The signature, the ETA, the scheduled window, the joined order fields and pod_photos are omitted when empty. */
         Delivery: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
+            route_id: string | null;
+            /** Format: uuid */
             order_id: string;
-            /** Format: uuid */
-            route_id?: string | null;
-            /** Format: uuid */
-            driver_id?: string | null;
-            /** Format: uuid */
-            vehicle_id?: string | null;
-            /** @enum {string} */
-            status: "PENDING" | "LOADING" | "IN_TRANSIT" | "DELIVERED" | "FAILED";
+            stop_sequence: number;
+            status: components["schemas"]["DeliveryStatus"];
+            pod_proof_url: string | null;
+            pod_signed_by: string | null;
             /** Format: date-time */
-            scheduled_date?: string | null;
+            pod_timestamp: string | null;
+            signature_data_url?: string;
+            delivery_instructions: string | null;
+            latitude: number | null;
+            longitude: number | null;
             /** Format: date-time */
-            delivered_at?: string | null;
-            pod_photo_urls?: string[] | null;
-            notes?: string | null;
+            estimated_arrival?: string;
+            /** Format: date-time */
+            scheduled_start?: string;
+            /** Format: date-time */
+            scheduled_end?: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            customer_name?: string;
+            order_number?: string;
+            address?: string;
+            pod_photos?: components["schemas"]["DeliveryPodPhoto"][];
         };
+        /** @description AssignOrderRequest. */
         DeliveryCreate: {
             /** Format: uuid */
+            route_id: string;
+            /** Format: uuid */
             order_id: string;
-            /** Format: uuid */
-            route_id?: string;
-            /** Format: uuid */
-            driver_id?: string;
-            /** Format: uuid */
-            vehicle_id?: string;
-            /** Format: date-time */
-            scheduled_date?: string;
-            notes?: string;
+            stop_sequence?: number;
+            delivery_instructions?: string | null;
         };
+        /** @description Soft warning only; the assignment still happens. */
+        DeliveryCapacityWarning: {
+            vehicle_capacity_lbs: number;
+            current_load_lbs: number;
+            order_weight_lbs: number;
+            total_after_lbs: number;
+        };
+        DeliveryAssignResult: {
+            delivery: components["schemas"]["Delivery"];
+            capacity_warning?: components["schemas"]["DeliveryCapacityWarning"];
+        };
+        /** @description UpdateDeliveryStatusRequest. */
         DeliveryStatusUpdate: {
-            /** @enum {string} */
-            status: "PENDING" | "LOADING" | "IN_TRANSIT" | "DELIVERED" | "FAILED";
+            status: components["schemas"]["DeliveryStatus"];
+            pod_proof_url?: string | null;
+            pod_signed_by?: string | null;
+            signature_data_url?: string | null;
+        };
+        /** @description DeliveryLineAdjustment. */
+        DeliveryAdjustLine: {
+            /** Format: uuid */
+            product_id: string;
+            original_qty: number;
+            adjusted_qty: number;
+            /** @description SHORT_SHIP, DAMAGED, REFUSED, WRONG_PRODUCT or OTHER; not validated by the handler. */
+            reason_code: string;
             notes?: string;
         };
+        /** @description QtyAdjustmentRequest; the delivery id comes from the path. */
         DeliveryAdjustQty: {
             /** Format: uuid */
-            line_id: string;
-            quantity: number;
-            reason?: string;
+            adjusted_by: string;
+            adjustments: components["schemas"]["DeliveryAdjustLine"][];
         };
-        DeliveryPhotoRequest: {
-            photo_url: string;
-        };
-        DeliveryRoute: {
-            /** Format: uuid */
-            id: string;
-            name?: string | null;
-            /** Format: uuid */
-            driver_id?: string | null;
-            /** Format: uuid */
-            vehicle_id?: string | null;
+        DeliveryAdjustAck: {
             /** @enum {string} */
-            status: "PLANNED" | "LOADING" | "DISPATCHED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
-            /** Format: date-time */
-            scheduled_date?: string | null;
-            /** Format: date-time */
-            started_at?: string | null;
-            /** Format: date-time */
-            completed_at?: string | null;
-            notes?: string | null;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
+            status: "adjusted";
         };
-        DeliveryRouteCreate: {
-            name?: string;
-            /** Format: uuid */
-            driver_id?: string;
-            /** Format: uuid */
-            vehicle_id?: string;
-            /** Format: date-time */
-            scheduled_date: string;
-            notes?: string;
+        DeliveryStatusAck: {
+            /** @enum {string} */
+            status: "completed";
         };
-        DeliveryRouteReorder: {
-            delivery_ids: string[];
+        DeliveryPodPhotoUpload: {
+            /**
+             * Format: binary
+             * @description jpg, jpeg, png or webp, at most 10 MB.
+             */
+            photo: string;
+            /** @description signature, site or damage; defaults to site. */
+            photo_type?: string;
+        };
+        /** @description RouteLeg. */
+        DeliveryRouteLeg: {
+            stop_index: number;
+            duration_mins: number;
+            distance_miles: number;
+            /**
+             * Format: date-time
+             * @description ISO 8601 timestamp.
+             */
+            eta: string;
+        };
+        /** @description RouteOptimizationResult. optimized_order holds indices into the geocoded stops, not delivery ids. */
+        DeliveryRouteOptimizationResult: {
+            optimized_order: number[] | null;
+            legs: components["schemas"]["DeliveryRouteLeg"][] | null;
+            total_duration_mins: number;
+            total_distance_miles: number;
         };
         Deposit: {
             /** Format: uuid */
@@ -4126,18 +4270,12 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
     accountTransactions: {
         parameters: {
-            query?: {
-                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
-                limit?: components["parameters"]["Limit"];
-                /** @description Page offset. Unparseable or negative values are silently ignored and the default applies. */
-                offset?: components["parameters"]["Offset"];
-            };
+            query?: never;
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -4149,19 +4287,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of transactions. */
+            /** @description Every transaction of the customer, newest first. The body is null when there are none. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CustomerTransaction"][];
+                    "application/json": components["schemas"]["CustomerTransaction"][] | null;
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -4692,193 +4829,6 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryDriverList: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Array of drivers. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryDriver"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryDriverCreate: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeliveryDriverCreate"];
-            };
-        };
-        responses: {
-            /** @description The created driver. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryDriver"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryDriverGet: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The driver. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryDriver"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryDriverUpdate: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeliveryDriverUpdate"];
-            };
-        };
-        responses: {
-            /** @description The updated driver. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryDriver"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryDriverDelete: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Driver deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryDriverPhoto: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeliveryPhotoRequest"];
-            };
-        };
-        responses: {
-            /** @description Photo uploaded. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryDriver"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
     deliveryVehicleList: {
         parameters: {
             query?: never;
@@ -4891,13 +4841,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of vehicles. */
+            /** @description All vehicles. The body is null when there are none. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryVehicle"][];
+                    "application/json": components["schemas"]["DeliveryVehicle"][] | null;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4965,7 +4915,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
         };
     };
     deliveryVehicleUpdate: {
@@ -5000,7 +4949,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -5028,11 +4976,104 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryVehiclePhoto: {
+    deliveryVehiclePhotoUpload: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["DeliveryPhotoUpload"];
+            };
+        };
+        responses: {
+            /** @description The stored photo URL. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryPhotoUrl"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All drivers. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDriver"][] | null;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryDriverCreate"];
+            };
+        };
+        responses: {
+            /** @description The created driver, status ACTIVE. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDriver"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverGet: {
         parameters: {
             query?: never;
             header?: {
@@ -5044,25 +5085,334 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeliveryPhotoRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Photo uploaded. */
+            /** @description The driver. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryVehicle"];
+                    "application/json": components["schemas"]["DeliveryDriver"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    deliveryDriverUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryDriverUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated driver. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDriver"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverDelete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Driver deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryDriverPhotoUpload: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["DeliveryPhotoUpload"];
+            };
+        };
+        responses: {
+            /** @description The stored photo URL. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryPhotoUrl"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteList: {
+        parameters: {
+            query?: {
+                /** @description Filter to one scheduled date. An unparseable date answers 500. */
+                date?: string;
+                /** @description Filter to one driver. */
+                driver_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Routes. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryRoute"][] | null;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryRouteCreate"];
+            };
+        };
+        responses: {
+            /** @description The created route, status DRAFT. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryRoute"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteDispatch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dispatched; the body is empty. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteReorder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryRouteReorder"];
+            };
+        };
+        responses: {
+            /** @description Reordered; the body is empty. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteOptimize: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The optimization result. A route with no deliveries or no geocoded stops answers an empty result: null order and legs and zero totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryRouteOptimizationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deliveryRouteComplete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The route is completed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryStatusAck"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    deliveryRouteDeliveryList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deliveries in stop order. The body is null when there are none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"][] | null;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -5084,13 +5434,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created delivery. */
+            /** @description The created delivery, with a capacity warning when the vehicle would be over its weight capacity. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Delivery"];
+                    "application/json": components["schemas"]["DeliveryAssignResult"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -5125,11 +5475,10 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryUpdateStatus: {
+    deliveryStatusUpdate: {
         parameters: {
             query?: never;
             header?: {
@@ -5149,19 +5498,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated delivery. */
+            /** @description Updated; the body is empty. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["Delivery"];
-                };
+                content?: never;
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -5185,113 +5531,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated delivery. */
+            /** @description Adjusted. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Delivery"];
+                    "application/json": components["schemas"]["DeliveryAdjustAck"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryPodPhoto: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeliveryPhotoRequest"];
-            };
-        };
-        responses: {
-            /** @description Photo uploaded. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Delivery"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryPodPhotos: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Array of photo URLs. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string[];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryRouteList: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Array of routes. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryRoute"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryRouteCreate: {
+    deliveryPodPhotoUpload: {
         parameters: {
             query?: never;
             header?: {
@@ -5300,22 +5555,24 @@ export interface operations {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
-            path?: never;
+            path: {
+                id: string;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DeliveryRouteCreate"];
+                "multipart/form-data": components["schemas"]["DeliveryPodPhotoUpload"];
             };
         };
         responses: {
-            /** @description The created route. */
+            /** @description The stored photo record. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryRoute"];
+                    "application/json": components["schemas"]["DeliveryPodPhoto"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -5324,7 +5581,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryRouteDeliveries: {
+    deliveryPodPhotoList: {
         parameters: {
             query?: never;
             header?: {
@@ -5338,151 +5595,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of deliveries on the route. */
+            /** @description Photo records; an empty array when none. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Delivery"][];
+                    "application/json": components["schemas"]["DeliveryPodPhoto"][];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryRouteComplete: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The completed route. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryRoute"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryRouteDispatch: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The dispatched route. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryRoute"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryRouteOptimize: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The optimized route. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryRoute"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryRouteReorder: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeliveryRouteReorder"];
-            };
-        };
-        responses: {
-            /** @description The reordered route. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryRoute"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
