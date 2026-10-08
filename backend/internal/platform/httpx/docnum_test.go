@@ -128,3 +128,20 @@ func TestNextDocumentNumberValidatesItsArguments(t *testing.T) {
 		}
 	}
 }
+
+// RULE: valid constants with no database seam is a server bug that must
+// surface, not a panic.
+func TestNextDocumentNumberNilQuerier(t *testing.T) {
+	if _, err := NextDocumentNumber(context.Background(), nil, "quote_number_seq", "Q", 6); err == nil {
+		t.Error("nil querier succeeded, want a refusal")
+	}
+}
+
+// RULE: a sequence the migration never created is an error naming the
+// sequence, not a zero-prefixed zero.
+func TestNextDocumentNumberMissingSequence(t *testing.T) {
+	db := testutil.RequireDB(t)
+	if _, err := NextDocumentNumber(context.Background(), db.Pool, "docnum_missing_seq", "Q", 6); err == nil {
+		t.Fatal("missing sequence succeeded, want an error")
+	}
+}

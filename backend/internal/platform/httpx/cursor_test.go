@@ -116,6 +116,9 @@ func TestMintCursorValidatesItsInputs(t *testing.T) {
 	if _, err := MintCursor("", "a"); err == nil {
 		t.Error("empty scope minted")
 	}
+	if _, err := MintCursor("bad\nscope", "a"); err == nil {
+		t.Error("scope with a control character minted")
+	}
 	if _, err := MintCursor(testScope); err == nil {
 		t.Error("empty keyset minted")
 	}
@@ -231,4 +234,13 @@ func TestParseCursorPageDuplicateCursor(t *testing.T) {
 	raw, _ := MintCursor(testScope, "a")
 	_, err := ParseCursorPage(pageRequest(t, "cursor="+raw+"&cursor="+raw), testScope)
 	cursorErr(t, err)
+}
+
+// RULE: a repeated limit parameter is ambiguous and refused.
+func TestParseCursorPageDuplicateLimit(t *testing.T) {
+	_, err := ParseCursorPage(pageRequest(t, "limit=10&limit=20"), testScope)
+	e := cursorErr(t, err)
+	if len(e.Details) != 1 || e.Details[0].Field != "limit" {
+		t.Errorf("details = %+v, want the limit field named", e.Details)
+	}
 }

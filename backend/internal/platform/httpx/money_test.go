@@ -168,6 +168,20 @@ func TestMoneyRoundTrip(t *testing.T) {
 	}
 }
 
+// RULE: the parse errors state their class, so a bad column value says why
+// it was refused rather than returning a bare failure.
+func TestParseErrorMessages(t *testing.T) {
+	if _, err := ParseCents("NaN"); err.Error() != "not a plain decimal number" {
+		t.Errorf("NaN error = %q", err.Error())
+	}
+	if _, err := ParseCents("12.345"); err.Error() != "carries precision beyond the fixed scale" {
+		t.Errorf("sub-cent error = %q", err.Error())
+	}
+	if _, err := ParseCents(strings.Repeat("9", 25)); err.Error() != "beyond the range of a 64-bit integer at this scale" {
+		t.Errorf("overflow error = %q", err.Error())
+	}
+}
+
 // RULE: no float on the wire. Cents and Price serialize as JSON integers,
 // and a JSON number with a fraction does not decode into one.
 func TestMoneyOnTheWireIsNeverFloat(t *testing.T) {
