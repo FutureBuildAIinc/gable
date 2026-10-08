@@ -21,6 +21,10 @@ import (
 // ErrNotFound is a write's answer for a row that is not there.
 var ErrNotFound = fmt.Errorf("not found")
 
+// ErrStaleRevision is a write's answer when the row moved past the revision
+// the caller built on (ADR 0001 section 11).
+var ErrStaleRevision = fmt.Errorf("stale revision")
+
 // CategoryRepository defines database operations for category pricing.
 type CategoryRepository interface {
 	// Categories
@@ -31,7 +35,7 @@ type CategoryRepository interface {
 
 	// Category Pricing Rules
 	CreateCategoryRule(ctx context.Context, r *CategoryPricingRule) error
-	UpdateCategoryRule(ctx context.Context, r *CategoryPricingRule) error
+	UpdateCategoryRule(ctx context.Context, r *CategoryPricingRule, revision int64) error
 	DeleteCategoryRule(ctx context.Context, id uuid.UUID) error
 	GetCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error)
 	ListCategoryRules(ctx context.Context, filter CategoryRuleFilter) ([]CategoryPricingRule, error)
@@ -57,7 +61,8 @@ type CategoryRepository interface {
 	BulkDeleteRules(ctx context.Context, ids []uuid.UUID) error
 
 	// Pagination
-	ListCategoryRulesPaginated(ctx context.Context, filter CategoryRuleFilter, limit, offset int) ([]CategoryPricingRule, int, error)
+	ListCategoryRulesPage(ctx context.Context, filter CategoryRuleFilter, after *time.Time, afterID *uuid.UUID, limit int) ([]CategoryPricingRule, error)
+	CountCategoryRules(ctx context.Context, filter CategoryRuleFilter) (int64, error)
 }
 
 // PostgresCategoryRepository implements CategoryRepository using pgx.
@@ -192,7 +197,7 @@ func (r *PostgresCategoryRepository) CreateCategoryRule(ctx context.Context, rul
 	return nil
 }
 
-func (r *PostgresCategoryRepository) UpdateCategoryRule(ctx context.Context, rule *CategoryPricingRule) error {
+func (r *PostgresCategoryRepository) UpdateCategoryRule(ctx context.Context, rule *CategoryPricingRule, revision int64) error {
 	rule.UpdatedAt = httpx.TimestampOf(time.Now())
 
 	query := `
@@ -207,16 +212,26 @@ func (r *PostgresCategoryRepository) UpdateCategoryRule(ctx context.Context, rul
 		return err
 	}
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		rule.ID, args[5], args[6], args[7], args[8], args[9], args[10], args[11], rule.UpdatedAt.Time, rule.Revision,
+		rule.ID, args[5], args[6], args[7], args[8], args[9], args[10], args[11], rule.UpdatedAt.Time, revision,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update category rule: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return staleOrMissingRule(ctx, r, rule.ID)
 	}
-	rule.Revision++
+	rule.Revision = revision + 1
 	return nil
+}
+
+// staleOrMissingRule tells a missing rule from a stale revision for the write
+// the caller just attempted.
+func staleOrMissingRule(ctx context.Context, r *PostgresCategoryRepository, id uuid.UUID) error {
+	var exists bool
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM category_pricing_rules WHERE id = $1)`, id).Scan(&exists); err == nil && exists {
+		return ErrStaleRevision
+	}
+	return ErrNotFound
 }
 
 func (r *PostgresCategoryRepository) DeleteCategoryRule(ctx context.Context, id uuid.UUID) error {
@@ -725,48 +740,44 @@ func (r *PostgresCategoryRepository) BulkDeleteRules(ctx context.Context, ids []
 	return nil
 }
 
-// --- Paginated List ---
+// --- Keyset Page ---
 
-func (r *PostgresCategoryRepository) ListCategoryRulesPaginated(ctx context.Context, filter CategoryRuleFilter, limit, offset int) ([]CategoryPricingRule, int, error) {
-	baseWhere := " WHERE 1=1"
+// categoryRuleWhere builds the filters' shared predicate and arguments.
+func categoryRuleWhere(filter CategoryRuleFilter) (string, []any) {
+	where := " WHERE 1=1"
 	var args []any
-	argIdx := 1
-
 	if filter.TargetType != nil {
-		baseWhere += fmt.Sprintf(" AND cpr.target_type = $%d", argIdx)
+		where += fmt.Sprintf(" AND cpr.target_type = $%d", len(args)+1)
 		args = append(args, *filter.TargetType)
-		argIdx++
 	}
 	if filter.Tier != "" {
-		baseWhere += fmt.Sprintf(" AND cpr.tier = $%d", argIdx)
+		where += fmt.Sprintf(" AND cpr.tier = $%d", len(args)+1)
 		args = append(args, filter.Tier)
-		argIdx++
 	}
 	if filter.CustomerID != nil {
-		baseWhere += fmt.Sprintf(" AND cpr.customer_id = $%d", argIdx)
+		where += fmt.Sprintf(" AND cpr.customer_id = $%d", len(args)+1)
 		args = append(args, *filter.CustomerID)
-		argIdx++
 	}
 	if filter.CategoryID != nil {
-		baseWhere += fmt.Sprintf(" AND cpr.category_id = $%d", argIdx)
+		where += fmt.Sprintf(" AND cpr.category_id = $%d", len(args)+1)
 		args = append(args, *filter.CategoryID)
-		argIdx++
 	}
 	if filter.IsActive != nil {
-		baseWhere += fmt.Sprintf(" AND cpr.is_active = $%d", argIdx)
+		where += fmt.Sprintf(" AND cpr.is_active = $%d", len(args)+1)
 		args = append(args, *filter.IsActive)
-		argIdx++
 	}
+	return where, args
+}
 
-	// Count query
-	countQuery := `SELECT COUNT(*) FROM category_pricing_rules cpr` + baseWhere
-	var total int
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count category rules: %w", err)
+// ListCategoryRulesPage is the category rules list's keyset page:
+// `created_at DESC, id DESC`, the ordering migration 093 indexed.
+func (r *PostgresCategoryRepository) ListCategoryRulesPage(ctx context.Context, filter CategoryRuleFilter, after *time.Time, afterID *uuid.UUID, limit int) ([]CategoryPricingRule, error) {
+	where, args := categoryRuleWhere(filter)
+	if after != nil {
+		where += fmt.Sprintf(" AND (cpr.created_at, cpr.id) < ($%d, $%d)", len(args)+1, len(args)+2)
+		args = append(args, *after, *afterID)
 	}
-
-	// Data query
-	dataQuery := `
+	query := `
 		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
@@ -774,20 +785,24 @@ func (r *PostgresCategoryRepository) ListCategoryRulesPaginated(ctx context.Cont
 		       pc.name, pc.path::text
 		FROM category_pricing_rules cpr
 		JOIN product_categories pc ON pc.id = cpr.category_id` +
-		baseWhere +
-		" ORDER BY cpr.target_type ASC, cpr.tier ASC, pc.path ASC, cpr.priority DESC" +
-		fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
-
-	dataArgs := append(args, limit, offset)
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, dataQuery, dataArgs...)
+		where +
+		" ORDER BY cpr.created_at DESC, cpr.id DESC" +
+		fmt.Sprintf(" LIMIT $%d", len(args)+1)
+	args = append(args, limit)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list paginated category rules: %w", err)
+		return nil, fmt.Errorf("list category rules: %w", err)
 	}
-	defer rows.Close()
+	return scanCategoryRules(rows)
+}
 
-	rules, err := scanCategoryRules(rows)
-	if err != nil {
-		return nil, 0, err
+// CountCategoryRules is the include=total count under the same filters.
+func (r *PostgresCategoryRepository) CountCategoryRules(ctx context.Context, filter CategoryRuleFilter) (int64, error) {
+	where, args := categoryRuleWhere(filter)
+	query := `SELECT COUNT(*) FROM category_pricing_rules cpr` + where
+	var total int64
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, query, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count category rules: %w", err)
 	}
-	return rules, total, nil
+	return total, nil
 }

@@ -5,6 +5,7 @@ package pricing
 
 import (
 	"context"
+	"time"
 	"math"
 	"math/big"
 	"testing"
@@ -52,7 +53,7 @@ func (m *mockCategoryRepo) CreateCategoryRule(_ context.Context, r *CategoryPric
 	return nil
 }
 
-func (m *mockCategoryRepo) UpdateCategoryRule(_ context.Context, _ *CategoryPricingRule) error {
+func (m *mockCategoryRepo) UpdateCategoryRule(_ context.Context, _ *CategoryPricingRule, _ int64) error {
 	return nil
 }
 
@@ -120,16 +121,14 @@ func (m *mockCategoryRepo) BulkDeleteRules(_ context.Context, ids []uuid.UUID) e
 	return nil
 }
 
-func (m *mockCategoryRepo) ListCategoryRulesPaginated(_ context.Context, _ CategoryRuleFilter, limit, offset int) ([]CategoryPricingRule, int, error) {
-	total := len(m.rules)
-	if offset >= total {
-		return nil, total, nil
+func (m *mockCategoryRepo) ListCategoryRulesPage(_ context.Context, _ CategoryRuleFilter, _ *time.Time, _ *uuid.UUID, limit int) ([]CategoryPricingRule, error) {
+	if limit < len(m.rules) {
+		return m.rules[:limit], nil
 	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-	return m.rules[offset:end], total, nil
+	return m.rules, nil
+}
+func (m *mockCategoryRepo) CountCategoryRules(_ context.Context, _ CategoryRuleFilter) (int64, error) {
+	return int64(len(m.rules)), nil
 }
 
 func (m *mockCategoryRepo) ResolveAccountExact(_ context.Context, customerID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error) {

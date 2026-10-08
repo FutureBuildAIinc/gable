@@ -317,7 +317,7 @@ func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) 
 	`
 
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		rule.ID, rule.Name, rule.RuleType, rule.ProductID, rule.CustomerID, rule.JobID, rule.Category,
+		rule.ID, rule.Name, rule.RuleType, rule.ProductID, rule.CustomerID, rule.JobID, nilIfEmptyCategory(rule.Category),
 		priceString(rule.FixedPrice), quantityString(rule.DiscountPct), quantityString(rule.MarkupPct),
 		rule.MinQuantity.DecimalString(), quantityString(rule.MaxQuantity), quantityString(rule.MarginFloorPct),
 		timeOf(rule.StartsAt), timeOf(rule.ExpiresAt), rule.IsActive, rule.Priority, rule.Revision, rule.CreatedAt.Time, rule.UpdatedAt.Time,
@@ -326,6 +326,15 @@ func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) 
 		return fmt.Errorf("failed to create pricing rule: %w", err)
 	}
 	return nil
+}
+
+// nilIfEmptyCategory writes the column's NULL for an unscoped rule, so the
+// scope key's NULL semantics keep one row per scope.
+func nilIfEmptyCategory(c string) any {
+	if c == "" {
+		return nil
+	}
+	return c
 }
 
 func priceString(p *httpx.Price) any {

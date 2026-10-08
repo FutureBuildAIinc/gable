@@ -5,10 +5,13 @@ package pricing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
@@ -172,14 +175,56 @@ func (s *CategoryPricingService) CreateCategoryRule(ctx context.Context, r *Cate
 	return nil
 }
 
-// UpdateCategoryRule updates an existing category pricing rule and logs an audit entry.
-func (s *CategoryPricingService) UpdateCategoryRule(ctx context.Context, r *CategoryPricingRule) error {
+// UpdateCategoryRule updates an existing category pricing rule at the given
+// revision and logs an audit entry. A missing row or a stale revision is the
+// contract's 404 or 409.
+func (s *CategoryPricingService) UpdateCategoryRule(ctx context.Context, r *CategoryPricingRule, revision int64) error {
 	old, _ := s.catRepo.GetCategoryRule(ctx, r.ID)
-	if err := s.catRepo.UpdateCategoryRule(ctx, r); err != nil {
-		return err
+	if err := s.catRepo.UpdateCategoryRule(ctx, r, revision); err != nil {
+		return resolveRuleWrite(err)
 	}
+	if old != nil {
+		old.Revision = revision
+	}
+	r.Revision = revision + 1
 	s.logAudit(ctx, r.ID, "UPDATE", old, r)
 	return nil
+}
+
+// resolveRuleWrite maps a rule write's refusals to the boundary errors.
+func resolveRuleWrite(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNotFound):
+		return httpx.NotFound("no such category rule")
+	case errors.Is(err, ErrStaleRevision):
+		return httpx.StaleRevision("the rule was changed after this revision was read; reload and retry")
+	default:
+		return err
+	}
+}
+
+// ListCategoryRulesPage is the category rules list's keyset page:
+// `created_at DESC, id DESC` under the filters, limit+1 rows read so the
+// handler knows whether another page exists.
+func (s *CategoryPricingService) ListCategoryRulesPage(ctx context.Context, filter CategoryRuleFilter, after *time.Time, afterID *uuid.UUID, limit int, wantTotal bool) ([]CategoryPricingRule, bool, int64, error) {
+	rules, err := s.catRepo.ListCategoryRulesPage(ctx, filter, after, afterID, limit+1)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	more := len(rules) > limit
+	if more {
+		rules = rules[:limit]
+	}
+	var total int64
+	if wantTotal {
+		total, err = s.catRepo.CountCategoryRules(ctx, filter)
+		if err != nil {
+			return nil, false, 0, err
+		}
+	}
+	return rules, more, total, nil
 }
 
 // DeleteCategoryRule deletes a category pricing rule and logs an audit entry.
@@ -200,11 +245,6 @@ func (s *CategoryPricingService) GetCategoryRule(ctx context.Context, id uuid.UU
 // ListCategoryRules lists category pricing rules with optional filters.
 func (s *CategoryPricingService) ListCategoryRules(ctx context.Context, filter CategoryRuleFilter) ([]CategoryPricingRule, error) {
 	return s.catRepo.ListCategoryRules(ctx, filter)
-}
-
-// ListCategoryRulesPaginated lists rules with pagination.
-func (s *CategoryPricingService) ListCategoryRulesPaginated(ctx context.Context, filter CategoryRuleFilter, limit, offset int) ([]CategoryPricingRule, int, error) {
-	return s.catRepo.ListCategoryRulesPaginated(ctx, filter, limit, offset)
 }
 
 // ListAuditEntries returns audit log entries for a given rule.

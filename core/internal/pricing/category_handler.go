@@ -4,13 +4,15 @@
 package pricing
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
-	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
@@ -66,254 +68,474 @@ func (h *CategoryHandler) RegisterCategoryRoutes(mux *http.ServeMux, roleGuard .
 	mux.HandleFunc("GET /api/v1/pricing/resolve", guard(h.HandleResolvePreview))
 }
 
+func writeCatJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 // --- Category Endpoints ---
 
 func (h *CategoryHandler) HandleListCategories(w http.ResponseWriter, r *http.Request) {
-	view := r.URL.Query().Get("view")
+	q, err := httpx.StrictQuery(r, "view")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	view := "tree"
+	if vals := q["view"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			httpx.WriteError(w, r, httpx.BadRequest("view parameter is repeated",
+				httpx.FieldError{Field: "view", Message: "parameter is repeated"}))
+			return
+		}
+		if vals[0] != "flat" && vals[0] != "tree" {
+			httpx.WriteError(w, r, httpx.BadRequest("view is not one of the route's values",
+				httpx.FieldError{Field: "view", Message: "must be flat or tree"}))
+			return
+		}
+		view = vals[0]
+	}
 
-	var result any
-	var err error
-
+	var result []ProductCategory
 	if view == "flat" {
 		result, err = h.service.ListCategories(r.Context())
 	} else {
 		result, err = h.service.ListCategoriesTree(r.Context())
 	}
-
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list categories", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
+	httpx.WriteList(w, result, "", 0)
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+// categoryWriteRequest is the categories create and update body.
+type categoryWriteRequest struct {
+	Name      string `json:"name"`
+	Slug      string `json:"slug"`
+	Path      string `json:"path"`
+	ParentID  *string `json:"parent_id"`
+	SortOrder *int   `json:"sort_order"`
+	IsActive  *bool  `json:"is_active"`
+}
+
+func (req *categoryWriteRequest) parse(v *httpx.Validator) ProductCategory {
+	cat := ProductCategory{Name: req.Name, Slug: req.Slug, Path: req.Path}
+	v.Required("name", req.Name)
+	v.Required("slug", req.Slug)
+	v.Required("path", req.Path)
+	if req.ParentID != nil && *req.ParentID != "" {
+		if id, ok := v.UUID("parent_id", req.ParentID, true); ok {
+			cat.ParentID = &id
+		}
+	}
+	if req.SortOrder != nil {
+		cat.SortOrder = *req.SortOrder
+	}
+	cat.IsActive = true
+	if req.IsActive != nil {
+		cat.IsActive = *req.IsActive
+	}
+	return cat
 }
 
 func (h *CategoryHandler) HandleCreateCategory(w http.ResponseWriter, r *http.Request) {
-	var cat ProductCategory
-	if err := json.NewDecoder(r.Body).Decode(&cat); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req categoryWriteRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if cat.Name == "" || cat.Slug == "" || cat.Path == "" {
-		httputil.RespondError(w, r, "name, slug, and path are required", http.StatusBadRequest, nil)
+	v := &httpx.Validator{}
+	cat := req.parse(v)
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
 	if err := h.service.CreateCategory(r.Context(), &cat); err != nil {
-		httputil.RespondError(w, r, "failed to create category", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(cat)
+	w.Header().Set("Location", "/api/v1/pricing/categories/"+cat.ID.String())
+	writeCatJSON(w, http.StatusCreated, cat)
 }
 
 func (h *CategoryHandler) HandleUpdateCategory(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid category ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
-
-	var cat ProductCategory
-	if err := json.NewDecoder(r.Body).Decode(&cat); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req categoryWriteRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	v := &httpx.Validator{}
+	cat := req.parse(v)
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 	cat.ID = id
-
 	if err := h.service.UpdateCategory(r.Context(), &cat); err != nil {
-		httputil.RespondError(w, r, "failed to update category", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(cat)
+	writeCatJSON(w, http.StatusOK, cat)
 }
 
 // --- Category Pricing Rules Endpoints ---
 
+// categoryRuleOrdering is the category rules list's ordering scope.
+const categoryRuleOrdering = "category_pricing_rules.created_at_id_desc"
+
 func (h *CategoryHandler) HandleListCategoryRules(w http.ResponseWriter, r *http.Request) {
-	filter := parseCategoryRuleFilter(r)
-
-	// Check for pagination params
-	limitStr := r.URL.Query().Get("limit")
-	offsetStr := r.URL.Query().Get("offset")
-	if limitStr != "" || offsetStr != "" {
-		limit, _ := strconv.Atoi(limitStr)
-		offset, _ := strconv.Atoi(offsetStr)
-		if limit <= 0 {
-			limit = 50
-		}
-		if limit > 200 {
-			limit = 200
-		}
-		if offset < 0 {
-			offset = 0
-		}
-
-		rules, total, err := h.service.ListCategoryRulesPaginated(r.Context(), filter, limit, offset)
-		if err != nil {
-			httputil.RespondError(w, r, "failed to list category rules", http.StatusInternalServerError, err)
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include",
+		"target_type", "tier", "customer_id", "category_id", "is_active")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	page, err := httpx.ParseListQuery(r, categoryRuleOrdering)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	wantTotal := false
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			httpx.WriteError(w, r, httpx.BadRequest("include parameter is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"}))
 			return
 		}
-		if rules == nil {
-			rules = []CategoryPricingRule{}
+		set, ierr := httpx.ParseInclude(vals[0], httpx.IncludeTotal)
+		if ierr != nil {
+			httpx.WriteError(w, r, ierr)
+			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PaginatedRulesResponse{
-			Data:   rules,
-			Total:  total,
-			Limit:  limit,
-			Offset: offset,
-		})
+		wantTotal = set.Has(httpx.IncludeTotal)
+	}
+
+	v := &httpx.Validator{}
+	filter := CategoryRuleFilter{}
+	if vals := q["target_type"]; len(vals) > 0 {
+		if t, ok := ParseTargetType(vals[0]); ok {
+			filter.TargetType = &t
+		} else {
+			v.Check(false, "target_type", "must be one of: account, tier")
+		}
+	}
+	if vals := q["tier"]; len(vals) > 0 {
+		filter.Tier = vals[0]
+	}
+	if vals := q["customer_id"]; len(vals) > 0 {
+		if id, ok := v.UUID("customer_id", &vals[0], true); ok {
+			filter.CustomerID = &id
+		}
+	}
+	if vals := q["category_id"]; len(vals) > 0 {
+		if id, ok := v.UUID("category_id", &vals[0], true); ok {
+			filter.CategoryID = &id
+		}
+	}
+	if vals := q["is_active"]; len(vals) > 0 {
+		b := vals[0] == "true"
+		if vals[0] != "true" && vals[0] != "false" {
+			v.Check(false, "is_active", "must be true or false")
+		}
+		filter.IsActive = &b
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 
-	rules, err := h.service.ListCategoryRules(r.Context(), filter)
+	var after *time.Time
+	var afterID *uuid.UUID
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			httpx.WriteError(w, r, cursorErr())
+			return
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			httpx.WriteError(w, r, cursorErr())
+			return
+		}
+		after, afterID = &at, &id
+	}
+
+	rules, more, total, err := h.service.ListCategoryRulesPage(r.Context(), filter, after, afterID, page.Limit, wantTotal)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list category rules", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	if rules == nil {
-		rules = []CategoryPricingRule{}
+	next := ""
+	if more && len(rules) > 0 {
+		last := rules[len(rules)-1]
+		next, err = httpx.MintCursor(categoryRuleOrdering, httpx.FormatKeyTime(last.CreatedAt.Time), last.ID.String())
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rules)
+	opts := []httpx.ListOption{}
+	if wantTotal {
+		opts = append(opts, httpx.WithTotal(total))
+	}
+	httpx.WriteList(w, rules, next, page.Limit, opts...)
 }
 
-func parseCategoryRuleFilter(r *http.Request) CategoryRuleFilter {
-	filter := CategoryRuleFilter{}
-	if tt := r.URL.Query().Get("target_type"); tt != "" {
-		t := TargetType(tt)
-		filter.TargetType = &t
+// categoryRuleWriteRequest is the create and update body of a category rule,
+// with the rule's value in the one reading its type gives it: a scale 4
+// price for FIXED (value_ten_thousandths), a percentage otherwise (value_pct).
+type categoryRuleWriteRequest struct {
+	TargetType     string           `json:"target_type"`
+	CustomerID     *string          `json:"customer_id"`
+	Tier           *string          `json:"tier"`
+	CategoryID     string           `json:"category_id"`
+	RuleType       string           `json:"rule_type"`
+	ValuePrice     *json.RawMessage `json:"value_ten_thousandths"`
+	ValuePct       *json.RawMessage `json:"value_pct"`
+	MarginFloorPct *json.RawMessage `json:"margin_floor_pct"`
+	StartsAt       *json.RawMessage `json:"starts_at"`
+	ExpiresAt      *json.RawMessage `json:"expires_at"`
+	IsActive       *bool            `json:"is_active"`
+	Priority       *int             `json:"priority"`
+	Revision       *int64           `json:"revision"`
+}
+
+func (req *categoryRuleWriteRequest) parse(v *httpx.Validator) CategoryPricingRule {
+	rule := CategoryPricingRule{}
+	if t, ok := ParseTargetType(req.TargetType); ok {
+		rule.TargetType = t
+	} else {
+		v.Check(false, "target_type", "must be one of: account, tier")
 	}
-	if tier := r.URL.Query().Get("tier"); tier != "" {
-		filter.Tier = tier
+	if t, ok := ParseCategoryRuleType(req.RuleType); ok {
+		rule.RuleType = t
+	} else {
+		v.Check(false, "rule_type", "must be one of: markup, markdown, fixed, margin")
 	}
-	if cidStr := r.URL.Query().Get("customer_id"); cidStr != "" {
-		if cid, err := uuid.Parse(cidStr); err == nil {
-			filter.CustomerID = &cid
+	if req.CustomerID != nil && *req.CustomerID != "" {
+		if id, ok := v.UUID("customer_id", req.CustomerID, true); ok {
+			rule.CustomerID = &id
 		}
 	}
-	if catStr := r.URL.Query().Get("category_id"); catStr != "" {
-		if catID, err := uuid.Parse(catStr); err == nil {
-			filter.CategoryID = &catID
+	if req.Tier != nil {
+		rule.Tier = *req.Tier
+	}
+	if req.CategoryID != "" {
+		if id, ok := v.UUID("category_id", &req.CategoryID, true); ok {
+			rule.CategoryID = id
+		}
+	} else {
+		v.Check(false, "category_id", "is required")
+	}
+	if req.ValuePrice != nil {
+		if n, ok := v.Int("value_ten_thousandths", *req.ValuePrice, true); ok {
+			p := httpx.Price(n)
+			rule.ValuePrice = &p
+			v.Check(p >= 0, "value_ten_thousandths", "a unit price is never negative")
 		}
 	}
-	return filter
+	if req.ValuePct != nil {
+		if q, ok := v.Quantity("value_pct", *req.ValuePct, true); ok {
+			rule.ValuePct = &q
+		}
+	}
+	if req.MarginFloorPct != nil {
+		if q, ok := v.Quantity("margin_floor_pct", *req.MarginFloorPct, true); ok {
+			rule.MarginFloorPct = &q
+		}
+	}
+	if req.StartsAt != nil {
+		if ts, ok := v.Timestamp("starts_at", *req.StartsAt, false); ok && ts != nil {
+			rule.StartsAt = ts
+		}
+	}
+	if req.ExpiresAt != nil {
+		if ts, ok := v.Timestamp("expires_at", *req.ExpiresAt, false); ok && ts != nil {
+			rule.ExpiresAt = ts
+		}
+	}
+	rule.IsActive = true
+	if req.IsActive != nil {
+		rule.IsActive = *req.IsActive
+	}
+	if req.Priority != nil {
+		rule.Priority = *req.Priority
+	}
+	v.Check(rule.ValuePrice == nil || rule.ValuePct == nil, "value_ten_thousandths",
+		"a rule carries either value_ten_thousandths or value_pct, never both")
+	if rule.RuleType == CategoryRuleFixed {
+		v.Check(rule.ValuePrice != nil, "value_ten_thousandths", "is required on a fixed rule")
+	} else {
+		v.Check(rule.ValuePct != nil, "value_pct", "is required on a percent rule")
+	}
+	if rule.TargetType == TargetTypeAccount {
+		v.Check(rule.CustomerID != nil, "customer_id", "is required on an account rule")
+	} else {
+		v.Check(rule.Tier != "", "tier", "is required on a tier rule")
+	}
+	return rule
 }
 
 func (h *CategoryHandler) HandleCreateCategoryRule(w http.ResponseWriter, r *http.Request) {
-	var rule CategoryPricingRule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req categoryRuleWriteRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := validateCategoryRule(&rule); err != nil {
-		httputil.RespondError(w, r, "category rule validation failed", http.StatusBadRequest, err)
+	v := &httpx.Validator{}
+	rule := req.parse(v)
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
 	if err := h.service.CreateCategoryRule(r.Context(), &rule); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
-			httputil.RespondError(w, r, "category rule already exists", http.StatusConflict, err)
-		} else {
-			httputil.RespondError(w, r, "failed to create category rule", http.StatusInternalServerError, err)
+			httpx.WriteError(w, r, httpx.Duplicate("an active rule already exists for this target and category"))
+			return
 		}
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(rule)
+	w.Header().Set("Location", "/api/v1/pricing/category-rules/"+rule.ID.String())
+	httpx.WriteRevisionETag(w, rule.Revision)
+	writeCatJSON(w, http.StatusCreated, rule)
 }
 
 func (h *CategoryHandler) HandleUpdateCategoryRule(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid rule ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
-
-	var rule CategoryPricingRule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req categoryRuleWriteRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	v := &httpx.Validator{}
+	rule := req.parse(v)
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 	rule.ID = id
-
-	if err := h.service.UpdateCategoryRule(r.Context(), &rule); err != nil {
-		httputil.RespondError(w, r, "failed to update category rule", http.StatusInternalServerError, err)
+	current, err := h.service.GetCategoryRule(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rule)
+	if current == nil {
+		httpx.WriteError(w, r, httpx.NotFound("no such category rule"))
+		return
+	}
+	if err := httpx.CheckRevision(current.Revision, r.Header.Get("If-Match"), req.Revision); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	rule.TargetType, rule.CustomerID, rule.Tier, rule.CategoryID = current.TargetType, current.CustomerID, current.Tier, current.CategoryID
+	if err := h.service.UpdateCategoryRule(r.Context(), &rule, current.Revision); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, rule.Revision)
+	writeCatJSON(w, http.StatusOK, rule)
 }
 
 func (h *CategoryHandler) HandleDeleteCategoryRule(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid rule ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
-
+	var bodyRevision *int64
+	if raw, rerr := readBody(r); rerr == nil && len(raw) > 0 {
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		var body struct {
+			Revision *int64 `json:"revision"`
+		}
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		bodyRevision = body.Revision
+	}
+	current, err := h.service.GetCategoryRule(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if current == nil {
+		httpx.WriteError(w, r, httpx.NotFound("no such category rule"))
+		return
+	}
+	if err := httpx.CheckRevision(current.Revision, r.Header.Get("If-Match"), bodyRevision); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	if err := h.service.DeleteCategoryRule(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to delete category rule", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Matrix ---
 
 func (h *CategoryHandler) HandleGetMatrix(w http.ResponseWriter, r *http.Request) {
-	matrix, err := h.service.GetMatrix(r.Context())
-	if err != nil {
-		httputil.RespondError(w, r, "failed to get pricing matrix", http.StatusInternalServerError, err)
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(matrix)
+	matrix, err := h.service.GetMatrix(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeCatJSON(w, http.StatusOK, matrix)
 }
 
 // --- Resolution Preview ---
 
 func (h *CategoryHandler) HandleResolvePreview(w http.ResponseWriter, r *http.Request) {
-	productIDStr := r.URL.Query().Get("product_id")
-	customerIDStr := r.URL.Query().Get("customer_id")
-	tierStr := r.URL.Query().Get("tier")
-
-	if productIDStr == "" {
-		httputil.RespondError(w, r, "product_id is required", http.StatusBadRequest, nil)
-		return
-	}
-
-	productID, err := uuid.Parse(productIDStr)
+	q, err := httpx.StrictQuery(r, "product_id", "customer_id", "tier")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid product_id", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	customerID := uuid.Nil
-	if customerIDStr != "" {
-		if cid, err := uuid.Parse(customerIDStr); err == nil {
-			customerID = cid
+	v := &httpx.Validator{}
+	var productID uuid.UUID
+	if vals := q["product_id"]; len(vals) > 0 {
+		if id, ok := v.UUID("product_id", &vals[0], true); ok {
+			productID = id
+		}
+	} else {
+		v.Check(false, "product_id", "is required")
+	}
+	var customerID uuid.UUID
+	if vals := q["customer_id"]; len(vals) > 0 {
+		if id, ok := v.UUID("customer_id", &vals[0], true); ok {
+			customerID = id
 		}
 	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 
-	tier := tierStr
+	tier := ""
+	if vals := q["tier"]; len(vals) > 0 {
+		tier = vals[0]
+	}
 	if tier == "" && customerID != uuid.Nil && h.customerSvc != nil {
 		if cust, err := h.customerSvc.GetCustomer(r.Context(), customerID); err == nil && cust != nil {
 			tier = string(cust.Tier)
@@ -325,119 +547,103 @@ func (h *CategoryHandler) HandleResolvePreview(w http.ResponseWriter, r *http.Re
 
 	resolved, err := h.service.ResolveEffectivePrice(r.Context(), customerID, tier, productID)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to resolve effective price", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resolved)
+	writeCatJSON(w, http.StatusOK, resolved)
 }
 
 // --- Audit ---
 
 func (h *CategoryHandler) HandleGetRuleAudit(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid rule ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
-
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	entries, err := h.service.ListAuditEntries(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list audit entries", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	if entries == nil {
-		entries = []CategoryPricingAudit{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
+	httpx.WriteList(w, entries, "", 0)
 }
 
 // --- Bulk Operations ---
 
 func (h *CategoryHandler) HandleBulkUpsertRules(w http.ResponseWriter, r *http.Request) {
-	var rules []CategoryPricingRule
-	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var reqs []categoryRuleWriteRequest
+	if err := httpx.DecodeJSON(r, &reqs); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	if len(rules) == 0 {
-		httputil.RespondError(w, r, "at least one rule is required", http.StatusBadRequest, nil)
+	if len(reqs) == 0 {
+		httpx.WriteError(w, r, httpx.BadRequest("at least one rule is required",
+			httpx.FieldError{Field: "", Message: "at least one rule is required"}))
 		return
 	}
-	if len(rules) > 500 {
-		httputil.RespondError(w, r, "max 500 rules per batch", http.StatusBadRequest, nil)
+	if len(reqs) > 500 {
+		httpx.WriteError(w, r, httpx.BadRequest("max 500 rules per batch",
+			httpx.FieldError{Field: "", Message: "max 500 rules per batch"}))
 		return
 	}
-
-	for i := range rules {
-		if err := validateCategoryRule(&rules[i]); err != nil {
-			httputil.RespondError(w, r, "bulk category rule validation failed", http.StatusBadRequest, err)
-			return
-		}
+	v := &httpx.Validator{}
+	rules := make([]CategoryPricingRule, len(reqs))
+	for i := range reqs {
+		rules[i] = reqs[i].parse(v)
 	}
-
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	if err := h.service.BulkUpsertRules(r.Context(), rules); err != nil {
-		httputil.RespondError(w, r, "failed to bulk upsert category rules", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"count": len(rules)})
+	writeCatJSON(w, http.StatusOK, map[string]int{"count": len(rules)})
 }
 
 func (h *CategoryHandler) HandleBulkDeleteRules(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		IDs []uuid.UUID `json:"ids"`
+		IDs []string `json:"ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 	if len(body.IDs) == 0 {
-		httputil.RespondError(w, r, "at least one id is required", http.StatusBadRequest, nil)
+		httpx.WriteError(w, r, httpx.BadRequest("at least one id is required",
+			httpx.FieldError{Field: "ids", Message: "at least one id is required"}))
 		return
 	}
-
-	if err := h.service.BulkDeleteRules(r.Context(), body.IDs); err != nil {
-		httputil.RespondError(w, r, "failed to bulk delete category rules", http.StatusInternalServerError, err)
+	v := &httpx.Validator{}
+	ids := make([]uuid.UUID, 0, len(body.IDs))
+	for i := range body.IDs {
+		if id, ok := v.UUID("ids", &body.IDs[i], true); ok {
+			ids = append(ids, id)
+		}
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
+	if err := h.service.BulkDeleteRules(r.Context(), ids); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- Validation ---
-
-func validateCategoryRule(rule *CategoryPricingRule) error {
-	if rule.TargetType != TargetTypeAccount && rule.TargetType != TargetTypeTier {
-		return errInvalidField("target_type must be ACCOUNT or TIER")
+// readBody drains the request body for an optional body revision, leaving an
+// empty body alone.
+func readBody(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
 	}
-	if rule.TargetType == TargetTypeAccount && (rule.CustomerID == nil || *rule.CustomerID == uuid.Nil) {
-		return errInvalidField("customer_id is required for ACCOUNT rules")
-	}
-	if rule.TargetType == TargetTypeTier && rule.Tier == "" {
-		return errInvalidField("tier is required for TIER rules")
-	}
-	if rule.CategoryID == uuid.Nil {
-		return errInvalidField("category_id is required")
-	}
-	if rule.RuleType != CategoryRuleMarkup && rule.RuleType != CategoryRuleMarkdown &&
-		rule.RuleType != CategoryRuleFixed && rule.RuleType != CategoryRuleMargin {
-		return errInvalidField("rule_type must be MARKUP, MARKDOWN, FIXED, or MARGIN")
-	}
-	return nil
-}
-
-type validationError struct {
-	msg string
-}
-
-func (e *validationError) Error() string { return e.msg }
-
-func errInvalidField(msg string) error {
-	return &validationError{msg: msg}
+	return io.ReadAll(r.Body)
 }
