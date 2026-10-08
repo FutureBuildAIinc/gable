@@ -1235,10 +1235,12 @@
       }
     },
     "response": {
-      "status": 409,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": "quote cannot be converted: this write needs If-Match or a body revision"
+        "id": "<id-81>",
+        "quote_id": "<id-80>",
+        "status": "CONFIRMED"
       }
     }
   },
@@ -1265,7 +1267,7 @@
         "roles": [
           "sales"
         ],
-        "staff_id": "<id-81>"
+        "staff_id": "<id-82>"
       }
     }
   },
@@ -1318,7 +1320,7 @@
       "body": {
         "created": true,
         "replaced": false,
-        "route_id": "<id-82>",
+        "route_id": "<id-83>",
         "stop_count": 1
       }
     }
