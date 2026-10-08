@@ -10,6 +10,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 const testScope = "quotes.created_at"
@@ -352,5 +355,63 @@ func TestParseListQueryDuplicateLimit(t *testing.T) {
 	e := cursorErr(t, err)
 	if len(e.Details) != 1 || e.Details[0].Field != "limit" {
 		t.Errorf("details = %+v, want the limit field named", e.Details)
+	}
+}
+
+// RULE: the package decodes key parts to their column types, so a well
+// formed cursor carrying a bad timestamp is a 400 on cursor, never a cast
+// error at the database. Timestamp parts are RFC 3339 UTC with the Z.
+func TestParseKeyTime(t *testing.T) {
+	got, err := ParseKeyTime("2026-01-02T03:04:05Z")
+	if err != nil {
+		t.Fatalf("ParseKeyTime: %v", err)
+	}
+	if want := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("ParseKeyTime = %v, want %v", got, want)
+	}
+
+	for _, part := range []string{
+		"2026-01-02T03:04:05+00:00", // an offset is not the Z form
+		"2026-01-02T03:04:05",
+		"2026-01-02",
+		"not a timestamp",
+		"",
+	} {
+		t.Run(part, func(t *testing.T) {
+			_, err := ParseKeyTime(part)
+			e := cursorErr(t, err)
+			if len(e.Details) != 1 || e.Details[0].Field != "cursor" {
+				t.Errorf("details = %+v, want the cursor field named", e.Details)
+			}
+		})
+	}
+}
+
+// RULE: a UUID key part is the canonical lowercase hyphenated form the
+// database stores; anything else is a 400 on cursor.
+func TestParseKeyUUID(t *testing.T) {
+	id := uuid.MustParse("3f9c2b1e-6c4a-4d0f-9f4e-1b2a5c7d8e9f")
+	got, err := ParseKeyUUID("3f9c2b1e-6c4a-4d0f-9f4e-1b2a5c7d8e9f")
+	if err != nil {
+		t.Fatalf("ParseKeyUUID: %v", err)
+	}
+	if got != id {
+		t.Errorf("ParseKeyUUID = %v, want %v", got, id)
+	}
+
+	for _, part := range []string{
+		"3F9C2B1E-6C4A-4D0F-9F4E-1B2A5C7D8E9F", // uppercase is not canonical
+		"3f9c2b1e6c4a4d0f9f4e1b2a5c7d8e9f",     // unhyphenated
+		"{3f9c2b1e-6c4a-4d0f-9f4e-1b2a5c7d8e9f}",
+		"not-a-uuid",
+		"",
+	} {
+		t.Run(part, func(t *testing.T) {
+			_, err := ParseKeyUUID(part)
+			e := cursorErr(t, err)
+			if len(e.Details) != 1 || e.Details[0].Field != "cursor" {
+				t.Errorf("details = %+v, want the cursor field named", e.Details)
+			}
+		})
 	}
 }

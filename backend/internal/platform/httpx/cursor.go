@@ -10,7 +10,10 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 // Page limits (ADR 0001 §2): the default page size, and the bound a client
@@ -247,4 +250,33 @@ func parseLimitParam(s string) (int, bool) {
 		n = n*10 + int(d-'0')
 	}
 	return n, true
+}
+
+// ParseKeyTime parses one decoded key part as the wire form of a timestamp
+// column: RFC 3339 in UTC with the Z (the form section 12 fixes for every
+// timestamp, and the form an ordering column's values are formatted into
+// MintCursor with). A part that does not hold one is a 400 on cursor, so a
+// well formed cursor carrying a bad timestamp is refused at the boundary
+// instead of becoming a cast error at the database.
+func ParseKeyTime(part string) (time.Time, error) {
+	if len(part) == 0 || part[len(part)-1] != 'Z' {
+		return time.Time{}, cursorBadRequest("cursor keyset part is not an RFC 3339 UTC timestamp")
+	}
+	t, err := time.Parse(time.RFC3339, part)
+	if err != nil {
+		return time.Time{}, cursorBadRequest("cursor keyset part is not an RFC 3339 UTC timestamp")
+	}
+	return t, nil
+}
+
+// ParseKeyUUID parses one decoded key part as a UUID in the canonical
+// lowercase hyphenated form the database stores. A well formed cursor
+// carrying any other spelling of a UUID, or no UUID at all, is a 400 on
+// cursor.
+func ParseKeyUUID(part string) (uuid.UUID, error) {
+	id, err := uuid.Parse(part)
+	if err != nil || id.String() != part {
+		return uuid.UUID{}, cursorBadRequest("cursor keyset part is not a canonical UUID")
+	}
+	return id, nil
 }
