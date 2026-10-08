@@ -78,9 +78,10 @@ components:
   responses:
     BadRequest:
       description: >-
-        The request cannot be consumed. The body is the standard error
-        envelope; the message is the generic status text, and the handler's
-        specific message goes to the server log only.
+        A handler (or the branch middleware) cannot consume the request. The
+        body is the standard error envelope; the message is the generic status
+        text, and the specific message goes to the server log only. POST, PUT
+        and PATCH operations that take an Idempotency-Key use BadRequestEither.
       content:
         application/json:
           schema:
@@ -121,16 +122,113 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     Conflict:
-      description: The write conflicts with the resource's current state.
+      description: >-
+        A handler reports that the write conflicts with the resource's current
+        state (the standard error envelope). Operations that take an
+        Idempotency-Key use ConflictEither.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     UnprocessableEntity:
       description: >-
-        The request is semantically invalid for this operation. Used by the
-        idempotency layer when an Idempotency-Key is reused with a request
-        body that differs from the original.
+        The idempotency layer refused an Idempotency-Key reused with a request
+        whose method, path, query or body differs from the original (code
+        idempotency_key_reused). Written by middleware, so the ADR 0001
+        envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    UnprocessableEntityEither:
+      description: >-
+        Either the handler refused the operation as semantically invalid (the
+        standard error envelope, code UNPROCESSABLE_ENTITY), or the idempotency
+        layer refused a reused Idempotency-Key (the ADR 0001 envelope, code
+        idempotency_key_reused).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Error"
+              - $ref: "#/components/schemas/WireError"
+    IdempotencyConflict:
+      description: >-
+        The Idempotency-Key is already in progress under a concurrent request
+        (code idempotency_in_progress). Written by the idempotency layer, so
+        the ADR 0001 envelope. The operation raises no 409 of its own.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    ConflictEither:
+      description: >-
+        Either the handler reports a conflict with the resource's current state
+        (the standard error envelope, code CONFLICT), or the idempotency layer
+        reports the Idempotency-Key in progress (the ADR 0001 envelope, code
+        idempotency_in_progress).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Error"
+              - $ref: "#/components/schemas/WireError"
+    BadRequestEither:
+      description: >-
+        Either the handler cannot consume the request (the standard error
+        envelope, code BAD_REQUEST, generic message), or the idempotency layer
+        rejects the Idempotency-Key header or the body read (the ADR 0001
+        envelope, codes validation_failed and bad_request, one details entry
+        per fault).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Error"
+              - $ref: "#/components/schemas/WireError"
+    IdempotencyBadRequest:
+      description: >-
+        The idempotency layer rejects an Idempotency-Key that is not 1 to 255
+        printable ASCII characters (code validation_failed) or a body it cannot
+        read (code bad_request). Written by middleware, so the ADR 0001
+        envelope. The operation raises no 400 of its own.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    PayloadTooLarge:
+      description: >-
+        An Idempotency-Key was sent and the body exceeds the request size
+        limit (code payload_too_large). Written by the idempotency layer, so
+        the ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    ForbiddenEither:
+      description: >-
+        Either the role guard or the machine key scope check refused the caller
+        (the ADR 0001 envelope, code forbidden), or the branch middleware found
+        no grant for the X-Branch-Id (the standard error envelope, code
+        FORBIDDEN).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/WireError"
+              - $ref: "#/components/schemas/Error"
+    LegacyUnauthorized:
+      description: >-
+        No or invalid portal credentials. The portal auth middleware answers
+        with httputil.RespondError, so the standard error envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    LegacyForbidden:
+      description: >-
+        A portal handler refused the caller. Portal handlers answer with
+        httputil.RespondError, so the standard error envelope.
       content:
         application/json:
           schema:

@@ -46,11 +46,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/locations/{id}:
     get:
       operationId: locationGet
@@ -106,13 +112,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
     delete:
       operationId: locationDelete
       tags: [location]
@@ -183,11 +195,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/branches/{id}:
     get:
       operationId: branchGet
@@ -245,13 +263,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Location"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
     delete:
       operationId: branchDelete
       tags: [location]
@@ -416,13 +440,19 @@ paths:
         "204":
           description: Granted.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/users/{sub}/branches/{branch_id}:
@@ -478,13 +508,19 @@ paths:
         "204":
           description: Set.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
 components:

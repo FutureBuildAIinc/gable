@@ -33,7 +33,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PurchaseOrder"
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
         "500": { $ref: "#/components/responses/InternalError" }
     post:
       operationId: purchaseOrderCreate
@@ -59,9 +59,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PurchaseOrder"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/purchase-orders/recommendations:
     get:
@@ -81,7 +84,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PurchaseOrderRecommendationSummary"
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
         "500": { $ref: "#/components/responses/InternalError" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /api/v1/purchase-orders/refresh-reorder-targets:
@@ -110,8 +113,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PurchaseOrderRefreshResult"
+        "400": { $ref: "#/components/responses/IdempotencyBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/purchase-orders/reorder-check:
     post:
@@ -138,8 +145,12 @@ paths:
                     enum: [success]
                   count:
                     type: integer
+        "400": { $ref: "#/components/responses/IdempotencyBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/purchase-orders/reorder-runs:
     get:
@@ -159,7 +170,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/PurchaseOrderReorderRun"
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/purchase-orders/source-summary:
     get:
@@ -182,7 +193,7 @@ paths:
                 additionalProperties:
                   type: integer
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/purchase-orders/{id}:
     get:
@@ -209,7 +220,7 @@ paths:
                 $ref: "#/components/schemas/PurchaseOrder"
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/purchase-orders/{id}/freight:
     get:
@@ -236,7 +247,7 @@ paths:
                   $ref: "#/components/schemas/PurchaseOrderFreightCharge"
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
         "500": { $ref: "#/components/responses/InternalError" }
     post:
       operationId: purchaseOrderFreightUpload
@@ -275,12 +286,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PurchaseOrderFreightUploadResponse"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "500": { $ref: "#/components/responses/InternalError" }
-        "409":
-          $ref: "#/components/responses/Conflict"
+        "409": { $ref: "#/components/responses/ConflictEither" }
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/purchase-orders/{id}/freight/{freightId}/apply:
@@ -317,9 +328,12 @@ paths:
                   status:
                     type: string
                     enum: [applied]
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
   /api/v1/purchase-orders/{id}/receive:
     post:
       operationId: purchaseOrderReceive
@@ -355,9 +369,12 @@ paths:
                   status:
                     type: string
                     enum: [received]
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/purchase-orders/{id}/submit:
     post:
@@ -388,9 +405,12 @@ paths:
                   status:
                     type: string
                     enum: [submitted]
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenEither" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
 components:
   schemas:

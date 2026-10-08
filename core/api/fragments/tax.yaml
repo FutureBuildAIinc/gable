@@ -34,9 +34,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaxExemption"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/tax/exemptions/{customerID}:
     get:
@@ -115,9 +118,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaxResult"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/BadRequestEither" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
 components:
   schemas:

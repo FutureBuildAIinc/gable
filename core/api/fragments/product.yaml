@@ -13,48 +13,54 @@ paths:
       tags: [product]
       summary: List products
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
-        "200":
+        '200':
           description: The page of products.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProductPage"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ProductPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       operationId: productCreate
       tags: [product]
       summary: Create a product
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Product"
+              $ref: '#/components/schemas/Product'
       responses:
-        "201":
+        '201':
           description: The created product.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/reorder-alerts:
     get:
       operationId: productReorderAlerts
@@ -64,18 +70,18 @@ paths:
         The alert rows omit on order quantity, velocity and lead time; they
         carry the deficit only.
       responses:
-        "200":
+        '200':
           description: The alerts, a bare array that is null when nothing is below its reorder point.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReorderAlertList"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ReorderAlertList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}:
     get:
       operationId: productGet
@@ -89,20 +95,20 @@ paths:
             type: string
             format: uuid
       responses:
-        "200":
+        '200':
           description: The product.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/products/{id}/detail:
     get:
       operationId: productDetail
@@ -159,7 +165,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
     put:
@@ -191,11 +197,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimContent'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/media:
@@ -226,7 +238,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/media/{mediaId}:
@@ -257,7 +269,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/media/{mediaId}/primary:
@@ -285,11 +297,17 @@ paths:
         '200':
           description: Primary media set; the body is empty.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/collateral:
@@ -320,7 +338,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/collateral/{collateralId}:
@@ -351,7 +369,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/collateral:
@@ -384,11 +402,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimCollateral'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/descriptions:
@@ -421,11 +445,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimContent'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/image:
@@ -458,11 +488,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimMedia'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/seo:
@@ -495,11 +531,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/PimContent'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/margins:
@@ -515,24 +557,30 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProductMarginUpdate"
+              $ref: '#/components/schemas/ProductMarginUpdate'
       responses:
-        "200":
+        '200':
           description: Updated; no body.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/dimensions:
     patch:
       operationId: productUpdateDimensions
@@ -549,28 +597,34 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Geometry"
+              $ref: '#/components/schemas/Geometry'
       responses:
-        "200":
+        '200':
           description: The persisted geometry.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Geometry"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Geometry'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/lead-time:
     patch:
       operationId: productUpdateLeadTime
@@ -587,26 +641,32 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProductLeadTimeUpdate"
+              $ref: '#/components/schemas/ProductLeadTimeUpdate'
       responses:
-        "200":
+        '200':
           description: The echoed request.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProductLeadTimeUpdate"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: '#/components/schemas/ProductLeadTimeUpdate'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 components:
   schemas:
     UOM:

@@ -65,6 +65,7 @@ func allGroups() []groupDef {
 		integrationGroups(),
 		clockGroups(),
 		eventsGroups(),
+		idempotencyGroups(),
 	)
 }
 

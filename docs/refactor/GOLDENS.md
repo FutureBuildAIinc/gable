@@ -297,6 +297,7 @@ last).
 | pim | `pim` | GET /api/v1/products/{id}/pim/content (synthetic empty); PUT /api/v1/products/{id}/pim/content; GET again |
 | parsing | `parsing` | POST /api/v1/parsing/upload (multipart; the no-AI-key synthetic answer) |
 | vision | `vision` | POST /api/v1/vision/scan; empty text (400) |
+| idempotency layer | `idempotency` | POST /api/v1/vision/scan carrying an Idempotency-Key: the first request (200), the same key with a different body (422 `idempotency_key_reused`), and a malformed key (400 `validation_failed`); the middleware answers pin the ADR 0001 envelope |
 | millwork app | `millwork` | POST /api/v1/millwork/options; GET /api/v1/millwork/options?category= |
 | configurator app | `configurator` | GET /api/v1/configurator/options?attribute_type=; POST /api/v1/configurator/validate; POST /api/v1/configurator/build-sku; empty selections (400) |
 | governance app | `governance` | POST /api/v1/governance/rfcs; GET /api/v1/governance/rfcs/{id} |

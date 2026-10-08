@@ -29,11 +29,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Deposit'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     get:
       operationId: depositList
       tags:
@@ -61,7 +67,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/deposits/{id}:
@@ -90,7 +96,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/deposits/{id}/apply:
@@ -124,11 +130,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DepositApplication'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ForbiddenEither'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 components:
   schemas:
     Deposit:

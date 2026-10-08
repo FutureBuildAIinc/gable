@@ -29,11 +29,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Payment"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/payments/intent:
@@ -58,11 +64,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaymentIntentResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/payments/card:
@@ -89,13 +101,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Payment"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "402":
           $ref: "#/components/responses/PaymentRequired"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /api/v1/payments/refund:
     post:
       operationId: paymentRefund
@@ -117,11 +135,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Refund"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/invoices/{id}/payments:
