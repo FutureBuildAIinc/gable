@@ -26,7 +26,7 @@ export class GableSalesDialog extends LitElement {
 
     @state() private reason = '';
 
-    updated(changed: Map<string, unknown>) {
+    willUpdate(changed: Map<string, unknown>) {
         if (changed.has('isOpen') && !this.isOpen) this.reason = '';
     }
 

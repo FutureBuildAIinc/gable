@@ -582,3 +582,182 @@ func TestRawInsertNumbersThroughTheCounter(t *testing.T) {
 		t.Errorf("the Go path numbered %d after the raw insert's %d", b, a)
 	}
 }
+
+// holdCredit takes the customer's credit serialization (the advisory lock the
+// order's confirm, release and fulfilment take, ADR 0005 section 11 step 1a) in
+// a transaction of its own and returns the function that releases it.
+func holdCredit(t *testing.T, f *fixture) (release func()) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, f.customerID.String()); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release = func() {
+		if !released {
+			released = true
+			_ = tx.Rollback(ctx)
+		}
+	}
+	t.Cleanup(release)
+	return release
+}
+
+// finishes reports whether the act completes within the wait.
+func finishes(done <-chan resp, wait time.Duration) (resp, bool) {
+	select {
+	case r := <-done:
+		return r, true
+	case <-time.After(wait):
+		return resp{}, false
+	}
+}
+
+// RULE (ADR 0005 11, step 1a; carried from C2-2b): every act that adds to a
+// customer's exposure takes the per customer credit serialization. An invoice
+// void re-opens billed quantity on its order, and voiding a posted credit memo
+// puts its credit back on the receivable: both wait behind a holder of the
+// customer's lock. Voiding a DRAFT adds nothing to the exposure and does not wait.
+func TestExposureAddingActsTakeTheCustomerCreditLock(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	invID, _ := f.invoice("4")
+	line := f.firstLineID(invID)
+	posted := f.createCredit(f.creditBody(invID, returnLine(line, "-1", false)))
+	postedID := str(t, posted.body, "id")
+	if r := f.postCredit(postedID, 1); r.status != 200 {
+		t.Fatalf("post = %d", r.status)
+	}
+	draft := f.createCredit(f.creditBody(invID, returnLine(line, "-1", false)))
+	draftID := str(t, draft.body, "id")
+	other, _ := f.invoice("1")
+
+	asyncDo := func(method, path string, body any) <-chan resp {
+		ch := make(chan resp, 1)
+		go func() { ch <- doOn(t, f.srv.URL, method, path, body) }()
+		return ch
+	}
+	release := holdCredit(t, f)
+
+	// a draft's void is not an exposure act: it completes while the lock is held
+	d := asyncDo("POST", "/api/v1/credit-memos/"+draftID+"/transitions", map[string]any{"to": "void", "revision": 1, "reason": "draft"})
+	if r, ok := finishes(d, 3*time.Second); !ok || r.status != 200 {
+		t.Fatalf("voiding a draft waited on the credit lock (finished %v)", ok)
+	}
+	// a posted credit memo's void waits
+	c := asyncDo("POST", "/api/v1/credit-memos/"+postedID+"/transitions", map[string]any{"to": "void", "revision": 2, "reason": "posted"})
+	// an invoice void waits
+	v := asyncDo("POST", "/api/v1/invoices/"+other+"/transitions", map[string]any{"to": "void", "revision": 1, "reason": "invoice"})
+	if _, ok := finishes(c, 400*time.Millisecond); ok {
+		t.Error("a posted credit memo's void ran while the customer's credit lock was held")
+	}
+	if _, ok := finishes(v, 400*time.Millisecond); ok {
+		t.Error("an invoice void ran while the customer's credit lock was held")
+	}
+	release()
+	if r, ok := finishes(c, 5*time.Second); !ok || r.status != 200 {
+		t.Errorf("the credit memo void after the release: finished %v status %d", ok, r.status)
+	}
+	if r, ok := finishes(v, 5*time.Second); !ok || r.status != 200 {
+		t.Errorf("the invoice void after the release: finished %v status %d: %s", ok, r.status, r.raw)
+	}
+}
+
+// RULE (carried from C2-2b round 2, ADR 0005 8.4): the relieved cost read excludes
+// void invoices. A non stock line's bill relieves 1030 from the linked receipts'
+// posted values pro rata; once the first bill is voided its relief is no longer
+// relieved, so the re-bill of the whole line takes the receipts' full value, and
+// 1030 nets out to what the receipts posted (1333), not to the 889 left after a
+// voided invoice's 444 was counted as spent.
+func TestRelievedCostReadExcludesVoidInvoices(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	ctx := context.Background()
+	vendor, po := uuid.New(), uuid.New()
+	mustExec(t, db, `INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "rv-"+vendor.String()[:8])
+	mustExec(t, db, `INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'SPECIAL_ORDER', `+defaultBranch+`)`, po, vendor)
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
+	})
+	r := f.do("POST", "/api/v1/orders", map[string]any{"customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": []map[string]any{{
+		"description": "Custom millwork", "quantity": "3", "uom": "EA", "unit_price_ten_thousandths": 100000,
+		"is_special_order": true, "special_order_unit_cost_ten_thousandths": 30000}}})
+	if r.status != 201 {
+		t.Fatalf("create = %d: %s", r.status, r.raw)
+	}
+	orderID := str(t, r.body, "id")
+	lineID := str(t, r.body["lines"].([]any)[0].(map[string]any), "id")
+	mustExec(t, db, `INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id, created_at) VALUES ($1, $2, 'first', 1, 3.33, 1, $3, now() - interval '1 minute')`, uuid.New(), po, lineID)
+	mustExec(t, db, `INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id) VALUES ($1, $2, 'second', 2, 5.00, 2, $3)`, uuid.New(), po, lineID)
+	c := f.do("POST", "/api/v1/orders/"+orderID+"/transitions", map[string]any{"to": "confirmed", "revision": 1})
+	if c.status != 200 {
+		t.Fatalf("confirm = %d: %s", c.status, c.raw)
+	}
+	first, rv := f.fulfil(orderID, rev(t, c), []map[string]any{{"order_line_id": lineID, "quantity": "1"}})
+	if _, legs := f.entryLegs(first); legs["5010"].debit != 444 {
+		t.Fatalf("first bill relieved %+v, want 444", legs["5010"])
+	}
+	_ = rv
+	if v := f.voidInvoice(first, rev(t, f.getInvoice(first)), "billed the wrong line"); v.status != 200 {
+		t.Fatalf("void = %d: %s", v.status, v.raw)
+	}
+	o := f.do("GET", "/api/v1/orders/"+orderID, nil)
+	rebill, _ := f.fulfil(orderID, rev(t, o), nil) // all 3 now
+	if _, legs := f.entryLegs(rebill); legs["5010"].debit != 1333 || legs["1030"].credit != 1333 {
+		t.Errorf("the re-bill relieved %+v / %+v, want the receipts' full 1333 (the void invoice's 444 is not spent)", legs["5010"], legs["1030"])
+	}
+}
+
+// RULE (carried from C2-2b round 2, ADR 0005 2.4): an invoice line's discount on a
+// partial piece is the gross extension of the piece less its net, so every
+// invoice line satisfies total + discount = gross piece to the cent and the
+// shares over the invoices sum to the order line's discount exactly. Prorating
+// the discount on its own (round(2 x 1 / 3) = 1) disagreed with the line total
+// split: a line of 3 at 3.3333 with a 0.02 discount billed 1 then 2 carried a
+// discount of 1 cent on a first piece whose net is its whole 3.33.
+func TestPartialInvoiceLineDiscountsSumExactly(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	product := uuid.New()
+	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, 'thirds', 'PCS', 3.3333, 1)`, product, "TH-"+product.String()[:8])
+	mustExec(t, db, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 50, 0)`, product, f.yardID)
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE product_id = $1`, product)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM invoice_lines WHERE product_id = $1`, product)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM order_lines WHERE product_id = $1`, product)
+	})
+	orderID, r := f.confirmedOrder(map[string]any{"product_id": product.String(), "quantity": "3", "discount_cents": 2, "discount_reason": "contract"})
+	line := f.do("GET", "/api/v1/orders/"+orderID, nil).body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	first, r2 := f.fulfil(orderID, r, []map[string]any{{"order_line_id": line, "quantity": "1"}})
+	second, _ := f.fulfil(orderID, r2, nil)
+
+	type piece struct{ total, discount int64 }
+	read := func(inv string) piece {
+		l := f.getInvoice(inv).body["lines"].([]any)[0].(map[string]any)
+		p := piece{total: num(t, l, "line_total_cents")}
+		if l["discount_cents"] != nil {
+			p.discount = num(t, l, "discount_cents")
+		}
+		return p
+	}
+	a, b := read(first), read(second)
+	// gross pieces: 3.3333 x 1 = 333, 3.3333 x 3 = 1000 so the rest is 667
+	if a.total+a.discount != 333 || b.total+b.discount != 667 {
+		t.Errorf("pieces %+v and %+v: total + discount must equal the gross pieces 333 and 667", a, b)
+	}
+	if a.discount+b.discount != 2 {
+		t.Errorf("discounts %d + %d, want the order line's 2 exactly", a.discount, b.discount)
+	}
+	if a.total+b.total != 998 {
+		t.Errorf("totals %d + %d, want 998 (1000 less the discount)", a.total, b.total)
+	}
+}

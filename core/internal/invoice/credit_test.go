@@ -523,11 +523,12 @@ func TestCreditMemoWithNoInvoice(t *testing.T) {
 			{"line_type": "product", "description": "Freight allowance", "quantity": "-1", "uom": "EA", "unit_price_ten_thousandths": 100000},
 			{"line_type": "text", "description": "per the account manager"},
 		}}
-	r := f.do("POST", "/api/v1/credit-memos", body, "Idempotency-Key", "cm-once")
+	key := "cm-once-" + uuid.NewString()
+	r := f.do("POST", "/api/v1/credit-memos", body, "Idempotency-Key", key)
 	if r.status != 201 {
 		t.Fatalf("create = %d: %s", r.status, r.raw)
 	}
-	if again := f.do("POST", "/api/v1/credit-memos", body, "Idempotency-Key", "cm-once"); again.header.Get("Idempotency-Replayed") != "true" || str(t, again.body, "id") != str(t, r.body, "id") {
+	if again := f.do("POST", "/api/v1/credit-memos", body, "Idempotency-Key", key); again.header.Get("Idempotency-Replayed") != "true" || str(t, again.body, "id") != str(t, r.body, "id") {
 		t.Errorf("the replay = %d replayed %q", again.status, again.header.Get("Idempotency-Replayed"))
 	}
 	if n := countOf(t, db, `SELECT count(*) FROM credit_memos WHERE customer_id = $1`, f.customerID); n != 1 {

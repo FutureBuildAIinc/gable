@@ -71,6 +71,7 @@ type TxRunner interface {
 }
 
 type Service struct {
+	tx        TxRunner
 	repo      Repository
 	gl        *gl.Service
 	account   account.Service
@@ -92,6 +93,10 @@ func (s *Service) WithAuditLog(l *audit.Logger) *Service { s.auditLog = l; retur
 
 // WithOutbox sets the event writer.
 func (s *Service) WithOutbox(e EventRecorder) *Service { s.events = e; return s }
+
+// WithTxRunner replaces the database as the transaction runner (a test gates
+// transactions with it; serve leaves the database).
+func (s *Service) WithTxRunner(tx TxRunner) *Service { s.tx = tx; return s }
 
 // WithBranchGuard sets the payload branch rule for the write routes.
 func (s *Service) WithBranchGuard(g BranchGuard) *Service { s.branches = g; return s }
@@ -145,6 +150,9 @@ func (s *Service) store() (Store, error) {
 }
 
 func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx != nil {
+		return s.tx.RunInTx(ctx, fn)
+	}
 	if s.db == nil {
 		return fn(ctx)
 	}

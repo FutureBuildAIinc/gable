@@ -17,9 +17,9 @@ const statusConfig = (status: string): { color: string; bgColor: string } => {
     const map: Record<string, { color: string; bgColor: string }> = {
         PAID: { color: '#00FFA3', bgColor: 'rgba(0,255,163,0.1)' },
         UNPAID: { color: '#F59E0B', bgColor: 'rgba(245,158,11,0.1)' },
-        OVERDUE: { color: '#F43F5E', bgColor: 'rgba(244,63,94,0.1)' },
         PARTIAL: { color: '#38BDF8', bgColor: 'rgba(56,189,248,0.1)' },
         VOID: { color: '#71717A', bgColor: 'rgba(113,113,122,0.1)' },
+        WRITTEN_OFF: { color: '#71717A', bgColor: 'rgba(113,113,122,0.1)' },
     };
     return map[status] || map.UNPAID;
 };
@@ -27,10 +27,14 @@ const statusConfig = (status: string): { color: string; bgColor: string } => {
 const INVOICE_STATUS_COLORS: Record<string, string> = {
     PAID: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
     UNPAID: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    OVERDUE: 'bg-red-500/10 text-red-400 border-red-500/20',
     PARTIAL: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
     VOID: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+    WRITTEN_OFF: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
 };
+
+/** The label a status shows: WRITTEN_OFF reads "Written off". */
+export const portalStatusLabel = (status: string): string =>
+    status.replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase());
 
 @customElement('gable-portal-invoices')
 export class PortalInvoices extends LitElement {
@@ -56,9 +60,9 @@ export class PortalInvoices extends LitElement {
 
     private _handleDownloadPDF(invoice: PortalInvoice) {
         const content = [
-            `INVOICE ${invoice.id.substring(0, 8).toUpperCase()}`,
+            `INVOICE ${invoice.number}`,
             `Date: ${new Date(invoice.created_at).toLocaleDateString()}`,
-            `Status: ${invoice.status}`,
+            `Status: ${portalStatusLabel(invoice.status)}${invoice.is_overdue ? ' (overdue)' : ''}`,
             `Payment Terms: ${invoice.payment_terms}`,
             invoice.due_date ? `Due Date: ${new Date(invoice.due_date).toLocaleDateString()}` : '',
             '',
@@ -71,7 +75,7 @@ export class PortalInvoices extends LitElement {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `invoice-${invoice.id.substring(0, 8)}.txt`;
+        a.download = `invoice-${invoice.number}.txt`;
         a.click();
         URL.revokeObjectURL(url);
     }
@@ -130,7 +134,7 @@ export class PortalInvoices extends LitElement {
                                             </div>
                                             <div>
                                                 <div class="font-mono text-sm font-medium text-white">
-                                                    INV-${inv.id.substring(0, 8).toUpperCase()}
+                                                    ${inv.number}
                                                 </div>
                                                 <div class="text-xs text-zinc-500 mt-0.5">
                                                     ${new Date(inv.created_at).toLocaleDateString()}${inv.due_date ? html` · Due ${new Date(inv.due_date).toLocaleDateString()}` : ''}
@@ -141,8 +145,9 @@ export class PortalInvoices extends LitElement {
                                             <div class="text-right">
                                                 <div class="font-mono text-sm text-white">${formatCurrency(inv.total_amount)}</div>
                                                 <span class="inline-block px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${INVOICE_STATUS_COLORS[inv.status] || INVOICE_STATUS_COLORS.UNPAID}">
-                                                    ${inv.status}
+                                                    ${portalStatusLabel(inv.status)}
                                                 </span>
+                                                ${inv.is_overdue ? html`<span class="inline-block ml-1 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border bg-red-500/10 text-red-400 border-red-500/20" data-testid="portal-overdue">Overdue</span>` : ''}
                                             </div>
                                             <button
                                                 @click=${() => this._handleDownloadPDF(inv)}
