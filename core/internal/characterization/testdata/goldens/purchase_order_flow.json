@@ -13,39 +13,39 @@
         "high_count": 0,
         "items": [
           {
-            "avg_daily_sales": 23.53,
+            "avg_daily_sales": 1,
             "current_stock": 0,
             "days_until_out": 0,
-            "estimated_cost": 3309.9,
+            "estimated_cost": 683.4,
             "lead_time_days": 7,
             "product_id": "<id-1>",
             "product_name": "Golden harness stud",
             "product_sku": "GOLD-HARNESS-2X4",
-            "reorder_point": 195.52,
-            "safety_stock": 30.82,
-            "std_dev_sales": 7.06,
-            "suggested_qty": 1298,
+            "reorder_point": 8.31,
+            "safety_stock": 1.31,
+            "std_dev_sales": 0.3,
+            "suggested_qty": 268,
             "urgency": "CRITICAL"
           },
           {
-            "avg_daily_sales": 26.67,
+            "avg_daily_sales": 500,
             "current_stock": 30,
-            "days_until_out": 1.1,
-            "estimated_cost": 3309.75,
+            "days_until_out": 0.1,
+            "estimated_cost": 14330.25,
             "lead_time_days": 7,
             "product_id": "<id-2>",
             "product_name": "Golden item stud",
             "product_sku": "GOLD-A-STUD",
-            "reorder_point": 221.59,
-            "safety_stock": 34.92,
-            "std_dev_sales": 8,
-            "suggested_qty": 1471,
+            "reorder_point": 4154.82,
+            "safety_stock": 654.82,
+            "std_dev_sales": 150,
+            "suggested_qty": 6369,
             "urgency": "CRITICAL"
           }
         ],
         "low_count": 0,
         "medium_count": 0,
-        "total_estimated_cost": 6619.65,
+        "total_estimated_cost": 15013.65,
         "total_items": 2
       }
     }

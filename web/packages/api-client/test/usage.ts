@@ -64,7 +64,28 @@ async function _happy() {
   );
   const customerRevision: number = edited.body.revision;
 
-  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, noBody, limit, terms, shipToRevision, customerRevision];
+  // Products, pricing and locations (C3-1): the stocking unit, the scaled base
+  // price, the stock totals as decimal strings, the price read's pair and
+  // lowercase basis, and a location edit at its revision.
+  const products = await client.get("/api/v1/products", { query: { limit: 20, include: "total" } });
+  const stockUom: string | undefined = products.body.items[0]?.stock_uom;
+  const basePrice: number | undefined = products.body.items[0]?.base_price_ten_thousandths;
+  const available: string | undefined = products.body.items[0]?.available;
+  const priced = await client.get("/api/v1/pricing/calculate", {
+    query: { customer_id: "8f14e45f", product_id: "8f14e45f", quantity: "120" },
+  });
+  const unitPrice: number = priced.body.unit_price_ten_thousandths;
+  const basis: "contract" | "tier" | "retail" | "quantity_break" | "job_override" | "promotional" | "category_tier" | "category_account" =
+    priced.body.price_basis;
+  const total: number = priced.body.line_total_cents;
+  const moved = await client.put(
+    "/api/v1/locations/{id}",
+    { code: "YARD-1", name: "Main yard", active: true },
+    { path: { id: "8f14e45f" }, headers: { "If-Match": '"2"' } },
+  );
+  const locationType: string = moved.body.type;
+
+  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, noBody, limit, terms, shipToRevision, customerRevision, stockUom, basePrice, available, unitPrice, basis, total, locationType];
 }
 
 // Wrong paths: each line must be a compile error --------------------------
@@ -99,6 +120,21 @@ async function _wrong() {
 
   // @ts-expect-error a ship-to needs its code, name and line1
   await client.post("/api/v1/customers/{id}/ship-tos", { name: "only a name" }, { path: { id: "x" } });
+
+  // @ts-expect-error the product list is cursor paged: no offset
+  await client.get("/api/v1/products", { query: { offset: 10 } });
+
+  // @ts-expect-error a product is created in a stocking unit (stock_uom), not uom_primary
+  await client.post("/api/v1/products", { sku: "A", description: "d", uom_primary: "PCS" });
+
+  // @ts-expect-error a base price is an integer in ten thousandths, not a decimal string
+  await client.post("/api/v1/products", { sku: "A", description: "d", stock_uom: "PCS", base_price_ten_thousandths: "4.25" });
+
+  // @ts-expect-error a pricing rule's discount is a decimal string
+  await client.post("/api/v1/pricing/rules", { name: "n", rule_type: "promotional", discount_pct: 5 });
+
+  // @ts-expect-error a location type is lowercase on the wire
+  await client.post("/api/v1/locations", { code: "C", type: "YARD" });
 
   // @ts-expect-error path parameter must be a string
   await client.get("/api/v1/quotes/{id}", { path: { id: 123 } });

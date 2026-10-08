@@ -28,23 +28,39 @@ func locationGroups() []groupDef {
 			{name: "branch.get", method: "GET", path: "/api/v1/branches/{newBranch}"},
 			// Update: type and parent are not mutable from the endpoint; the
 			// rename is the observable change.
+			{name: "branch.update.without_revision", method: "PUT", path: "/api/v1/branches/{newBranch}",
+				body: map[string]any{"code": "GOLD", "name": "Golden Branch Renamed"}},
 			{
-				name:   "branch.update",
-				method: "PUT",
-				path:   "/api/v1/branches/{newBranch}",
-				body:   map[string]any{"code": "GOLD", "name": "Golden Branch Renamed"},
+				name:    "branch.update",
+				method:  "PUT",
+				path:    "/api/v1/branches/{newBranch}",
+				headers: map[string]string{"If-Match": `"1"`},
+				body:    map[string]any{"code": "GOLD", "name": "Golden Branch Renamed"},
 			},
+			{name: "branch.update.stale", method: "PUT", path: "/api/v1/branches/{newBranch}",
+				headers: map[string]string{"If-Match": `"1"`},
+				body:    map[string]any{"code": "GOLD", "name": "Golden Branch Stale"}},
+			{name: "branch.create.invalid", method: "POST", path: "/api/v1/branches",
+				body: map[string]any{"code": "", "address": "no name"}},
+			{name: "branch.get.not_found", method: "GET", path: "/api/v1/branches/00000000-0000-0000-0000-0000000000aa"},
+			{name: "branch.list.unsupported_parameter", method: "GET", path: "/api/v1/branches?offset=1"},
+			{name: "branch.list.bad_cursor", method: "GET", path: "/api/v1/branches?cursor=garbage"},
 			{name: "location.list", method: "GET", path: "/api/v1/locations"},
 			{
 				name:   "location.create",
 				method: "POST",
 				path:   "/api/v1/locations",
 				body: map[string]any{
-					"code": "GOLD-YARD", "type": "YARD", "name": "Golden Yard",
+					"code": "GOLD-YARD", "type": "yard", "name": "Golden Yard",
 					"parent_id": "{newBranch}",
 				},
 				extract: map[string]string{"myLocation": "/id"},
 			},
+			{name: "location.create.invalid", method: "POST", path: "/api/v1/locations",
+				body: map[string]any{"type": "YARD", "parent_id": "not-a-uuid"}},
+			{name: "location.create.unknown_field", method: "POST", path: "/api/v1/locations",
+				body: map[string]any{"code": "GOLD-X", "type": "yard", "revision": 1}},
+			{name: "location.list.unsupported_parameter", method: "GET", path: "/api/v1/locations?offset=1"},
 			{name: "location.get", method: "GET", path: "/api/v1/locations/{myLocation}"},
 			// The branch reader refuses a non-branch row: type discipline.
 			{name: "branch.get.not_a_branch", method: "GET", path: "/api/v1/branches/{myLocation}"},
@@ -77,7 +93,9 @@ func locationGroups() []groupDef {
 				path: "/api/v1/users/golden-user-1/branches/{newBranch}"},
 			// Delete branch: soft archive (active=false), so the default list
 			// no longer shows it.
-			{name: "branch.delete", method: "DELETE", path: "/api/v1/branches/{newBranch}"},
+			{name: "branch.delete.without_revision", method: "DELETE", path: "/api/v1/branches/{newBranch}"},
+			{name: "branch.delete", method: "DELETE", path: "/api/v1/branches/{newBranch}",
+				headers: map[string]string{"If-Match": `"2"`}},
 			{name: "branch.list_after_delete", method: "GET", path: "/api/v1/branches"},
 		},
 	}}

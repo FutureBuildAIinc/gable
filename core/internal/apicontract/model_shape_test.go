@@ -90,7 +90,6 @@ var modelBoundSchemas = []struct {
 	{"Refund", payment.Refund{}},
 	{"PaymentIntentResponse", payment.PaymentIntentResponse{}},
 	// product
-	{"Product", product.Product{}},
 	{"Geometry", product.Geometry{}},
 	{"ReorderAlert", product.ReorderAlert{}},
 	{"PimContent", pim.PIMContent{}},
@@ -98,7 +97,6 @@ var modelBoundSchemas = []struct {
 	{"PimCollateral", pim.PIMCollateral{}},
 	{"ProductDetail", pim.ProductDetail{}},
 	{"ProductView", product.View{}},
-	{"ProductReorderAlert", product.ReorderAlert{}},
 	// location
 	{"Location", location.Location{}},
 	{"BranchSummary", location.BranchSummary{}},
@@ -229,12 +227,11 @@ var modelBoundSchemas = []struct {
 	{"ParsingParsedItem", parsing.ParsedItem{}},
 	{"ParsingMatchedProduct", parsing.MatchedProduct{}},
 	// finance (R1-7e)
-	{"PricingCalculatedPrice", pricing.CalculatedPrice{}},
+	{"PricingCalculatedPrice", pricing.CalculatedPriceView{}},
 	{"PricingRule", pricing.PricingRule{}},
 	{"PricingEscalationResult", pricing.EscalationResult{}},
 	{"PricingProductCategory", pricing.ProductCategory{}},
 	{"PricingCategoryRule", pricing.CategoryPricingRule{}},
-	{"PricingCategoryRulePage", pricing.PaginatedRulesResponse{}},
 	{"PricingCategoryRuleAudit", pricing.CategoryPricingAudit{}},
 	{"PricingMatrixCell", pricing.MatrixCell{}},
 	{"PricingMatrix", pricing.MatrixResponse{}},

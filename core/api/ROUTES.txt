@@ -115,7 +115,7 @@ POST	/api/v1/bankrecon/unmatch	internal/bankrecon	h.ManualUnmatch
 GET	/api/v1/branches	internal/location	h.ListBranches
 POST	/api/v1/branches	internal/location	h.CreateBranch
 DELETE	/api/v1/branches/{id}	internal/location	h.DeleteBranch
-GET	/api/v1/branches/{id}	internal/location	h.GetBranch
+GET	/api/v1/branches/{id}	internal/location	getBranch
 PUT	/api/v1/branches/{id}	internal/location	h.UpdateBranch
 GET	/api/v1/branches/{id}/tree	internal/location	tree
 GET	/api/v1/branches/{id}/users	internal/location	h.ListBranchUsers

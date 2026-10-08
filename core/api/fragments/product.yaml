@@ -1,20 +1,26 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The product module, transcribed from internal/product/handler.go and
-# model.go as they behave today: float dollars base price, a UPPERCASE unit
-# of measure vocabulary shared with quotes and the integration seam, and
-# the PIM geometry carried as nullable fields where null means not
-# recorded.
+# The product module and the PIM detail on the wire contract (item C3-1, ADR
+# 0001 and ADR 0006 sections 6 and 7.1): the list envelope, stock_uom beside
+# the scaled base price (base_price_ten_thousandths), quantities as decimal
+# strings, the stock totals on_hand, allocated and available in the stocking
+# unit, and a revision every write names. The PIM content, media and
+# generation routes below keep their own shapes until a later item converts
+# them; the PIM detail embeds the product wire.
 paths:
   /api/v1/products:
     get:
       operationId: productList
       tags: [product]
       summary: List products
+      description: >-
+        The keyset envelope of ADR 0001 section 1, ordered created_at DESC,
+        id DESC. Money is integer scaled; quantities are decimal strings.
       parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/Include'
       responses:
         '200':
           description: The page of products.
@@ -22,6 +28,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -39,14 +47,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Product'
+              $ref: '#/components/schemas/ProductCreate'
       responses:
         '201':
-          description: The created product.
+          description: The created product, revision 1, with its ETag and Location.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Product'
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
@@ -67,11 +82,11 @@ paths:
       tags: [product]
       summary: List products below their reorder point
       description: >-
-        The alert rows omit on order quantity, velocity and lead time; they
-        carry the deficit only.
+        The envelope; quantities are decimal strings. The rows carry the
+        deficit only.
       responses:
         '200':
-          description: The alerts, a bare array that is null when nothing is below its reorder point.
+          description: The alerts envelope.
           content:
             application/json:
               schema:
@@ -96,26 +111,30 @@ paths:
             format: uuid
       responses:
         '200':
-          description: The product.
+          description: The product, with its revision ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Product'
+                $ref: '#/components/schemas/ProductView'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/WireBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/WireNotFound'
   /api/v1/products/{id}/detail:
     get:
       operationId: productDetail
       tags:
       - product
       summary: Get product detail
-      description: A missing product answers 500, not 404.
+      description: The PIM aggregate; the product summary is the converted product wire.
       parameters:
       - name: id
         in: path
@@ -125,17 +144,19 @@ paths:
           format: uuid
       responses:
         '200':
-          description: The product with its PIM content, media and collateral.
+          description: The PIM aggregate.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductDetail'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/WireBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/content:
@@ -546,10 +567,9 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/margins:
     patch:
-      operationId: productUpdateMarginRules
+      operationId: productUpdateMargins
       tags: [product]
-      summary: Set the target margin and commission rate
-      description: A bare 200 with no body on success.
+      summary: Update the margin rules
       parameters:
         - name: id
           in: path
@@ -558,6 +578,12 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
@@ -566,30 +592,39 @@ paths:
               $ref: '#/components/schemas/ProductMarginUpdate'
       responses:
         '200':
-          description: Updated; no body.
+          description: The product with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/WireConflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/dimensions:
     patch:
       operationId: productUpdateDimensions
       tags: [product]
-      summary: Set the PIM parametric geometry
+      summary: Write the parametric geometry
       description: >-
-        All fields are nullable: an omitted or explicitly null field clears
-        the column to no geometry recorded, while a real zero is a recorded
-        zero dimension. The persisted geometry is returned.
+        Every geometry field is a pointer: a null clears the column to SQL
+        NULL ("not recorded"), a real zero is a measurement.
       parameters:
         - name: id
           in: path
@@ -598,42 +633,53 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Geometry'
+              $ref: '#/components/schemas/ProductDimensionsUpdate'
       responses:
         '200':
-          description: The persisted geometry.
+          description: The product with the persisted geometry, the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Geometry'
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/WireConflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/lead-time:
     patch:
       operationId: productUpdateLeadTime
       tags: [product]
-      summary: Set the dealer side lead time
+      summary: Publish or clear the lead time
       description: >-
-        The lead time in days published to the portal catalog. A null clears
-        it back to unpublished; zero asserts same day availability. The
-        request is echoed as the response.
+        lead_time_days null is "unpublished", a different fact than zero
+        ("available today").
       parameters:
         - name: id
           in: path
@@ -642,6 +688,12 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
       requestBody:
         required: true
         content:
@@ -650,32 +702,50 @@ paths:
               $ref: '#/components/schemas/ProductLeadTimeUpdate'
       responses:
         '200':
-          description: The echoed request.
+          description: The product with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProductLeadTimeUpdate'
+                $ref: '#/components/schemas/ProductView'
         '400':
           $ref: '#/components/responses/BadRequestEither'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/WireConflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   schemas:
     UOM:
       type: string
       description: The database unit of measure vocabulary, verbatim.
       enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
-    Product:
+    ProductView:
       type: object
-      required: [id, sku, description, uom_primary, base_price, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, reorder_point, reorder_qty, total_quantity, total_allocated, average_unit_cost, target_margin, commission_rate, created_at, updated_at]
+      description: >-
+        The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom,
+        the scaled base price, quantities as decimal strings, and the stock
+        totals in the stocking unit.
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths,
+        average_unit_cost_ten_thousandths, target_margin, commission_rate,
+        vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in,
+        stackable, geometry_source, lead_time_days, reorder_point,
+        reorder_qty, on_hand, allocated, available, revision, created_at,
+        updated_at]
       properties:
         id:
           type: string
@@ -684,14 +754,21 @@ components:
           type: string
         description:
           type: string
-        uom_primary:
-          $ref: "#/components/schemas/UOM"
-        base_price:
+        stock_uom:
+          $ref: '#/components/schemas/UOM'
+        base_price_ten_thousandths:
+          type: integer
+          format: int64
+          description: The base price per stocking unit at scale 4.
+        average_unit_cost_ten_thousandths:
+          type: integer
+          format: int64
+        target_margin:
           type: number
-          description: Float dollars.
+        commission_rate:
+          type: number
         vendor:
           type: [string, "null"]
-          description: Denormalized display name.
         vendor_id:
           type: [string, "null"]
           format: uuid
@@ -701,7 +778,62 @@ components:
           type: number
         length_in:
           type: [number, "null"]
-          description: Inches; null when the PIM has no geometry for the SKU.
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+        lead_time_days:
+          type: [integer, "null"]
+        reorder_point:
+          type: string
+          description: A decimal string at scale 4.
+        reorder_qty:
+          type: string
+        on_hand:
+          type: string
+          description: The stocking unit total of quantity.
+        allocated:
+          type: string
+        available:
+          type: string
+          description: on_hand less allocated.
+        revision:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductCreate:
+      type: object
+      required: [sku, description, stock_uom]
+      properties:
+        sku:
+          type: string
+        description:
+          type: string
+        stock_uom:
+          $ref: '#/components/schemas/UOM'
+        base_price_ten_thousandths:
+          type: integer
+          format: int64
+        vendor:
+          type: [string, "null"]
+        vendor_id:
+          type: [string, "null"]
+          format: uuid
+        upc:
+          type: [string, "null"]
+        weight_lbs:
+          type: number
+        length_in:
+          type: [number, "null"]
         width_in:
           type: [number, "null"]
         height_in:
@@ -711,41 +843,25 @@ components:
         geometry_source:
           type: [string, "null"]
         reorder_point:
-          type: number
+          type: string
         reorder_qty:
-          type: number
-        total_quantity:
-          type: number
-          description: Aggregated from inventory.
-        total_allocated:
-          type: number
-        average_unit_cost:
-          type: number
-          description: Float dollars.
-        target_margin:
-          type: number
-        commission_rate:
-          type: number
-        created_at:
           type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
     ProductPage:
       type: object
-      required: [data, total, limit, offset]
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
       properties:
-        data:
+        items:
           type: array
           items:
-            $ref: "#/components/schemas/Product"
-        total:
-          type: integer
+            $ref: '#/components/schemas/ProductView'
+        next_cursor:
+          type: [string, "null"]
         limit:
           type: integer
-        offset:
+        total:
           type: integer
+          format: int64
     Geometry:
       type: object
       description: >-
@@ -766,7 +882,8 @@ components:
           type: [string, "null"]
     ReorderAlert:
       type: object
-      required: [product_id, sku, description, vendor, vendor_id, reorder_point, reorder_qty, current_stock, deficit]
+      required: [product_id, sku, description, vendor, vendor_id,
+        reorder_point, reorder_qty, current_stock, deficit]
       properties:
         product_id:
           type: string
@@ -781,32 +898,59 @@ components:
           type: [string, "null"]
           format: uuid
         reorder_point:
-          type: number
+          type: string
         reorder_qty:
-          type: number
+          type: string
         current_stock:
-          type: number
+          type: string
         deficit:
-          type: number
+          type: string
     ReorderAlertList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/ReorderAlert"
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReorderAlert'
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
     ProductMarginUpdate:
       type: object
-      required: [target_margin, commission_rate]
       properties:
         target_margin:
           type: number
         commission_rate:
           type: number
+        revision:
+          type: integer
+          format: int64
+    ProductDimensionsUpdate:
+      type: object
+      properties:
+        length_in:
+          type: [number, "null"]
+        width_in:
+          type: [number, "null"]
+        height_in:
+          type: [number, "null"]
+        stackable:
+          type: [boolean, "null"]
+        geometry_source:
+          type: [string, "null"]
+        revision:
+          type: integer
+          format: int64
     ProductLeadTimeUpdate:
       type: object
-      required: [lead_time_days]
       properties:
         lead_time_days:
           type: [integer, "null"]
-          description: Days; null clears to unpublished, zero asserts same day.
+        revision:
+          type: integer
+          format: int64
     PimContent:
       type: object
       description: pim.PIMContent. The handler always sends all fifteen fields. A product with no content
@@ -984,83 +1128,23 @@ components:
           format: date-time
     ProductDetail:
       type: object
-      description: pim.ProductDetail. content is null when the product has none.
-      required:
-      - id
-      - sku
-      - description
-      - uom_primary
-      - base_price
-      - vendor
-      - upc
-      - weight_lbs
-      - reorder_point
-      - reorder_qty
-      - total_quantity
-      - total_allocated
-      - average_unit_cost
-      - target_margin
-      - commission_rate
-      - created_at
-      - updated_at
-      - content
-      - media
-      - collateral
+      description: >-
+        The PIM aggregate. The product summary is the converted product wire
+        (ADR 0006 7.1); content is null when the product has none.
+      required: [product, content, media, collateral]
       properties:
-        id:
-          type: string
-          format: uuid
-        sku:
-          type: string
-        description:
-          type: string
-        uom_primary:
-          type: string
-        base_price:
-          type: number
-          description: Float dollars today.
-        vendor:
-          type:
-          - string
-          - 'null'
-        upc:
-          type:
-          - string
-          - 'null'
-        weight_lbs:
-          type: number
-        reorder_point:
-          type: number
-        reorder_qty:
-          type: number
-        total_quantity:
-          type: number
-        total_allocated:
-          type: number
-        average_unit_cost:
-          type: number
-        target_margin:
-          type: number
-        commission_rate:
-          type: number
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+        product:
+          $ref: '#/components/schemas/ProductView'
         content:
-          oneOf:
-          - $ref: '#/components/schemas/PimContent'
-          - type: 'null'
+          type: [object, "null"]
         media:
           type: array
           items:
-            $ref: '#/components/schemas/PimMedia'
+            type: object
         collateral:
           type: array
           items:
-            $ref: '#/components/schemas/PimCollateral'
+            type: object
     PimContentUpdate:
       type: object
       description: 'UpdateContentRequest: every field optional, absent means unchanged.'

@@ -20,6 +20,7 @@
         "id": "<id-1>",
         "is_active": true,
         "name": "Golden D Rules Cat",
+        "parent_id": null,
         "path": "golden_d_rules_cat",
         "slug": "golden-d-rules-cat",
         "sort_order": 8,
@@ -36,7 +37,11 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": []
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -47,12 +52,12 @@
       "body": {
         "category_id": "<id-1>",
         "is_active": true,
-        "margin_floor_pct": 5,
+        "margin_floor_pct": "5",
         "priority": 3,
-        "rule_type": "MARKUP",
-        "rule_value": 12.5,
-        "target_type": "TIER",
-        "tier": "CONTRACTOR"
+        "rule_type": "markup",
+        "target_type": "tier",
+        "tier": "CONTRACTOR",
+        "value_pct": "12.5"
       }
     },
     "response": {
@@ -61,15 +66,21 @@
       "body": {
         "category_id": "<id-1>",
         "created_at": "<ts+0d>",
+        "created_by": "",
+        "customer_id": null,
+        "expires_at": null,
         "id": "<id-2>",
         "is_active": true,
-        "margin_floor_pct": 5,
+        "margin_floor_pct": "5",
         "priority": 3,
-        "rule_type": "MARKUP",
-        "rule_value": 12.5,
-        "target_type": "TIER",
+        "revision": 1,
+        "rule_type": "markup",
+        "starts_at": null,
+        "target_type": "tier",
         "tier": "CONTRACTOR",
-        "updated_at": "<ts+0d>"
+        "updated_at": "<ts+0d>",
+        "value_pct": "12.5",
+        "value_ten_thousandths": null
       }
     }
   },
@@ -83,9 +94,9 @@
         "customer_id": "<id-3>",
         "is_active": true,
         "priority": 1,
-        "rule_type": "MARKDOWN",
-        "rule_value": 4,
-        "target_type": "ACCOUNT"
+        "rule_type": "markdown",
+        "target_type": "account",
+        "value_pct": "4"
       }
     },
     "response": {
@@ -94,14 +105,21 @@
       "body": {
         "category_id": "<id-1>",
         "created_at": "<ts+0d>",
+        "created_by": "",
         "customer_id": "<id-3>",
+        "expires_at": null,
         "id": "<id-4>",
         "is_active": true,
+        "margin_floor_pct": null,
         "priority": 1,
-        "rule_type": "MARKDOWN",
-        "rule_value": 4,
-        "target_type": "ACCOUNT",
-        "updated_at": "<ts+0d>"
+        "revision": 1,
+        "rule_type": "markdown",
+        "starts_at": null,
+        "target_type": "account",
+        "tier": "",
+        "updated_at": "<ts+0d>",
+        "value_pct": "4",
+        "value_ten_thousandths": null
       }
     }
   },
@@ -114,10 +132,10 @@
         "category_id": "<id-1>",
         "is_active": true,
         "priority": 3,
-        "rule_type": "MARKUP",
-        "rule_value": 20,
-        "target_type": "TIER",
-        "tier": "CONTRACTOR"
+        "rule_type": "markup",
+        "target_type": "tier",
+        "tier": "CONTRACTOR",
+        "value_pct": "20"
       }
     },
     "response": {
@@ -125,8 +143,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "CONFLICT",
-          "message": "Conflict"
+          "code": "duplicate",
+          "message": "an active rule already exists for this target and category"
         },
         "meta": {
           "request_id": "<id-5>"
@@ -141,8 +159,8 @@
       "path": "/api/v1/pricing/category-rules",
       "body": {
         "category_id": "<id-1>",
-        "rule_type": "MARKUP",
-        "target_type": "NOPE"
+        "rule_type": "markup",
+        "target_type": "nope"
       }
     },
     "response": {
@@ -150,8 +168,22 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "target_type",
+              "message": "must be one of: account, tier"
+            },
+            {
+              "field": "value_pct",
+              "message": "is required on a percent rule"
+            },
+            {
+              "field": "tier",
+              "message": "is required on a tier rule"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-6>"
@@ -166,8 +198,8 @@
       "path": "/api/v1/pricing/category-rules",
       "body": {
         "category_id": "<id-1>",
-        "rule_type": "MARKUP",
-        "target_type": "ACCOUNT"
+        "rule_type": "markup",
+        "target_type": "account"
       }
     },
     "response": {
@@ -175,8 +207,18 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "value_pct",
+              "message": "is required on a percent rule"
+            },
+            {
+              "field": "customer_id",
+              "message": "is required on an account rule"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-7>"
@@ -191,8 +233,8 @@
       "path": "/api/v1/pricing/category-rules",
       "body": {
         "category_id": "<id-1>",
-        "rule_type": "NOPE",
-        "target_type": "TIER",
+        "rule_type": "nope",
+        "target_type": "tier",
         "tier": "RETAIL"
       }
     },
@@ -201,8 +243,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "rule_type",
+              "message": "must be one of: markup, markdown, fixed, margin"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-8>"
@@ -220,96 +268,240 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-3>",
-          "id": "<id-4>",
-          "is_active": true,
-          "priority": 1,
-          "rule_type": "MARKDOWN",
-          "rule_value": 4,
-          "target_type": "ACCOUNT",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "is_active": true,
-          "margin_floor_pct": 5,
-          "priority": 3,
-          "rule_type": "MARKUP",
-          "rule_value": 12.5,
-          "target_type": "TIER",
-          "tier": "CONTRACTOR",
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": "<id-3>",
+            "expires_at": null,
+            "id": "<id-4>",
+            "is_active": true,
+            "margin_floor_pct": null,
+            "priority": 1,
+            "revision": 1,
+            "rule_type": "markdown",
+            "starts_at": null,
+            "target_type": "account",
+            "tier": "",
+            "updated_at": "<ts+0d>",
+            "value_pct": "4",
+            "value_ten_thousandths": null
+          },
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": null,
+            "expires_at": null,
+            "id": "<id-2>",
+            "is_active": true,
+            "margin_floor_pct": "5",
+            "priority": 3,
+            "revision": 1,
+            "rule_type": "markup",
+            "starts_at": null,
+            "target_type": "tier",
+            "tier": "CONTRACTOR",
+            "updated_at": "<ts+0d>",
+            "value_pct": "12.5",
+            "value_ten_thousandths": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
     "name": "pricing.category_rules.list_by_tier",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pricing/category-rules?category_id=<id-1>&target_type=TIER&tier=CONTRACTOR"
+      "path": "/api/v1/pricing/category-rules?category_id=<id-1>&target_type=tier&tier=CONTRACTOR"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "is_active": true,
-          "margin_floor_pct": 5,
-          "priority": 3,
-          "rule_type": "MARKUP",
-          "rule_value": 12.5,
-          "target_type": "TIER",
-          "tier": "CONTRACTOR",
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": null,
+            "expires_at": null,
+            "id": "<id-2>",
+            "is_active": true,
+            "margin_floor_pct": "5",
+            "priority": 3,
+            "revision": 1,
+            "rule_type": "markup",
+            "starts_at": null,
+            "target_type": "tier",
+            "tier": "CONTRACTOR",
+            "updated_at": "<ts+0d>",
+            "value_pct": "12.5",
+            "value_ten_thousandths": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
     "name": "pricing.category_rules.list_paginated",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pricing/category-rules?category_id=<id-1>&limit=1&offset=0"
+      "path": "/api/v1/pricing/category-rules?category_id=<id-1>&limit=1&include=total"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "data": [
+        "items": [
           {
             "category_id": "<id-1>",
             "category_name": "Golden D Rules Cat",
             "category_path": "golden_d_rules_cat",
             "created_at": "<ts+0d>",
+            "created_by": "",
             "customer_id": "<id-3>",
+            "expires_at": null,
             "id": "<id-4>",
             "is_active": true,
+            "margin_floor_pct": null,
             "priority": 1,
-            "rule_type": "MARKDOWN",
-            "rule_value": 4,
-            "target_type": "ACCOUNT",
-            "updated_at": "<ts+0d>"
+            "revision": 1,
+            "rule_type": "markdown",
+            "starts_at": null,
+            "target_type": "account",
+            "tier": "",
+            "updated_at": "<ts+0d>",
+            "value_pct": "4",
+            "value_ten_thousandths": null
           }
         ],
         "limit": 1,
-        "offset": 0,
+        "next_cursor": "<cursor>",
         "total": 2
+      }
+    }
+  },
+  {
+    "name": "pricing.category_rules.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/category-rules?offset=0"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pricing.category_rules.list.bad_target_type",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/category-rules?target_type=TIER"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "target_type",
+              "message": "must be one of: account, tier"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pricing.category_rules.update.without_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/pricing/category-rules/<id-2>",
+      "body": {
+        "rule_type": "markup",
+        "value_pct": "15"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pricing.category_rules.update.target_refused",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/pricing/category-rules/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "rule_type": "markup",
+        "tier": "OTHER",
+        "value_pct": "15"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "tier",
+              "message": "unknown field"
+            }
+          ],
+          "message": "request body has a field this route does not accept"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
       }
     }
   },
@@ -318,15 +510,15 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/pricing/category-rules/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
-        "category_id": "<id-1>",
         "is_active": true,
-        "margin_floor_pct": 6,
+        "margin_floor_pct": "6",
         "priority": 3,
-        "rule_type": "MARKUP",
-        "rule_value": 15,
-        "target_type": "TIER",
-        "tier": "CONTRACTOR"
+        "rule_type": "markup",
+        "value_pct": "15"
       }
     },
     "response": {
@@ -334,16 +526,51 @@
       "content_type": "application/json",
       "body": {
         "category_id": "<id-1>",
-        "created_at": "<ts-106751d>",
+        "category_name": "Golden D Rules Cat",
+        "category_path": "golden_d_rules_cat",
+        "created_at": "<ts+0d>",
+        "created_by": "",
+        "customer_id": null,
+        "expires_at": null,
         "id": "<id-2>",
         "is_active": true,
-        "margin_floor_pct": 6,
+        "margin_floor_pct": "6",
         "priority": 3,
-        "rule_type": "MARKUP",
-        "rule_value": 15,
-        "target_type": "TIER",
+        "revision": 2,
+        "rule_type": "markup",
+        "starts_at": null,
+        "target_type": "tier",
         "tier": "CONTRACTOR",
-        "updated_at": "<ts+0d>"
+        "updated_at": "<ts+0d>",
+        "value_pct": "15",
+        "value_ten_thousandths": null
+      }
+    }
+  },
+  {
+    "name": "pricing.category_rules.update.stale",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/pricing/category-rules/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "rule_type": "markup",
+        "value_pct": "16"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
       }
     }
   },
@@ -351,29 +578,26 @@
     "name": "pricing.category_rules.update.not_found",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/pricing/category-rules/<id-9>",
+      "path": "/api/v1/pricing/category-rules/<id-14>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
-        "category_id": "<id-1>",
-        "rule_type": "MARKUP",
-        "rule_value": 1,
-        "target_type": "TIER",
-        "tier": "CONTRACTOR"
+        "rule_type": "markup",
+        "value_pct": "1"
       }
     },
     "response": {
-      "status": 200,
+      "status": 404,
       "content_type": "application/json",
       "body": {
-        "category_id": "<id-1>",
-        "created_at": "<ts-106751d>",
-        "id": "<id-9>",
-        "is_active": false,
-        "priority": 0,
-        "rule_type": "MARKUP",
-        "rule_value": 1,
-        "target_type": "TIER",
-        "tier": "CONTRACTOR",
-        "updated_at": "<ts+0d>"
+        "error": {
+          "code": "not_found",
+          "message": "no such category rule"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
       }
     }
   },
@@ -389,11 +613,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-16>"
         }
       }
     }
@@ -407,52 +637,56 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "action": "UPDATE",
-          "category_id": "<id-1>",
-          "id": "<id-11>",
-          "new_values": {
-            "is_active": true,
-            "margin_floor_pct": 6,
-            "priority": 3,
-            "rule_type": "MARKUP",
-            "rule_value": 15,
+      "body": {
+        "items": [
+          {
+            "action": "UPDATE",
+            "category_id": "<id-1>",
+            "id": "<id-17>",
+            "new_values": {
+              "is_active": true,
+              "margin_floor_pct": "6",
+              "priority": 3,
+              "rule_type": "markup",
+              "tier": "CONTRACTOR",
+              "value_pct": "15"
+            },
+            "old_values": {
+              "is_active": true,
+              "margin_floor_pct": "5",
+              "priority": 3,
+              "rule_type": "markup",
+              "tier": "CONTRACTOR",
+              "value_pct": "12.5"
+            },
+            "performed_at": "<ts+0d>",
+            "performed_by": "system",
+            "rule_id": "<id-2>",
+            "target_type": "TIER",
             "tier": "CONTRACTOR"
           },
-          "old_values": {
-            "is_active": true,
-            "margin_floor_pct": 5,
-            "priority": 3,
-            "rule_type": "MARKUP",
-            "rule_value": 12.5,
+          {
+            "action": "CREATE",
+            "category_id": "<id-1>",
+            "id": "<id-18>",
+            "new_values": {
+              "is_active": true,
+              "margin_floor_pct": "5",
+              "priority": 3,
+              "rule_type": "markup",
+              "tier": "CONTRACTOR",
+              "value_pct": "12.5"
+            },
+            "performed_at": "<ts+0d>",
+            "performed_by": "system",
+            "rule_id": "<id-2>",
+            "target_type": "TIER",
             "tier": "CONTRACTOR"
-          },
-          "performed_at": "<ts+0d>",
-          "performed_by": "system",
-          "rule_id": "<id-2>",
-          "target_type": "TIER",
-          "tier": "CONTRACTOR"
-        },
-        {
-          "action": "CREATE",
-          "category_id": "<id-1>",
-          "id": "<id-12>",
-          "new_values": {
-            "is_active": true,
-            "margin_floor_pct": 5,
-            "priority": 3,
-            "rule_type": "MARKUP",
-            "rule_value": 12.5,
-            "tier": "CONTRACTOR"
-          },
-          "performed_at": "<ts+0d>",
-          "performed_by": "system",
-          "rule_id": "<id-2>",
-          "target_type": "TIER",
-          "tier": "CONTRACTOR"
-        }
-      ]
+          }
+        ],
+        "limit": 0,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -466,11 +700,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -485,19 +725,19 @@
           "category_id": "<id-1>",
           "is_active": true,
           "priority": 2,
-          "rule_type": "MARGIN",
-          "rule_value": 22,
-          "target_type": "TIER",
-          "tier": "WHOLESALE"
+          "rule_type": "margin",
+          "target_type": "tier",
+          "tier": "WHOLESALE",
+          "value_pct": "22"
         },
         {
           "category_id": "<id-1>",
           "is_active": true,
           "priority": 2,
-          "rule_type": "FIXED",
-          "rule_value": 9.99,
-          "target_type": "TIER",
-          "tier": "RETAIL"
+          "rule_type": "fixed",
+          "target_type": "tier",
+          "tier": "RETAIL",
+          "value_ten_thousandths": 99900
         }
       ]
     },
@@ -521,11 +761,16 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "message": "at least one rule is required"
+            }
+          ],
+          "message": "at least one rule is required"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -538,8 +783,8 @@
       "body": [
         {
           "category_id": "<id-1>",
-          "rule_type": "MARKUP",
-          "target_type": "TIER"
+          "rule_type": "markup",
+          "target_type": "tier"
         }
       ]
     },
@@ -548,11 +793,21 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "value_pct",
+              "message": "is required on a percent rule"
+            },
+            {
+              "field": "tier",
+              "message": "is required on a tier rule"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-21>"
         }
       }
     }
@@ -567,65 +822,96 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-3>",
-          "id": "<id-4>",
-          "is_active": true,
-          "priority": 1,
-          "rule_type": "MARKDOWN",
-          "rule_value": 4,
-          "target_type": "ACCOUNT",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "is_active": true,
-          "margin_floor_pct": 6,
-          "priority": 3,
-          "rule_type": "MARKUP",
-          "rule_value": 15,
-          "target_type": "TIER",
-          "tier": "CONTRACTOR",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "id": "<id-16>",
-          "is_active": true,
-          "priority": 2,
-          "rule_type": "FIXED",
-          "rule_value": 9.99,
-          "target_type": "TIER",
-          "tier": "RETAIL",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "id": "<id-17>",
-          "is_active": true,
-          "priority": 2,
-          "rule_type": "MARGIN",
-          "rule_value": 22,
-          "target_type": "TIER",
-          "tier": "WHOLESALE",
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": null,
+            "expires_at": null,
+            "id": "<id-22>",
+            "is_active": true,
+            "margin_floor_pct": null,
+            "priority": 2,
+            "revision": 1,
+            "rule_type": "fixed",
+            "starts_at": null,
+            "target_type": "tier",
+            "tier": "RETAIL",
+            "updated_at": "<ts+0d>",
+            "value_pct": null,
+            "value_ten_thousandths": 99900
+          },
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": null,
+            "expires_at": null,
+            "id": "<id-23>",
+            "is_active": true,
+            "margin_floor_pct": null,
+            "priority": 2,
+            "revision": 1,
+            "rule_type": "margin",
+            "starts_at": null,
+            "target_type": "tier",
+            "tier": "WHOLESALE",
+            "updated_at": "<ts+0d>",
+            "value_pct": "22",
+            "value_ten_thousandths": null
+          },
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": "<id-3>",
+            "expires_at": null,
+            "id": "<id-4>",
+            "is_active": true,
+            "margin_floor_pct": null,
+            "priority": 1,
+            "revision": 1,
+            "rule_type": "markdown",
+            "starts_at": null,
+            "target_type": "account",
+            "tier": "",
+            "updated_at": "<ts+0d>",
+            "value_pct": "4",
+            "value_ten_thousandths": null
+          },
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": null,
+            "expires_at": null,
+            "id": "<id-2>",
+            "is_active": true,
+            "margin_floor_pct": "6",
+            "priority": 3,
+            "revision": 2,
+            "rule_type": "markup",
+            "starts_at": null,
+            "target_type": "tier",
+            "tier": "CONTRACTOR",
+            "updated_at": "<ts+0d>",
+            "value_pct": "15",
+            "value_ten_thousandths": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -641,9 +927,10 @@
         "categories": [
           {
             "created_at": "<ts+0d>",
-            "id": "<id-18>",
+            "id": "<id-24>",
             "is_active": true,
             "name": "Concrete",
+            "parent_id": null,
             "path": "concrete",
             "slug": "concrete",
             "sort_order": 5,
@@ -651,9 +938,10 @@
           },
           {
             "created_at": "<ts+0d>",
-            "id": "<id-19>",
+            "id": "<id-25>",
             "is_active": true,
             "name": "General",
+            "parent_id": null,
             "path": "general",
             "slug": "general",
             "sort_order": 99,
@@ -663,10 +951,10 @@
             "children": [
               {
                 "created_at": "<ts+0d>",
-                "id": "<id-20>",
+                "id": "<id-26>",
                 "is_active": true,
                 "name": "Golden D Child Renamed",
-                "parent_id": "<id-21>",
+                "parent_id": "<id-27>",
                 "path": "golden_d_root.golden_d_child",
                 "slug": "golden-d-child",
                 "sort_order": 2,
@@ -674,9 +962,10 @@
               }
             ],
             "created_at": "<ts+0d>",
-            "id": "<id-21>",
+            "id": "<id-27>",
             "is_active": true,
             "name": "Golden D Root",
+            "parent_id": null,
             "path": "golden_d_root",
             "slug": "golden-d-root",
             "sort_order": 7,
@@ -687,6 +976,7 @@
             "id": "<id-1>",
             "is_active": true,
             "name": "Golden D Rules Cat",
+            "parent_id": null,
             "path": "golden_d_rules_cat",
             "slug": "golden-d-rules-cat",
             "sort_order": 8,
@@ -696,10 +986,10 @@
             "children": [
               {
                 "created_at": "<ts+0d>",
-                "id": "<id-22>",
+                "id": "<id-28>",
                 "is_active": true,
                 "name": "Connectors",
-                "parent_id": "<id-23>",
+                "parent_id": "<id-29>",
                 "path": "hardware.connectors",
                 "slug": "connectors",
                 "sort_order": 2,
@@ -707,10 +997,10 @@
               },
               {
                 "created_at": "<ts+0d>",
-                "id": "<id-24>",
+                "id": "<id-30>",
                 "is_active": true,
                 "name": "Fasteners",
-                "parent_id": "<id-23>",
+                "parent_id": "<id-29>",
                 "path": "hardware.fasteners",
                 "slug": "fasteners",
                 "sort_order": 1,
@@ -718,9 +1008,10 @@
               }
             ],
             "created_at": "<ts+0d>",
-            "id": "<id-23>",
+            "id": "<id-29>",
             "is_active": true,
             "name": "Hardware",
+            "parent_id": null,
             "path": "hardware",
             "slug": "hardware",
             "sort_order": 2,
@@ -728,9 +1019,10 @@
           },
           {
             "created_at": "<ts+0d>",
-            "id": "<id-25>",
+            "id": "<id-31>",
             "is_active": true,
             "name": "Insulation",
+            "parent_id": null,
             "path": "insulation",
             "slug": "insulation",
             "sort_order": 4,
@@ -740,10 +1032,10 @@
             "children": [
               {
                 "created_at": "<ts+0d>",
-                "id": "<id-26>",
+                "id": "<id-32>",
                 "is_active": true,
                 "name": "Engineered Wood",
-                "parent_id": "<id-27>",
+                "parent_id": "<id-33>",
                 "path": "lumber.engineered",
                 "slug": "engineered_wood",
                 "sort_order": 3,
@@ -751,10 +1043,10 @@
               },
               {
                 "created_at": "<ts+0d>",
-                "id": "<id-28>",
+                "id": "<id-34>",
                 "is_active": true,
                 "name": "Framing Lumber",
-                "parent_id": "<id-27>",
+                "parent_id": "<id-33>",
                 "path": "lumber.framing",
                 "slug": "framing_lumber",
                 "sort_order": 1,
@@ -762,10 +1054,10 @@
               },
               {
                 "created_at": "<ts+0d>",
-                "id": "<id-29>",
+                "id": "<id-35>",
                 "is_active": true,
                 "name": "Sheathing",
-                "parent_id": "<id-27>",
+                "parent_id": "<id-33>",
                 "path": "lumber.sheathing",
                 "slug": "sheathing",
                 "sort_order": 2,
@@ -773,9 +1065,10 @@
               }
             ],
             "created_at": "<ts+0d>",
-            "id": "<id-27>",
+            "id": "<id-33>",
             "is_active": true,
             "name": "Lumber",
+            "parent_id": null,
             "path": "lumber",
             "slug": "lumber",
             "sort_order": 1,
@@ -783,9 +1076,10 @@
           },
           {
             "created_at": "<ts+0d>",
-            "id": "<id-30>",
+            "id": "<id-36>",
             "is_active": true,
             "name": "Roofing",
+            "parent_id": null,
             "path": "roofing",
             "slug": "roofing",
             "sort_order": 3,
@@ -794,157 +1088,175 @@
         ],
         "cells": [
           {
-            "category_id": "<id-18>",
+            "category_id": "<id-24>",
             "category_name": "Concrete",
             "category_path": "concrete",
             "inherited": false,
             "tier": "RETAIL"
           },
           {
-            "category_id": "<id-18>",
+            "category_id": "<id-24>",
             "category_name": "Concrete",
             "category_path": "concrete",
             "inherited": false,
             "rule": {
-              "category_id": "<id-18>",
+              "category_id": "<id-24>",
               "category_name": "Concrete",
               "category_path": "concrete",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-31>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-37>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "SILVER",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
             },
             "tier": "SILVER"
           },
           {
-            "category_id": "<id-18>",
+            "category_id": "<id-24>",
             "category_name": "Concrete",
             "category_path": "concrete",
             "inherited": false,
             "rule": {
-              "category_id": "<id-18>",
+              "category_id": "<id-24>",
               "category_name": "Concrete",
               "category_path": "concrete",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-32>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-38>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "GOLD",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
             },
             "tier": "GOLD"
           },
           {
-            "category_id": "<id-18>",
+            "category_id": "<id-24>",
             "category_name": "Concrete",
             "category_path": "concrete",
             "inherited": false,
             "rule": {
-              "category_id": "<id-18>",
+              "category_id": "<id-24>",
               "category_name": "Concrete",
               "category_path": "concrete",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-33>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-39>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
             },
             "tier": "PLATINUM"
           },
           {
-            "category_id": "<id-19>",
+            "category_id": "<id-25>",
             "category_name": "General",
             "category_path": "general",
             "inherited": false,
             "tier": "RETAIL"
           },
           {
-            "category_id": "<id-19>",
+            "category_id": "<id-25>",
             "category_name": "General",
             "category_path": "general",
             "inherited": false,
             "tier": "SILVER"
           },
           {
-            "category_id": "<id-19>",
+            "category_id": "<id-25>",
             "category_name": "General",
             "category_path": "general",
             "inherited": false,
             "tier": "GOLD"
           },
           {
-            "category_id": "<id-19>",
+            "category_id": "<id-25>",
             "category_name": "General",
             "category_path": "general",
             "inherited": false,
             "tier": "PLATINUM"
           },
           {
-            "category_id": "<id-21>",
+            "category_id": "<id-27>",
             "category_name": "Golden D Root",
             "category_path": "golden_d_root",
             "inherited": false,
             "tier": "RETAIL"
           },
           {
-            "category_id": "<id-21>",
+            "category_id": "<id-27>",
             "category_name": "Golden D Root",
             "category_path": "golden_d_root",
             "inherited": false,
             "tier": "SILVER"
           },
           {
-            "category_id": "<id-21>",
+            "category_id": "<id-27>",
             "category_name": "Golden D Root",
             "category_path": "golden_d_root",
             "inherited": false,
             "tier": "GOLD"
           },
           {
-            "category_id": "<id-21>",
+            "category_id": "<id-27>",
             "category_name": "Golden D Root",
             "category_path": "golden_d_root",
             "inherited": false,
             "tier": "PLATINUM"
           },
           {
-            "category_id": "<id-20>",
+            "category_id": "<id-26>",
             "category_name": "Golden D Child Renamed",
             "category_path": "golden_d_root.golden_d_child",
             "inherited": false,
             "tier": "RETAIL"
           },
           {
-            "category_id": "<id-20>",
+            "category_id": "<id-26>",
             "category_name": "Golden D Child Renamed",
             "category_path": "golden_d_root.golden_d_child",
             "inherited": false,
             "tier": "SILVER"
           },
           {
-            "category_id": "<id-20>",
+            "category_id": "<id-26>",
             "category_name": "Golden D Child Renamed",
             "category_path": "golden_d_root.golden_d_child",
             "inherited": false,
             "tier": "GOLD"
           },
           {
-            "category_id": "<id-20>",
+            "category_id": "<id-26>",
             "category_name": "Golden D Child Renamed",
             "category_path": "golden_d_root.golden_d_child",
             "inherited": false,
@@ -960,14 +1272,21 @@
               "category_name": "Golden D Rules Cat",
               "category_path": "golden_d_rules_cat",
               "created_at": "<ts+0d>",
-              "id": "<id-16>",
+              "created_by": "",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-22>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 2,
-              "rule_type": "FIXED",
-              "rule_value": 9.99,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "fixed",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "RETAIL",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": null,
+              "value_ten_thousandths": 99900
             },
             "tier": "RETAIL"
           },
@@ -993,674 +1312,836 @@
             "tier": "PLATINUM"
           },
           {
-            "category_id": "<id-23>",
+            "category_id": "<id-29>",
             "category_name": "Hardware",
             "category_path": "hardware",
             "inherited": false,
             "tier": "RETAIL"
           },
           {
-            "category_id": "<id-23>",
+            "category_id": "<id-29>",
             "category_name": "Hardware",
             "category_path": "hardware",
             "inherited": false,
             "rule": {
-              "category_id": "<id-23>",
+              "category_id": "<id-29>",
               "category_name": "Hardware",
               "category_path": "hardware",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-34>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-40>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "SILVER",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
             },
             "tier": "SILVER"
           },
           {
-            "category_id": "<id-23>",
+            "category_id": "<id-29>",
             "category_name": "Hardware",
             "category_path": "hardware",
             "inherited": false,
             "rule": {
-              "category_id": "<id-23>",
+              "category_id": "<id-29>",
               "category_name": "Hardware",
               "category_path": "hardware",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-35>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-41>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "GOLD",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
             },
             "tier": "GOLD"
           },
           {
-            "category_id": "<id-23>",
+            "category_id": "<id-29>",
             "category_name": "Hardware",
             "category_path": "hardware",
             "inherited": false,
             "rule": {
-              "category_id": "<id-23>",
+              "category_id": "<id-29>",
               "category_name": "Hardware",
               "category_path": "hardware",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-36>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-42>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
             },
             "tier": "PLATINUM"
           },
           {
-            "category_id": "<id-22>",
+            "category_id": "<id-28>",
             "category_name": "Connectors",
             "category_path": "hardware.connectors",
             "inherited": false,
             "tier": "RETAIL"
           },
           {
-            "category_id": "<id-22>",
+            "category_id": "<id-28>",
             "category_name": "Connectors",
             "category_path": "hardware.connectors",
             "inherited": true,
             "rule": {
-              "category_id": "<id-23>",
+              "category_id": "<id-29>",
               "category_name": "Hardware",
               "category_path": "hardware",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-34>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-40>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "SILVER",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
             },
             "source_path": "hardware",
             "tier": "SILVER"
           },
           {
-            "category_id": "<id-22>",
+            "category_id": "<id-28>",
             "category_name": "Connectors",
             "category_path": "hardware.connectors",
             "inherited": true,
             "rule": {
-              "category_id": "<id-23>",
+              "category_id": "<id-29>",
               "category_name": "Hardware",
               "category_path": "hardware",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-35>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-41>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "GOLD",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
             },
             "source_path": "hardware",
             "tier": "GOLD"
           },
           {
-            "category_id": "<id-22>",
+            "category_id": "<id-28>",
             "category_name": "Connectors",
             "category_path": "hardware.connectors",
             "inherited": true,
             "rule": {
-              "category_id": "<id-23>",
+              "category_id": "<id-29>",
               "category_name": "Hardware",
               "category_path": "hardware",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-36>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
-              "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "hardware",
-            "tier": "PLATINUM"
-          },
-          {
-            "category_id": "<id-24>",
-            "category_name": "Fasteners",
-            "category_path": "hardware.fasteners",
-            "inherited": false,
-            "tier": "RETAIL"
-          },
-          {
-            "category_id": "<id-24>",
-            "category_name": "Fasteners",
-            "category_path": "hardware.fasteners",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-23>",
-              "category_name": "Hardware",
-              "category_path": "hardware",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-34>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
-              "tier": "SILVER",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "hardware",
-            "tier": "SILVER"
-          },
-          {
-            "category_id": "<id-24>",
-            "category_name": "Fasteners",
-            "category_path": "hardware.fasteners",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-23>",
-              "category_name": "Hardware",
-              "category_path": "hardware",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-35>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
-              "tier": "GOLD",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "hardware",
-            "tier": "GOLD"
-          },
-          {
-            "category_id": "<id-24>",
-            "category_name": "Fasteners",
-            "category_path": "hardware.fasteners",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-23>",
-              "category_name": "Hardware",
-              "category_path": "hardware",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-36>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
-              "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "hardware",
-            "tier": "PLATINUM"
-          },
-          {
-            "category_id": "<id-25>",
-            "category_name": "Insulation",
-            "category_path": "insulation",
-            "inherited": false,
-            "tier": "RETAIL"
-          },
-          {
-            "category_id": "<id-25>",
-            "category_name": "Insulation",
-            "category_path": "insulation",
-            "inherited": false,
-            "rule": {
-              "category_id": "<id-25>",
-              "category_name": "Insulation",
-              "category_path": "insulation",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-37>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
-              "tier": "SILVER",
-              "updated_at": "<ts+0d>"
-            },
-            "tier": "SILVER"
-          },
-          {
-            "category_id": "<id-25>",
-            "category_name": "Insulation",
-            "category_path": "insulation",
-            "inherited": false,
-            "rule": {
-              "category_id": "<id-25>",
-              "category_name": "Insulation",
-              "category_path": "insulation",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-38>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
-              "tier": "GOLD",
-              "updated_at": "<ts+0d>"
-            },
-            "tier": "GOLD"
-          },
-          {
-            "category_id": "<id-25>",
-            "category_name": "Insulation",
-            "category_path": "insulation",
-            "inherited": false,
-            "rule": {
-              "category_id": "<id-25>",
-              "category_name": "Insulation",
-              "category_path": "insulation",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-39>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
-              "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
-            },
-            "tier": "PLATINUM"
-          },
-          {
-            "category_id": "<id-27>",
-            "category_name": "Lumber",
-            "category_path": "lumber",
-            "inherited": false,
-            "tier": "RETAIL"
-          },
-          {
-            "category_id": "<id-27>",
-            "category_name": "Lumber",
-            "category_path": "lumber",
-            "inherited": false,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-40>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
-              "tier": "SILVER",
-              "updated_at": "<ts+0d>"
-            },
-            "tier": "SILVER"
-          },
-          {
-            "category_id": "<id-27>",
-            "category_name": "Lumber",
-            "category_path": "lumber",
-            "inherited": false,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-41>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
-              "tier": "GOLD",
-              "updated_at": "<ts+0d>"
-            },
-            "tier": "GOLD"
-          },
-          {
-            "category_id": "<id-27>",
-            "category_name": "Lumber",
-            "category_path": "lumber",
-            "inherited": false,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
               "id": "<id-42>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
             },
-            "tier": "PLATINUM"
-          },
-          {
-            "category_id": "<id-26>",
-            "category_name": "Engineered Wood",
-            "category_path": "lumber.engineered",
-            "inherited": false,
-            "tier": "RETAIL"
-          },
-          {
-            "category_id": "<id-26>",
-            "category_name": "Engineered Wood",
-            "category_path": "lumber.engineered",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-40>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
-              "tier": "SILVER",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "SILVER"
-          },
-          {
-            "category_id": "<id-26>",
-            "category_name": "Engineered Wood",
-            "category_path": "lumber.engineered",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-41>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
-              "tier": "GOLD",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "GOLD"
-          },
-          {
-            "category_id": "<id-26>",
-            "category_name": "Engineered Wood",
-            "category_path": "lumber.engineered",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-42>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
-              "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "PLATINUM"
-          },
-          {
-            "category_id": "<id-28>",
-            "category_name": "Framing Lumber",
-            "category_path": "lumber.framing",
-            "inherited": false,
-            "tier": "RETAIL"
-          },
-          {
-            "category_id": "<id-28>",
-            "category_name": "Framing Lumber",
-            "category_path": "lumber.framing",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-40>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
-              "tier": "SILVER",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "SILVER"
-          },
-          {
-            "category_id": "<id-28>",
-            "category_name": "Framing Lumber",
-            "category_path": "lumber.framing",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-41>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
-              "tier": "GOLD",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "GOLD"
-          },
-          {
-            "category_id": "<id-28>",
-            "category_name": "Framing Lumber",
-            "category_path": "lumber.framing",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-42>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
-              "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "PLATINUM"
-          },
-          {
-            "category_id": "<id-29>",
-            "category_name": "Sheathing",
-            "category_path": "lumber.sheathing",
-            "inherited": false,
-            "tier": "RETAIL"
-          },
-          {
-            "category_id": "<id-29>",
-            "category_name": "Sheathing",
-            "category_path": "lumber.sheathing",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-40>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
-              "tier": "SILVER",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "SILVER"
-          },
-          {
-            "category_id": "<id-29>",
-            "category_name": "Sheathing",
-            "category_path": "lumber.sheathing",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-41>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
-              "tier": "GOLD",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
-            "tier": "GOLD"
-          },
-          {
-            "category_id": "<id-29>",
-            "category_name": "Sheathing",
-            "category_path": "lumber.sheathing",
-            "inherited": true,
-            "rule": {
-              "category_id": "<id-27>",
-              "category_name": "Lumber",
-              "category_path": "lumber",
-              "created_at": "<ts+0d>",
-              "created_by": "system_migration",
-              "id": "<id-42>",
-              "is_active": true,
-              "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
-              "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
-            },
-            "source_path": "lumber",
+            "source_path": "hardware",
             "tier": "PLATINUM"
           },
           {
             "category_id": "<id-30>",
-            "category_name": "Roofing",
-            "category_path": "roofing",
+            "category_name": "Fasteners",
+            "category_path": "hardware.fasteners",
             "inherited": false,
             "tier": "RETAIL"
           },
           {
             "category_id": "<id-30>",
-            "category_name": "Roofing",
-            "category_path": "roofing",
-            "inherited": false,
+            "category_name": "Fasteners",
+            "category_path": "hardware.fasteners",
+            "inherited": true,
             "rule": {
-              "category_id": "<id-30>",
-              "category_name": "Roofing",
-              "category_path": "roofing",
+              "category_id": "<id-29>",
+              "category_name": "Hardware",
+              "category_path": "hardware",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-40>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "SILVER",
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
+            },
+            "source_path": "hardware",
+            "tier": "SILVER"
+          },
+          {
+            "category_id": "<id-30>",
+            "category_name": "Fasteners",
+            "category_path": "hardware.fasteners",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-29>",
+              "category_name": "Hardware",
+              "category_path": "hardware",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-41>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "GOLD",
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
+            },
+            "source_path": "hardware",
+            "tier": "GOLD"
+          },
+          {
+            "category_id": "<id-30>",
+            "category_name": "Fasteners",
+            "category_path": "hardware.fasteners",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-29>",
+              "category_name": "Hardware",
+              "category_path": "hardware",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-42>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "PLATINUM",
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
+            },
+            "source_path": "hardware",
+            "tier": "PLATINUM"
+          },
+          {
+            "category_id": "<id-31>",
+            "category_name": "Insulation",
+            "category_path": "insulation",
+            "inherited": false,
+            "tier": "RETAIL"
+          },
+          {
+            "category_id": "<id-31>",
+            "category_name": "Insulation",
+            "category_path": "insulation",
+            "inherited": false,
+            "rule": {
+              "category_id": "<id-31>",
+              "category_name": "Insulation",
+              "category_path": "insulation",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
               "id": "<id-43>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 10,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "SILVER",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
             },
             "tier": "SILVER"
           },
           {
-            "category_id": "<id-30>",
-            "category_name": "Roofing",
-            "category_path": "roofing",
+            "category_id": "<id-31>",
+            "category_name": "Insulation",
+            "category_path": "insulation",
             "inherited": false,
             "rule": {
-              "category_id": "<id-30>",
-              "category_name": "Roofing",
-              "category_path": "roofing",
+              "category_id": "<id-31>",
+              "category_name": "Insulation",
+              "category_path": "insulation",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
               "id": "<id-44>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 15,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "GOLD",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
             },
             "tier": "GOLD"
           },
           {
-            "category_id": "<id-30>",
+            "category_id": "<id-31>",
+            "category_name": "Insulation",
+            "category_path": "insulation",
+            "inherited": false,
+            "rule": {
+              "category_id": "<id-31>",
+              "category_name": "Insulation",
+              "category_path": "insulation",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-45>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "PLATINUM",
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
+            },
+            "tier": "PLATINUM"
+          },
+          {
+            "category_id": "<id-33>",
+            "category_name": "Lumber",
+            "category_path": "lumber",
+            "inherited": false,
+            "tier": "RETAIL"
+          },
+          {
+            "category_id": "<id-33>",
+            "category_name": "Lumber",
+            "category_path": "lumber",
+            "inherited": false,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-46>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "SILVER",
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
+            },
+            "tier": "SILVER"
+          },
+          {
+            "category_id": "<id-33>",
+            "category_name": "Lumber",
+            "category_path": "lumber",
+            "inherited": false,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-47>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "GOLD",
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
+            },
+            "tier": "GOLD"
+          },
+          {
+            "category_id": "<id-33>",
+            "category_name": "Lumber",
+            "category_path": "lumber",
+            "inherited": false,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-48>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "PLATINUM",
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
+            },
+            "tier": "PLATINUM"
+          },
+          {
+            "category_id": "<id-32>",
+            "category_name": "Engineered Wood",
+            "category_path": "lumber.engineered",
+            "inherited": false,
+            "tier": "RETAIL"
+          },
+          {
+            "category_id": "<id-32>",
+            "category_name": "Engineered Wood",
+            "category_path": "lumber.engineered",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-46>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "SILVER",
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "SILVER"
+          },
+          {
+            "category_id": "<id-32>",
+            "category_name": "Engineered Wood",
+            "category_path": "lumber.engineered",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-47>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "GOLD",
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "GOLD"
+          },
+          {
+            "category_id": "<id-32>",
+            "category_name": "Engineered Wood",
+            "category_path": "lumber.engineered",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-48>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "PLATINUM",
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "PLATINUM"
+          },
+          {
+            "category_id": "<id-34>",
+            "category_name": "Framing Lumber",
+            "category_path": "lumber.framing",
+            "inherited": false,
+            "tier": "RETAIL"
+          },
+          {
+            "category_id": "<id-34>",
+            "category_name": "Framing Lumber",
+            "category_path": "lumber.framing",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-46>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "SILVER",
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "SILVER"
+          },
+          {
+            "category_id": "<id-34>",
+            "category_name": "Framing Lumber",
+            "category_path": "lumber.framing",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-47>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "GOLD",
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "GOLD"
+          },
+          {
+            "category_id": "<id-34>",
+            "category_name": "Framing Lumber",
+            "category_path": "lumber.framing",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-48>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "PLATINUM",
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "PLATINUM"
+          },
+          {
+            "category_id": "<id-35>",
+            "category_name": "Sheathing",
+            "category_path": "lumber.sheathing",
+            "inherited": false,
+            "tier": "RETAIL"
+          },
+          {
+            "category_id": "<id-35>",
+            "category_name": "Sheathing",
+            "category_path": "lumber.sheathing",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-46>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "SILVER",
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "SILVER"
+          },
+          {
+            "category_id": "<id-35>",
+            "category_name": "Sheathing",
+            "category_path": "lumber.sheathing",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-47>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "GOLD",
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "GOLD"
+          },
+          {
+            "category_id": "<id-35>",
+            "category_name": "Sheathing",
+            "category_path": "lumber.sheathing",
+            "inherited": true,
+            "rule": {
+              "category_id": "<id-33>",
+              "category_name": "Lumber",
+              "category_path": "lumber",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-48>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "PLATINUM",
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
+            },
+            "source_path": "lumber",
+            "tier": "PLATINUM"
+          },
+          {
+            "category_id": "<id-36>",
+            "category_name": "Roofing",
+            "category_path": "roofing",
+            "inherited": false,
+            "tier": "RETAIL"
+          },
+          {
+            "category_id": "<id-36>",
             "category_name": "Roofing",
             "category_path": "roofing",
             "inherited": false,
             "rule": {
-              "category_id": "<id-30>",
+              "category_id": "<id-36>",
               "category_name": "Roofing",
               "category_path": "roofing",
               "created_at": "<ts+0d>",
               "created_by": "system_migration",
-              "id": "<id-45>",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-49>",
               "is_active": true,
+              "margin_floor_pct": null,
               "priority": 0,
-              "rule_type": "MARKDOWN",
-              "rule_value": 20,
-              "target_type": "TIER",
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "SILVER",
+              "updated_at": "<ts+0d>",
+              "value_pct": "10",
+              "value_ten_thousandths": null
+            },
+            "tier": "SILVER"
+          },
+          {
+            "category_id": "<id-36>",
+            "category_name": "Roofing",
+            "category_path": "roofing",
+            "inherited": false,
+            "rule": {
+              "category_id": "<id-36>",
+              "category_name": "Roofing",
+              "category_path": "roofing",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-50>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
+              "tier": "GOLD",
+              "updated_at": "<ts+0d>",
+              "value_pct": "15",
+              "value_ten_thousandths": null
+            },
+            "tier": "GOLD"
+          },
+          {
+            "category_id": "<id-36>",
+            "category_name": "Roofing",
+            "category_path": "roofing",
+            "inherited": false,
+            "rule": {
+              "category_id": "<id-36>",
+              "category_name": "Roofing",
+              "category_path": "roofing",
+              "created_at": "<ts+0d>",
+              "created_by": "system_migration",
+              "customer_id": null,
+              "expires_at": null,
+              "id": "<id-51>",
+              "is_active": true,
+              "margin_floor_pct": null,
+              "priority": 0,
+              "revision": 1,
+              "rule_type": "markdown",
+              "starts_at": null,
+              "target_type": "tier",
               "tier": "PLATINUM",
-              "updated_at": "<ts+0d>"
+              "updated_at": "<ts+0d>",
+              "value_pct": "20",
+              "value_ten_thousandths": null
             },
             "tier": "PLATINUM"
           }
@@ -1678,29 +2159,35 @@
     "name": "pricing.resolve",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pricing/resolve?product_id=<id-46>&customer_id=<id-3>"
+      "path": "/api/v1/pricing/resolve?product_id=<id-52>&customer_id=<id-3>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
         "category_path": "lumber",
-        "cost_price": 3.5,
+        "cost_price_ten_thousandths": 35000,
         "match_type": "tier_exact",
         "rule": {
-          "category_id": "<id-27>",
+          "category_id": "<id-33>",
           "category_name": "Lumber",
           "category_path": "lumber",
           "created_at": "<ts+0d>",
           "created_by": "system_migration",
-          "id": "<id-41>",
+          "customer_id": null,
+          "expires_at": null,
+          "id": "<id-47>",
           "is_active": true,
+          "margin_floor_pct": null,
           "priority": 0,
-          "rule_type": "MARKDOWN",
-          "rule_value": 15,
-          "target_type": "TIER",
+          "revision": 1,
+          "rule_type": "markdown",
+          "starts_at": null,
+          "target_type": "tier",
           "tier": "GOLD",
-          "updated_at": "<ts+0d>"
+          "updated_at": "<ts+0d>",
+          "value_pct": "15",
+          "value_ten_thousandths": null
         }
       }
     }
@@ -1709,14 +2196,14 @@
     "name": "pricing.resolve.tier",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pricing/resolve?product_id=<id-46>&tier=CONTRACTOR"
+      "path": "/api/v1/pricing/resolve?product_id=<id-52>&tier=CONTRACTOR"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
         "category_path": "lumber",
-        "cost_price": 3.5,
+        "cost_price_ten_thousandths": 35000,
         "match_type": "none"
       }
     }
@@ -1732,11 +2219,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "product_id",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-47>"
+          "request_id": "<id-53>"
         }
       }
     }
@@ -1752,11 +2245,37 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "product_id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-48>"
+          "request_id": "<id-54>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pricing.category_rules.delete.without_revision",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/pricing/category-rules/<id-4>"
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-55>"
         }
       }
     }
@@ -1765,7 +2284,10 @@
     "name": "pricing.category_rules.delete",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/pricing/category-rules/<id-4>"
+      "path": "/api/v1/pricing/category-rules/<id-4>",
+      "headers": {
+        "If-Match": "\"1\""
+      }
     },
     "response": {
       "status": 204,
@@ -1786,11 +2308,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "id is not a UUID"
         },
         "meta": {
-          "request_id": "<id-49>"
+          "request_id": "<id-56>"
         }
       }
     }
@@ -1799,13 +2327,19 @@
     "name": "pricing.category_rules.delete.unknown",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/pricing/category-rules/<id-9>"
+      "path": "/api/v1/pricing/category-rules/<id-14>"
     },
     "response": {
-      "status": 204,
-      "content_type": "",
+      "status": 404,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "error": {
+          "code": "not_found",
+          "message": "no such category rule"
+        },
+        "meta": {
+          "request_id": "<id-57>"
+        }
       }
     }
   },
@@ -1842,11 +2376,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "ids",
+              "message": "at least one id is required"
+            }
+          ],
+          "message": "at least one id is required"
         },
         "meta": {
-          "request_id": "<id-50>"
+          "request_id": "<id-58>"
         }
       }
     }
@@ -1861,36 +2401,54 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "id": "<id-16>",
-          "is_active": true,
-          "priority": 2,
-          "rule_type": "FIXED",
-          "rule_value": 9.99,
-          "target_type": "TIER",
-          "tier": "RETAIL",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "category_id": "<id-1>",
-          "category_name": "Golden D Rules Cat",
-          "category_path": "golden_d_rules_cat",
-          "created_at": "<ts+0d>",
-          "id": "<id-17>",
-          "is_active": true,
-          "priority": 2,
-          "rule_type": "MARGIN",
-          "rule_value": 22,
-          "target_type": "TIER",
-          "tier": "WHOLESALE",
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": null,
+            "expires_at": null,
+            "id": "<id-22>",
+            "is_active": true,
+            "margin_floor_pct": null,
+            "priority": 2,
+            "revision": 1,
+            "rule_type": "fixed",
+            "starts_at": null,
+            "target_type": "tier",
+            "tier": "RETAIL",
+            "updated_at": "<ts+0d>",
+            "value_pct": null,
+            "value_ten_thousandths": 99900
+          },
+          {
+            "category_id": "<id-1>",
+            "category_name": "Golden D Rules Cat",
+            "category_path": "golden_d_rules_cat",
+            "created_at": "<ts+0d>",
+            "created_by": "",
+            "customer_id": null,
+            "expires_at": null,
+            "id": "<id-23>",
+            "is_active": true,
+            "margin_floor_pct": null,
+            "priority": 2,
+            "revision": 1,
+            "rule_type": "margin",
+            "starts_at": null,
+            "target_type": "tier",
+            "tier": "WHOLESALE",
+            "updated_at": "<ts+0d>",
+            "value_pct": "22",
+            "value_ten_thousandths": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   }
 ]
