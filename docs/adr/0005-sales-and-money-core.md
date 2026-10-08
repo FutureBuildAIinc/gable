@@ -1304,6 +1304,8 @@ The sizes are dev hour equivalents, 202 to 334 together, against the plan's
 | Payment terms are free text; a credit limit of 0 means no limit | migrations 018, 003 | C2-1 |
 | Journal entries take the server's date, not the branch's business date | every `gl.Sync*` | C2-2 (invoice), C2-4 (the rest) |
 | Deposits are a second prepayment document beside payments | `internal/deposit` | C2-4 |
+| `AGENTS.md` tells agents to read the AR balance live from open invoice totals and to treat `customers.balance_due` as secondary, and describes the posting of today | `AGENTS.md`, "AR balance" and "Money convention" | C2-4 rewrites both sections to this record: the subledger is the balance, written only by the AR core, and agrees with documents and ledger by the invariants of 9.3 |
+| `AGENTS.md` backlog item B proposes a will-call ticket table and a `READY_FOR_PICKUP` status | `AGENTS.md`, Tier 1 backlog | C2-2 marks it superseded by section 5.5 |
 
 ## Alternatives considered
 
@@ -1397,6 +1399,13 @@ AR report choosing one. `projects` is the live one; adopted.
 **Tax rate fallback.** Keeping the 8.25 percent constant silently charges a
 rate nobody configured; falling back to zero silently charges none. Adopted:
 refuse until the branch (or ship-to) has a rate, zero included.
+
+**Will-call as its own document.** A will-call ticket table with a
+`READY_FOR_PICKUP` status (the repository's backlog idea) adds a document and
+a state that carry no money and that the delivery path does not need either.
+Adopted: will-call is the order's `delivery_type` with its own fulfilment
+rule (`picked_up_by`, never routed). A ready for pickup notice is a later
+event on the same order if dealers ask for one.
 
 **Payment void for card payments.** Allowing a void of a settled card charge
 would reverse the books while the money stays with the customer's bank.
