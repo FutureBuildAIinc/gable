@@ -671,7 +671,8 @@ func Run() {
 	// Governance App (converted — reference conversion #2)
 	governanceRepo := governance.NewRepository(db)
 	aiProvider := governance.NewTemplateAIProvider()
-	governanceSvc := governance.NewService(governanceRepo, aiProvider)
+	governanceSvc := governance.NewService(governanceRepo, aiProvider).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).WithTxRunner(db).WithAuditLog(auditLog)
 	governanceHandler := governance.NewHandler(governanceSvc)
 	appRegistry.Add(apps.App{Manifest: governance.App, Register: func(r apps.Router) {
 		governanceHandler.RegisterRoutes(r, middleware.RequireRole("admin", "owner"))
