@@ -1266,9 +1266,13 @@ func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid
 	if err != nil {
 		return basePrice, nil // Fallback to base price if customer lookup fails
 	}
-	cp, err := a.pricingSvc.CalculatePriceWithQty(ctx, cust, productID, basePrice, quantity, nil)
+	// The counter (fenced) turns this float into cents with a +0.5 truncation,
+	// which misrounds a half cent price whose float is just below it (20.025
+	// is 2002.4999 cents). So hand it a price already rounded half away from
+	// zero to whole cents, in integers.
+	sp, err := a.pricingSvc.CalculateScaled(ctx, cust, productID, basePrice, quantity, nil)
 	if err != nil {
 		return basePrice, nil
 	}
-	return cp.FinalPrice, nil
+	return float64(pricing.CentsOf(sp.Price)) / 100, nil
 }
