@@ -107,10 +107,16 @@ test.describe('Order flow on the new contract', () => {
     const row = page.locator('tr', { hasText: order.number });
     await expect(row).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'orders-list.png') });
+    const fulfilled = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/orders' && new URL(r.url()).searchParams.get('status') === 'fulfilled');
     await page.getByRole('button', { name: 'Fulfilled', exact: true }).click();
-    await page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/orders' && new URL(r.url()).searchParams.get('status') === 'fulfilled');
+    await fulfilled;
     await expect(row).toHaveCount(0);
-    await page.getByRole('button', { name: /Confirmed|On Hold/ }).first().click();
+    // Click the filter for the status the order actually landed in: the buttons
+    // render On Hold before Confirmed, so a pattern matching both picked On Hold
+    // and lost a confirmed order whenever the customer had credit to spare.
+    const filtered = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/orders' && new URL(r.url()).searchParams.get('status') === confirmed.status);
+    await page.getByRole('button', { name: confirmed.status === 'on_hold' ? 'On Hold' : 'Confirmed', exact: true }).click();
+    await filtered;
     await expect(page.locator('tr', { hasText: order.number })).toBeVisible();
 
     // The record page by API agrees with the page.
