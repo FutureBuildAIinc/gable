@@ -45,6 +45,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/routecensus"
@@ -372,16 +373,68 @@ func assemble(apiDir string) (*yaml.Node, error) {
 		}
 	}
 	for _, kind := range componentKinds {
-		walkRefs(components[kind], refTargets, func(ref, trail string) {
+		walkRefs(components[kind], refTargets, func(ref string, trail string) {
 			problem("unresolved $ref %s at components.%s.%s", ref, kind, trail)
 		})
 	}
+
+	sortResponses(&paths)
 
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return nil, fmt.Errorf("merge failed with %d problem(s):\n  - %s", len(problems), strings.Join(problems, "\n  - "))
 	}
 	return doc, nil
+}
+
+// sortResponses lists every operation's responses by ascending status code
+// (numeric, with any non numeric key such as "default" last), whatever order
+// the fragment wrote them in. The order is presentation only, but one
+// direction across the whole document keeps it readable and the generated
+// TypeScript stable.
+func sortResponses(paths *yaml.Node) {
+	for i := 0; i+1 < len(paths.Content); i += 2 {
+		item := paths.Content[i+1]
+		for j := 0; j+1 < len(item.Content); j += 2 {
+			if !httpMethods[item.Content[j].Value] {
+				continue
+			}
+			responses := child(item.Content[j+1], "responses")
+			if responses == nil || responses.Kind != yaml.MappingNode {
+				continue
+			}
+			type entry struct{ key, value *yaml.Node }
+			var entries []entry
+			for k := 0; k+1 < len(responses.Content); k += 2 {
+				entries = append(entries, entry{responses.Content[k], responses.Content[k+1]})
+			}
+			sort.SliceStable(entries, func(a, b int) bool {
+				return statusKeyLess(entries[a].key.Value, entries[b].key.Value)
+			})
+			responses.Content = responses.Content[:0]
+			for _, e := range entries {
+				responses.Content = append(responses.Content, e.key, e.value)
+			}
+		}
+	}
+}
+
+// statusKeyLess reports whether status code a sorts before b: numerically
+// when both are numeric, with any non numeric key (a "default") after every
+// number.
+func statusKeyLess(a, b string) bool {
+	na, errA := strconv.Atoi(a)
+	nb, errB := strconv.Atoi(b)
+	switch {
+	case errA == nil && errB == nil:
+		return na < nb
+	case errA == nil:
+		return true
+	case errB == nil:
+		return false
+	default:
+		return a < b
+	}
 }
 
 // tagList derives the document's tag declarations from the operations
