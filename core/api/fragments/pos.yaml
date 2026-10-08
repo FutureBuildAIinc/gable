@@ -8,7 +8,7 @@
 paths:
   /api/v1/pos/transactions:
     post:
-      operationId: posTransactionStart
+      operationId: posTransactionCreate
       tags:
       - pos
       summary: Start a transaction
@@ -109,7 +109,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/v1/pos/transactions/{id}/items:
     post:
-      operationId: posTransactionItemAdd
+      operationId: posTransactionAddItem
       tags:
       - pos
       summary: Add a line item
@@ -145,7 +145,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/transactions/{id}/items/{itemId}:
     delete:
-      operationId: posTransactionItemRemove
+      operationId: posTransactionRemoveItem
       tags:
       - pos
       summary: Remove a line item
@@ -468,7 +468,7 @@ paths:
           $ref: '#/components/responses/Conflict'
   /api/v1/pos/till/{id}/zreport:
     get:
-      operationId: posZReportGet
+      operationId: posTillZReport
       tags:
       - pos
       summary: The Z report of a closed session

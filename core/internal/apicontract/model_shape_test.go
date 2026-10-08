@@ -27,6 +27,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/routecensus"
 	"github.com/gablelbm/gable/internal/salesteam"
+	"github.com/gablelbm/gable/internal/vendor"
 	"gopkg.in/yaml.v3"
 )
 
@@ -91,10 +92,12 @@ var modelBoundSchemas = []struct {
 	{"Inventory", inventory.Inventory{}},
 	// deposits
 	{"Deposit", deposit.CustomerDeposit{}},
+	{"DepositApplication", deposit.DepositApplication{}},
 	// accounts
 	{"AccountSummary", account.AccountSummary{}},
 	{"CustomerTransaction", account.CustomerTransaction{}},
-	// vendors - fragment schema is partial response view; excluded from shape test
+	// vendors
+	{"Vendor", vendor.Vendor{}},
 	// sales-team
 	{"SalesPerson", salesteam.SalesPerson{}},
 	// activities / crm

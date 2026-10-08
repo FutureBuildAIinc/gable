@@ -2,143 +2,149 @@
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
 # The deposits module, transcribed from internal/deposit/handler.go and model.go
-# as they behave today: cents amounts, nullability per golden records.
+# as they behave today: cents everywhere, list and apply wrappers, and every service
+# failure on record and apply answering 400.
 paths:
   /api/v1/deposits:
-    get:
-      operationId: depositList
-      tags: [deposits]
-      summary: List deposits
-      parameters:
-        - name: customer_id
-          in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-      responses:
-        "200":
-          description: Array of deposits.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Deposit"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
     post:
       operationId: depositCreate
-      tags: [deposits]
-      summary: Create a deposit
+      tags:
+      - deposits
+      summary: Record a customer deposit
+      description: Every service failure, such as a non positive amount, answers 400.
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DepositCreate"
+              $ref: '#/components/schemas/DepositCreate'
       responses:
-        "201":
-          description: The created deposit.
+        '201':
+          description: The recorded deposit.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Deposit"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Deposit'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      operationId: depositList
+      tags:
+      - deposits
+      summary: List a customer's deposits
+      description: A missing customer_id answers 400. The list is not paginated.
+      parameters:
+      - name: customer_id
+        in: query
+        required: true
+        description: Required.
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The deposits and the customer's open balance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/deposits/{id}:
     get:
       operationId: depositGet
-      tags: [deposits]
+      tags:
+      - deposits
       summary: Get one deposit
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The deposit.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Deposit"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Deposit'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/deposits/{id}/apply:
     post:
       operationId: depositApply
-      tags: [deposits]
-      summary: Apply deposit to invoices
+      tags:
+      - deposits
+      summary: Apply a deposit against AR
+      description: Every service failure, such as a deposit not OPEN or an amount over the remainder,
+        answers 400.
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DepositApply"
+              $ref: '#/components/schemas/DepositApply'
       responses:
-        "200":
-          description: Application result.
+        '201':
+          description: The recorded application.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DepositApplyResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/DepositApplication'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 components:
   schemas:
     Deposit:
       type: object
-      required: [id, customer_id, amount, applied_amount, remaining, status, method, created_at, updated_at]
+      description: deposit.CustomerDeposit. The branch, reference, note and ledger entry are omitted when
+        empty.
+      required:
+      - id
+      - customer_id
+      - amount
+      - applied_amount
+      - remaining
+      - status
+      - method
+      - created_at
+      - updated_at
       properties:
         id:
           type: string
@@ -149,39 +155,94 @@ components:
         branch_id:
           type: string
           format: uuid
-          nullable: true
-        gl_entry_id:
-          type: string
-          format: uuid
-          nullable: true
         amount:
           type: integer
-          description: Cents.
+          format: int64
+          description: Cents, original.
         applied_amount:
           type: integer
-          description: Cents.
+          format: int64
+          description: Cents, cumulative applied.
         remaining:
           type: integer
-          description: Cents.
+          format: int64
+          description: Cents, amount minus applied.
         status:
           type: string
-          enum: [OPEN, APPLIED, VOIDED]
+          enum:
+          - OPEN
+          - APPLIED
+          - REFUNDED
         method:
           type: string
-          enum: [CHECK, CASH, CARD, TRANSFER]
+          description: How the prepayment was taken; free text, CASH when the request leaves it empty.
         reference:
           type: string
         note:
           type: string
+        gl_entry_id:
+          type: string
+          format: uuid
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    DepositApplication:
+      type: object
+      description: deposit.DepositApplication. The invoice and ledger entry are omitted when empty.
+      required:
+      - id
+      - deposit_id
+      - customer_id
+      - amount
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        deposit_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        invoice_id:
+          type: string
+          format: uuid
+        gl_entry_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    DepositList:
+      type: object
+      description: The list wrapper; deposits is null when the customer has none.
+      required:
+      - deposits
+      - open_balance_cents
+      properties:
+        deposits:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/Deposit'
+        open_balance_cents:
+          type: integer
+          format: int64
     DepositCreate:
       type: object
-      required: [customer_id, amount_cents, method]
+      description: RecordDepositRequest.
+      required:
+      - customer_id
+      - amount_cents
       properties:
         customer_id:
           type: string
@@ -191,38 +252,25 @@ components:
           format: uuid
         amount_cents:
           type: integer
-          description: Cents.
+          format: int64
+          description: Must be positive.
         method:
           type: string
-          enum: [CHECK, CASH, CARD, TRANSFER]
+          description: Free text; defaults to CASH.
         reference:
+          type: string
+        note:
           type: string
     DepositApply:
       type: object
-      required: [invoice_ids]
+      description: ApplyDepositRequest.
+      required:
+      - amount_cents
       properties:
-        invoice_ids:
-          type: array
-          items:
-            type: string
-            format: uuid
-    DepositApplyResponse:
-      type: object
-      required: [deposit, applications]
-      properties:
-        deposit:
-          $ref: "#/components/schemas/Deposit"
-        applications:
-          type: array
-          items:
-            $ref: "#/components/schemas/DepositApplication"
-    DepositApplication:
-      type: object
-      required: [invoice_id, amount_applied]
-      properties:
+        amount_cents:
+          type: integer
+          format: int64
+          description: Must be positive and at most the remainder.
         invoice_id:
           type: string
           format: uuid
-        amount_applied:
-          type: integer
-          description: Cents.

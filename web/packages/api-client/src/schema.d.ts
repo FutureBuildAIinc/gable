@@ -53,7 +53,10 @@ export interface paths {
         };
         /** Get one activity */
         get: operations["activityGet"];
-        /** Update an activity */
+        /**
+         * Update an activity
+         * @description The write replaces contact_id, activity_type, description, logged_by and activity_date; an omitted field is cleared.
+         */
         put: operations["activityUpdate"];
         post?: never;
         /** Delete an activity */
@@ -267,7 +270,7 @@ export interface paths {
          * Upload a vehicle photo
          * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
          */
-        post: operations["deliveryVehiclePhotoUpload"];
+        post: operations["deliveryVehiclePhoto"];
         delete?: never;
         options?: never;
         head?: never;
@@ -330,7 +333,7 @@ export interface paths {
          * Upload a driver photo
          * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
          */
-        post: operations["deliveryDriverPhotoUpload"];
+        post: operations["deliveryDriverPhoto"];
         delete?: never;
         options?: never;
         head?: never;
@@ -440,7 +443,7 @@ export interface paths {
             cookie?: never;
         };
         /** List the deliveries of a route */
-        get: operations["deliveryRouteDeliveryList"];
+        get: operations["deliveryRouteDeliveries"];
         put?: never;
         post?: never;
         delete?: never;
@@ -501,7 +504,7 @@ export interface paths {
          * Complete a delivery
          * @description Only DELIVERED, FAILED and PARTIAL are accepted. DELIVERED and PARTIAL need pod_proof_url and pod_signed_by. Any other value or a missing proof answers 500.
          */
-        put: operations["deliveryStatusUpdate"];
+        put: operations["deliveryUpdateStatus"];
         post?: never;
         delete?: never;
         options?: never;
@@ -539,7 +542,7 @@ export interface paths {
          * Attach a proof of delivery photo
          * @description A missing photo, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
          */
-        post: operations["deliveryPodPhotoUpload"];
+        post: operations["deliveryPodPhoto"];
         delete?: never;
         options?: never;
         head?: never;
@@ -554,7 +557,7 @@ export interface paths {
             cookie?: never;
         };
         /** List the proof of delivery photos */
-        get: operations["deliveryPodPhotoList"];
+        get: operations["deliveryPodPhotos"];
         put?: never;
         post?: never;
         delete?: never;
@@ -570,10 +573,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List deposits */
+        /**
+         * List a customer's deposits
+         * @description A missing customer_id answers 400. The list is not paginated.
+         */
         get: operations["depositList"];
         put?: never;
-        /** Create a deposit */
+        /**
+         * Record a customer deposit
+         * @description Every service failure, such as a non positive amount, answers 400.
+         */
         post: operations["depositCreate"];
         delete?: never;
         options?: never;
@@ -607,7 +616,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Apply deposit to invoices */
+        /**
+         * Apply a deposit against AR
+         * @description Every service failure, such as a deposit not OPEN or an amount over the remainder, answers 400.
+         */
         post: operations["depositApply"];
         delete?: never;
         options?: never;
@@ -817,8 +829,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List inventory for a product
-         * @description Returns null body today when no product_id query parameter is provided. When product_id is provided, returns the inventory record or null.
+         * List inventory rows of a product
+         * @description A product_id that is not a UUID reaches the service and answers 500, not 400.
          */
         get: operations["inventoryList"];
         put?: never;
@@ -838,7 +850,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Adjust inventory (cycle count) */
+        /**
+         * Adjust inventory (cycle count)
+         * @description A result that would leave negative stock answers 500.
+         */
         post: operations["inventoryAdjust"];
         delete?: never;
         options?: never;
@@ -855,7 +870,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Transfer inventory between locations */
+        /**
+         * Transfer inventory between locations
+         * @description A cross-branch move, a non positive quantity or insufficient unallocated stock answers 500.
+         */
         post: operations["inventoryTransfer"];
         delete?: never;
         options?: never;
@@ -1418,7 +1436,7 @@ export interface paths {
          * Start a transaction
          * @description register_id defaults to REG-01 and a missing cashier_id is replaced by a random UUID.
          */
-        post: operations["posTransactionStart"];
+        post: operations["posTransactionCreate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1452,7 +1470,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Add a line item */
-        post: operations["posTransactionItemAdd"];
+        post: operations["posTransactionAddItem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1470,7 +1488,7 @@ export interface paths {
         put?: never;
         post?: never;
         /** Remove a line item */
-        delete: operations["posTransactionItemRemove"];
+        delete: operations["posTransactionRemoveItem"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1652,7 +1670,7 @@ export interface paths {
             cookie?: never;
         };
         /** The Z report of a closed session */
-        get: operations["posZReportGet"];
+        get: operations["posTillZReport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2284,7 +2302,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List vendors */
+        /**
+         * List vendors
+         * @description The list is not paginated: limit and offset are not read.
+         */
         get: operations["vendorList"];
         put?: never;
         /** Create a vendor */
@@ -2396,18 +2417,20 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        /** @enum {string} */
+        ActivityType: "CALL" | "MEETING" | "EMAIL" | "NOTE";
+        /** @description crm.Activity. contact_id and logged_by are omitted when unset. The customer routes of the customer fragment return the same schema. */
         Activity: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             customer_id: string;
             /** Format: uuid */
-            contact_id?: string | null;
-            /** @enum {string} */
-            activity_type: "CALL" | "MEETING" | "EMAIL" | "NOTE";
+            contact_id?: string;
+            activity_type: components["schemas"]["ActivityType"];
             description: string;
             /** Format: uuid */
-            logged_by?: string | null;
+            logged_by?: string;
             /** Format: date-time */
             activity_date: string;
             /** Format: date-time */
@@ -2415,12 +2438,14 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description The Activity decoded from the body; a missing or unknown activity_type answers 400. */
         ActivityUpdate: {
             /** Format: uuid */
             contact_id?: string;
-            /** @enum {string} */
-            activity_type?: "CALL" | "MEETING" | "EMAIL" | "NOTE";
+            activity_type: components["schemas"]["ActivityType"];
             description?: string;
+            /** Format: uuid */
+            logged_by?: string;
             /** Format: date-time */
             activity_date?: string;
         };
@@ -2814,55 +2839,93 @@ export interface components {
             total_duration_mins: number;
             total_distance_miles: number;
         };
+        /** @description deposit.CustomerDeposit. The branch, reference, note and ledger entry are omitted when empty. */
         Deposit: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             customer_id: string;
             /** Format: uuid */
-            branch_id?: string | null;
-            /** Format: uuid */
-            gl_entry_id?: string | null;
-            /** @description Cents. */
+            branch_id?: string;
+            /**
+             * Format: int64
+             * @description Cents, original.
+             */
             amount: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents, cumulative applied.
+             */
             applied_amount: number;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Cents, amount minus applied.
+             */
             remaining: number;
             /** @enum {string} */
-            status: "OPEN" | "APPLIED" | "VOIDED";
-            /** @enum {string} */
-            method: "CHECK" | "CASH" | "CARD" | "TRANSFER";
+            status: "OPEN" | "APPLIED" | "REFUNDED";
+            /** @description How the prepayment was taken; free text, CASH when the request leaves it empty. */
+            method: string;
             reference?: string;
             note?: string;
+            /** Format: uuid */
+            gl_entry_id?: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description deposit.DepositApplication. The invoice and ledger entry are omitted when empty. */
+        DepositApplication: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            deposit_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /**
+             * Format: int64
+             * @description Cents.
+             */
+            amount: number;
+            /** Format: uuid */
+            invoice_id?: string;
+            /** Format: uuid */
+            gl_entry_id?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description The list wrapper; deposits is null when the customer has none. */
+        DepositList: {
+            deposits: components["schemas"]["Deposit"][] | null;
+            /** Format: int64 */
+            open_balance_cents: number;
+        };
+        /** @description RecordDepositRequest. */
         DepositCreate: {
             /** Format: uuid */
             customer_id: string;
             /** Format: uuid */
             branch_id?: string;
-            /** @description Cents. */
+            /**
+             * Format: int64
+             * @description Must be positive.
+             */
             amount_cents: number;
-            /** @enum {string} */
-            method: "CHECK" | "CASH" | "CARD" | "TRANSFER";
+            /** @description Free text; defaults to CASH. */
+            method?: string;
             reference?: string;
+            note?: string;
         };
+        /** @description ApplyDepositRequest. */
         DepositApply: {
-            invoice_ids: string[];
-        };
-        DepositApplyResponse: {
-            deposit: components["schemas"]["Deposit"];
-            applications: components["schemas"]["DepositApplication"][];
-        };
-        DepositApplication: {
+            /**
+             * Format: int64
+             * @description Must be positive and at most the remainder.
+             */
+            amount_cents: number;
             /** Format: uuid */
-            invoice_id: string;
-            /** @description Cents. */
-            amount_applied: number;
+            invoice_id?: string;
         };
         IntegrationProduct: {
             /** Format: uuid */
@@ -3051,13 +3114,14 @@ export interface components {
             /** @description Never null. */
             modules: string[];
         };
+        /** @description inventory.Inventory. location_id is omitted when unset. */
         Inventory: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             product_id: string;
             /** Format: uuid */
-            location_id?: string | null;
+            location_id?: string;
             /** @description Deprecated text field. */
             location: string;
             quantity: number;
@@ -3070,10 +3134,11 @@ export interface components {
             product_id: string;
             /** Format: uuid */
             location_id?: string | null;
+            /** @description The new quantity, or the delta when is_delta is true. */
             quantity: number;
             reason?: string;
-            /** @description If true, add/subtract. If false, replace. */
-            is_delta: boolean;
+            /** @description If true, add or subtract; if false, replace. */
+            is_delta?: boolean;
         };
         StockMovementRequest: {
             /** Format: uuid */
@@ -3085,11 +3150,9 @@ export interface components {
             quantity: number;
             reason?: string;
         };
-        InventoryAdjustResponse: {
-            status: string;
-        };
-        InventoryTransferResponse: {
-            status: string;
+        InventoryStatusAck: {
+            /** @enum {string} */
+            status: "ok";
         };
         /** @enum {string} */
         InvoiceStatus: "UNPAID" | "PARTIAL" | "PAID" | "VOID" | "OVERDUE";
@@ -4279,34 +4342,33 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description vendor.Vendor. */
         Vendor: {
             /** Format: uuid */
             id: string;
             name: string;
-            contact_email?: string | null;
-            phone?: string | null;
-            address_line1?: string | null;
-            city?: string | null;
-            state?: string | null;
-            zip?: string | null;
+            contact_email: string | null;
+            phone: string | null;
+            address_line1: string | null;
+            city: string | null;
+            state: string | null;
+            zip: string | null;
             payment_terms: string;
             average_lead_time_days: number;
             fill_rate: number;
+            /** @description Float dollars today. */
             total_spend_ytd: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description CreateVendorRequest. The address fields are not accepted. */
         VendorCreate: {
             name: string;
-            contact_email?: string;
-            phone?: string;
-            address_line1?: string;
-            city?: string;
-            state?: string;
-            zip?: string;
-            payment_terms?: string;
+            contact_email?: string | null;
+            phone?: string | null;
+            payment_terms?: string | null;
         };
     };
     responses: {
@@ -4538,7 +4600,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
         };
     };
     activityUpdate: {
@@ -4561,7 +4622,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated activity. */
+            /** @description The activity as the request wrote it. customer_id, created_at and any field the body omitted come back as zero values, because the handler echoes the decoded body rather than re-reading the row. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5188,7 +5249,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryVehiclePhotoUpload: {
+    deliveryVehiclePhoto: {
         parameters: {
             query?: never;
             header?: {
@@ -5373,7 +5434,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryDriverPhotoUpload: {
+    deliveryDriverPhoto: {
         parameters: {
             query?: never;
             header?: {
@@ -5596,7 +5657,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    deliveryRouteDeliveryList: {
+    deliveryRouteDeliveries: {
         parameters: {
             query?: never;
             header?: {
@@ -5687,7 +5748,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryStatusUpdate: {
+    deliveryUpdateStatus: {
         parameters: {
             query?: never;
             header?: {
@@ -5755,7 +5816,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryPodPhotoUpload: {
+    deliveryPodPhoto: {
         parameters: {
             query?: never;
             header?: {
@@ -5790,7 +5851,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    deliveryPodPhotoList: {
+    deliveryPodPhotos: {
         parameters: {
             query?: never;
             header?: {
@@ -5821,13 +5882,9 @@ export interface operations {
     };
     depositList: {
         parameters: {
-            query?: {
-                customer_id?: string;
-                status?: string;
-                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
-                limit?: components["parameters"]["Limit"];
-                /** @description Page offset. Unparseable or negative values are silently ignored and the default applies. */
-                offset?: components["parameters"]["Offset"];
+            query: {
+                /** @description Required. */
+                customer_id: string;
             };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
@@ -5838,15 +5895,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of deposits. */
+            /** @description The deposits and the customer's open balance. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Deposit"][];
+                    "application/json": components["schemas"]["DepositList"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -5870,7 +5928,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created deposit. */
+            /** @description The recorded deposit. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5882,7 +5940,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
         };
     };
     depositGet: {
@@ -5912,7 +5969,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
         };
     };
     depositApply: {
@@ -5935,20 +5991,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Application result. */
-            200: {
+            /** @description The recorded application. */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DepositApplyResponse"];
+                    "application/json": components["schemas"]["DepositApplication"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
         };
     };
     integrationListProducts: {
@@ -6228,6 +6282,7 @@ export interface operations {
     inventoryList: {
         parameters: {
             query: {
+                /** @description Required; a missing value answers 400. */
                 product_id: string;
             };
             header?: {
@@ -6239,24 +6294,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Inventory record or null. */
+            /** @description The product's inventory rows, one per location. The body is null when the product has none. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Inventory"];
+                    "application/json": components["schemas"]["Inventory"][] | null;
                 };
             };
-            /** @description Bad request when product_id is missing. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -6280,13 +6327,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Adjustment result. */
+            /** @description Adjusted. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InventoryAdjustResponse"];
+                    "application/json": components["schemas"]["InventoryStatusAck"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -6313,13 +6360,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Transfer result. */
+            /** @description Transferred. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InventoryTransferResponse"];
+                    "application/json": components["schemas"]["InventoryStatusAck"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -7440,7 +7487,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    posTransactionStart: {
+    posTransactionCreate: {
         parameters: {
             query?: never;
             header?: {
@@ -7510,7 +7557,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    posTransactionItemAdd: {
+    posTransactionAddItem: {
         parameters: {
             query?: never;
             header?: {
@@ -7545,7 +7592,7 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    posTransactionItemRemove: {
+    posTransactionRemoveItem: {
         parameters: {
             query?: never;
             header?: {
@@ -7872,7 +7919,7 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    posZReportGet: {
+    posTillZReport: {
         parameters: {
             query?: never;
             header?: {
@@ -9132,12 +9179,7 @@ export interface operations {
     };
     vendorList: {
         parameters: {
-            query?: {
-                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
-                limit?: components["parameters"]["Limit"];
-                /** @description Page offset. Unparseable or negative values are silently ignored and the default applies. */
-                offset?: components["parameters"]["Offset"];
-            };
+            query?: never;
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -9147,7 +9189,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Array of vendors. */
+            /** @description Every vendor; an empty array when none. */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -100,7 +100,8 @@ paths:
   /api/v1/activities/{id}:
     get:
       operationId: activityGet
-      tags: [activities]
+      tags:
+        - activities
       summary: Get one activity
       parameters:
         - name: id
@@ -109,28 +110,28 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The activity.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       operationId: activityUpdate
-      tags: [activities]
+      tags:
+        - activities
       summary: Update an activity
+      description: The write replaces contact_id, activity_type, description, logged_by and activity_date; an omitted field is cleared.
       parameters:
         - name: id
           in: path
@@ -138,34 +139,35 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ActivityUpdate"
+              $ref: '#/components/schemas/ActivityUpdate'
       responses:
-        "200":
-          description: The updated activity.
+        '200':
+          description: The activity as the request wrote it. customer_id, created_at and any field the body omitted come back as zero values, because the handler echoes the decoded body rather than re-reading the row.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       operationId: activityDelete
-      tags: [activities]
+      tags:
+        - activities
       summary: Delete an activity
       parameters:
         - name: id
@@ -174,20 +176,20 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "204":
+        '204':
           description: Activity deleted.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/customers:
     get:
       operationId: customerList
@@ -742,7 +744,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/vehicles/{id}/photo:
     post:
-      operationId: deliveryVehiclePhotoUpload
+      operationId: deliveryVehiclePhoto
       tags:
         - delivery
       summary: Upload a vehicle photo
@@ -923,7 +925,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/drivers/{id}/photo:
     post:
-      operationId: deliveryDriverPhotoUpload
+      operationId: deliveryDriverPhoto
       tags:
         - delivery
       summary: Upload a driver photo
@@ -1147,7 +1149,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
   /api/v1/delivery/routes/{id}/deliveries:
     get:
-      operationId: deliveryRouteDeliveryList
+      operationId: deliveryRouteDeliveries
       tags:
         - delivery
       summary: List the deliveries of a route
@@ -1241,7 +1243,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/status:
     put:
-      operationId: deliveryStatusUpdate
+      operationId: deliveryUpdateStatus
       tags:
         - delivery
       summary: Complete a delivery
@@ -1310,7 +1312,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/pod-photo:
     post:
-      operationId: deliveryPodPhotoUpload
+      operationId: deliveryPodPhoto
       tags:
         - delivery
       summary: Attach a proof of delivery photo
@@ -1347,7 +1349,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/pod-photos:
     get:
-      operationId: deliveryPodPhotoList
+      operationId: deliveryPodPhotos
       tags:
         - delivery
       summary: List the proof of delivery photos
@@ -1377,72 +1379,69 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/deposits:
-    get:
-      operationId: depositList
-      tags: [deposits]
-      summary: List deposits
-      parameters:
-        - name: customer_id
-          in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-      responses:
-        "200":
-          description: Array of deposits.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Deposit"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
     post:
       operationId: depositCreate
-      tags: [deposits]
-      summary: Create a deposit
+      tags:
+        - deposits
+      summary: Record a customer deposit
+      description: Every service failure, such as a non positive amount, answers 400.
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DepositCreate"
+              $ref: '#/components/schemas/DepositCreate'
       responses:
-        "201":
-          description: The created deposit.
+        '201':
+          description: The recorded deposit.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Deposit"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Deposit'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      operationId: depositList
+      tags:
+        - deposits
+      summary: List a customer's deposits
+      description: A missing customer_id answers 400. The list is not paginated.
+      parameters:
+        - name: customer_id
+          in: query
+          required: true
+          description: Required.
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The deposits and the customer's open balance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/deposits/{id}:
     get:
       operationId: depositGet
-      tags: [deposits]
+      tags:
+        - deposits
       summary: Get one deposit
       parameters:
         - name: id
@@ -1451,29 +1450,29 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The deposit.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Deposit"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Deposit'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/deposits/{id}/apply:
     post:
       operationId: depositApply
-      tags: [deposits]
-      summary: Apply deposit to invoices
+      tags:
+        - deposits
+      summary: Apply a deposit against AR
+      description: Every service failure, such as a deposit not OPEN or an amount over the remainder, answers 400.
       parameters:
         - name: id
           in: path
@@ -1481,31 +1480,27 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DepositApply"
+              $ref: '#/components/schemas/DepositApply'
       responses:
-        "200":
-          description: Application result.
+        '201':
+          description: The recorded application.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DepositApplyResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/DepositApplication'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/integration/products:
     get:
       operationId: integrationListProducts
@@ -1798,96 +1793,100 @@ paths:
   /api/v1/inventory:
     get:
       operationId: inventoryList
-      tags: [inventory]
-      summary: List inventory for a product
-      description: >-
-        Returns null body today when no product_id query parameter is provided. When product_id is provided, returns the inventory record or null.
+      tags:
+        - inventory
+      summary: List inventory rows of a product
+      description: A product_id that is not a UUID reaches the service and answers 500, not 400.
       parameters:
         - name: product_id
           in: query
           required: true
+          description: Required; a missing value answers 400.
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
-          description: Inventory record or null.
+        '200':
+          description: The product's inventory rows, one per location. The body is null when the product has none.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Inventory"
-                nullable: true
-        "400":
-          description: Bad request when product_id is missing.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                type:
+                  - array
+                  - 'null'
+                items:
+                  $ref: '#/components/schemas/Inventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/inventory/adjust:
     post:
       operationId: inventoryAdjust
-      tags: [inventory]
+      tags:
+        - inventory
       summary: Adjust inventory (cycle count)
+      description: A result that would leave negative stock answers 500.
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StockAdjustmentRequest"
+              $ref: '#/components/schemas/StockAdjustmentRequest'
       responses:
-        "200":
-          description: Adjustment result.
+        '200':
+          description: Adjusted.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InventoryAdjustResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/InventoryStatusAck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/inventory/transfer:
     post:
       operationId: inventoryTransfer
-      tags: [inventory]
+      tags:
+        - inventory
       summary: Transfer inventory between locations
+      description: A cross-branch move, a non positive quantity or insufficient unallocated stock answers 500.
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StockMovementRequest"
+              $ref: '#/components/schemas/StockMovementRequest'
       responses:
-        "200":
-          description: Transfer result.
+        '200':
+          description: Transferred.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InventoryTransferResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/InventoryStatusAck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/invoices:
     get:
       operationId: invoiceList
@@ -2917,7 +2916,7 @@ paths:
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions:
     post:
-      operationId: posTransactionStart
+      operationId: posTransactionCreate
       tags:
         - pos
       summary: Start a transaction
@@ -3016,7 +3015,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /api/v1/pos/transactions/{id}/items:
     post:
-      operationId: posTransactionItemAdd
+      operationId: posTransactionAddItem
       tags:
         - pos
       summary: Add a line item
@@ -3052,7 +3051,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/transactions/{id}/items/{itemId}:
     delete:
-      operationId: posTransactionItemRemove
+      operationId: posTransactionRemoveItem
       tags:
         - pos
       summary: Remove a line item
@@ -3372,7 +3371,7 @@ paths:
           $ref: '#/components/responses/Conflict'
   /api/v1/pos/till/{id}/zreport:
     get:
-      operationId: posZReportGet
+      operationId: posTillZReport
       tags:
         - pos
       summary: The Z report of a closed session
@@ -4624,59 +4623,61 @@ paths:
   /api/v1/vendors:
     get:
       operationId: vendorList
-      tags: [vendors]
+      tags:
+        - vendors
       summary: List vendors
+      description: 'The list is not paginated: limit and offset are not read.'
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
-          description: Array of vendors.
+        '200':
+          description: Every vendor; an empty array when none.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Vendor"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                  $ref: '#/components/schemas/Vendor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       operationId: vendorCreate
-      tags: [vendors]
+      tags:
+        - vendors
       summary: Create a vendor
       parameters:
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/VendorCreate"
+              $ref: '#/components/schemas/VendorCreate'
       responses:
-        "201":
+        '201':
           description: The created vendor.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Vendor"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Vendor'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/vendors/{id}:
     get:
       operationId: vendorGet
-      tags: [vendors]
+      tags:
+        - vendors
       summary: Get one vendor
       parameters:
         - name: id
@@ -4685,24 +4686,24 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The vendor.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Vendor"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Vendor'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     BearerJWT:
@@ -4978,9 +4979,24 @@ components:
         created_at:
           type: string
           format: date-time
+    ActivityType:
+      type: string
+      enum:
+        - CALL
+        - MEETING
+        - EMAIL
+        - NOTE
     Activity:
       type: object
-      required: [id, customer_id, activity_type, description, activity_date, created_at, updated_at]
+      description: crm.Activity. contact_id and logged_by are omitted when unset. The customer routes of the customer fragment return the same schema.
+      required:
+        - id
+        - customer_id
+        - activity_type
+        - description
+        - activity_date
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -4991,16 +5007,13 @@ components:
         contact_id:
           type: string
           format: uuid
-          nullable: true
         activity_type:
-          type: string
-          enum: [CALL, MEETING, EMAIL, NOTE]
+          $ref: '#/components/schemas/ActivityType'
         description:
           type: string
         logged_by:
           type: string
           format: uuid
-          nullable: true
         activity_date:
           type: string
           format: date-time
@@ -5012,15 +5025,20 @@ components:
           format: date-time
     ActivityUpdate:
       type: object
+      description: The Activity decoded from the body; a missing or unknown activity_type answers 400.
+      required:
+        - activity_type
       properties:
         contact_id:
           type: string
           format: uuid
         activity_type:
-          type: string
-          enum: [CALL, MEETING, EMAIL, NOTE]
+          $ref: '#/components/schemas/ActivityType'
         description:
           type: string
+        logged_by:
+          type: string
+          format: uuid
         activity_date:
           type: string
           format: date-time
@@ -5929,7 +5947,17 @@ components:
           type: number
     Deposit:
       type: object
-      required: [id, customer_id, amount, applied_amount, remaining, status, method, created_at, updated_at]
+      description: deposit.CustomerDeposit. The branch, reference, note and ledger entry are omitted when empty.
+      required:
+        - id
+        - customer_id
+        - amount
+        - applied_amount
+        - remaining
+        - status
+        - method
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -5940,39 +5968,94 @@ components:
         branch_id:
           type: string
           format: uuid
-          nullable: true
-        gl_entry_id:
-          type: string
-          format: uuid
-          nullable: true
         amount:
           type: integer
-          description: Cents.
+          format: int64
+          description: Cents, original.
         applied_amount:
           type: integer
-          description: Cents.
+          format: int64
+          description: Cents, cumulative applied.
         remaining:
           type: integer
-          description: Cents.
+          format: int64
+          description: Cents, amount minus applied.
         status:
           type: string
-          enum: [OPEN, APPLIED, VOIDED]
+          enum:
+            - OPEN
+            - APPLIED
+            - REFUNDED
         method:
           type: string
-          enum: [CHECK, CASH, CARD, TRANSFER]
+          description: How the prepayment was taken; free text, CASH when the request leaves it empty.
         reference:
           type: string
         note:
           type: string
+        gl_entry_id:
+          type: string
+          format: uuid
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    DepositApplication:
+      type: object
+      description: deposit.DepositApplication. The invoice and ledger entry are omitted when empty.
+      required:
+        - id
+        - deposit_id
+        - customer_id
+        - amount
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        deposit_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Cents.
+        invoice_id:
+          type: string
+          format: uuid
+        gl_entry_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    DepositList:
+      type: object
+      description: The list wrapper; deposits is null when the customer has none.
+      required:
+        - deposits
+        - open_balance_cents
+      properties:
+        deposits:
+          type:
+            - array
+            - 'null'
+          items:
+            $ref: '#/components/schemas/Deposit'
+        open_balance_cents:
+          type: integer
+          format: int64
     DepositCreate:
       type: object
-      required: [customer_id, amount_cents, method]
+      description: RecordDepositRequest.
+      required:
+        - customer_id
+        - amount_cents
       properties:
         customer_id:
           type: string
@@ -5982,41 +6065,28 @@ components:
           format: uuid
         amount_cents:
           type: integer
-          description: Cents.
+          format: int64
+          description: Must be positive.
         method:
           type: string
-          enum: [CHECK, CASH, CARD, TRANSFER]
+          description: Free text; defaults to CASH.
         reference:
+          type: string
+        note:
           type: string
     DepositApply:
       type: object
-      required: [invoice_ids]
+      description: ApplyDepositRequest.
+      required:
+        - amount_cents
       properties:
-        invoice_ids:
-          type: array
-          items:
-            type: string
-            format: uuid
-    DepositApplyResponse:
-      type: object
-      required: [deposit, applications]
-      properties:
-        deposit:
-          $ref: "#/components/schemas/Deposit"
-        applications:
-          type: array
-          items:
-            $ref: "#/components/schemas/DepositApplication"
-    DepositApplication:
-      type: object
-      required: [invoice_id, amount_applied]
-      properties:
+        amount_cents:
+          type: integer
+          format: int64
+          description: Must be positive and at most the remainder.
         invoice_id:
           type: string
           format: uuid
-        amount_applied:
-          type: integer
-          description: Cents.
     IntegrationProduct:
       type: object
       required: [id, sku, name, category, uom, price, weight_lbs, length_in, width_in, height_in, stackable, geometry_source]
@@ -6340,7 +6410,14 @@ components:
           description: Never null.
     Inventory:
       type: object
-      required: [id, product_id, location, quantity, allocated, updated_at]
+      description: inventory.Inventory. location_id is omitted when unset.
+      required:
+        - id
+        - product_id
+        - location
+        - quantity
+        - allocated
+        - updated_at
       properties:
         id:
           type: string
@@ -6351,7 +6428,6 @@ components:
         location_id:
           type: string
           format: uuid
-          nullable: true
         location:
           type: string
           description: Deprecated text field.
@@ -6364,33 +6440,41 @@ components:
           format: date-time
     StockAdjustmentRequest:
       type: object
-      required: [product_id, quantity, is_delta]
+      required:
+        - product_id
+        - quantity
       properties:
         product_id:
           type: string
           format: uuid
         location_id:
-          type: string
+          type:
+            - string
+            - 'null'
           format: uuid
-          nullable: true
         quantity:
           type: number
+          description: The new quantity, or the delta when is_delta is true.
         reason:
           type: string
         is_delta:
           type: boolean
-          description: If true, add/subtract. If false, replace.
+          description: If true, add or subtract; if false, replace.
     StockMovementRequest:
       type: object
-      required: [product_id, to_location_id, quantity]
+      required:
+        - product_id
+        - to_location_id
+        - quantity
       properties:
         product_id:
           type: string
           format: uuid
         from_location_id:
-          type: string
+          type:
+            - string
+            - 'null'
           format: uuid
-          nullable: true
         to_location_id:
           type: string
           format: uuid
@@ -6398,18 +6482,15 @@ components:
           type: number
         reason:
           type: string
-    InventoryAdjustResponse:
+    InventoryStatusAck:
       type: object
-      required: [status]
+      required:
+        - status
       properties:
         status:
           type: string
-    InventoryTransferResponse:
-      type: object
-      required: [status]
-      properties:
-        status:
-          type: string
+          enum:
+            - ok
     InvoiceStatus:
       type: string
       enum: [UNPAID, PARTIAL, PAID, VOID, OVERDUE]
@@ -8475,7 +8556,22 @@ components:
           format: date-time
     Vendor:
       type: object
-      required: [id, name, payment_terms, average_lead_time_days, fill_rate, total_spend_ytd, created_at, updated_at]
+      description: vendor.Vendor.
+      required:
+        - id
+        - name
+        - contact_email
+        - phone
+        - address_line1
+        - city
+        - state
+        - zip
+        - payment_terms
+        - average_lead_time_days
+        - fill_rate
+        - total_spend_ytd
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -8483,23 +8579,29 @@ components:
         name:
           type: string
         contact_email:
-          type: string
-          nullable: true
+          type:
+            - string
+            - 'null'
         phone:
-          type: string
-          nullable: true
+          type:
+            - string
+            - 'null'
         address_line1:
-          type: string
-          nullable: true
+          type:
+            - string
+            - 'null'
         city:
-          type: string
-          nullable: true
+          type:
+            - string
+            - 'null'
         state:
-          type: string
-          nullable: true
+          type:
+            - string
+            - 'null'
         zip:
-          type: string
-          nullable: true
+          type:
+            - string
+            - 'null'
         payment_terms:
           type: string
         average_lead_time_days:
@@ -8508,6 +8610,7 @@ components:
           type: number
         total_spend_ytd:
           type: number
+          description: Float dollars today.
         created_at:
           type: string
           format: date-time
@@ -8516,22 +8619,22 @@ components:
           format: date-time
     VendorCreate:
       type: object
-      required: [name]
+      description: CreateVendorRequest. The address fields are not accepted.
+      required:
+        - name
       properties:
         name:
           type: string
         contact_email:
-          type: string
+          type:
+            - string
+            - 'null'
         phone:
-          type: string
-        address_line1:
-          type: string
-        city:
-          type: string
-        state:
-          type: string
-        zip:
-          type: string
+          type:
+            - string
+            - 'null'
         payment_terms:
-          type: string
+          type:
+            - string
+            - 'null'
 

@@ -1,105 +1,126 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The activities module, transcribed from internal/crm/activity.go and handler.go
-# as they behave today: nullability per golden records.
+# The activities module, transcribed from internal/crm/handler.go and activity.go
+# as they behave today: update echoes the decoded body, and a missing row answers 404.
 paths:
   /api/v1/activities/{id}:
     get:
       operationId: activityGet
-      tags: [activities]
+      tags:
+      - activities
       summary: Get one activity
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The activity.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       operationId: activityUpdate
-      tags: [activities]
+      tags:
+      - activities
       summary: Update an activity
+      description: The write replaces contact_id, activity_type, description, logged_by and activity_date;
+        an omitted field is cleared.
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ActivityUpdate"
+              $ref: '#/components/schemas/ActivityUpdate'
       responses:
-        "200":
-          description: The updated activity.
+        '200':
+          description: The activity as the request wrote it. customer_id, created_at and any field the
+            body omitted come back as zero values, because the handler echoes the decoded body rather
+            than re-reading the row.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       operationId: activityDelete
-      tags: [activities]
+      tags:
+      - activities
       summary: Delete an activity
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
       responses:
-        "204":
+        '204':
           description: Activity deleted.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   schemas:
+    ActivityType:
+      type: string
+      enum:
+      - CALL
+      - MEETING
+      - EMAIL
+      - NOTE
     Activity:
       type: object
-      required: [id, customer_id, activity_type, description, activity_date, created_at, updated_at]
+      description: crm.Activity. contact_id and logged_by are omitted when unset. The customer routes
+        of the customer fragment return the same schema.
+      required:
+      - id
+      - customer_id
+      - activity_type
+      - description
+      - activity_date
+      - created_at
+      - updated_at
       properties:
         id:
           type: string
@@ -110,16 +131,13 @@ components:
         contact_id:
           type: string
           format: uuid
-          nullable: true
         activity_type:
-          type: string
-          enum: [CALL, MEETING, EMAIL, NOTE]
+          $ref: '#/components/schemas/ActivityType'
         description:
           type: string
         logged_by:
           type: string
           format: uuid
-          nullable: true
         activity_date:
           type: string
           format: date-time
@@ -131,15 +149,20 @@ components:
           format: date-time
     ActivityUpdate:
       type: object
+      description: The Activity decoded from the body; a missing or unknown activity_type answers 400.
+      required:
+      - activity_type
       properties:
         contact_id:
           type: string
           format: uuid
         activity_type:
-          type: string
-          enum: [CALL, MEETING, EMAIL, NOTE]
+          $ref: '#/components/schemas/ActivityType'
         description:
           type: string
+        logged_by:
+          type: string
+          format: uuid
         activity_date:
           type: string
           format: date-time

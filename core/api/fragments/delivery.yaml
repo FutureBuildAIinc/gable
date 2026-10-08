@@ -151,7 +151,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/vehicles/{id}/photo:
     post:
-      operationId: deliveryVehiclePhotoUpload
+      operationId: deliveryVehiclePhoto
       tags:
       - delivery
       summary: Upload a vehicle photo
@@ -333,7 +333,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/drivers/{id}/photo:
     post:
-      operationId: deliveryDriverPhotoUpload
+      operationId: deliveryDriverPhoto
       tags:
       - delivery
       summary: Upload a driver photo
@@ -561,7 +561,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
   /api/v1/delivery/routes/{id}/deliveries:
     get:
-      operationId: deliveryRouteDeliveryList
+      operationId: deliveryRouteDeliveries
       tags:
       - delivery
       summary: List the deliveries of a route
@@ -657,7 +657,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/status:
     put:
-      operationId: deliveryStatusUpdate
+      operationId: deliveryUpdateStatus
       tags:
       - delivery
       summary: Complete a delivery
@@ -727,7 +727,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/pod-photo:
     post:
-      operationId: deliveryPodPhotoUpload
+      operationId: deliveryPodPhoto
       tags:
       - delivery
       summary: Attach a proof of delivery photo
@@ -765,7 +765,7 @@ paths:
           $ref: '#/components/responses/InternalError'
   /api/v1/delivery/deliveries/{id}/pod-photos:
     get:
-      operationId: deliveryPodPhotoList
+      operationId: deliveryPodPhotos
       tags:
       - delivery
       summary: List the proof of delivery photos
