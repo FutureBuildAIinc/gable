@@ -1,0 +1,297 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package httpx
+
+import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strconv"
+	"time"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
+)
+
+// Page limits (ADR 0001 §2): the default page size, and the bound a client
+// cannot exceed. A limit outside [1, MaxPageLimit] is refused, not clamped.
+const (
+	DefaultPageLimit = 50
+	MaxPageLimit     = 200
+)
+
+// Cursor shape bounds. These exist so a hostile cursor cannot be a decode
+// or memory burden: the encoded token is short, the decoded payload is
+// bounded, and every keyset part is a printable, bounded string.
+const (
+	cursorVersion         = 1
+	maxCursorDecodedBytes = 1024
+	maxCursorKeyParts     = 8
+	maxCursorKeyPartBytes = 256
+)
+
+// cursorPayload is the JSON object inside every minted cursor: the format
+// version, the ordering scope the cursor was minted under, and the keyset
+// tuple of the last row of the page, in the ordering's column order.
+type cursorPayload struct {
+	V int      `json:"v"`
+	O string   `json:"o"`
+	K []string `json:"k"`
+}
+
+// validateKeyPart applies the per-part shape rules shared by minting and
+// decoding: a part is non-empty, bounded, valid UTF-8, and carries no
+// control characters, neither the C0 bank nor the C1 one. Invalid UTF-8 is
+// refused because JSON encoding would rewrite it into replacement
+// characters and hand decode a different value than mint was given;
+// controls are refused so a cursor part can never smuggle structure into a
+// log line or a debug dump.
+func validateKeyPart(part string) bool {
+	if part == "" || len(part) > maxCursorKeyPartBytes {
+		return false
+	}
+	if !utf8.ValidString(part) {
+		return false
+	}
+	for _, r := range part {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return false
+		}
+	}
+	return true
+}
+
+// MintCursor mints the opaque next_cursor value from a page's last row:
+// the ordering scope (the converting module's stable name for that list's
+// ordering) and the keyset values of the last row, in the ordering's column
+// order. It refuses to mint what DecodeCursor would refuse to read, so no
+// handler can hand a client an unloadable cursor. The error is a server
+// bug (bad scope constant or unshapeable row value), not a client input:
+// wrap the handler's return in WriteError, which answers it as a 500.
+func MintCursor(scope string, key ...string) (string, error) {
+	if scope == "" || len(scope) > maxCursorKeyPartBytes {
+		return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+			Message: "cursor scope is empty or too long"}
+	}
+	for _, part := range scope {
+		if part < 0x20 || part == 0x7f {
+			return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+				Message: "cursor scope carries a control character"}
+		}
+	}
+	if len(key) == 0 || len(key) > maxCursorKeyParts {
+		return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+			Message: "cursor keyset must have between 1 and " + strconv.Itoa(maxCursorKeyParts) + " parts"}
+	}
+	for _, part := range key {
+		if !validateKeyPart(part) {
+			return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+				Message: "cursor keyset part is empty, too long, or carries a control character"}
+		}
+	}
+
+	payload, err := json.Marshal(cursorPayload{V: cursorVersion, O: scope, K: key})
+	if err != nil {
+		return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+			Message: "cursor payload cannot be encoded"}
+	}
+	// The payload bound is what DecodeCursor enforces, so it is checked here
+	// on the marshalled bytes: many parts, or characters JSON escapes, grow
+	// the payload past the bound even when every part alone is within its own.
+	if len(payload) > maxCursorDecodedBytes {
+		return "", &Error{Status: http.StatusInternalServerError, Code: CodeInternalError,
+			Message: "cursor payload is past the decoded size bound"}
+	}
+	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+// cursorBadRequest is the 400 every refused cursor answers with: a client
+// error naming the cursor field, so the caller is told its token is
+// unusable rather than being quietly wound back to the head of the list.
+func cursorBadRequest(message string) *Error {
+	return BadRequest(message, FieldError{Field: "cursor", Message: message})
+}
+
+// DecodeCursor validates and inverts MintCursor for one ordering scope. A
+// cursor minted for a different scope is refused too: resuming a different
+// sort would silently repeat or drop rows the client already acted on. The
+// cursor is not signed (ADR 0001 §2 records why): strict structure plus the
+// scope binding are the integrity bound, and a forged but well-formed
+// cursor can only seek within the same ordered, filtered list.
+func DecodeCursor(raw, scope string) ([]string, error) {
+	// The base64 form of maxCursorDecodedBytes is a fixed ceiling; anything
+	// longer is refused before it is touched.
+	maxEncoded := base64.RawURLEncoding.EncodedLen(maxCursorDecodedBytes)
+	if len(raw) == 0 || len(raw) > maxEncoded {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	// Canonical form: the re-encoded value must match byte for byte, so
+	// padded variants and alternate trailing bits are refused rather than
+	// accepted as aliases.
+	if base64.RawURLEncoding.EncodeToString(decoded) != raw {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	if len(decoded) > maxCursorDecodedBytes {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+
+	var payload cursorPayload
+	dec := json.NewDecoder(bytes.NewReader(decoded))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&payload); err != nil {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	// One JSON value and nothing after it: a payload with trailing bytes of
+	// any kind, even whitespace, is not a cursor this package minted.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	// Canonical form only: the decoded value must re-marshal to exactly the
+	// bytes it arrived as. This refuses case-variant field names (which Go's
+	// decoder matches leniently), duplicated fields, and any spacing or
+	// ordering difference: a cursor that did not come from MintCursor byte
+	// for byte does not resume a list.
+	if canonical, err := json.Marshal(payload); err != nil || !bytes.Equal(canonical, decoded) {
+		return nil, cursorBadRequest("cursor is malformed")
+	}
+	if payload.V != cursorVersion {
+		return nil, cursorBadRequest("cursor is from an unsupported version")
+	}
+	if payload.O != scope {
+		return nil, cursorBadRequest("cursor was not minted for this ordering")
+	}
+	if len(payload.K) == 0 || len(payload.K) > maxCursorKeyParts {
+		return nil, cursorBadRequest("cursor keyset has an invalid length")
+	}
+	for _, part := range payload.K {
+		if !validateKeyPart(part) {
+			return nil, cursorBadRequest("cursor keyset is malformed")
+		}
+	}
+	return payload.K, nil
+}
+
+// CursorPage is the parsed list window: the decoded keyset of the last row
+// of the previous page (nil on the first page) and the effective limit.
+type CursorPage struct {
+	Key   []string
+	Limit int
+}
+
+// ParseListQuery reads `cursor` and `limit` from a list route's query string
+// (ADR 0001 §2). Absent parameters are the first page at the default limit.
+// A present but malformed cursor, a repeated cursor, or a limit the server
+// will not honor is a 400 *Error naming the field: never a silent restart,
+// never a silent clamp.
+func ParseListQuery(r *http.Request, scope string) (CursorPage, error) {
+	q := r.URL.Query()
+
+	page := CursorPage{Limit: DefaultPageLimit}
+	if vals := q["cursor"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			return CursorPage{}, cursorBadRequest("cursor parameter is repeated")
+		}
+		key, err := DecodeCursor(vals[0], scope)
+		if err != nil {
+			return CursorPage{}, err
+		}
+		page.Key = key
+	}
+
+	if vals := q["limit"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			return CursorPage{}, BadRequest("limit parameter is repeated",
+				FieldError{Field: "limit", Message: "parameter is repeated"})
+		}
+		n, ok := parseLimitParam(vals[0])
+		if !ok {
+			return CursorPage{}, BadRequest("limit is not a plain integer",
+				FieldError{Field: "limit", Message: "must be plain digits with no sign, space, or leading zero"})
+		}
+		if n < 1 || n > MaxPageLimit {
+			return CursorPage{}, &Error{Status: http.StatusBadRequest, Code: CodeValidationFailed,
+				Message: "limit is out of range",
+				Details: []FieldError{{Field: "limit",
+					Message: "must be between 1 and " + strconv.Itoa(MaxPageLimit)}}}
+		}
+		page.Limit = n
+	}
+
+	return page, nil
+}
+
+// parseLimitParam accepts a plain run of ASCII digits and nothing else: no
+// sign, no whitespace, no exponent, no leading zero ("0" alone parses and is
+// then refused by the range check). Nothing here leans on strconv's
+// leniency, and a digit run too long to hold an int still comes back as a
+// number past the range bound rather than an error class of its own.
+func parseLimitParam(s string) (int, bool) {
+	if s == "" || (len(s) > 1 && s[0] == '0') {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		d := s[i]
+		if d < '0' || d > '9' {
+			return 0, false
+		}
+		if n > 100_000_000 {
+			// Past any valid limit already; stop before the int overflows
+			// and let the range check refuse it.
+			return 1 << 30, true
+		}
+		n = n*10 + int(d-'0')
+	}
+	return n, true
+}
+
+// keyTimeFormat is RFC 3339 UTC with exactly six fraction digits: the
+// column's full microsecond precision in a fixed-width form, so the same
+// instant always formats to the same bytes.
+const keyTimeFormat = "2006-01-02T15:04:05.000000Z07:00"
+
+// FormatKeyTime renders a timestamp column value as the key part form
+// MintCursor carries: UTC, the Z, and the microseconds. Formatting a
+// cutoff without the fraction (plain RFC 3339 does: 03:04:05.123456
+// becomes 03:04:05) mints a cursor earlier than its own last row, which
+// repeats rows on an ascending (created_at, id) ordering and skips them on
+// a descending one; this formatter keeps them.
+func FormatKeyTime(t time.Time) string {
+	return t.UTC().Format(keyTimeFormat)
+}
+
+// ParseKeyTime parses one decoded key part as the wire form of a timestamp
+// column: RFC 3339 in UTC with the Z (the form section 12 fixes for every
+// timestamp, and the form FormatKeyTime writes into MintCursor). A part
+// that does not hold one is a 400 on cursor, so a well formed cursor
+// carrying a bad timestamp is refused at the boundary instead of becoming
+// a cast error at the database.
+func ParseKeyTime(part string) (time.Time, error) {
+	if len(part) == 0 || part[len(part)-1] != 'Z' {
+		return time.Time{}, cursorBadRequest("cursor keyset part is not an RFC 3339 UTC timestamp")
+	}
+	t, err := time.Parse(time.RFC3339, part)
+	if err != nil {
+		return time.Time{}, cursorBadRequest("cursor keyset part is not an RFC 3339 UTC timestamp")
+	}
+	return t, nil
+}
+
+// ParseKeyUUID parses one decoded key part as a UUID in the canonical
+// lowercase hyphenated form the database stores. A well formed cursor
+// carrying any other spelling of a UUID, or no UUID at all, is a 400 on
+// cursor.
+func ParseKeyUUID(part string) (uuid.UUID, error) {
+	id, err := uuid.Parse(part)
+	if err != nil || id.String() != part {
+		return uuid.UUID{}, cursorBadRequest("cursor keyset part is not a canonical UUID")
+	}
+	return id, nil
+}
