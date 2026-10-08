@@ -34,6 +34,7 @@ import (
 	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/governance"
 	"github.com/gablelbm/gable/internal/integrations"
@@ -585,8 +586,10 @@ func Run() {
 	// Lumber index-aware quote price protection (the exposure module).
 	// Snapshots a baseline index when a quote is sent, detects moves past the
 	// per-customer threshold, applies the snapshotted policy, and gates order
-	// confirm/fulfil and delivery route assignment. Notification side-effects
-	// travel over the in-process pkg/eventbus — see wire_exposure.go.
+	// confirm/fulfil and delivery route assignment. Notification events are
+	// recorded in the transactional outbox inside the mutation's transaction
+	// and the worker role's drain delivers the committed rows; see
+	// wire_exposure.go and pkg/outbox.
 	// Must come after deliverySvc, its last dependency.
 	exposureWiring := wireExposure(exposureDeps{
 		Mux:           mux,
@@ -598,7 +601,7 @@ func Run() {
 		QuoteSvc:      quoteSvc,
 		OrderSvc:      orderSvc,
 		DeliverySvc:   deliverySvc,
-		EmailSvc:      emailSvc,
+		EventsOrg:     cfg.EventsOrg,
 	})
 
 	// SMS Notification Service
@@ -669,6 +672,12 @@ func Run() {
 	techAdminHandler.WithAIBaseURLStore(aiBaseURLStore)
 	techAdminHandler.WithORSKeyStore(orsKeyStore)
 	techAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+
+	// Events feed: the outbox read API (item R1-12), the one cursor-paginated
+	// feed of every domain event. Role gated admin/owner like the other admin
+	// reads; agents and integrations poll it with their own cursors.
+	eventsHandler := events.NewHandler(db)
+	eventsHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Portal Module (Sovereign Dealer Portal)
 	// Resolve JWT secret: required in production, uses dev default in dev mode only.

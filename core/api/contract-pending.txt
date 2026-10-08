@@ -48,6 +48,7 @@ GET	/api/v1/documents/print/pickticket/{id}
 GET	/api/v1/edi/partners
 GET	/api/v1/edi/partners/{id}
 GET	/api/v1/edi/partners/{id}/catalog
+GET	/api/v1/events
 GET	/api/v1/gl/accounts
 GET	/api/v1/gl/balance-sheet
 GET	/api/v1/gl/fiscal-periods

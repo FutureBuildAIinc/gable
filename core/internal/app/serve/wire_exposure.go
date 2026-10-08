@@ -9,40 +9,35 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/delivery"
-	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
-	"github.com/gablelbm/gable/pkg/eventbus"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
 // ExposureWiring is the handle main.go keeps after wiring the lumber
 // index-aware price-protection subsystem. Call Shutdown during graceful
-// shutdown to stop the safety-net cron and drain the event bus.
+// shutdown to stop the safety-net cron. The outbox drain that delivers the
+// exposure notifications is not here: it is a background job and runs in the
+// worker role (internal/app/worker).
 type ExposureWiring struct {
-	// Bus is the in-process event bus carrying quote.exposure.* events.
-	// See pkg/eventbus for the (deliberately weak) delivery guarantees.
-	Bus eventbus.Bus
 	// Scheduler is the nightly safety-net re-evaluation cron. Disabled unless
 	// system_settings has exposure.enabled = "true".
 	Scheduler *quote.ExposureScheduler
 }
 
-// Shutdown stops the safety-net cron and closes the event bus, bounded by ctx.
-// Safe to call on a nil receiver so main.go's shutdown path needs no guard.
+// Shutdown stops the safety-net cron, bounded by ctx. Safe to
+// call on a nil receiver so main.go's shutdown path needs no guard.
 func (w *ExposureWiring) Shutdown(ctx context.Context) {
 	if w == nil {
 		return
 	}
 	if w.Scheduler != nil {
 		w.Scheduler.Stop()
-	}
-	if w.Bus != nil {
-		_ = w.Bus.Close(ctx)
 	}
 }
 
@@ -59,7 +54,10 @@ type exposureDeps struct {
 	QuoteSvc      *quote.Service
 	OrderSvc      *order.Service
 	DeliverySvc   *delivery.Service
-	EmailSvc      notification.EmailService
+	// EventsOrg is the org slug the outbox writer stamps on every event
+	// (EVENTS_ORG, "default" when unset): one database per dealer today, so
+	// the org is a property of the deployment.
+	EventsOrg string
 }
 
 // wireExposure builds and registers the entire lumber index-aware quote
@@ -82,25 +80,30 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 		logger = slog.Default()
 	}
 
-	// In-process event bus. There is no broker: events are best-effort,
-	// at-most-once and lost on restart. Durable state lives in Postgres and
-	// the nightly safety-net scan is the recovery path. See pkg/eventbus.
-	bus := eventbus.New(eventbus.Config{Logger: logger})
-	logger.Info("eventbus: using in-process backend",
-		"backend", bus.Backend(),
-		"guarantees", "best-effort, at-most-once, single-process, no replay")
+	// Delivery: the worker role's outbox drain delivers committed events_outbox
+	// rows (pkg/outbox) synchronously to each registered subscriber handler,
+	// so delivery follows the commit, not the process lifetime. The eventbus
+	// package's Event envelope and subject wildcard rules remain the shared
+	// vocabulary between the drain and its subscribers.
+	logger.Info("exposure events: delivered by the outbox drain, at least once, per subscriber cursor")
 
 	exposureRepo := pricing.NewExposureRepository(deps.DB)
 	exposureChecker := pricing.NewExposureChecker(deps.DB)
 	exposureAudit := &exposureAuditAdapter{auditLog: deps.AuditLog}
 
+	// The outbox writer stamps the deployment's org (EVENTS_ORG, "default"
+	// until a deployment level org identity exists) on every event; the
+	// scanner and service record their notification events through it inside
+	// their mutations' transactions.
+	outboxWriter := outbox.NewWriter(deps.DB, deps.EventsOrg)
+
 	exposureScanner := pricing.NewExposureScanner(
 		exposureRepo, deps.EscalatorRepo, deps.QuoteRepo, exposureAudit, deps.DB, logger,
-	).WithEventBus(bus)
+	).WithOutbox(outboxWriter)
 
 	exposureSvc := pricing.NewExposureService(
 		exposureRepo, deps.EscalatorRepo, deps.QuoteRepo, exposureAudit, exposureChecker, logger,
-	).WithEventBus(bus)
+	).WithOutbox(outboxWriter).WithTxRunner(deps.DB)
 
 	registerExposureRoutes(deps.Mux, exposureRoutes{
 		Scanner:    exposureScanner,
@@ -129,27 +132,21 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 		deps.DeliverySvc.WithExposureGate(exposureChecker)
 	}
 
-	// Notifications: turn exposure events into salesperson alerts + customer
-	// notices. Subscribed on the wildcard subject so every exposure subject
-	// routes through one consumer.
-	if deps.EmailSvc != nil {
-		notifier := notification.NewExposureNotifier(deps.EmailSvc, deps.DB, logger)
-		if err := bus.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle); err != nil {
-			logger.Error("exposure notifier subscription failed; index alerts will not be emailed", "error", err)
-		}
-	}
+	// Notifications: the exposure notifier is registered on the outbox drain
+	// in the worker role (internal/app/worker), which delivers every exposure
+	// event committed to the outbox to it, at least once, per cursor.
 
 	// Nightly safety net. Off by default; an operator enables it by setting
 	// exposure.enabled = "true" in system_settings. It re-evaluates every open
 	// commodity quote against current index values, which is how the system
-	// recovers from an event this bus dropped or a refresh that raced a
-	// restart.
+	// recovers from an event the drain parked or dropped and a refresh that
+	// raced a restart.
 	scheduler := quote.NewExposureScheduler(deps.DB, exposureScanner)
 	if err := scheduler.Start(context.Background()); err != nil {
 		logger.Error("exposure safety-net scheduler failed to start", "error", err)
 	}
 
-	return &ExposureWiring{Bus: bus, Scheduler: scheduler}
+	return &ExposureWiring{Scheduler: scheduler}
 }
 
 // exposureRoutes carries the collaborators the exposure HTTP surface needs.
