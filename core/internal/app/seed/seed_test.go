@@ -5,10 +5,12 @@ package seed
 
 import (
 	"context"
+	"strconv"
 	"math"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
@@ -36,18 +38,24 @@ func (r *oneRuleRepo) GetContract(ctx context.Context, customerID, productID uui
 func (r *oneRuleRepo) CreateContract(ctx context.Context, c *pricing.CustomerContract) error {
 	return nil
 }
-func (r *oneRuleRepo) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID, jobID *uuid.UUID, quantity float64) ([]pricing.PricingRule, error) {
+func (r *oneRuleRepo) GetMatchingRules(ctx context.Context, productID uuid.UUID, customerID, jobID *uuid.UUID, quantity httpx.Quantity) ([]pricing.PricingRule, error) {
 	if r.rule.MinQuantity > quantity {
 		return nil, nil
 	}
 	return []pricing.PricingRule{r.rule}, nil
 }
-func (r *oneRuleRepo) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]float64, error) {
+func (r *oneRuleRepo) ListBreakQuantities(ctx context.Context, productID uuid.UUID, customerID *uuid.UUID) ([]httpx.Quantity, error) {
 	return nil, nil
 }
 func (r *oneRuleRepo) CreateRule(ctx context.Context, rule *pricing.PricingRule) error { return nil }
 func (r *oneRuleRepo) ListRules(ctx context.Context) ([]pricing.PricingRule, error) {
 	return nil, nil
+}
+func (r *oneRuleRepo) ListRulesPage(ctx context.Context, after *pricing.RuleCursor, limit int) ([]pricing.PricingRule, error) {
+	return nil, nil
+}
+func (r *oneRuleRepo) CountRules(ctx context.Context) (int64, error) {
+	return 0, nil
 }
 
 // priceWithSeededRule prices one line at basePrice/quantity using a single
@@ -55,14 +63,20 @@ func (r *oneRuleRepo) ListRules(ctx context.Context) ([]pricing.PricingRule, err
 func priceWithSeededRule(t *testing.T, r pricingRule, basePrice, quantity float64) pricing.CalculatedPrice {
 	t.Helper()
 	rule := pricing.PricingRule{
-		ID:             uuid.New(),
-		Name:           r.Name,
-		RuleType:       pricing.RuleType(r.RuleType),
-		Category:       r.Category,
-		DiscountPct:    r.DiscPct,
-		MinQuantity:    r.MinQty,
-		MarginFloorPct: r.MarginFloor,
-		IsActive:       true,
+		ID:          uuid.New(),
+		Name:        r.Name,
+		RuleType:    pricing.RuleType(r.RuleType),
+		Category:    r.Category,
+		MinQuantity: seedQty(t, r.MinQty),
+		IsActive:    true,
+	}
+	if r.DiscPct != nil {
+		q := seedQty(t, *r.DiscPct)
+		rule.DiscountPct = &q
+	}
+	if r.MarginFloor != nil {
+		q := seedQty(t, *r.MarginFloor)
+		rule.MarginFloorPct = &q
 	}
 	svc := pricing.NewService(&oneRuleRepo{rule: rule})
 	got, err := svc.CalculatePriceWithQty(context.Background(),
@@ -71,6 +85,17 @@ func priceWithSeededRule(t *testing.T, r pricingRule, basePrice, quantity float6
 		t.Fatalf("CalculatePriceWithQty(%s): %v", r.Name, err)
 	}
 	return got
+}
+
+// seedQty parses one of the seed's decimal numbers into the engine's exact
+// scale 4 quantity, the way the wire would.
+func seedQty(t *testing.T, f float64) httpx.Quantity {
+	t.Helper()
+	q, err := httpx.ParseQuantity(strconv.FormatFloat(f, 'f', -1, 64))
+	if err != nil {
+		t.Fatalf("fixture quantity %v: %v", f, err)
+	}
+	return q
 }
 
 // CORRECTNESS: every seeded discount is a PERCENT, and the engine delivers it.
@@ -136,7 +161,9 @@ func TestDemoPricingRules_MarginFloorsDoNotClampTheirOwnDiscount(t *testing.T) {
 //
 // "Spring Roofing Promo" is 5% off. Written as 0.05 it delivered 0.05%, and a
 // $23.25 board came back at $23.24 — a saving of one cent, on a rule the
-// dealer thinks takes $1.16 off. Written as 5 it comes back at $22.09.
+// dealer thinks takes $1.16 off. Written as 5 the exact engine answers
+// 22.0875 (C3-1: the engine no longer rounds a rule price to cents; the one
+// cent rounding is the line's extension, ADR 0006 R4).
 func TestSpringRoofingPromo_TakesFivePercentNotFiveHundredthsOfOne(t *testing.T) {
 	var promo pricingRule
 	for _, r := range demoPricingRules {
@@ -149,8 +176,8 @@ func TestSpringRoofingPromo_TakesFivePercentNotFiveHundredthsOfOne(t *testing.T)
 	}
 
 	got := priceWithSeededRule(t, promo, 23.25, 1)
-	if got.FinalPrice != 22.09 {
-		t.Errorf("FinalPrice = %.2f, want 22.09 (5%% off 23.25); 23.24 is the old 0.05%%", got.FinalPrice)
+	if got.FinalPrice != 22.0875 {
+		t.Errorf("FinalPrice = %.4f, want 22.0875 (exactly 5%% off 23.25); 23.24 is the old 0.05%%", got.FinalPrice)
 	}
 	if got.Source != pricing.SourcePromotional {
 		t.Errorf("Source = %v, want PROMOTIONAL", got.Source)
