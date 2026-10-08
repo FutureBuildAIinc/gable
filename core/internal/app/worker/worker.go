@@ -125,9 +125,6 @@ func Run() {
 func newOutboxDrain(db *database.DB, logger *slog.Logger) *outbox.DrainRunner {
 	drain := outbox.NewDrainRunner(db, logger)
 	notifier := notification.NewExposureNotifier(notification.NewLogEmailService(logger), db, logger)
-	// A closure, not the method value: the route census reads any "Handle"
-	// method value as a route registration it cannot resolve.
-	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier",
-		func(ctx context.Context, e eventbus.Event) error { return notifier.Handle(ctx, e) })
+	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
 	return drain
 }
