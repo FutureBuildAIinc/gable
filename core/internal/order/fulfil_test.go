@@ -246,12 +246,14 @@ func TestFailingEventWriteRollsTheFulfilmentBack(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
-	var writtenInvoice string
+	var writtenInvoice, probeOrder string
 	var entriesInside int
 	f.serveWith(f.withStock(), f.withMoney(), func(s *order.Service) *order.Service {
 		return s.WithOutbox(failOn{inner: outbox.NewWriter(db, ""), typ: "order.fulfilled", onFail: func(ctx context.Context) {
 			ex := db.GetExecutor(ctx)
-			_ = ex.QueryRow(ctx, `SELECT id::text FROM invoices ORDER BY created_at DESC LIMIT 1`).Scan(&writtenInvoice)
+			// this order's invoice, not the newest in a shared database (another
+			// test can leave a future dated one behind)
+			_ = ex.QueryRow(ctx, `SELECT id::text FROM invoices WHERE order_id = $1::uuid`, probeOrder).Scan(&writtenInvoice)
 			_ = ex.QueryRow(ctx, `SELECT count(*) FROM gl_journal_entries WHERE source_ref_id = $1::uuid`, writtenInvoice).Scan(&entriesInside)
 		}})
 	})
@@ -261,6 +263,7 @@ func TestFailingEventWriteRollsTheFulfilmentBack(t *testing.T) {
 
 	r := f.create()
 	id := str(t, r.body, "id")
+	probeOrder = id
 	r = f.transition(id, 1, "confirmed")
 	rev := revision(t, r)
 	bad := f.fulfil(id, rev, map[string]any{"picked_up_by": "Counter customer"})
