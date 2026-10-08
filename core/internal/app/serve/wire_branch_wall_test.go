@@ -571,15 +571,18 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 
 // The document print and email routes run behind the branch middleware, so
 // the branch filters the invoice and order repositories already carry apply
-// to every caller: a sales or finance user held to branch A finds branch B's
-// invoice or pick ticket a 404 and can read, print and email only its own
-// branch's.
+// to every caller, and the handler holds the record's own branch to the wall
+// for the caller the repositories' filter never fires for: a sales or finance
+// user held to branch A finds branch B's invoice or pick ticket a 404 with a
+// context branch and a 403 with none (its grants, none granted none), and
+// can read, print and email only its own branch's records.
 func TestBranchWall_DocumentRoutes(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
 
 	const ok = http.StatusOK
+	const no = http.StatusForbidden
 	for _, c := range []struct {
 		name, method, path, role, sub, header string
 		want                                  int
@@ -588,9 +591,15 @@ func TestBranchWall_DocumentRoutes(t *testing.T) {
 		{"finance emails foreign invoice", "POST", "/api/v1/invoices/" + f.invB.String() + "/email", "finance", "u-a", A, http.StatusNotFound},
 		{"sales prints foreign pick ticket", "GET", "/api/v1/documents/print/pickticket/" + f.orderB.String(), "sales", "u-a", A, http.StatusNotFound},
 		{"finance prints foreign pick ticket", "GET", "/api/v1/documents/print/pickticket/" + f.orderB.String(), "finance", "u-a", A, http.StatusNotFound},
+		{"sales prints foreign invoice, no header", "GET", "/api/v1/documents/print/invoice/" + f.invB.String(), "sales", "u-a", "", no},
+		{"finance emails foreign invoice, no header", "POST", "/api/v1/invoices/" + f.invB.String() + "/email", "finance", "u-a", "", no},
+		{"sales prints foreign pick ticket, no header", "GET", "/api/v1/documents/print/pickticket/" + f.orderB.String(), "sales", "u-a", "", no},
+		{"finance prints foreign pick ticket, no header", "GET", "/api/v1/documents/print/pickticket/" + f.orderB.String(), "finance", "u-a", "", no},
 		{"sales prints own invoice", "GET", "/api/v1/documents/print/invoice/" + f.invA.String(), "sales", "u-a", A, ok},
 		{"finance emails own invoice", "POST", "/api/v1/invoices/" + f.invA.String() + "/email", "finance", "u-a", A, http.StatusAccepted},
 		{"sales prints own pick ticket", "GET", "/api/v1/documents/print/pickticket/" + f.orderA.String(), "sales", "u-a", A, ok},
+		{"sales prints own invoice, no header", "GET", "/api/v1/documents/print/invoice/" + f.invA.String(), "sales", "u-a", "", ok},
+		{"sales prints own pick ticket, no header", "GET", "/api/v1/documents/print/pickticket/" + f.orderA.String(), "sales", "u-a", "", ok},
 		{"admin prints foreign invoice", "GET", "/api/v1/documents/print/invoice/" + f.invB.String(), "admin", "boss", "", ok},
 	} {
 		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {

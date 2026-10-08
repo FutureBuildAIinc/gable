@@ -5,6 +5,7 @@ package document
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -22,10 +24,28 @@ type Handler struct {
 	invoiceSvc  *invoice.Service
 	customerSvc *customer.Service
 	emailSvc    notification.EmailService
+	guard       BranchGuard // optional; see WithBranchWall
 }
 
 func NewHandler(d *Service, o *order.Service, i *invoice.Service, c *customer.Service, e notification.EmailService) *Handler {
 	return &Handler{docSvc: d, orderSvc: o, invoiceSvc: i, customerSvc: c, emailSvc: e}
+}
+
+// BranchGuard holds the record a print or email acts on to the caller's
+// branch wall (ADR 0007 section 2.3). *middleware.BranchGuard satisfies it.
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+}
+
+// WithBranchWall makes the print and email routes hold the record's own
+// branch to the caller's wall. The invoice and order repositories already
+// filter their reads on the request's context branch, which is what stops a
+// caller with a header; the record check is what stops a bound caller with
+// no context branch (its grants, none granted none). Without it that caller
+// reaches any branch's record, so serve always sets it.
+func (h *Handler) WithBranchWall(g BranchGuard) *Handler {
+	h.guard = g
+	return h
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -43,6 +63,26 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/invoices/{id}/email", guard(h.HandleEmailInvoice))
 }
 
+// recordBranchAllowed holds a loaded record's branch to the caller's wall,
+// as the purchase order routes hold the path id's record. A refusal is a 403
+// in the legacy error shape these unconverted routes carry; a record of no
+// branch is not a crossing of the wall and passes. It reports whether the
+// request may proceed.
+func (h *Handler) recordBranchAllowed(w http.ResponseWriter, r *http.Request, what string, branch uuid.UUID) bool {
+	if h.guard == nil || branch == uuid.Nil {
+		return true
+	}
+	if err := h.guard.CheckPayloadBranch(r.Context(), branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httputil.RespondError(w, r, what+" is in a branch this caller may not target", http.StatusForbidden, err)
+			return false
+		}
+		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+		return false
+	}
+	return true
+}
+
 func (h *Handler) HandlePrintInvoice(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
@@ -54,6 +94,9 @@ func (h *Handler) HandlePrintInvoice(w http.ResponseWriter, r *http.Request) {
 	inv, err := h.invoiceSvc.GetInvoice(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
+		return
+	}
+	if !h.recordBranchAllowed(w, r, "invoice", inv.BranchID) {
 		return
 	}
 
@@ -87,6 +130,9 @@ func (h *Handler) HandlePrintPickTicket(w http.ResponseWriter, r *http.Request) 
 		httputil.RespondError(w, r, "order not found", http.StatusNotFound, err)
 		return
 	}
+	if !h.recordBranchAllowed(w, r, "order", o.BranchID) {
+		return
+	}
 
 	cust, err := h.customerSvc.GetCustomer(r.Context(), o.CustomerID)
 	if err != nil {
@@ -116,6 +162,11 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 	inv, err := h.invoiceSvc.GetInvoice(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
+		return
+	}
+	// Held before anything is generated or queued: a refused caller must not
+	// reach the customer read, the PDF or the email dispatch.
+	if !h.recordBranchAllowed(w, r, "invoice", inv.BranchID) {
 		return
 	}
 

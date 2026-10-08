@@ -78,9 +78,12 @@ func (w *branchWall) matching(mux *http.ServeMux, svc *matching.Service) {
 // middleware: a print or an email acts on an invoice or an order addressed by
 // its path id, and the invoice and order repositories already filter their
 // reads on the branch the middleware settles, so a caller held to branch A
-// finds branch B's invoice or pick ticket a 404. (The record checks proper,
-// 403 on a foreign record, arrive with the invoice and order seam; the
-// missing header case rides with it.)
+// finds branch B's invoice or pick ticket a 404. The handler also holds the
+// loaded record's own branch to the wall, which is what scopes a bound caller
+// with no context branch (default_branch_required=false, no header) to its
+// grants; the repositories' filter never fires for that caller. (The 403
+// record checks on the invoice and order modules' own routes arrive with
+// their seam.)
 func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
-	h.RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
+	h.WithBranchWall(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
 }
