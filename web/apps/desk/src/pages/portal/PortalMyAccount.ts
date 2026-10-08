@@ -4,11 +4,10 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { router } from '../../lib/router.ts';
-import { CustomerService } from '../../services/CustomerService';
-import { fetchWithAuth } from '../../services/fetchClient';
+import { CustomerService, customerRequestFromCustomer } from '../../services/CustomerService';
+import { ApiError, apiErrorMessage } from '../../services/apiError';
 import type { Customer } from '../../types/customer';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 @customElement('gable-portal-my-account')
 export class PortalMyAccount extends LitElement {
@@ -75,18 +74,20 @@ export class PortalMyAccount extends LitElement {
             this.successMsg = '';
             this.error = null;
 
-            const res = await fetchWithAuth(`${API_URL}/api/v1/customers/${this.portalCustomerId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(this.customer),
-            });
-
-            if (!res.ok) throw new Error('Failed to update profile');
+            // The customer PUT replaces the whole header on the revision this page loaded.
+            const req = customerRequestFromCustomer(this.customer);
+            for (const f of ['email', 'phone', 'address'] as const) req[f] = req[f]?.trim() ? req[f] : null;
+            this.customer = await CustomerService.updateCustomer(this.customer.id, req, this.customer.revision);
 
             this.successMsg = 'Profile updated successfully!';
             this._successTimer = setTimeout(() => { this.successMsg = ''; }, 3000);
         } catch (err: unknown) {
-            this.error = err instanceof Error ? err.message : 'Error saving profile';
+            if (err instanceof ApiError && err.isStaleRevision) {
+                await this._loadProfile();
+                this.error = 'Your profile changed elsewhere. It has been reloaded; please make your change again.';
+            } else {
+                this.error = apiErrorMessage(err, 'Error saving profile');
+            }
         } finally {
             this.saving = false;
         }

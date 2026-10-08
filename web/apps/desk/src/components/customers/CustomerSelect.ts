@@ -27,7 +27,7 @@ export class GableCustomerSelect extends LitElement {
 
   private async _fetchCustomers() {
     try {
-      const data = await CustomerService.listCustomers();
+      const data = await CustomerService.listAllCustomers();
       this._customers = data;
     } catch (error) {
       console.error('Failed to load customers', error);

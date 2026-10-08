@@ -1,51 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import type {
-    Contact,
-    Activity,
-    CreateContactRequest,
-    CreateActivityRequest,
-} from '../types/crm';
+import type { Activity, CreateActivityRequest } from '../types/crm';
 import { fetchWithAuth } from './fetchClient';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export const crmApi = {
-    // Contacts
-    listContacts: async (customerId: string): Promise<Contact[]> => {
-        const res = await fetchWithAuth(`${API_BASE}/api/v1/customers/${customerId}/contacts`);
-        if (!res.ok) throw new Error('Failed to fetch contacts');
-        return res.json();
-    },
-
-    createContact: async (customerId: string, data: CreateContactRequest): Promise<Contact> => {
-        const res = await fetchWithAuth(`${API_BASE}/api/v1/customers/${customerId}/contacts`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        });
-        if (!res.ok) throw new Error('Failed to create contact');
-        return res.json();
-    },
-
-    updateContact: async (contactId: string, data: Partial<Contact>): Promise<Contact> => {
-        const res = await fetchWithAuth(`${API_BASE}/api/v1/contacts/${contactId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        });
-        if (!res.ok) throw new Error('Failed to update contact');
-        return res.json();
-    },
-
-    deleteContact: async (contactId: string): Promise<void> => {
-        const res = await fetchWithAuth(`${API_BASE}/api/v1/contacts/${contactId}`, {
-            method: 'DELETE',
-        });
-        if (!res.ok) throw new Error('Failed to delete contact');
-    },
-
     // Activities
     listActivities: async (customerId: string): Promise<Activity[]> => {
         const res = await fetchWithAuth(`${API_BASE}/api/v1/customers/${customerId}/activities`);

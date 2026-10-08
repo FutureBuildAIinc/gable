@@ -5,16 +5,21 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatCents } from '../../lib/utils.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
+import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
+import { keyed } from 'lit/directives/keyed.js';
 import { AccountService } from '../../services/AccountService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
-import type { Customer } from '../../types/customer.ts';
+import type { Customer, CustomerRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
-import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users, MessageSquare, User, Mail, Phone, ChevronDown } from 'lucide';
+import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
 
 // Side-effect imports: register child custom elements
 import './ContactList.ts';
+import './ShipToList.ts';
+import './CustomerForm.ts';
 import './ActivityFeed.ts';
 
 @customElement('gable-account-detail')
@@ -27,11 +32,16 @@ export class GableAccountDetail extends LitElement {
     @state() private summary: AccountSummary | null = null;
     @state() private transactions: CustomerTransaction[] = [];
     @state() private loading = true;
-    @state() private activeTab: 'ledger' | 'invoices' | 'payments' | 'contacts' | 'crm' = 'ledger';
+    @state() private activeTab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm' = 'ledger';
     @state() private salesperson: SalesPerson | null = null;
     @state() private salesTeam: SalesPerson[] = [];
     @state() private showSpDropdown = false;
     @state() private assigningRep = false;
+    @state() private editing = false;
+    @state() private saving = false;
+    @state() private terms: PaymentTermsRecord[] = [];
+    @state() private editErrors: Record<string, string> = {};
+    @state() private editMessage = '';
 
     connectedCallback() {
         super.connectedCallback();
@@ -56,7 +66,8 @@ export class GableAccountDetail extends LitElement {
             ]);
             this.customer = cust;
             this.summary = summ;
-            this.transactions = txns;
+            // The ledger route answers null for an account with no transactions yet.
+            this.transactions = txns ?? [];
             if (cust.salesperson_id) {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(cust.salesperson_id);
@@ -75,7 +86,7 @@ export class GableAccountDetail extends LitElement {
         if (!this.customer) return;
         this.assigningRep = true;
         try {
-            const updated = await CustomerService.updateSalesperson(this.customer.id, spId);
+            const updated = await CustomerService.updateSalesperson(this.customer.id, spId, this.customer.revision);
             this.customer = updated;
             if (spId) {
                 const sp = await SalesTeamService.getSalesPerson(spId);
@@ -85,10 +96,66 @@ export class GableAccountDetail extends LitElement {
             }
         } catch (error) {
             console.error('Failed to assign salesperson:', error);
-            ToastService.show('Failed to assign salesperson', 'error');
+            if (!(await this.handleStale(error))) {
+                ToastService.show(`Failed to assign salesperson: ${apiErrorMessage(error)}`, 'error');
+            }
         } finally {
             this.assigningRep = false;
             this.showSpDropdown = false;
+        }
+    }
+
+    /** A 409 stale_revision means another session moved the customer: show the server's message and reload it. */
+    private async handleStale(error: unknown): Promise<boolean> {
+        if (!(error instanceof ApiError && error.isStaleRevision) || !this.customer) return false;
+        ToastService.show(`${error.message} The account was reloaded.`, 'error');
+        this.editing = false;
+        try {
+            const fresh = await CustomerService.getCustomer(this.customer.id);
+            this.customer = fresh;
+            if (fresh.salesperson_id) {
+                this.salesperson = await SalesTeamService.getSalesPerson(fresh.salesperson_id);
+            } else {
+                this.salesperson = null;
+            }
+        } catch (err) {
+            ToastService.show(`Failed to reload the account: ${apiErrorMessage(err)}`, 'error');
+        }
+        return true;
+    }
+
+    private async openEdit() {
+        this.editErrors = {};
+        this.editMessage = '';
+        this.editing = true;
+        if (this.terms.length === 0) {
+            try {
+                this.terms = (await CustomerService.listPaymentTerms({ limit: 200 })).items;
+            } catch (error) {
+                this.editMessage = apiErrorMessage(error, 'Failed to load payment terms');
+            }
+        }
+    }
+
+    /** Saves the whole header on the revision this page loaded. */
+    private async saveHeader(request: CustomerRequest) {
+        if (!this.customer) return;
+        this.saving = true;
+        this.editErrors = {};
+        this.editMessage = '';
+        try {
+            this.customer = await CustomerService.updateCustomer(this.customer.id, request, this.customer.revision);
+            this.editing = false;
+            ToastService.show('Customer saved', 'success');
+            // The balance summary's limit may have moved with the header.
+            this.summary = await AccountService.getAccountSummary(this.customer.id);
+        } catch (error) {
+            if (!(await this.handleStale(error))) {
+                this.editErrors = fieldErrorMap(error);
+                this.editMessage = apiErrorMessage(error, 'Failed to save customer');
+            }
+        } finally {
+            this.saving = false;
         }
     }
 
@@ -102,7 +169,7 @@ export class GableAccountDetail extends LitElement {
         this.showSpDropdown = !this.showSpDropdown;
     }
 
-    private renderTab(tabId: 'ledger' | 'invoices' | 'payments' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
+    private renderTab(tabId: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
         const active = this.activeTab === tabId;
         return html`
             <button
@@ -141,6 +208,8 @@ export class GableAccountDetail extends LitElement {
 
         const customer = this.customer;
         const summary = this.summary;
+        // A null limit is no limit; the summary reads it as 0, so the cards say "No limit" instead.
+        const noLimit = customer.credit_limit_cents === null;
         const availablePercentage = summary.credit_limit > 0
             ? (summary.available_credit / summary.credit_limit) * 100
             : 0;
@@ -161,19 +230,20 @@ export class GableAccountDetail extends LitElement {
                                 <span>&bull;</span>
                                 <span>${customer.phone}</span>
                             </div>
+                            <dl class="flex flex-wrap items-center gap-x-6 gap-y-1 mt-3 text-sm" data-account-facts>
+                                <div class="flex gap-2"><dt class="text-zinc-500">Terms</dt><dd class="text-white" data-fact="terms">${customer.payment_terms.code} - ${customer.payment_terms.name}</dd></div>
+                                <div class="flex gap-2"><dt class="text-zinc-500">PO required</dt><dd class="text-white" data-fact="po">${customer.po_required ? 'Yes' : 'No'}</dd></div>
+                                <div class="flex gap-2"><dt class="text-zinc-500">Currency</dt><dd class="font-mono text-white" data-fact="currency">${customer.effective_currency}${customer.currency === null ? ' (dealer default)' : ''}</dd></div>
+                                <div class="flex gap-2"><dt class="text-zinc-500">Tier</dt><dd class="text-white capitalize" data-fact="tier">${customer.tier}</dd></div>
+                                <div class="flex gap-2"><dt class="text-zinc-500">Revision</dt><dd class="font-mono text-white" data-fact="revision">${customer.revision}</dd></div>
+                            </dl>
                         </div>
-                        <!--
-                          Both actions are unimplemented: there is no customer
-                          edit form (CustomerService exposes createCustomer and
-                          updateSalesperson only) and "New Transaction" was
-                          never given a target. They render disabled rather than
-                          looking live and doing nothing on click.
-                        -->
+                        <!-- "New Transaction" was never given a target, so it stays disabled rather than looking live. -->
                         <div class="flex gap-2">
                             <button
-                                disabled
-                                title="Not implemented: this build has no customer edit form."
-                                class="border border-white/10 text-zinc-500 px-3 py-1.5 rounded text-sm font-medium opacity-50 cursor-not-allowed"
+                                @click=${() => void this.openEdit()}
+                                ?disabled=${this.editing}
+                                class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
                             >Edit Profile</button>
                             <button
                                 disabled
@@ -183,6 +253,18 @@ export class GableAccountDetail extends LitElement {
                         </div>
                     </div>
                 </div>
+
+                ${this.editing ? keyed(customer.revision, html`
+                    <gable-customer-form
+                        .customer=${customer}
+                        .terms=${this.terms}
+                        .fieldErrors=${this.editErrors}
+                        .formError=${this.editMessage}
+                        ?submitting=${this.saving}
+                        @customer-submit=${(e: CustomEvent<CustomerRequest>) => void this.saveHeader(e.detail)}
+                        @customer-cancel=${() => { this.editing = false; }}
+                    ></gable-customer-form>
+                `) : nothing}
 
                 <!-- Salesperson Card -->
                 <div class="p-5 bg-slate-steel border border-white/10 rounded-2xl relative">
@@ -261,7 +343,7 @@ export class GableAccountDetail extends LitElement {
                             Balance Due
                         </div>
                         <div class="text-3xl font-mono font-bold text-white">
-                            $${(summary.balance_due / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            ${formatCents(summary.balance_due)}
                         </div>
                         <div class="mt-2 text-xs text-zinc-500">Current outstanding balance</div>
                     </div>
@@ -271,13 +353,13 @@ export class GableAccountDetail extends LitElement {
                             ${icon(CreditCard, 16, 'text-emerald-400')}
                             Available Credit
                         </div>
-                        <div class="text-3xl font-mono font-bold ${availablePercentage < 20 ? 'text-red-400' : 'text-white'}">
-                            $${(summary.available_credit / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        <div class="text-3xl font-mono font-bold ${!noLimit && availablePercentage < 20 ? 'text-red-400' : 'text-white'}">
+                            ${noLimit ? 'No limit' : formatCents(summary.available_credit)}
                         </div>
                         <div class="mt-2 w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
                             <div
-                                class="h-full rounded-full transition-all duration-500 ${availablePercentage < 20 ? 'bg-red-500' : 'bg-emerald-500'}"
-                                style="width: ${Math.min(availablePercentage, 100)}%"
+                                class="h-full rounded-full transition-all duration-500 ${!noLimit && availablePercentage < 20 ? 'bg-red-500' : 'bg-emerald-500'}"
+                                style="width: ${noLimit ? 100 : Math.min(availablePercentage, 100)}%"
                             ></div>
                         </div>
                     </div>
@@ -288,9 +370,9 @@ export class GableAccountDetail extends LitElement {
                             Credit Limit
                         </div>
                         <div class="text-3xl font-mono font-bold text-white">
-                            $${(summary.credit_limit / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            ${noLimit ? 'No limit' : formatCents(customer.credit_limit_cents)}
                         </div>
-                        <div class="mt-2 text-xs text-zinc-500">Total approved credit line</div>
+                        <div class="mt-2 text-xs text-zinc-500">${noLimit ? 'No credit ceiling on this account' : customer.credit_limit_cents === 0 ? 'No credit: cash only' : 'Total approved credit line'}</div>
                     </div>
                 </div>
 
@@ -300,6 +382,7 @@ export class GableAccountDetail extends LitElement {
                         ${this.renderTab('ledger', 'Activity Ledger', Activity)}
                         ${this.renderTab('invoices', 'Invoices', FileText)}
                         ${this.renderTab('payments', 'Payments', CreditCard)}
+                        ${this.renderTab('shipto', 'Ship-to Addresses', MapPin)}
                         ${this.renderTab('contacts', 'Contacts', Users)}
                         ${this.renderTab('crm', 'CRM Activity', MessageSquare)}
                     </div>
@@ -344,6 +427,12 @@ export class GableAccountDetail extends LitElement {
                             </div>
                         ` : nothing}
 
+                        ${this.activeTab === 'shipto' ? html`
+                            <div class="mt-4">
+                                <gable-ship-to-list customerId=${customer.id}></gable-ship-to-list>
+                            </div>
+                        ` : nothing}
+
                         ${this.activeTab === 'contacts' ? html`
                             <div class="mt-4">
                                 <gable-contact-list customerId=${customer.id}></gable-contact-list>
@@ -356,7 +445,7 @@ export class GableAccountDetail extends LitElement {
                             </div>
                         ` : nothing}
 
-                        ${(this.activeTab !== 'ledger' && this.activeTab !== 'contacts' && this.activeTab !== 'crm') ? html`
+                        ${(this.activeTab !== 'ledger' && this.activeTab !== 'shipto' && this.activeTab !== 'contacts' && this.activeTab !== 'crm') ? html`
                             <div class="flex flex-col items-center justify-center h-64 border border-dashed border-white/10 rounded-lg text-zinc-500">
                                 ${icon(AlertCircle, 32, 'mb-2 opacity-50')}
                                 <p>This view is under construction.</p>

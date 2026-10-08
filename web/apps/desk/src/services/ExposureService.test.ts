@@ -6,8 +6,8 @@
  *
  * Every assertion here mirrors a name the backend actually reads:
  * `ExposureHandler.HandleListExposure` parses `owner`, `state`, `customer_id`,
- * `index_code`, `min_dollars`, `limit`, `offset`; the escalation-policy and
- * index-refresh endpoints are method-sensitive. A renamed query parameter does
+ * `index_code`, `min_dollars`, `limit`, `offset`; the
+ * index-refresh endpoints are method-sensitive (the customer escalation policy lives in CustomerService). A renamed query parameter does
  * not fail a build or a type-check — it silently returns the *unfiltered* book,
  * which for a salesperson means seeing every account's exposure. That is what
  * these tests catch.
@@ -162,25 +162,6 @@ describe('ExposureService — market index admin', () => {
     await ExposureService.runScan()
     expect(lastUrl().pathname).toBe('/api/v1/admin/exposure-scan')
     expect(lastInit().method).toBe('POST')
-  })
-})
-
-describe('ExposureService — customer escalation policy', () => {
-  it('reads the policy with GET', async () => {
-    await ExposureService.getEscalationPolicy('cust-1')
-    expect(lastUrl().pathname).toBe('/api/v1/customers/cust-1/escalation-policy')
-    expect(lastInit().method ?? 'GET').toBe('GET')
-  })
-
-  it('writes the policy with PUT, not POST', async () => {
-    // The backend registers PUT only; a POST would 405 and the operator would
-    // see "saved" in the UI while nothing changed.
-    await ExposureService.setEscalationPolicy('cust-1', {
-      policy: 'REQUIRE_ACK',
-      threshold_pct: 4.5,
-    })
-    expect(lastInit().method).toBe('PUT')
-    expect(lastBody()).toEqual({ policy: 'REQUIRE_ACK', threshold_pct: 4.5 })
   })
 })
 

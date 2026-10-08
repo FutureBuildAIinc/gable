@@ -382,7 +382,9 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private get isOverLimit() {
-        return this.customer ? (this.customer.balance_due + this.totalCents / 100) > this.customer.credit_limit : false;
+        // A null limit is no limit; a limit of zero is no credit, so any order over it is over.
+        const limit = this.customer?.credit_limit_cents;
+        return this.customer && limit !== null && limit !== undefined ? this.customer.balance_cents + this.totalCents > limit : false;
     }
 
     render() {
@@ -455,18 +457,18 @@ export class GableQuoteBuilder extends LitElement {
                                         <div class="space-y-2 pt-2">
                                             <div class="flex justify-between">
                                                 <span class="text-zinc-400">Credit Limit</span>
-                                                <span class="font-mono text-zinc-200">$${this.customer.credit_limit?.toLocaleString() || '0.00'}</span>
+                                                <span class="font-mono text-zinc-200">${this.customer.credit_limit_cents === null ? 'No limit' : formatCents(this.customer.credit_limit_cents)}</span>
                                             </div>
                                             <div class="flex justify-between">
                                                 <span class="text-zinc-400">Balance Due</span>
-                                                <span class="font-mono ${this.customer.balance_due > this.customer.credit_limit ? 'text-rose-500 font-bold' : 'text-zinc-200'}">
-                                                    $${this.customer.balance_due.toLocaleString()}
+                                                <span class="font-mono ${this.customer.credit_limit_cents !== null && this.customer.balance_cents > this.customer.credit_limit_cents ? 'text-rose-500 font-bold' : 'text-zinc-200'}">
+                                                    ${formatCents(this.customer.balance_cents)}
                                                 </span>
                                             </div>
                                             <div class="flex justify-between border-t border-white/5 pt-2">
                                                 <span class="text-zinc-400">Available</span>
-                                                <span class="font-mono font-bold ${(this.customer.credit_limit - this.customer.balance_due) < 0 ? 'text-rose-500' : 'text-emerald-400'}">
-                                                    $${(this.customer.credit_limit - this.customer.balance_due).toLocaleString()}
+                                                <span class="font-mono font-bold ${this.customer.credit_limit_cents !== null && this.customer.credit_limit_cents - this.customer.balance_cents < 0 ? 'text-rose-500' : 'text-emerald-400'}">
+                                                    ${this.customer.credit_limit_cents === null ? 'No limit' : formatCents(this.customer.credit_limit_cents - this.customer.balance_cents)}
                                                 </span>
                                             </div>
                                         </div>
