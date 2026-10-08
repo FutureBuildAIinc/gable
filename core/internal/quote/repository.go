@@ -400,10 +400,21 @@ func (r *PostgresRepository) ReplaceDraft(ctx context.Context, q *Quote) error {
 	return r.insertLines(ctx, q, priorNotes)
 }
 
-// listWhere is the shared predicate of the list and its count. The count
-// ignores the keyset position: it is the size of the filtered set.
+// listFilters is the shared predicate of the list and its count. The count
+// ignores the keyset position: it is the size of the filtered set. The
+// grants sub trails each query's own parameters, so its placeholder is
+// filled per query (ADR 0007 section 2.3, the list form of the record rule):
+// a context branch lists its own rows; with no context branch a bound
+// non-admin user lists the branches granted to the user, none granted
+// listing none; an administrator without a header, an unbound key, the
+// single-branch switch and dev mode list every branch's.
 const listFilters = `
-	WHERE ($1::uuid IS NULL OR q.branch_id = $1)
+	WHERE (
+	    ($1::uuid IS NOT NULL AND q.branch_id = $1)
+	    OR ($1::uuid IS NULL AND $%d::text IS NOT NULL AND q.branch_id IN
+	        (SELECT branch_id FROM user_locations WHERE user_sub = $%d))
+	    OR ($1::uuid IS NULL AND $%d::text IS NULL)
+	  )
 	  AND (cardinality($2::text[]) = 0 OR q.state::text = ANY($2))
 	  AND ($3::uuid IS NULL OR q.customer_id = $3)`
 
@@ -417,11 +428,12 @@ func statusStrings(states []QuoteState) []string {
 
 func (r *PostgresRepository) ListQuotes(ctx context.Context, f ListFilter) ([]QuoteSummary, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
-		SELECT `+summaryColumns+summaryFrom+listFilters+`
+		SELECT `+summaryColumns+summaryFrom+fmt.Sprintf(listFilters, 7, 7, 7)+`
 		  AND ($4::timestamptz IS NULL OR (q.created_at, q.id) < ($4, $5::uuid))
 		ORDER BY q.created_at DESC, q.id DESC
 		LIMIT $6`,
-		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID, f.AfterTime, f.AfterID, f.Limit)
+		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID, f.AfterTime, f.AfterID, f.Limit,
+		middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}
@@ -443,8 +455,10 @@ func scanSummaries(rows pgx.Rows) ([]QuoteSummary, error) {
 
 func (r *PostgresRepository) CountQuotes(ctx context.Context, f ListFilter) (int64, error) {
 	var n int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT count(*) FROM quotes q`+listFilters,
-		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID).Scan(&n)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT count(*) FROM quotes q`+fmt.Sprintf(listFilters, 4, 4, 4),
+		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID,
+		middleware.GrantsSubForQuery(ctx)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count quotes: %w", err)
 	}
@@ -455,8 +469,14 @@ func (r *PostgresRepository) ListQuotesByCustomer(ctx context.Context, customerI
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT `+summaryColumns+summaryFrom+`
 		WHERE q.customer_id = $1
-		  AND ($2::uuid IS NULL OR q.branch_id = $2)
-		ORDER BY q.created_at DESC, q.id DESC`, customerID, middleware.BranchIDForQuery(ctx))
+		  AND (
+		    ($2::uuid IS NOT NULL AND q.branch_id = $2)
+		    OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND q.branch_id IN
+		        (SELECT branch_id FROM user_locations WHERE user_sub = $3))
+		    OR ($2::uuid IS NULL AND $3::text IS NULL)
+		  )
+		ORDER BY q.created_at DESC, q.id DESC`,
+		customerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}

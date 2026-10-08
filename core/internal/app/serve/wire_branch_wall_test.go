@@ -442,6 +442,19 @@ func TestBranchWall_SwitchOffAdmitsBoundCaller(t *testing.T) {
 	if !strings.Contains(string(listBody), f.yardB.String()) {
 		t.Errorf("switch off, location list does not carry branch B's yard")
 	}
+
+	// The same for the quote list: the single branch deployment is one
+	// branch, so a bound caller reads every row.
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLQ-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLQ-"+quoteB.String()[:8])
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+	_, quoteBody := f.callBody(t, "GET", "/api/v1/quotes", "", "sales", "u-a", "")
+	if !strings.Contains(string(quoteBody), quoteA.String()) || !strings.Contains(string(quoteBody), quoteB.String()) {
+		t.Errorf("switch off, quote list does not carry both branches' quotes")
+	}
 }
 
 // The branch wall on records a path id addresses (ADR 0007 section 2.3): a
@@ -649,6 +662,57 @@ func TestBranchWall_MatchingExceptions(t *testing.T) {
 		}
 		if got := strings.Contains(string(body), f.poB.String()); got != c.wantB {
 			t.Errorf("matching exceptions, %s: branch B's exception present = %v, want %v", c.name, got, c.wantB)
+		}
+	}
+}
+
+// seedWallQuote inserts one quote directly at the named branch, the list
+// tests' row. The fixture's customer is the header; the caller cleans up.
+func seedWallQuote(t *testing.T, db *database.DB, id, branch, customer uuid.UUID, number string) {
+	t.Helper()
+	if _, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO quotes (id, number, customer_id, state, branch_id, total_amount)
+		 VALUES ($1, $2, $3, 'DRAFT', $4, 10)`, id, number, customer, branch); err != nil {
+		t.Fatalf("seed quote: %v", err)
+	}
+}
+
+// The quote list is filtered by the caller's branches (ADR 0007 section 2.3,
+// the list form of the record rule): a sales user held to branch A reads only
+// branch A's quotes, through its context branch or, with none, through its
+// grants; a bound user with no grants reads none; an administrator without a
+// header reads every branch's.
+func TestBranchWall_QuoteListGrants(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLQ-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLQ-"+quoteB.String()[:8])
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+
+	for _, c := range []struct {
+		name, role, sub, header string
+		wantA, wantB            bool
+	}{
+		{"sales, header A", "sales", "u-a", A, true, false},
+		{"sales, no header", "sales", "u-a", "", true, false},
+		{"sales u-none, no header", "sales", "u-none", "", false, false},
+		{"admin, no header", "admin", "boss", "", true, true},
+	} {
+		status, body := f.callBody(t, "GET", "/api/v1/quotes", "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("quote list, %s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), quoteA.String()); got != c.wantA {
+			t.Errorf("quote list, %s: branch A's quote present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), quoteB.String()); got != c.wantB {
+			t.Errorf("quote list, %s: branch B's quote present = %v, want %v", c.name, got, c.wantB)
 		}
 	}
 }
