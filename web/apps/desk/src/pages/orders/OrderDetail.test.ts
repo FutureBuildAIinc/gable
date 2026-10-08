@@ -157,6 +157,58 @@ describe('gable-order-detail - the order contract', () => {
     expect(body).toContain('Fulfil Order')
   })
 
+  it('shows no allocation figure for lines that never allocate (a dash), the figure for stocked lines', async () => {
+    const mixed = order()
+    const stocked = { ...mixed.lines[0], quantity_allocated: '6' }
+    const nonStock = {
+      ...mixed.lines[0],
+      id: '00000000-0000-4000-8000-000000000l02',
+      position: 1,
+      product_id: null,
+      sku: null,
+      description: 'Custom millwork',
+      quantity_allocated: '0',
+      quantity_backordered: '0',
+      quantity_fulfilled: '0',
+    }
+    const freight = {
+      ...mixed.lines[0],
+      id: '00000000-0000-4000-8000-000000000l03',
+      position: 2,
+      line_type: 'charge' as const,
+      product_id: null,
+      sku: null,
+      charge_code: 'FREIGHT',
+      description: 'Delivery',
+      quantity: '1',
+      quantity_allocated: '0',
+      quantity_backordered: '0',
+      quantity_fulfilled: '0',
+    }
+    const note = {
+      ...mixed.lines[0],
+      id: '00000000-0000-4000-8000-000000000l04',
+      position: 3,
+      line_type: 'text' as const,
+      product_id: null,
+      sku: null,
+      description: 'Leave at the side gate',
+      quantity_allocated: '0',
+      quantity_backordered: '0',
+      quantity_fulfilled: '0',
+    }
+    mixed.lines = [stocked, nonStock, freight, note]
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(mixed)))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: mixed.id })
+    const cells = Array.from(el.querySelectorAll('[data-testid="line-stock"]'))
+    expect(cells.length).toBe(4)
+    expect(cells[0].textContent).toContain('6 allocated')
+    for (const cell of cells.slice(1)) {
+      expect(cell.textContent).not.toContain('allocated')
+      expect(cell.textContent?.trim()).toBe('\u2014')
+    }
+  })
+
   it('offers the fulfilment of a confirmed order; a pickup order names who collected it', async () => {
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
     expect(text(el)).toContain('Fulfil Order')

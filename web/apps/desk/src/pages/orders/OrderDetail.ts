@@ -307,12 +307,12 @@ export class GableOrderDetail extends LitElement {
                                                 ${line.price_uom && line.uom && line.price_uom !== line.uom
                                                     ? html`<div class="text-[10px] text-zinc-500">per ${line.price_uom}</div>` : ''}
                                             </td>
-                                            <td class="p-4 font-mono text-right text-xs" data-testid="line-stock">
-                                                ${line.line_type === 'text' ? '' : html`
+                                            <td class="p-4 font-mono text-right text-xs text-zinc-500" data-testid="line-stock">
+                                                ${line.line_type === 'product' && line.product_id !== null ? html`
                                                     <div class="text-zinc-300">${line.quantity_allocated} allocated</div>
                                                     ${line.quantity_backordered !== '0' ? html`<div class="text-amber-400">${line.quantity_backordered} back ordered</div>` : nothing}
                                                     ${line.quantity_fulfilled !== '0' ? html`<div class="text-gable-green">${line.quantity_fulfilled} shipped</div>` : nothing}
-                                                `}
+                                                ` : '—'}
                                             </td>
                                             <td class="p-4 text-white font-mono text-right">
                                                 ${line.unit_price_ten_thousandths !== null
