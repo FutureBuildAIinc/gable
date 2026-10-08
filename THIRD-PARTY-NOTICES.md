@@ -35,7 +35,7 @@ redistribute Gable:
 Apache-2.0 dependencies in this project include (Go) `MicahParks/keyfunc`,
 `MicahParks/jwkset`, `go-jose/go-jose`, `prometheus/client_golang`,
 `prometheus/client_model`, `prometheus/common`, `prometheus/procfs`,
-`pdfcpu/pdfcpu`, `richardlehane/mscfb`, `richardlehane/msoleps`,
+`pdfcpu/pdfcpu`, `richardlehane/mscfb`, `richardlehane/msoleps`, `santhosh-tekuri/jsonschema`,
 `go.yaml.in/yaml`, `gopkg.in/yaml.v2`; and (npm) `html5-qrcode`, and (dev tooling) `typescript`.
 
 ---
@@ -66,6 +66,7 @@ Apache-2.0 dependencies in this project include (Go) `MicahParks/keyfunc`,
 | github.com/beorn7/perks | MIT |
 | github.com/boombuler/barcode | MIT |
 | github.com/cespare/xxhash/v2 | MIT |
+| github.com/dlclark/regexp2 | MIT |
 | github.com/f-amaral/go-async | MIT |
 | github.com/hhrutter/lzw | BSD-3-Clause |
 | github.com/hhrutter/tiff | BSD-3-Clause |
@@ -84,7 +85,7 @@ Apache-2.0 dependencies in this project include (Go) `MicahParks/keyfunc`,
 | github.com/richardlehane/mscfb | Apache-2.0 |
 | github.com/richardlehane/msoleps | Apache-2.0 |
 | github.com/rivo/uniseg | MIT |
-| github.com/santhosh-tekuri/jsonschema/v6 | BSD-3-Clause |
+| github.com/santhosh-tekuri/jsonschema/v6 | Apache-2.0 |
 | github.com/tiendc/go-deepcopy | MIT |
 | github.com/xuri/efp | BSD-3-Clause |
 | github.com/xuri/nfp | BSD-3-Clause |
