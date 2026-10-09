@@ -192,6 +192,14 @@ func TestMigration095_BackfillsRowsThatExist(t *testing.T) {
 	if _, err := conn.Exec(ctx, string(down)); err != nil {
 		t.Fatalf("down: %v", err)
 	}
+
+	// The down is re-runnable: a second apply is a no-op. Before the fix
+	// for P3-2 the line `ALTER TABLE rfcs ALTER COLUMN number DROP DEFAULT`
+	// failed on a second run because the column was already dropped; that
+	// line is gone now because dropping the column drops its default.
+	if _, err := conn.Exec(ctx, string(down)); err != nil {
+		t.Errorf("down must be re-runnable; second apply failed: %v", err)
+	}
 	if n := scalar095[int](t, conn, `SELECT count(*) FROM information_schema.columns WHERE table_name = 'rfcs' AND column_name IN ('number', 'revision')`); n != 0 {
 		t.Errorf("%d of the rfcs columns survived the down file", n)
 	}

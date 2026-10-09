@@ -23,7 +23,6 @@ DROP INDEX IF EXISTS idx_rfcs_created_id;
 DROP TABLE IF EXISTS admin_revisions;
 
 ALTER TABLE rfcs DROP CONSTRAINT IF EXISTS rfcs_status_check;
-ALTER TABLE rfcs ALTER COLUMN number DROP DEFAULT;
 ALTER TABLE rfcs DROP CONSTRAINT IF EXISTS rfcs_number_key;
 ALTER TABLE rfcs DROP COLUMN IF EXISTS number;
 DROP FUNCTION IF EXISTS rfc_next_number();
