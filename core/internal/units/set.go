@@ -197,7 +197,13 @@ func ResolveSet(inputs []SetInput, facts SetFacts, catalogue map[string]Catalogu
 	// 4): a product cannot hold BF (1, 1.5) beside MBF (1, 1400), which
 	// would break the standard 1000 to 1. Every anchor that derives the
 	// unit is checked, so a pair that agrees one way and disagrees another
-	// (a cross section that gives another MBF pair) is still refused.
+	// (a cross section that gives another MBF pair) is still refused. Two
+	// sent rows can disagree with each other through a rule (BF and MBF
+	// above); the later row is the one named, the row whose sent pair
+	// contradicts what the others derive.
+	badIndex := -1
+	badField := ""
+	badMessage := ""
 	for i := range inputs {
 		in := &inputs[i]
 		if !in.HasPair || in.derivedBy != "" || in.UOM == facts.StockUOM {
@@ -209,11 +215,16 @@ func ResolveSet(inputs []SetInput, facts SetFacts, catalogue map[string]Catalogu
 		others[i].UnitQty, others[i].StockQty = 0, 0
 		for _, p := range deriveAll(in.UOM, others, facts, catalogue) {
 			if !p.SameRatio(Pair{A: in.UnitQty, B: in.StockQty}) {
-				return nil, nil, &DeriveError{Field: fmt.Sprintf("units[%d].unit_qty", i),
-					Message: fmt.Sprintf("does not match the product's unit set: the derived pair is (%s, %s)",
-						p.A.WireString(), p.B.WireString())}
+				badIndex = i
+				badField = fmt.Sprintf("units[%d].unit_qty", i)
+				badMessage = fmt.Sprintf("does not match the product's unit set: the derived pair is (%s, %s)",
+					p.A.WireString(), p.B.WireString())
+				break
 			}
 		}
+	}
+	if badIndex >= 0 {
+		return nil, nil, &DeriveError{Field: badField, Message: badMessage}
 	}
 	// Every ordered pair of rows must resolve within the bound (R2 step 4),
 	// so a line can never meet an unrepresentable pair.
