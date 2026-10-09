@@ -90,8 +90,8 @@ consults before it bills.
 | `tax_exempt` | boolean | Whether the customer is exempt. |
 | `tax_source` | lowercase enum | `exempt`, `provider`, `ship_to_rate`, `branch_rate`, `legacy`. |
 | `total_cents` | integer | The customer's total, in minor units. |
-| `total_cost_cents`, `total_margin_cents`, `margin_percent` | integer, integer, decimal string | Read by margin-aware roles. |
-| `total_commission_cents` | integer | Read by sales roles. |
+| `total_cost_cents`, `total_margin_cents`, `margin_percent` | integer, integer, decimal string | The lines' cost at the products' average cost, read at read time; the margin as a percentage decimal string, null when the subtotal is zero. |
+| `total_commission_cents` | integer | The total commission, in cents. |
 | `confirmed_at` | timestamp, nullable | When the order was first confirmed. |
 | `currency` | ISO 4217 | The customer's effective currency. |
 | `lines` | array of `OrderLine` | The priced lines, in position order. |

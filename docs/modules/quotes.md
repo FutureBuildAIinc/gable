@@ -103,7 +103,7 @@ A `QuoteLine` carries:
 | `price_uom_qty` | decimal string | Scale 4. |
 | `unit_price_ten_thousandths` | integer | The price per `price_uom`. |
 | `line_total_cents` | integer | The extension, rounded once. |
-| `unit_cost_ten_thousandths` | integer | The cost per stocking unit, read by margin-aware roles. |
+| `unit_cost_ten_thousandths` | integer | The cost per stocking unit. |
 | `created_at` | timestamp | RFC 3339 UTC. |
 
 The conversion pair (`uom_qty`, `price_uom_qty`) is mandatory; when
