@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -804,6 +805,61 @@ func TestRealKeyRefusalRowBoundedOnLongPath(t *testing.T) {
 	}
 	if len(stored) > 512 {
 		t.Fatalf("audit row stores a %d byte path, want at most 512", len(stored))
+	}
+}
+
+// The audit row a refused request writes survives a NUL byte in the path:
+// before the sanitiser the request's path reached the audit writer verbatim,
+// json.Marshal escaped the NUL to the JSON escape sequence "\u0000", and
+// Postgres jsonb rejected the row with SQLSTATE 22P05 ("unsupported Unicode
+// escape sequence"), so the refusal verdict stood but no row was recorded.
+// The sanitiser lives in the audit writer (one place, not per caller) and
+// replaces the NUL with a visible marker before the row is marshalled, so
+// the path is recorded and the audit trail is whole on a refused path that
+// holds whatever the URL contained.
+func TestRealKeyRefusalRowSurvivesNULInPath(t *testing.T) {
+	db := testutil.RequireDB(t)
+
+	// admin:staff is refused on /api/v1/admin/%00: the path's second segment
+	// is the NUL, not one of the declared finer scopes, so RequiredScopeForPath
+	// answers the coarse admin:read and the staff key does not hold it. The
+	// 403 is the verdict the reviewer saw; the audit row is what gets lost
+	// when the sanitiser is absent.
+	raw, id := createKey(t, db, "admin:staff")
+	h := &okHandler{}
+	chain := newDBAuth(t, db).Handler(h)
+
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, bearerRequest(t, "GET", "/api/v1/admin/%00", raw))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a refused path with NUL; body: %s", rec.Code, rec.Body.String())
+	}
+	if h.reached {
+		t.Fatal("handler must not be reached on a refused path")
+	}
+
+	// The row is present. Before the fix the INSERT raised SQLSTATE 22P05
+	// inside jsonb and no row was created, so this scan is the assertion
+	// that closes the regression: the trail of a refused request whose path
+	// holds a NUL is not lost.
+	var storedPath string
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'path' FROM audit_log
+		   WHERE actor_kind = 'key' AND actor_id = $1
+		     AND action = 'key.scope_refused'
+		   ORDER BY created_at DESC LIMIT 1`, id,
+	).Scan(&storedPath)
+	if err != nil {
+		t.Fatalf("no key.scope_refused audit row for key %s on a NUL path (the audit write must survive): %v", id, err)
+	}
+	if strings.ContainsRune(storedPath, '\x00') {
+		t.Fatalf("audit row still holds a raw NUL byte in the path: %q", storedPath)
+	}
+	if !strings.Contains(storedPath, "admin") || !strings.Contains(storedPath, `\u0000`) {
+		t.Fatalf("audit row path = %q, want the NUL replaced visibly (e.g. the literal text \\u0000)", storedPath)
+	}
+	if !utf8.ValidString(storedPath) {
+		t.Fatalf("audit row path is not valid UTF-8: %q", storedPath)
 	}
 }
 
