@@ -70,8 +70,8 @@ GET	/api/portal/v1/users	internal/portal	h.HandleListUsers
 PUT	/api/portal/v1/users/{id}/role	internal/portal	h.HandleUpdateUserRole
 PUT	/api/portal/v1/users/{id}/status	internal/portal	h.HandleUpdateUserStatus
 POST	/api/v1/a2a/purchase-order	cmd/server	a2aReceiver.ReceiveWebhook
-GET	/api/v1/accounts/{id}	internal/account	h.GetAccountSummary
-GET	/api/v1/accounts/{id}/transactions	internal/account	h.GetTransactions
+GET	/api/v1/accounts/{id}	internal/account	wrap(guard, h.HandleSummary)
+GET	/api/v1/accounts/{id}/transactions	internal/account	wrap(guard, h.HandleTransactions)
 DELETE	/api/v1/activities/{id}	internal/crm	h.HandleDeleteActivity
 GET	/api/v1/activities/{id}	internal/crm	h.HandleGetActivity
 PUT	/api/v1/activities/{id}	internal/crm	h.HandleUpdateActivity
@@ -103,6 +103,11 @@ POST	/api/v1/ap/payments	internal/ap	h.PayVendor
 GET	/api/v1/apps	pkg/apps	h.handleList
 POST	/api/v1/apps/{key}/disable	pkg/apps	h.handleDisable
 POST	/api/v1/apps/{key}/enable	pkg/apps	h.handleEnable
+GET	/api/v1/ar/aging	internal/account	wrap(guard, h.HandleAging)
+GET	/api/v1/ar/aging/summary	internal/account	wrap(guard, h.HandleAgingSummary)
+POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.HandleReverse)
+GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
+GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
 POST	/api/v1/bankrecon/import	internal/bankrecon	h.ImportCSV
@@ -135,6 +140,8 @@ GET	/api/v1/credit-memos	internal/invoice	h.HandleListCreditMemos
 POST	/api/v1/credit-memos	internal/invoice	h.HandleCreateCreditMemo
 GET	/api/v1/credit-memos/{id}	internal/invoice	h.HandleGetCreditMemo
 PUT	/api/v1/credit-memos/{id}	internal/invoice	h.HandleUpdateCreditMemo
+POST	/api/v1/credit-memos/{id}/applications	internal/invoice	h.HandleCreditApply
+POST	/api/v1/credit-memos/{id}/refunds	internal/payment	h.HandleCreditRefund
 POST	/api/v1/credit-memos/{id}/transitions	internal/invoice	h.HandleCreditTransition
 GET	/api/v1/customers	internal/customer	h.HandleListCustomers
 POST	/api/v1/customers	internal/customer	h.HandleCreateCustomer
@@ -179,10 +186,6 @@ DELETE	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleDeleteVehicle
 GET	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleGetVehicle
 PUT	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleUpdateVehicle
 POST	/api/v1/delivery/vehicles/{id}/photo	internal/delivery	h.HandleUploadVehiclePhoto
-GET	/api/v1/deposits	internal/deposit	h.ListDeposits
-POST	/api/v1/deposits	internal/deposit	h.RecordDeposit
-GET	/api/v1/deposits/{id}	internal/deposit	h.GetDeposit
-POST	/api/v1/deposits/{id}/apply	internal/deposit	h.ApplyDeposit
 GET	/api/v1/documents/print/invoice/{id}	internal/document	h.HandlePrintInvoice
 GET	/api/v1/documents/print/pickticket/{id}	internal/document	h.HandlePrintPickTicket
 GET	/api/v1/edi/partners	internal/edi	h.ListPartners
@@ -218,8 +221,9 @@ POST	/api/v1/inventory/transfer	internal/inventory	h.MoveStock
 GET	/api/v1/invoices	internal/invoice	h.HandleList
 GET	/api/v1/invoices/{id}	internal/invoice	h.HandleGet
 POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
-GET	/api/v1/invoices/{id}/payments	internal/payment	h.GetPaymentHistory
+GET	/api/v1/invoices/{id}/payments	internal/invoice	h.HandleApplications
 POST	/api/v1/invoices/{id}/transitions	internal/invoice	h.HandleTransition
+POST	/api/v1/invoices/{id}/write-offs	internal/invoice	h.HandleWriteOff
 GET	/api/v1/locations	internal/location	list
 POST	/api/v1/locations	internal/location	create
 DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation
@@ -254,10 +258,14 @@ GET	/api/v1/payment-terms	internal/customer	h.HandleListTerms
 POST	/api/v1/payment-terms	internal/customer	h.HandleCreateTerms
 GET	/api/v1/payment-terms/{id}	internal/customer	h.HandleGetTerms
 PUT	/api/v1/payment-terms/{id}	internal/customer	h.HandleUpdateTerms
-POST	/api/v1/payments	internal/payment	h.CreatePayment
-POST	/api/v1/payments/card	internal/payment	h.ProcessCardPayment
-POST	/api/v1/payments/intent	internal/payment	h.CreatePaymentIntent
-POST	/api/v1/payments/refund	internal/payment	h.ProcessRefund
+GET	/api/v1/payments	internal/payment	h.HandleList
+POST	/api/v1/payments	internal/payment	h.HandleCreate
+POST	/api/v1/payments/card	internal/payment	h.HandleCard
+POST	/api/v1/payments/intent	internal/payment	h.HandleIntent
+GET	/api/v1/payments/{id}	internal/payment	h.HandleGet
+POST	/api/v1/payments/{id}/applications	internal/payment	h.HandleApply
+POST	/api/v1/payments/{id}/refunds	internal/payment	h.HandleRefund
+POST	/api/v1/payments/{id}/transitions	internal/payment	h.HandleTransition
 GET	/api/v1/pos/catalog	internal/pos	h.GetCatalog
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
 GET	/api/v1/pos/returns	internal/pos	h.ListReturns

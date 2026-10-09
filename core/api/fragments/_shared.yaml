@@ -412,6 +412,8 @@ components:
                 - idempotency_in_progress
                 - invalid_state_transition
                 - conflict
+                - payment_required
+                - charge_not_reversed
                 - precondition_failed
                 - payload_too_large
                 - unsupported_media_type
