@@ -8,7 +8,7 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 The tech admin surface is the dealer administrator's seat for the keys and
 secrets that let other systems talk to this one. It mints the machine API
 keys a service uses to call the rest of the platform; it stores the AI and
-routing provider keys that internal/ai and internal/integrations read; and
+routing provider keys that internal/ai and internal/delivery read; and
 it lists and toggles the apps the operator has installed (the catalog the
 Apps page renders). It also exposes one operator-owned trigger, the price
 exposure safety net scan, that lives at the pricing module's own service
@@ -17,7 +17,8 @@ from the admin nav.
 
 The Go code is in `core/internal/techadmin/` (keys, AI and routing
 settings), `core/pkg/apps/` (the apps catalog and its mount) and
-`core/internal/integrations/` (the exposure scan handler). The migration
+`core/internal/pricing/` (the exposure scan handler,
+`exposure_handler.go`). The migration
 that brought the surfaces onto the contract is
 `core/migrations/095_admin_wire_contract.sql` (the admin revision anchors
 and the api_keys timestamps); the apps table the platform boot syncs is
@@ -30,11 +31,11 @@ the integration partner, copy the raw key out of the create response, and
 hand the partner the value once; the partner stores it, and every later
 call authenticates by the salted Argon2 hash the platform keeps. They
 open AI Settings, paste the OpenRouter key, save, and the AI client
-reads the override on its next call (the override wins over the
+reads the override once its short cache expires (the override wins over the
 environment default). They open Routing Settings, paste the
 OpenRouteService key, and the dispatcher reads it through the routing
 engine. They open Apps, scan the catalog of installed apps, and disable
-the experimental image generation app until the next cycle.
+the millwork app.
 
 ## Routes
 
@@ -107,7 +108,7 @@ there, at mint.
 `AdminCreateKeyRequest` carries `name` (required) and `scopes`
 (optional, array of text). `AdminCreateKeyResponse` carries `api_key`
 (the raw key, `sk_live_` plus 43 URL safe base64 characters) and `key`
-(the saved `ApiKey` row, with its revision now 1).
+(the saved `ApiKey` row).
 
 `AISettings` (`components.schemas.AISettings`) is the AI settings
 document: a singleton with a revision anchor in `admin_revisions`.
@@ -189,17 +190,17 @@ the next request and `404`s (or `app_disabled`) when the app is off.
 ## Events the module writes
 
 The constants are in `core/internal/techadmin/service.go` (key events),
-`core/internal/governance/service.go` (the governance events ride the
-tech admin segment) and `core/pkg/apps/registry.go` writes the `enabled`
-flag, not an event. Every mutation writes its event as the last
+`core/internal/governance/service.go` holds the governance events (see
+[governance.md](governance.md)) and `core/pkg/apps/registry.go` writes the
+`enabled` flag, not an event. Every mutation writes its event as the last
 statement of its transaction ([ADR 0003](../adr/0003-events-outbox.md)),
 alongside the `audit_log` row the service writes. The event names the
 tech admin writes are `key.created`, `key.revoked`,
 `admin_settings.saved` (for both AI and routing settings) and
 `admin_settings.deleted` (for both); the staff module writes
 `staff.created`, `staff.updated`, `staff.module_granted`,
-`staff.module_revoked` and `module.flag_changed` (see the staff page
-[staff.md](staff.md) for the staff detail).
+`staff.module_revoked`, `module.enabled` and `module.disabled` (see the
+staff page [staff.md](staff.md) for the staff detail).
 
 The apps module writes no outbox event today; the `enabled` flag is the
 only durable change and it lives in the `apps` row. The exposure scan
@@ -217,8 +218,8 @@ toggle routes stay on the plain `apps:read` and `apps:write` scopes
 declared in `adminAreaScopes` and the auth core serves them through
 `RequiredScopeForPath`). The key management routes gain no scope
 because a machine key is refused there whatever it holds (ADR 0002
-section 4); the exposure scan trigger keeps `admin:read` and
-`admin:write` because no finer scope declares it.
+section 4); the exposure scan trigger needs `admin:write`
+because no finer scope declares it.
 
 The user guard at the serve layer for every tech admin route (key
 management, AI and routing settings, the staff roster and the module
@@ -262,7 +263,7 @@ curl -X POST http://localhost:8080/api/v1/admin/keys \
 ```
 
 The wire tests in `core/internal/techadmin/wire_test.go` pin the
-platform and HTTP behaviour; the apps wire tests in
-`core/pkg/apps/handler_test.go` pin the catalog and toggle envelopes;
+platform and HTTP behaviour; the apps registry tests in
+`core/pkg/apps/registry_test.go` pin the toggle rules;
 the staff wire tests in `core/internal/staff/wire_test.go` pin the
 roster and grant behaviour.
