@@ -118,7 +118,8 @@ The table `company`:
 
 - `id UUID PRIMARY KEY`
 - `code TEXT NOT NULL UNIQUE` (short, uppercase, chosen by the dealer; it
-  appears in gapless document numbers, section 4)
+  appears in the gapless prefixes of companies created after the migration
+  and is frozen once the company has issued a gapless number, section 4)
 - `name TEXT NOT NULL`
 - `functional_currency CHAR(3) NOT NULL` (section 5)
 - `fiscal_year_start_month SMALLINT NOT NULL DEFAULT 1` (drives the period
@@ -296,14 +297,20 @@ other documents gapped numbers from Postgres sequences; its named escape,
 if a dealer ever reaches the mint's ceiling, is a series per branch with the
 branch code in the prefix.
 
-The gapless counter key becomes per company: series `invoice:<company code>`
-and `credit_memo:<company code>`, and the prefix carries the company code,
-`IN-<code>-000001` and `CM-<code>-000001`. The reason gaplessness exists is
-the tax authority, and the tax authority is per legal entity (ADR 0005
-section 4.1); two companies must not both issue `IN-000001`. This is the
-widening ADR 0005 section 1's boundary row reserved for cycle 5 ("Multi
-company: none; the series key for numbers is the entity; cycle 5 may widen
-series keys").
+The gapless counter key becomes per company, keyed by the company's id:
+series `invoice:<company uuid>` and `credit_memo:<company uuid>`. The key
+is the id, never the code, because the code is dealer editable and a
+rename after the first number would either restart the series at 1 under a
+new key or orphan the old one, breaking the legal entity's unbroken
+series; `company.code` is frozen once the company has issued a gapless
+number, an update that would change it refused with 409 blocker
+`numbers_issued` (section 1). The prefix carries the company code of
+companies created after the migration, `IN-<code>-000001` and
+`CM-<code>-000001`. The reason gaplessness exists is the tax authority,
+and the tax authority is per legal entity (ADR 0005 section 4.1); two
+companies must not both issue `IN-000001`. This is the widening ADR 0005
+section 1's boundary row reserved for cycle 5 ("Multi company: none; the
+series key for numbers is the entity; cycle 5 may widen series keys").
 
 `number` stays `UNIQUE NOT NULL` across the database. ADR 0007 section 7
 serves record URLs by number only under that constraint, and its parser
@@ -313,11 +320,16 @@ is a listed contract change against ADR 0007 section 7's pattern table and
 the openapi fragments. Both spellings of a company's numbers parse, so
 existing rows keep working.
 
-Backfill ruling: while there is exactly one company (every deployment
-today), existing numbers keep their form `IN-000001`; from the item's
-landing, new numbers of the seed company carry its code. No collision is
-possible: the code bearing form is a different string. A second company
-starts its own series at 1 under its own code.
+Backfill ruling: the seed company keeps everything it has. Its series rows
+keep the names C2-3 builds (`invoice`, `credit_memo`), its counter
+positions are untouched (`next_value` moves only as numbers issue), and
+its numbers keep the bare forms `IN-000001` and `CM-000001` before and
+after the item lands, so no existing deployment's next number changes
+form and an auditor reading the series sees no format change mid period.
+Nothing is renamed and no counter restarts. A company created after the
+migration starts its own series at 1 under its own key and code bearing
+prefix; no collision is possible, because the code bearing form is a
+different string.
 
 Gapped sequences (orders `SO`, payments `PAY`, counter sales `POS`,
 counter returns `RTN`, and ADR 0008's transfers, adjustments and counts)
@@ -502,7 +514,8 @@ census test below is the guard for tables that land later.
 Up, in order:
 
 1. Create `company` (section 1) and insert exactly one row: `code` `MAIN`
-   (a fixed code the dealer can rename on the admin screen of section 11),
+   (a fixed code the dealer can rename on the admin screen of section 11
+   until the company issues a gapless number, then frozen, section 4),
    `name` `Main`, `functional_currency` from `system_settings`
    `currency.default` (`091:36`; `USD` when absent),
    `fiscal_year_start_month` 1, `tax_company_code` null (the operator sets
@@ -531,10 +544,11 @@ Up, in order:
    (`092:239`); `gl_fiscal_periods` attached to the seed company; the 077
    exclusion and trigger replaced with the per company forms
    (`077:29-33,43-60`).
-6. Numbering groundwork only: nothing. The series rename (`invoice` to
-   `invoice:MAIN`) is the numbering item's own migration step, after C2-3
-   has built the counters; this migration does not touch tables that do
-   not exist when it runs.
+6. Numbering groundwork only: nothing. The per company series rows of
+   companies created later are the numbering item's own concern; the seed
+   company's `invoice` and `credit_memo` rows are never renamed (section
+   4), and this migration does not touch tables that do not exist when it
+   runs.
 7. `api_keys.company_id UUID NULL REFERENCES company(id)` (section 6).
    `user_locations` is not touched.
 
@@ -596,7 +610,7 @@ are its own, and their sum is stated rather than rounded):
 | 1 | The migration and the census test (section 10: about twenty tables, three rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart seed per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
-| 4 | Numbering and URLs (section 4: series per company, the code bearing prefix, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
+| 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code; routes and the desk screen) | 6 to 10 |
@@ -612,14 +626,15 @@ independent of each other.
   registration and the bank accounts, while sharing parties, catalog,
   pricing, stock identity, users and locations.
 - The single company deployment keeps its behaviour: one seed company, the
-  config tax fallback, the currency chain unchanged, new numbers carrying a
-  code the dealer can keep short.
+  config tax fallback, the currency chain unchanged, and numbers keeping
+  the bare forms they have always had.
 - The books stop being branchless: every journal entry, payment, credit
   memo, vendor bill and bank account names its company, set by its writer
   and checked by the database where the shapes allow.
-- Gapless numbers become per company with the company code in the prefix,
-  and number URLs keep working under widened patterns, recorded as contract
-  changes.
+- Gapless numbers become per company, keyed by company id: companies
+  created after the migration carry their code in the prefix, the seed
+  company's series and number forms change nothing, and number URLs keep
+  working under widened patterns, recorded as contract changes.
 - The census test holds the split: no branch carrying table lands without
   a company rule after the migration item merges.
 - The inter company transfer, the inter company sale, FX, the branch move
