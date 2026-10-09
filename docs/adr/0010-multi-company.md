@@ -698,11 +698,13 @@ every BRANCH writer converted: the company scoped route stamps the
 column from the path, the two old routes stamp the column with one
 company and refuse with 409 `company_required` once two companies
 exist (the rule above), and the seed plus the twenty fixtures read
-the seed company row their test reads (the row whose
-`number_infix IS NULL`, or the seed `code`, never the bare
-`SELECT id FROM company`, because item 7's own two company tests
-share the database with every other package's tests under
-`go test ./...`) and bind the result. No second company can inherit
+the seed company row by its identifying shape (`invoice_series =
+'invoice'` together with `number_infix IS NULL`, or the seed `code`)
+and bind the result. The bare `SELECT id FROM company` would name
+the wrong row when a second company exists, and item 7's own two
+company tests share the database with every other package's tests
+under `go test ./...`, so the row is picked by what makes it the
+seed, not by its being the only one. No second company can inherit
 the seed company through the default once item 7 lands. Each refusal,
 the seed conversion and the fixture conversion are rows in
 `docs/refactor/CONTRACT-CHANGES.md`. Sized inside item 7; the twenty
