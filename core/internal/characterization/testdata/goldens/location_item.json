@@ -151,7 +151,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -173,7 +173,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -195,7 +195,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -217,7 +217,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -239,7 +239,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V1X 7K2"
