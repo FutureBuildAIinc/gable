@@ -116,54 +116,137 @@ func TestRequiredScopeSplit(t *testing.T) {
 	}
 }
 
-// TestFinerAdminScopesCoverCensusRoutes is the finer scopes' drift gate
-// (ADR 0009): every admin area the middleware declares must sit under real
-// census routes, every census route under a declared area resolves to that
-// area's scope for every method, and every route under /api/v1/admin outside
-// the declared areas keeps the coarse module scope (the exposure scan, and
-// the key routes a key may not reach anyway).
-func TestFinerAdminScopesCoverCensusRoutes(t *testing.T) {
-	areas := map[string]bool{}
-	for _, scope := range middleware.FinerAdminScopes() {
-		areas[strings.TrimPrefix(scope, "admin:")] = true
-	}
-	if len(areas) == 0 {
-		t.Fatal("no admin areas declared; the test is not exercising anything")
-	}
+// scopeUserOnly marks a table row for a route a machine key may never reach:
+// the user only prefixes refuse a key before any scope is consulted.
+const scopeUserOnly = "user only"
 
-	served := map[string]bool{}
+// adminUsersRouteExpectations is the finer admin scopes' independent
+// expectation (ADR 0009), written by hand against the route census rather
+// than derived from the middleware it judges: every census route under
+// /api/v1/admin and /api/v1/users with the scope a machine key must hold for
+// its method, or the user only marker. The test below fails when a census
+// route is missing here (a route added without a scope decision), when a row
+// matches no census route (a dead or renamed row), when a route resolves to a
+// scope other than its row's, and when the middleware declares a finer scope
+// no row expects (a stray area, whose name would enter the mint grammar).
+var adminUsersRouteExpectations = map[string]string{
+	"POST /api/v1/admin/exposure-scan":                    "admin:write",
+	"GET /api/v1/admin/keys":                              scopeUserOnly,
+	"POST /api/v1/admin/keys":                             scopeUserOnly,
+	"DELETE /api/v1/admin/keys/{id}":                      scopeUserOnly,
+	"GET /api/v1/admin/modules":                           "admin:modules",
+	"PUT /api/v1/admin/modules/{id}":                      "admin:modules",
+	"DELETE /api/v1/admin/settings/ai":                    "admin:settings",
+	"GET /api/v1/admin/settings/ai":                       "admin:settings",
+	"PUT /api/v1/admin/settings/ai":                       "admin:settings",
+	"DELETE /api/v1/admin/settings/routing":               "admin:settings",
+	"GET /api/v1/admin/settings/routing":                  "admin:settings",
+	"PUT /api/v1/admin/settings/routing":                  "admin:settings",
+	"GET /api/v1/admin/staff":                             "admin:staff",
+	"POST /api/v1/admin/staff":                            "admin:staff",
+	"GET /api/v1/admin/staff/{id}":                        "admin:staff",
+	"PUT /api/v1/admin/staff/{id}":                        "admin:staff",
+	"POST /api/v1/admin/staff/{id}/modules":               "admin:staff",
+	"DELETE /api/v1/admin/staff/{id}/modules/{module_id}": "admin:staff",
+	"GET /api/v1/users":                                   "users:read",
+	"GET /api/v1/users/{sub}/branches":                    "users:read",
+	"POST /api/v1/users/{sub}/branches":                   "users:grants",
+	"DELETE /api/v1/users/{sub}/branches/{branch_id}":     "users:grants",
+	"PUT /api/v1/users/{sub}/home-branch":                 "users:grants",
+}
+
+// underUserOnlyPrefix mirrors the middleware's segment boundary rule for a
+// user-only prefix: the prefix itself or a path under it, never a longer
+// module name that merely shares the stem.
+func underUserOnlyPrefix(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
+}
+
+// TestFinerAdminScopesCoverCensusRoutes is the finer scopes' drift gate
+// (ADR 0009), judged against the hand written table above: every census route
+// under /api/v1/admin and /api/v1/users must be in the table and resolve to
+// its row's scope, every table row must match a census route, a user only row
+// must sit under a user-only prefix AND keep resolving to the coarse module
+// scope (a stray finer area declared over it would put its name into the
+// grammar the mint validates), an area scope must hold for every method, and
+// every finer scope the middleware declares must be some row's expectation.
+func TestFinerAdminScopesCoverCensusRoutes(t *testing.T) {
+	carried := map[string]bool{}
 	for _, line := range readCensus(t) {
 		fields := strings.Split(line, "\t")
-		if len(fields) < 2 || !strings.HasPrefix(fields[1], "/api/v1/admin/") {
+		if len(fields) < 2 {
+			t.Fatalf("census line is not tab separated method/pattern/...: %q", line)
+		}
+		method, pattern := fields[0], fields[1]
+		underAdmin := pattern == "/api/v1/admin" || strings.HasPrefix(pattern, "/api/v1/admin/")
+		underUsers := pattern == "/api/v1/users" || strings.HasPrefix(pattern, "/api/v1/users/")
+		if !underAdmin && !underUsers {
 			continue
 		}
-		served[fields[1]] = true
-		rest := strings.TrimPrefix(fields[1], "/api/v1/admin/")
-		segment, _, _ := strings.Cut(rest, "/")
-		if areas[segment] {
-			for _, method := range []string{"GET", "PUT", "POST", "DELETE"} {
-				scope, ok := middleware.RequiredScopeForPath(method, fields[1])
-				if !ok || scope != "admin:"+segment {
-					t.Errorf("%s %s resolves to scope %q (ok=%v), want the area scope admin:%s for every method", method, fields[1], scope, ok, segment)
+		key := method + " " + pattern
+		carried[key] = true
+		want, ok := adminUsersRouteExpectations[key]
+		if !ok {
+			t.Errorf("%s is under /api/v1/admin or /api/v1/users but the expectation table names it nowhere; give the route a scope decision", key)
+			continue
+		}
+		if want == scopeUserOnly {
+			matched := false
+			for _, prefix := range middleware.MachineKeyUserOnlyPrefixes() {
+				if underUserOnlyPrefix(pattern, prefix) {
+					matched = true
+					break
 				}
 			}
-		} else {
-			scope, _ := middleware.RequiredScopeForPath("POST", fields[1])
-			if scope != "admin:write" {
-				t.Errorf("POST %s outside the declared areas resolves to %q, want the coarse admin:write", fields[1], scope)
+			if !matched {
+				t.Errorf("%s is marked user only but sits under no user-only prefix; a key holding every scope would reach it", key)
+			}
+			// The user-only check runs before the scope check, so the route
+			// stays refused whatever the resolver says; the resolver must
+			// still answer the coarse module name; a finer area declared over
+			// a user-only surface would leak its name into ValidScopeGrammar.
+			if got, ok := middleware.RequiredScopeForPath(method, pattern); !ok || got != middleware.RequiredScope("admin", method) {
+				t.Errorf("%s resolves to scope %q (ok=%v), want the coarse %q a user only route keeps; a finer area is declared over it", key, got, ok, middleware.RequiredScope("admin", method))
+			}
+			continue
+		}
+		got, ok := middleware.RequiredScopeForPath(method, pattern)
+		if !ok || got != want {
+			t.Errorf("%s resolves to scope %q (ok=%v), want %q", key, got, ok, want)
+		}
+		// One scope per area for every method (ADR 0009 section 3): the
+		// table's admin rows name areas, so the other verbs must agree.
+		if strings.HasPrefix(want, "admin:") && want != "admin:read" && want != "admin:write" {
+			for _, other := range []string{"GET", "PUT", "POST", "DELETE"} {
+				if got, ok := middleware.RequiredScopeForPath(other, pattern); !ok || got != want {
+					t.Errorf("%s %s resolves to scope %q (ok=%v), want the area scope %s for every method", other, pattern, got, ok, want)
+				}
 			}
 		}
 	}
-	for area := range areas {
-		found := false
-		for path := range served {
-			if strings.HasPrefix(path, "/api/v1/admin/"+area+"/") || path == "/api/v1/admin/"+area {
-				found = true
-				break
-			}
+	if len(carried) == 0 {
+		t.Fatal("the census carries no routes under /api/v1/admin or /api/v1/users; the test is not exercising anything")
+	}
+
+	// Reverse direction: the table names only routes that exist.
+	for key, want := range adminUsersRouteExpectations {
+		if !carried[key] {
+			t.Errorf("expectation %q (%s) matches no route in the census; dead or renamed row", key, want)
 		}
-		if !found {
-			t.Errorf("admin area %q matches no route in the census; dead or misspelled entry", area)
+	}
+
+	// Every finer scope the middleware declares is some row's expectation: a
+	// stray area declared over no table route (or only over user-only routes)
+	// fails here before its name reaches the mint's grammar.
+	expected := map[string]bool{}
+	for _, want := range adminUsersRouteExpectations {
+		if want != scopeUserOnly {
+			expected[want] = true
+		}
+	}
+	for _, scope := range middleware.FinerAdminScopes() {
+		if !expected[scope] {
+			t.Errorf("the middleware declares finer admin scope %q, but no route in the expectation table requires it; a stray area puts its name into ValidScopeGrammar", scope)
 		}
 	}
 }
