@@ -932,21 +932,39 @@ row of any table the up touched points at a company other than the seed;
 and it refuses while any later item's objects still exist: a
 `document_counters` series other than `invoice` or `credit_memo` (item
 4's per company rows), a composite foreign key on `gl_journal_lines`,
-`gl_journal_entries` or `bank_accounts` (item 2's), or a bridged
+`gl_journal_entries` or `bank_accounts` (item 2's), a bridged
 `company_id` column (`locations` and the R2 set of step 4) that no
 longer carries its DEFAULT, which means a dropping item's drop is still
-in place and that item's own down has not run. The probe runs that way
-round because the defaults are what this down expects to find: they are
-present right after this up, and present again once each dropping item's
-down has restored the default it dropped, which is exactly the state
-this down runs in (its round trip test creates them); a missing default
-is a later item still to unwind, and the down refuses rather than guess.
-Each refusal names what it found. Otherwise it drops the triggers, the
-columns, the seed row and the `company` table, in reverse order. A down
-that would lose a second company's data loses nothing instead: it
-answers. Down ordering against the build items: the runner applies no
-down at all, it skips every `*_down.sql` file and the downs live in
-`migrations/down/`, applied by hand
+in place and that item's own down has not run, an `invoices` or
+`credit_memos` row trigger of item 4's name (the per company mint), or
+`invoices.number` lacking its `097:84` `DEFAULT` (the same "missing
+default" shape the bridged columns use; the trigger alone cannot keep
+the seed's invoices numbering after item 4 drops the default, and PL/pgSQL
+records no dependency on a table its body reads, so without the probe
+the down would drop `company` while the trigger stayed installed), or
+a `system_settings` row trigger of item 7's name (the gate on
+`multi_branch_enabled` and `default_branch_required`); the trigger is
+the one piece that fires against the still installed writers
+(`ai/keystore.go:64`, `payment/keystore.go:138`,
+`staff/repository.go:213`, all `INSERT ... ON CONFLICT DO UPDATE`)
+the first time any keystore writes a row, and a missing probe would
+let the down answer and leave that first fire to fail against the
+already dropped `company` table. The probe runs that way round because
+the defaults are what this down expects to find: they are present right
+after this up, and present again once each dropping item's down has
+restored the default it dropped, which is exactly the state this down
+runs in (its round trip test creates them); a missing default is a
+later item still to unwind, and the down refuses rather than guess.
+Item 4 and item 7's triggers, by contrast, are not defaults: they are
+the converting items' own database additions, and the down refuses
+when either is still installed because item 4's and item 7's own
+downs are the only path that removes them. Each refusal names what it
+found. Otherwise it drops the triggers, the columns, the seed row and
+the `company` table, in reverse order. A down that would lose a second
+company's data loses nothing instead: it answers. Down ordering against
+the build items: the runner applies no down at all, it skips every
+`*_down.sql` file and the downs live in `migrations/down/`, applied by
+hand
 (`core/internal/app/migrate/migrate.go:61-73`), so the rule is the C5-3
 downs are applied by hand in reverse number order, the items' downs
 before the migration's own; the refusals above make this migration's
@@ -962,7 +980,10 @@ Tests, in the migration item:
   at a made up company, and each later item's object (a per company
   counter row, a composite foreign key of section 3, a bridged
   `company_id` column whose DEFAULT a dropping item removed and whose
-  restoring down has not run), each making the down raise.
+  restoring down has not run, an `invoices` or `credit_memos` row
+  trigger of item 4's name or `invoices.number` lacking its `097:84`
+  `DEFAULT`, and a `system_settings` row trigger of item 7's name),
+  each making the down raise.
 - **The census test**: it reads the census list that lives beside the
   migration, one line per table, so the test reads as the table of
   section 2 does. It fails when a table with a `branch_id` column (minus
