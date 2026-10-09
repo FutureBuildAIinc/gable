@@ -936,6 +936,13 @@ inventory read `GET /api/v1/inventory` onto the list envelope with
 writes stay for C4-1. C3-2 changes nothing in inventory's storage: stock was
 and stays in the stocking unit; its callers pass `stock_quantity`.
 
+The list is a keyset walk on `(created_at, id)` (migration 098 gave the
+table the column and the index). `created_at` defaults to the
+transaction's `NOW()`, so a row inserted by a long-running transaction
+that commits after a client has already walked past its `created_at`
+position is not returned to that in-progress walk; the next walk sees it.
+A row committed before a walk starts is always returned by that walk.
+
 #### 7.3 Pricing
 
 C3-1: the engine moves from float64 to `httpx.Price` and exact arithmetic
