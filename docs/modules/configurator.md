@@ -68,10 +68,13 @@ selections, deterministically ordered by value. Each carries
 
 ### Money and quantity conventions
 
-The configurator carries no money. The build route returns a SKU
-string. The validate route returns a 200 with the validated
-selections, or a 400 with one `details` entry per failing rule
-naming the rule's dependency and attribute.
+The configurator carries no money. The validate route returns a 200
+with `{valid, conflicts}`; a conflict is `valid: false` with one
+entry per violated rule (`attribute_type`, `attribute_value`,
+`depends_on_type`, `depends_on_value`, `message`). The build route
+validates first, answers 400 `validation_failed` with one
+`config_conflict` blocker per violated rule, and otherwise returns
+`{sku, description}`.
 
 ## Lifecycle and transitions
 

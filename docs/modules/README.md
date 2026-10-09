@@ -104,9 +104,11 @@ the page describes the wire rather than restating the SQL.
 - The agent-to-agent JWS routes under `/api/v1/a2a/*`, which keep
   their own published contract.
 - The portal and partner surfaces, which carry their own sessions
-  and their own shape. The project module is the one place a
-  portal surface shows up here, because the project is the only
-  entity that lives under the portal and not under `/api/v1`.
+  and their own shape. The project module is the one portal-only
+  module with a page here; the other portal endpoints (cart, catalog,
+  dashboard, deliveries, invites, invoices, orders, quotes, users
+  and the rest) sit under the `internal/portal` package in the
+  route census.
 - The accounts, GL, AP, bank reconciliation, matching, purchase
   order, deposit, document print, EDI, governance, accounting
   and AI surfaces, which are not in the brief's list.

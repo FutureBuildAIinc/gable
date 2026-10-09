@@ -29,7 +29,8 @@ this so the builder sees the job from their side.
 Every route is in `core/api/fragments/project.yaml` and the
 registered handles are in `core/internal/project/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`portal` module column (the project routes share the portal prefix).
+`internal/project` package (the project routes share the portal
+prefix).
 
 | Method | Path | One line |
 |---|---|---|

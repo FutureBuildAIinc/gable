@@ -39,7 +39,7 @@ route census (`core/api/ROUTES.txt`) lists each one under the
 | POST | `/api/v1/millwork/options` | Create an option, writes `millwork_option.created`. |
 | GET | `/api/v1/millwork/options/{id}` | Get one option with its revision as ETag. |
 
-Both routes sit behind the millwork app gate (a 404
+All three routes sit behind the millwork app gate (a 404
 `app_disabled` when the millwork app is off) and the `admin`,
 `owner` or `sales` guard.
 
