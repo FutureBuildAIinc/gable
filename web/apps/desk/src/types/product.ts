@@ -29,13 +29,15 @@ const UOM_SET: Record<UOM, true> = {
 };
 export const UOM_OPTIONS = Object.keys(UOM_SET) as UOM[];
 
+/** One inventory level row (C3-1b): quantities are decimal strings in the product's stocking unit. */
 export interface Inventory {
     id: string;
     product_id: string;
-    location: string; // Deprecated? Or just path?
-    location_id?: string;
-    location_name?: string;
-    quantity: number;
-    allocated?: number;
+    location_id: string | null;
+    location_name: string;
+    quantity: string;
+    allocated: string;
+    available: string;
+    uom: string;
     updated_at: string;
 }

@@ -21,11 +21,19 @@ import (
 var ErrNothingAllocated = errors.New("inventory: no allocated stock")
 
 type Service struct {
-	repo Repository
+	repo   Repository
+	levels LevelStore // the levels read's store (C3-1b), when the repo can serve it
 }
 
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+	s := &Service{repo: repo}
+	// The levels read's store, the pattern product's KitStore set: beside the
+	// Repository interface so the module's test fakes and the portal's keep
+	// compiling; the real repository always serves it.
+	if ls, ok := any(repo).(LevelStore); ok {
+		s.levels = ls
+	}
+	return s
 }
 
 // AdjustStock handles receipt (Add) or cycle count (Set/Adjust)
@@ -235,6 +243,9 @@ func (s *Service) Release(ctx context.Context, productID uuid.UUID, quantity flo
 	return s.repo.DeallocateStock(ctx, best.ID, quantity)
 }
 
+// ListByProduct is the in-process read the portal's availability sum uses
+// (the unconverted float seam, the pattern of product's QtyFloat); the levels
+// route reads ListLevelsPage (C3-1b).
 func (s *Service) ListByProduct(ctx context.Context, productIDStr string) ([]Inventory, error) {
 	id, err := uuid.Parse(productIDStr)
 	if err != nil {

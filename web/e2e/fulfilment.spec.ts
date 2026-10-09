@@ -44,8 +44,13 @@ async function stockedProduct(request: APIRequestContext) {
   // the default branch (the availability sum below spans every branch).
   const seeded = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
   for (const p of seeded) {
-    const inv = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { quantity: number; allocated: number }[];
-    if (Array.isArray(inv) && inv.reduce((n, r) => n + (r.quantity - r.allocated), 0) >= 50) return p;
+    // The inventory levels list is the cursor envelope (C3-1b): quantities
+    // are scale 4 decimal strings; available is quantity - allocated.
+    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
+      items: { available: string }[];
+    };
+    const available = page.items.reduce((n, r) => n + (Number(r.available) || 0), 0);
+    if (available >= 50) return p;
   }
   throw new Error('no stocked product in the demo seed');
 }
