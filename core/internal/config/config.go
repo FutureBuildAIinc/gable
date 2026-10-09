@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"time"
+
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/joho/godotenv"
@@ -88,14 +90,27 @@ type Config struct {
 	EventsOrg string // EVENTS_ORG
 
 	// OutboxRetentionDays is how many days the worker role keeps
-	// events_outbox rows (OUTBOX_RETENTION_DAYS, default 14). A row older than
-	// this is deleted only once every registered subscriber cursor is at or
-	// past it and no parked entry names it (ADR 0003 section 6). Zero or a
-	// negative value turns the purge off; a value above
+	// events_outbox rows (OUTBOX_RETENTION_DAYS, default 14). A row older
+	// than this is deleted only once every registered subscriber cursor is at
+	// or past it and no parked entry names it (ADR 0003 section 6). Zero or
+	// a negative value turns the purge off; a value above
 	// MaxOutboxRetentionDays is clamped to it. An outside consumer of GET
 	// /api/v1/events that falls further behind than this loses the events
 	// between its cursor and the oldest retained row.
 	OutboxRetentionDays int // OUTBOX_RETENTION_DAYS
+
+	// The draft change feed (ADR 0007 section 3.5). Zero or negative values
+	// are refused at boot, except the retention, where zero or negative
+	// turns the purge off (the outbox's rule). Serve assembles these into
+	// the drafts package's FeedSettings.
+	DraftFeedHeartbeat              time.Duration // DRAFT_FEED_HEARTBEAT, default 15s
+	DraftFeedPoll                   time.Duration // DRAFT_FEED_POLL, default 1s
+	DraftFeedBatch                  int           // DRAFT_FEED_BATCH, default 100
+	DraftFeedWriteTimeout           time.Duration // DRAFT_FEED_WRITE_TIMEOUT, default 10s
+	DraftFeedMaxLifetime            time.Duration // DRAFT_FEED_MAX_LIFETIME, default 15m
+	DraftEventsRetention            time.Duration // DRAFT_EVENTS_RETENTION, default 7d; zero or negative turns the purge off
+	DraftFeedMaxStreamsPerPrincipal int           // DRAFT_FEED_MAX_STREAMS_PER_PRINCIPAL, default 8
+	DraftFeedMaxStreams             int           // DRAFT_FEED_MAX_STREAMS, default 500
 
 	// EDI
 	//
@@ -123,6 +138,31 @@ type Config struct {
 // MaxOutboxRetentionDays caps OUTBOX_RETENTION_DAYS (ten years), so the
 // worker's days to Duration conversion cannot overflow.
 const MaxOutboxRetentionDays = 3650
+
+// validateDraftFeedSettings refuses a zero or negative setting at boot,
+// except the retention, where zero or negative turns the purge off.
+func validateDraftFeedSettings(cfg *Config) error {
+	for _, tc := range []struct {
+		name  string
+		value time.Duration
+	}{
+		{"DRAFT_FEED_HEARTBEAT", cfg.DraftFeedHeartbeat},
+		{"DRAFT_FEED_POLL", cfg.DraftFeedPoll},
+		{"DRAFT_FEED_WRITE_TIMEOUT", cfg.DraftFeedWriteTimeout},
+		{"DRAFT_FEED_MAX_LIFETIME", cfg.DraftFeedMaxLifetime},
+	} {
+		if tc.value <= 0 {
+			return fmt.Errorf("invalid %s %s: must be a positive duration", tc.name, tc.value)
+		}
+	}
+	if cfg.DraftFeedBatch < 1 {
+		return fmt.Errorf("invalid DRAFT_FEED_BATCH %d: must be 1 or more", cfg.DraftFeedBatch)
+	}
+	if cfg.DraftFeedMaxStreamsPerPrincipal < 1 || cfg.DraftFeedMaxStreams < 1 {
+		return fmt.Errorf("invalid DRAFT_FEED_MAX_STREAMS(_PER_PRINCIPAL): must be 1 or more")
+	}
+	return nil
+}
 
 func Load() (*Config, error) {
 	_ = godotenv.Load() // Load .env if it exists, ignore if not
@@ -182,6 +222,16 @@ func Load() (*Config, error) {
 		EventsOrg:           getEnv("EVENTS_ORG", "default"),
 		OutboxRetentionDays: getEnvInt("OUTBOX_RETENTION_DAYS", 14),
 
+		// The draft change feed (ADR 0007 section 3.5), with its defaults.
+		DraftFeedHeartbeat:              getEnvDuration("DRAFT_FEED_HEARTBEAT", 15*time.Second),
+		DraftFeedPoll:                   getEnvDuration("DRAFT_FEED_POLL", time.Second),
+		DraftFeedBatch:                  getEnvInt("DRAFT_FEED_BATCH", 100),
+		DraftFeedWriteTimeout:           getEnvDuration("DRAFT_FEED_WRITE_TIMEOUT", 10*time.Second),
+		DraftFeedMaxLifetime:            getEnvDuration("DRAFT_FEED_MAX_LIFETIME", 15*time.Minute),
+		DraftEventsRetention:            getEnvDuration("DRAFT_EVENTS_RETENTION", 7*24*time.Hour),
+		DraftFeedMaxStreamsPerPrincipal: getEnvInt("DRAFT_FEED_MAX_STREAMS_PER_PRINCIPAL", 8),
+		DraftFeedMaxStreams:             getEnvInt("DRAFT_FEED_MAX_STREAMS", 500),
+
 		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
 
 		// Database Pool
@@ -223,12 +273,28 @@ func Load() (*Config, error) {
 		cfg.OutboxRetentionDays = MaxOutboxRetentionDays
 	}
 
+	if err := validateDraftFeedSettings(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
+	}
+	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if value, exists := os.LookupEnv(key); exists {
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			slog.Warn("Invalid duration env var, using default", "key", key, "value", value)
+			return fallback
+		}
+		return d
 	}
 	return fallback
 }

@@ -5,16 +5,20 @@ package quote
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -85,7 +89,22 @@ type Service struct {
 	logger      *slog.Logger
 	branches    BranchGuard  // optional; nil leaves a payload branch unchecked (unit tests)
 	orders      OrderCreator // optional; nil refuses the convert (unit tests)
+	auditor     AuditSink    // optional; nil writes no audit row (unit tests)
 	now         func() time.Time
+}
+
+// AuditSink writes the module's audit rows through the caller's executor.
+// *audit.Logger satisfies it.
+type AuditSink interface {
+	Log(ctx context.Context, entry audit.Entry) error
+}
+
+// WithAudit wires the audit sink.
+func (s *Service) WithAudit(a AuditSink) *Service {
+	if a != nil {
+		s.auditor = a
+	}
+	return s
 }
 
 func NewService(repo Repository) *Service {
@@ -271,24 +290,12 @@ func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
 	}
 	var out *Quote
 	err := s.inTx(ctx, func(ctx context.Context) error {
-		q, err := s.priceDraft(ctx, d)
+		q, ev, err := s.createCore(ctx, d)
 		if err != nil {
 			return err
 		}
-		q.ID = uuid.New()
-		for i := range q.Lines {
-			q.Lines[i].QuoteID = q.ID
-		}
-		if q.Number, err = s.repo.NextNumber(ctx); err != nil {
-			return err
-		}
-		if err := s.repo.InsertQuote(ctx, q); err != nil {
-			return err
-		}
-		if out, err = s.repo.GetQuote(ctx, q.ID); err != nil {
-			return err
-		}
-		return s.record(ctx, out, EventCreated, "")
+		out = q
+		return s.writeEvent(ctx, ev)
 	})
 	if err != nil {
 		return nil, err
@@ -296,10 +303,155 @@ func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
 	return out, nil
 }
 
+// createCore prices and stores a new quote INSIDE the caller's transaction
+// and returns the quote.created event instead of writing it, so a caller
+// that owns a larger transaction (a draft's promotion, ADR 0007 section
+// 4.3) writes the event as that transaction's last statement. It assumes
+// the payload branch rule already ran (Create applies it; the promotion
+// runs at the draft's branch context).
+func (s *Service) createCore(ctx context.Context, d *Draft) (*Quote, *outbox.Event, error) {
+	q, err := s.priceDraft(ctx, d)
+	if err != nil {
+		return nil, nil, err
+	}
+	q.ID = uuid.New()
+	for i := range q.Lines {
+		q.Lines[i].QuoteID = q.ID
+	}
+	if q.Number, err = s.repo.NextNumber(ctx); err != nil {
+		return nil, nil, err
+	}
+	if err := s.repo.InsertQuote(ctx, q); err != nil {
+		return nil, nil, err
+	}
+	out, err := s.repo.GetQuote(ctx, q.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	ev := s.buildEvent(out, EventCreated, "")
+	return out, ev, nil
+}
+
 // Update replaces a draft quote's header and lines on the client's revision.
 func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precondition) (*Quote, error) {
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var out *Quote
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.updateCore(ctx, id, d, pre)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// updateCore replaces a draft quote's header and lines inside the caller's
+// transaction, on the precondition the caller holds: the quote row is
+// locked first and the revision checked after the lock, so the check and
+// the write are one database act. The update writes no event (the quote's
+// update writes none today, ADR 0007 section 4.4), so the caller's
+// transaction ends with its own statements.
+func (s *Service) updateCore(ctx context.Context, id uuid.UUID, d *Draft, pre Precondition) (*Quote, error) {
+	if err := s.repo.LockQuote(ctx, id); err != nil {
+		return nil, notFound(err)
+	}
+	cur, err := s.repo.GetQuote(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	if err := s.checkQuoteBranch(ctx, cur); err != nil {
+		return nil, err
+	}
+	if err := pre.check(cur.Revision); err != nil {
+		return nil, err
+	}
+	if cur.Status != QuoteStateDraft {
+		return nil, &httpx.Error{Status: 409, Code: httpx.CodeConflict, Message: "only draft quotes can be edited",
+			Details: []httpx.FieldError{httpx.Blocker("quote_not_draft", "the quote is "+cur.Status.Status())}}
+	}
+	q, err := s.priceDraft(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	q.ID, q.Number, q.BranchID = cur.ID, cur.Number, cur.BranchID
+	for i := range q.Lines {
+		q.Lines[i].QuoteID = id
+	}
+	if err := s.repo.ReplaceDraft(ctx, q); err != nil {
+		return nil, err
+	}
+	return s.repo.GetQuote(ctx, id)
+}
+
+func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
+	q, err := s.repo.GetQuote(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	if err := s.checkQuoteBranch(ctx, q); err != nil {
+		return nil, err
+	}
+	return q, nil
+}
+
+// NumberPattern is the quote's document number pattern, from the entity's
+// prefix and pad (ADR 0007 section 7): reads accept it in the {id} slot.
+var NumberPattern = regexp.MustCompile(`^Q-[0-9]{6,}$`)
+
+// ResolveRecordID parses a record URL's {id} slot: a UUID first, then the
+// entity's number pattern. A well formed number of another entity, or
+// anything else, is a 400 naming id; a value that names no visible row is
+// the caller's 404.
+func ResolveRecordID(raw string) (uuid.UUID, string, error) {
+	if id, err := uuid.Parse(raw); err == nil {
+		return id, "", nil
+	}
+	if NumberPattern.MatchString(raw) {
+		return uuid.Nil, raw, nil
+	}
+	return uuid.Nil, "", httpx.BadRequest("invalid quote id",
+		httpx.FieldError{Field: "id", Message: "must be a UUID or a quote number such as Q-000123"})
+}
+
+// GetQuoteByIDOrNumber reads a quote by its UUID or its document number
+// (section 7): both spellings answer exactly the same body, no redirect.
+func (s *Service) GetQuoteByIDOrNumber(ctx context.Context, raw string) (*Quote, error) {
+	id, number, err := ResolveRecordID(raw)
+	if err != nil {
+		return nil, err
+	}
+	if number != "" {
+		q, err := s.repo.GetQuoteByNumber(ctx, number)
+		if err != nil {
+			return nil, notFound(err)
+		}
+		if err := s.checkQuoteBranch(ctx, q); err != nil {
+			return nil, err
+		}
+		return q, nil
+	}
+	return s.GetQuote(ctx, id)
+}
+
+// maxAttachFile bounds the quote file route's body: the same 5 MiB bound
+// the create applies to a decoded original upload.
+const maxAttachFile = 5 << 20
+
+// AttachFile replaces the quote's stored upload (ADR 0007 section 10): raw
+// body with its content type, on the revision precondition, only while the
+// quote is in status draft, by the promotion's committer. It moves the
+// revision by one, writes the quote.file_attached audit row and no outbox
+// event (the quote's update writes none today).
+func (s *Service) AttachFile(ctx context.Context, id uuid.UUID, data []byte, filename, contentType string, pre Precondition) (*Quote, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	if len(data) > maxAttachFile {
+		return nil, httpx.PayloadTooLarge("the file is past the 5 MiB bound")
 	}
 	var out *Quote
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -317,38 +469,33 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 			return err
 		}
 		if cur.Status != QuoteStateDraft {
-			return &httpx.Error{Status: 409, Code: httpx.CodeConflict, Message: "only draft quotes can be edited",
-				Details: []httpx.FieldError{httpx.Blocker("quote_not_draft", "the quote is "+cur.Status.Status())}}
+			return httpx.InvalidStateTransition("a file attaches only to a draft quote",
+				httpx.Blocker("quote_not_draft", "the quote is "+cur.Status.Status()))
 		}
-		q, err := s.priceDraft(ctx, d)
-		if err != nil {
+		if err := s.repo.StoreOriginalFile(ctx, id, data, filename, contentType); err != nil {
 			return err
 		}
-		q.ID, q.Number, q.BranchID = cur.ID, cur.Number, cur.BranchID
-		for i := range q.Lines {
-			q.Lines[i].QuoteID = id
-		}
-		if err := s.repo.ReplaceDraft(ctx, q); err != nil {
+		if out, err = s.repo.GetQuote(ctx, id); err != nil {
 			return err
 		}
-		out, err = s.repo.GetQuote(ctx, id)
-		return err
+		if s.auditor != nil {
+			sum := sha256.Sum256(data)
+			return s.auditor.Log(ctx, audit.Entry{
+				Action:     "quote.file_attached",
+				EntityType: "quote",
+				EntityID:   id,
+				Changes: map[string]any{
+					"filename": filename, "content_type": contentType,
+					"bytes": len(data), "sha256": hex.EncodeToString(sum[:]),
+				},
+			})
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
-}
-
-func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
-	q, err := s.repo.GetQuote(ctx, id)
-	if err != nil {
-		return nil, notFound(err)
-	}
-	if err := s.checkQuoteBranch(ctx, q); err != nil {
-		return nil, err
-	}
-	return q, nil
 }
 
 // ListQuotes returns one page: up to f.Limit rows, and whether more follow
@@ -604,12 +751,11 @@ func quoteSourceFor(q *Quote) *order.QuoteSource {
 	return src
 }
 
-// record writes the quote's event into the outbox through the transaction's
-// executor. fromStatus is set on a transition.
-func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus string) error {
-	if s.events == nil {
-		return nil
-	}
+// buildEvent shapes the quote's event without writing it; fromStatus is set
+// on a transition. A nil service recorder builds the event anyway, so a
+// caller inside a larger transaction (a draft's promotion) can write it
+// through its own recorder.
+func (s *Service) buildEvent(q *Quote, eventType, fromStatus string) *outbox.Event {
 	data := map[string]any{
 		"number":      q.Number,
 		"customer_id": q.CustomerID,
@@ -622,12 +768,27 @@ func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus st
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return nil
 	}
 	branch := q.BranchID
-	return s.events.Write(ctx, outbox.Event{
+	return &outbox.Event{
 		Type: eventType, EntityType: "quote", EntityID: q.ID, BranchID: &branch, Data: raw,
-	})
+	}
+}
+
+// writeEvent writes one shaped event through the transaction's executor,
+// the caller's last statement. A nil recorder or event writes nothing.
+func (s *Service) writeEvent(ctx context.Context, ev *outbox.Event) error {
+	if s.events == nil || ev == nil {
+		return nil
+	}
+	return s.events.Write(ctx, *ev)
+}
+
+// record writes the quote's event into the outbox through the transaction's
+// executor. fromStatus is set on a transition.
+func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus string) error {
+	return s.writeEvent(ctx, s.buildEvent(q, eventType, fromStatus))
 }
 
 // triggerAutoPO creates purchase order lines for the SPECIAL ORDER lines of

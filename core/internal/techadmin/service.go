@@ -263,6 +263,21 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (*APIKey, erro
 	return nil, ErrInvalidKey
 }
 
+// KeyActive answers whether a key id is still valid: not revoked. The draft
+// change feed rechecks its keyed streams at every heartbeat by id (one row
+// read, no hash work), so a revoked key's stream closes within one
+// heartbeat of the revocation (ADR 0007 section 3.3).
+func (s *Service) KeyActive(ctx context.Context, id uuid.UUID) (bool, error) {
+	k, err := s.repo.GetKey(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return k.Revoked == nil, nil
+}
+
 // splitHash decodes the "salt$hash" storage form.
 func splitHash(h string) (salt, hash []byte, ok bool) {
 	for i := 0; i < len(h); i++ {

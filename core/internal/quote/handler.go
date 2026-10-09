@@ -5,6 +5,8 @@ package quote
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -16,6 +18,10 @@ import (
 // cursorScope names the list's ordering: created_at then id, newest first.
 // A cursor minted for any other ordering is refused (ADR 0001 section 2).
 const cursorScope = "quotes.created_at_id_desc"
+
+// maxAttachBody bounds the quote file route's body: the same 5 MiB bound
+// the create applies to a decoded original upload.
+const maxAttachBody = 5 << 20
 
 // safeFilename strips any characters that are not alphanumeric, hyphens,
 // underscores, or dots to prevent header injection in Content-Disposition.
@@ -48,6 +54,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/quotes", guard(h.HandleListQuotes))
 	mux.HandleFunc("GET /api/v1/quotes/{id}", guard(h.HandleGetQuotePath))
 	mux.HandleFunc("GET /api/v1/quotes/{id}/file", guard(h.HandleDownloadOriginalFile))
+	mux.HandleFunc("PUT /api/v1/quotes/{id}/file", guard(h.HandleAttachFile))
 	mux.HandleFunc("PUT /api/v1/quotes/{id}", guard(h.HandleUpdateQuote))
 	mux.HandleFunc("POST /api/v1/quotes/{id}/transitions", guard(h.HandleTransition))
 	mux.HandleFunc("POST /api/v1/quotes/{id}/convert", guard(h.HandleConvertToOrder))
@@ -74,6 +81,14 @@ func pathID(r *http.Request) (uuid.UUID, error) {
 			httpx.FieldError{Field: "id", Message: "must be a UUID"})
 	}
 	return id, nil
+}
+
+// pathRecord reads the {id} path value of a read route: a UUID first, then
+// the quote's document number (ADR 0007 section 7). A well formed number of
+// another entity, or anything else, is a 400 naming id; a number that names
+// no visible row is the read's 404.
+func pathRecord(r *http.Request) string {
+	return r.PathValue("id")
 }
 
 // noQuery refuses every query parameter: these routes declare none.
@@ -111,12 +126,7 @@ func (h *Handler) HandleGetQuotePath(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	id, err := pathID(r)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	q, err := h.service.GetQuote(r.Context(), id)
+	q, err := h.service.GetQuoteByIDOrNumber(r.Context(), pathRecord(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -351,12 +361,12 @@ func (h *Handler) HandleDownloadOriginalFile(w http.ResponseWriter, r *http.Requ
 		httpx.WriteError(w, r, err)
 		return
 	}
-	id, err := pathID(r)
+	q, err := h.service.GetQuoteByIDOrNumber(r.Context(), pathRecord(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	data, filename, contentType, err := h.service.GetOriginalFile(r.Context(), id)
+	data, filename, contentType, err := h.service.GetOriginalFile(r.Context(), q.ID)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -374,4 +384,47 @@ func (h *Handler) HandleDownloadOriginalFile(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "inline; filename=\""+filename+"\"")
 	w.Write(data)
+}
+
+// HandleAttachFile is the quote file route (ADR 0007 section 10): the raw
+// body with its content type, the same 5 MiB bound the create applies, on
+// the revision precondition, only while the quote is in status draft. The
+// parse flow's original file attaches here, by the committer, right after a
+// promotion. Being an entity write on a gated module, an agent marked
+// session is refused it by the confirm gate.
+func (h *Handler) HandleAttachFile(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAttachBody))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpx.WriteError(w, r, httpx.PayloadTooLarge("the file is past the 5 MiB bound"))
+			return
+		}
+		httpx.WriteError(w, r, httpx.BadRequest("the file could not be read"))
+		return
+	}
+	filename := sanitizeFilename(r.URL.Query().Get("filename"))
+	if filename == "" {
+		filename = "original-upload"
+	}
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	q, err := h.service.AttachFile(r.Context(), id, body, filename, contentType,
+		precondition(r, nil))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeQuote(w, http.StatusOK, q)
 }
