@@ -168,7 +168,7 @@ export class ProjectDashboard extends LitElement {
                             @click=${() => this._handleStatusToggle()}
                             class="px-4 py-2 border border-white/10 text-white text-sm font-medium rounded-lg hover:bg-white/5 transition-colors"
                         >
-                            Mark ${project.status === 'active' ? 'completed' : 'active'}
+                            Mark ${project.status === 'active' ? 'Completed' : 'Active'}
                         </button>
                     </div>
                 </div>
