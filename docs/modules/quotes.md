@@ -174,14 +174,15 @@ segment of the scope so the audit row carries it.
 The repository's own seed and the local make targets are the only way to
 exercise the module end to end; the integration seam under
 `/api/integration/*` keeps its own published contract and is not the path
-here. From the repository root:
-
-```
-make stack-up
-make migrate
-make seed
-make serve
-```
+here. `make up` builds and starts the local stack (Postgres, migrate and
+seed, `core serve`, `core worker`, the web front door) on
+http://127.0.0.1:8080 with `AUTH_MODE=dev`; `make down` removes it. To run
+the core from source instead: `make db`, `make migrate`,
+`DEMO_SEED=1 make seed`, then `cd core && AUTH_MODE=dev go run ./cmd/server`.
+The `make up` and `make db` workflows use different compose projects and
+volumes, so the `make db` data is never truncated or removed by `make up`
+or `make down` (`AUTH_MODE=dev` needs no `Authorization` header; the
+examples below show the production header shape).
 
 Then, with a sales role bearer and the seeded branch, create a draft and
 walk it to accepted:
