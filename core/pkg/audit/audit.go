@@ -285,11 +285,48 @@ var (
 // the jsonb value. The input is the marshalled JSON the writer is about to
 // INSERT; invalid UTF-8 is already coerced to U+FFFD by json.Marshal, so
 // one byte pass is enough. The input is not mutated.
+//
+// json.Marshal escapes a backslash in the input as `\\`, so a string that
+// already holds the six character text `\u0000` (the marker sanitiseString
+// writes) becomes the seven bytes `\\u0000` in the JSON output. A naive
+// replace of the six byte pattern `\u0000` would also match the trailing
+// six bytes of `\\u0000` and add a third backslash, turning the marker
+// into `\\\u0000` (which the jsonb parser reads as `\\` (one character)
+// plus `\u0000` (a NUL escape, which jsonb rejects)). The fix is the
+// negative lookbehind in the scan: a `\u0000` only gets rewritten when
+// the byte before it is not itself a backslash, so the seven byte
+// `\\u0000` from a marker is left alone. Raw NUL bytes in the input still
+// produce a six byte `\u0000` in the JSON, and the byte before is the
+// preceding character (slash, letter, etc.), so the rewrite still fires
+// for them.
 func sanitiseNULEscape(in []byte) []byte {
 	if len(in) == 0 {
 		return in
 	}
-	return bytes.ReplaceAll(in, nulJSONEscape, nulJSONMarker)
+	// One scan to find every `\u0000` that is NOT preceded by a backslash.
+	var positions []int
+	for i := 0; i+len(nulJSONEscape) <= len(in); i++ {
+		if !bytes.Equal(in[i:i+len(nulJSONEscape)], nulJSONEscape) {
+			continue
+		}
+		if i > 0 && in[i-1] == '\\' {
+			continue
+		}
+		positions = append(positions, i)
+	}
+	if len(positions) == 0 {
+		return in
+	}
+	// Build the rewritten bytes in one allocation; the input is not mutated.
+	out := make([]byte, 0, len(in)+len(positions))
+	prev := 0
+	for _, p := range positions {
+		out = append(out, in[prev:p]...)
+		out = append(out, nulJSONMarker...)
+		prev = p + len(nulJSONEscape)
+	}
+	out = append(out, in[prev:]...)
+	return out
 }
 
 // AuditKeyRefusal records a refused machine-key request (a valid key refused
