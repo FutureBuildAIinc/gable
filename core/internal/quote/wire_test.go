@@ -35,12 +35,14 @@ import (
 )
 
 type fixture struct {
-	t          *testing.T
-	db         *database.DB
-	srv        *httptest.Server
-	customerID uuid.UUID
-	productID  uuid.UUID
-	sku        string
+	t             *testing.T
+	db            *database.DB
+	srv           *httptest.Server
+	customerID    uuid.UUID
+	productID     uuid.UUID
+	product14     uuid.UUID // the 2x4x14 of the units tests, when they built it
+	randomProduct uuid.UUID // the random length product of the tally tests
+	sku           string
 }
 
 // newFixture builds the module the way serve does (repository, service with
@@ -56,9 +58,22 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		VALUES ($1, 'Wire Test Co', $2, `+branch+`)`, f.customerID, "WIRE-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
-		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price,
+			board_thickness_in, board_width_in, board_length_ft)
+		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5, 2, 4, 8)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
+	}
+	// The 2x4x8's unit set (ADR 0006 section 3.2's worked set): PCS (1, 1),
+	// LF (8, 1) sold by the foot, BF (1, 0.1875) and MBF (1, 187.5) priced,
+	// MBF bought. The stocking row and the defaults came with the insert.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price) VALUES
+		($1, 'LF', 8, 1, TRUE, FALSE, FALSE),
+		($1, 'BF', 1, 0.1875, FALSE, FALSE, TRUE),
+		($1, 'MBF', 1, 187.5, FALSE, TRUE, TRUE)`, f.productID); err != nil {
+		t.Fatalf("seed unit set: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET purchase_uom = 'MBF' WHERE id = $1`, f.productID); err != nil {
+		t.Fatalf("seed purchase default: %v", err)
 	}
 
 	repo := quote.NewRepository(db)
@@ -130,6 +145,15 @@ func (f *fixture) line(qty string) map[string]any {
 	return map[string]any{
 		"product_id": f.productID.String(), "sku": f.sku, "description": "2x4x8 SPF",
 		"quantity": qty, "uom": "PCS", "unit_price_ten_thousandths": 55000,
+	}
+}
+
+// nonStockLine is a line that names no product: its units are the
+// catalogue's, not a product set's.
+func (f *fixture) nonStockLine(qty, uom string) map[string]any {
+	return map[string]any{
+		"sku": "SPECIAL-" + f.sku, "description": "special order",
+		"quantity": qty, "uom": uom, "unit_price_ten_thousandths": 55000,
 	}
 }
 
@@ -402,17 +426,23 @@ func TestWire_MissingUomIs400NamingTheField(t *testing.T) {
 		t.Errorf("line_total_cents = %d, want 5500", num(t, got, "line_total_cents"))
 	}
 
-	// A price_uom that differs from the defaulted uom still needs its pair.
+	// A price_uom that differs from the uom is resolved from the product's
+	// set: the pair the server stores (ADR 0006 section 3.3, which replaces
+	// the pair the client had to send).
 	line = f.line("10")
 	delete(line, "uom")
 	line["price_uom"] = "MBF"
 	r = f.do("POST", "/api/v1/quotes", f.createBody(line))
-	if r.status != 400 {
-		t.Fatalf("price_uom differing from the defaulted uom, no pair = %d, want 400: %s", r.status, r.raw)
+	if r.status != 201 {
+		t.Fatalf("a product line priced per MBF with no pair = %d, want 201: %s", r.status, r.raw)
 	}
-	_, _, details = errorOf(t, r)
-	if fmt.Sprint(details) == "[]" || fmt.Sprint(details[0]["field"]) != "lines[0].uom_qty" {
-		t.Errorf("details = %v, want lines[0].uom_qty", details)
+	got = r.body["lines"].([]any)[0].(map[string]any)
+	if str(t, got, "uom") != "PCS" || str(t, got, "price_uom") != "MBF" ||
+		str(t, got, "uom_qty") != "187.5" || str(t, got, "price_uom_qty") != "1" {
+		t.Errorf("the resolved pair = %v, want PCS against MBF at 187.5 to 1", got)
+	}
+	if str(t, got, "stock_uom") != "PCS" || str(t, got, "stock_quantity") != "10" {
+		t.Errorf("the stocking fields = %v, want 10 PCS of stock", got)
 	}
 }
 
@@ -432,7 +462,14 @@ func TestWire_ValidationRules(t *testing.T) {
 		{"quantity as a JSON number", func(b, l map[string]any) { l["quantity"] = 10 }, "lines[0].quantity"},
 		{"zero quantity", func(b, l map[string]any) { l["quantity"] = "0" }, "lines[0].quantity"},
 		{"zero conversion side", func(b, l map[string]any) { l["uom_qty"] = "0"; l["price_uom_qty"] = "1" }, "lines[0].uom_qty"},
-		{"price unit differs with no pair", func(b, l map[string]any) { l["price_uom"] = "MBF" }, "lines[0].uom_qty"},
+		{"price unit differs with no pair", func(b, l map[string]any) {
+			// A non stock line carries the client's pair: without it the
+			// two units have no conversion (a product line's pair resolves
+			// from its set, ADR 0006 section 3.3).
+			delete(l, "product_id")
+			l["sku"], l["description"] = "SPECIAL", "special order"
+			l["price_uom"] = "MBF"
+		}, "lines[0].uom_qty"},
 		{"unknown product", func(b, l map[string]any) { l["product_id"] = uuid.NewString() }, "lines[0].product_id"},
 		{"missing customer", func(b, l map[string]any) { delete(b, "customer_id") }, "customer_id"},
 		{"unknown customer", func(b, l map[string]any) { b["customer_id"] = uuid.NewString() }, "customer_id"},
@@ -810,13 +847,16 @@ func TestWire_CreateRefusesARevision(t *testing.T) {
 }
 
 // price_uom is a unit code, not free text: one to six capital letters (a price
-// per M or per CWT is real, so it is not limited to the sale unit enum).
+// per M or per CWT is real, so it is not limited to the sale unit enum). On a
+// line that names a product the code must also be a price unit of the
+// product's set (ADR 0006 section 7.4); the free vocabulary is a non stock
+// line's.
 func TestWire_PriceUomIsAUnitCode(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 
 	for _, bad := range []string{"<script>", "mbf", "TOOLONGUNIT", "M BF", "M1"} {
-		line := f.line("10")
+		line := f.nonStockLine("10", "EA")
 		line["price_uom"] = bad
 		line["uom_qty"], line["price_uom_qty"] = "1000", "1"
 		r := f.do("POST", "/api/v1/quotes", f.createBody(line))
@@ -830,12 +870,25 @@ func TestWire_PriceUomIsAUnitCode(t *testing.T) {
 		}
 	}
 	for _, good := range []string{"M", "CWT", "MBF"} {
-		line := f.line("10")
+		line := f.nonStockLine("10", "EA")
 		line["price_uom"] = good
 		line["uom_qty"], line["price_uom_qty"] = "1000", "1"
 		if r := f.do("POST", "/api/v1/quotes", f.createBody(line)); r.status != 201 {
 			t.Errorf("price_uom %q = %d, want 201: %s", good, r.status, r.raw)
 		}
+	}
+	// On a product line the price unit must be a price unit of the set: the
+	// fixture's 2x4x8 prices in PCS, BF and MBF, not M.
+	line := f.line("10")
+	line["price_uom"] = "M"
+	line["uom_qty"], line["price_uom_qty"] = "1000", "1"
+	r := f.do("POST", "/api/v1/quotes", f.createBody(line))
+	if r.status != 400 {
+		t.Fatalf("a price unit outside the product's set = %d, want 400: %s", r.status, r.raw)
+	}
+	_, _, details := errorOf(t, r)
+	if len(details) != 1 || details[0]["field"] != "lines[0].price_uom" {
+		t.Errorf("details = %v, want lines[0].price_uom", details)
 	}
 }
 
@@ -1006,9 +1059,10 @@ func TestWire_Convert(t *testing.T) {
 func TestWire_ConvertRefusesANonStockUnit(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	// The fixture's product stocks in PCS; the line is sold in MBF.
-	stocked := f.line("1")
-	stocked["uom"] = "MBF"
+	// The fixture's product stocks in PCS; the line is sold by the foot, a
+	// sale unit of the set that is not the stocking unit.
+	stocked := f.line("8")
+	stocked["uom"] = "LF"
 	created := f.create(stocked)
 	id := str(t, created.body, "id")
 

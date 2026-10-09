@@ -127,7 +127,10 @@ type Quote struct {
 // QuoteLine is one priced line. Every priced line carries the same fields
 // (ADR 0001 section 7a): the quantity as a decimal string with its unit, the
 // scaled unit price with its price unit, the conversion pair, and the
-// extension in cents rounded once.
+// extension in cents rounded once. From C3-2A-units a line that names a
+// product also carries its stocking unit and quantity (ADR 0006 sections 3.4
+// and 6) and, on a random length product, its tally (section 4): both null
+// on a line without a product, so a client reads one line shape.
 type QuoteLine struct {
 	ID          uuid.UUID  `json:"id"`
 	QuoteID     uuid.UUID  `json:"quote_id"`
@@ -148,11 +151,59 @@ type QuoteLine struct {
 	UnitPrice   httpx.Price    `json:"unit_price_ten_thousandths"`
 	LineTotal   httpx.Cents    `json:"line_total_cents"`
 
+	// The stocking unit and quantity of ADR 0006 section 3.4: the product's
+	// stocking unit at the line's create, and the quantity converted into it,
+	// exact (R5). Null on a line without a product.
+	StockUOM      *string         `json:"stock_uom"`
+	StockQuantity *httpx.Quantity `json:"stock_quantity"`
+
+	// The tally of ADR 0006 section 4: the pieces by length a random length
+	// line carries, its cross section snapshotted from the product. Null on
+	// every other line.
+	Tally *Tally `json:"tally"`
+
 	// UnitCost is the product's average cost, read only: the margin basis and
 	// the special order indicator for the auto purchase order.
 	UnitCost httpx.Price `json:"unit_cost_ten_thousandths"`
 
 	CreatedAt httpx.Timestamp `json:"created_at"`
+}
+
+// Tally is a random length line's pieces by length (ADR 0006 section 4.3).
+// Pieces are JSON integers (a count); the lengths and the derived fields are
+// decimal strings. LinearFeet is the exact sum the line's quantity carries;
+// BoardFeet is the display rounding of R4.3 (linear feet x thickness x width
+// / 12), read by nothing; ThicknessIn and WidthIn are null on a tally without
+// a cross section.
+type Tally struct {
+	ThicknessIn *httpx.Quantity `json:"thickness_in"`
+	WidthIn     *httpx.Quantity `json:"width_in"`
+	Rows        []TallyRow      `json:"rows"`
+	LinearFeet  httpx.Quantity  `json:"linear_feet"`
+	BoardFeet   *httpx.Quantity `json:"board_feet"`
+}
+
+// TallyRow is one length of a tally: pieces at that length.
+type TallyRow struct {
+	Pieces   int            `json:"pieces"`
+	LengthFT httpx.Quantity `json:"length_ft"`
+}
+
+// TallyThickness is the cross section the tally snapshotted from the
+// product, for the line's write.
+func (l *QuoteLine) TallyThickness() *httpx.Quantity {
+	if l.Tally == nil {
+		return nil
+	}
+	return l.Tally.ThicknessIn
+}
+
+// TallyWidth is the cross section's other half.
+func (l *QuoteLine) TallyWidth() *httpx.Quantity {
+	if l.Tally == nil {
+		return nil
+	}
+	return l.Tally.WidthIn
 }
 
 // QuoteAnalytics holds aggregated quote analytics. Money is integer cents;
