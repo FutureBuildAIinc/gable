@@ -138,8 +138,8 @@ branch belongs to exactly one company. `locations` gains `company_id UUID
 NOT NULL REFERENCES company(id)` on every row (branch rows directly; every
 other row takes its branch's company, which is its company by construction,
 because a non branch row never leaves its branch's subtree,
-`058_locations_branch_denorm_trigger.sql`). The company of a branch is set
-at create and never moves in v1: an update that would change a location
+`058_locations_branch_denorm_trigger.sql`). The company of a branch is set at create by its route (section 6) and
+never moves in v1: an update that would change a location
 row's company is refused (section 9).
 
 ### 2. The table, by module
@@ -419,6 +419,19 @@ path ids. A wall test in the shape of
 (`wire_company_wall_test.go` beside it) covers each moved route, and item
 5's exit test names it.
 
+Branch creation is the one write that cannot derive a company, because the
+branch does not exist yet. It moves under the company segment: `POST
+/api/v1/companies/{id}/branches` creates a branch of that company, and
+the body carries no `company_id`; the path names it, the create stamps
+every row of the subtree with it, and it is immutable after (section 1).
+Today's `POST /api/v1/branches` (`location/handler.go:103`, admin) keeps
+answering while exactly one company exists, defaulting to it, so every
+single company deployment, script and golden keeps working; once a second
+company exists it refuses with 409 `conflict`, blocker `company_required`,
+naming the company scoped route. Both the new route and the old route's
+refusal are rows in `docs/refactor/CONTRACT-CHANGES.md`. Sized inside
+item 7.
+
 Who reaches a company: a caller reaches a company exactly when their
 grants reach a branch of it, one query over `user_locations` joined to
 branch rows. Admins and owners with no grants reach every branch today
@@ -634,7 +647,7 @@ are its own, and their sum is stated rather than rounded):
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, the record rule with `wire_company_wall_test.go`, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
-| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code; routes and the desk screen) | 6 to 10 |
+| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route; routes and the desk screen) | 6 to 10 |
 
 Total: 66 to 106 dev hour equivalents. Item 1 lands first and items 2 to 7
 depend on it; items 2 and 3 land together or in that order; 4 to 7 are
