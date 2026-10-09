@@ -674,8 +674,19 @@ Up, in order:
    their register or sale; `079:79` is left alone (legacy after C2-4, ADR
    0005 9.1); `089:64` is left alone (no company column, section 2).
 4. The R2 tables of section 2 that exist when it runs: add `company_id`,
-   backfill every row to the seed company, NOT NULL, the foreign key. No
-   trigger: the writers of section 11's third item set it from then on.
+   backfill every row to the seed company, NOT NULL, the foreign key, and
+   a `DEFAULT` of the seed company's id, which the migration knows from
+   step 1 and writes as a literal through `EXECUTE format(...)`. The
+   default is the bridge that lets item 1 land on its own: between this
+   item and item 3, every insert into an R2 table (a posting through
+   `PostEntry`, an account create, a fiscal period, a vendor bill, an AP
+   payment, a bank account, an AR transaction, a refund) would otherwise
+   fail a NOT NULL violation and turn `refactor/v1` red, and no writer
+   sets the column until item 3. No trigger: item 3's writers set the
+   value from then on, and each default is dropped in the same pull
+   request that makes its writer set it, the census test extended in that
+   same pull request to fail while any R2 `company_id` column still
+   carries a default.
 5. GL: `UNIQUE (code)` dropped and `UNIQUE (company_id, code)` added
    (`025:10`); `UNIQUE (company_id, id)` added to `gl_accounts` and
    `gl_journal_entries`; `gl_journal_lines.company_id` added and
@@ -767,8 +778,11 @@ are its own, and their sum is stated rather than rounded):
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
 
-Total: 66 to 106 dev hour equivalents. Item 1 lands first and items 2 to 7
-depend on it; items 2 and 3 land together or in that order; 4 to 7 are
+Total: 66 to 106 dev hour equivalents. Item 1 lands first, on its own,
+behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
+and 3 land together or in that order, and item 3 drops the defaults in
+the same pull request that makes its writers set the column (items 1 to 3
+may instead land as one pull request, sized as one); 4 to 7 are
 independent of each other; item 7 runs after C5-1a, per the run order
 above.
 
