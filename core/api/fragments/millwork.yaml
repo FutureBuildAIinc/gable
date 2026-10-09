@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The millwork option catalog, transcribed from internal/millwork as it
-# behaves today. Quirks the transcription preserves: price_adjustment is a
-# float (dollars); attributes is raw JSON stored as sent and serializes as
-# null when the create request omitted it; the list is null when the category
-# has no options. Both routes sit behind the millwork app gate (404
-# app_disabled when the app is off) and the admin, owner or sales guard.
+# The millwork option catalog on the wire contract of ADR 0001 (item C5-1b):
+# the cursor list envelope, the one error envelope, integer cents for the
+# price adjustment, a revision with its ETag on the by-id read, and the
+# create's audit row and millwork_option.created event in one transaction.
+# The catalog is global: an option is not branch scoped. Both routes sit
+# behind the millwork app gate (404 app_disabled when the app is off) and
+# the admin, owner or sales guard.
 paths:
   /api/v1/millwork/options:
     get:
@@ -14,37 +15,48 @@ paths:
       tags: [millwork]
       summary: List the options of a category
       description: >-
-        Admin, owner or sales. Ordered by name. Not paginated. Answers null,
-        not an empty array, when the category has no options.
+        The cursor list envelope, newest first on (created_at, id); total
+        appears only under include=total. category is required and filters;
+        a parameter the route does not declare, a missing or repeated
+        category, a malformed cursor or an out of range limit is a 400.
       parameters:
         - name: category
           in: query
           required: true
-          description: Exact match on the category column. An empty or missing value is a 400.
+          description: Exact match on the category column.
           schema:
             type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: The options, or null when none match.
+          description: The page of options.
           content:
             application/json:
               schema:
-                type: [array, "null"]
-                items:
-                  $ref: "#/components/schemas/MillworkOption"
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/AppDisabled" }
-        "500": { $ref: "#/components/responses/InternalError" }
+                $ref: "#/components/schemas/MillworkOptionPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: millworkCreateOption
       tags: [millwork]
       summary: Create an option
       description: >-
-        Admin, owner or sales. No field is validated by the handler; a value
-        the table refuses (a category over 50 characters, a name over 100)
-        surfaces as a 500.
+        category (at most 50 characters), name (at most 100) and
+        price_adjustment_cents are required; the adjustment may be negative
+        (a discount option); attributes is any JSON the dealer sends, stored
+        as sent and null when absent. Writes the audit row
+        millwork_option.created and the event millwork_option.created in the
+        same transaction, the event last.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -55,25 +67,76 @@ paths:
               $ref: "#/components/schemas/MillworkCreateOptionRequest"
       responses:
         "201":
-          description: The created option.
+          description: The created option, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MillworkOption"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/AppDisabled" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
-        "413": { $ref: "#/components/responses/PayloadTooLarge" }
-        "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/millwork/options/{id}:
+    get:
+      operationId: millworkGetOption
+      tags: [millwork]
+      summary: Get one option
+      description: The option with its ETag, so the create's Location resolves.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The option.
+          headers:
+            ETag:
+              description: The record's revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkOption"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
 components:
   schemas:
     MillworkOption:
       type: object
-      required: [id, category, name, price_adjustment, attributes, created_at, updated_at]
-      description: Go type millwork.MillworkOption.
+      description: One catalog option. The price adjustment is integer cents; attributes is whatever JSON the create carried, null when it carried none.
+      required: [id, category, name, price_adjustment_cents, attributes, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -82,11 +145,16 @@ components:
           type: string
         name:
           type: string
-        price_adjustment:
-          type: number
-          description: Float dollars today.
+        price_adjustment_cents:
+          type: integer
+          format: int64
+          description: A positive option adds to the configured price, a negative one discounts it.
         attributes:
-          description: Any JSON value stored as sent (an object in practice); null when the create request omitted it.
+          type: [object, array, string, number, boolean, "null"]
+          description: Any JSON value stored as sent (an object in practice).
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
@@ -95,14 +163,35 @@ components:
           format: date-time
     MillworkCreateOptionRequest:
       type: object
-      description: Go type millwork.CreateOptionRequest.
+      required: [category, name, price_adjustment_cents]
+      description: Every field problem is collected into one 400 with a details entry per field; an unknown field is refused.
       properties:
         category:
           type: string
+          description: 1 to 50 characters.
         name:
           type: string
-        price_adjustment:
-          type: number
-          description: Float dollars today; absent means 0.
+          description: 1 to 100 characters.
+        price_adjustment_cents:
+          type: integer
+          format: int64
         attributes:
-          description: Any JSON value; stored as sent. Absent is stored as null.
+          type: [object, array, string, number, boolean]
+          description: Optional; stored as sent, null when absent.
+    MillworkOptionPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MillworkOption"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64

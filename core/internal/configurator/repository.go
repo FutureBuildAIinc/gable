@@ -6,10 +6,25 @@ package configurator
 import (
 	"context"
 	"fmt"
+	"sort"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/jackc/pgx/v5"
 )
 
+// ErrNotFound reports that a rule or preset read named a row that is not
+// there; the handler answers 404.
+var ErrNotFound = errNotFound{}
+
+type errNotFound struct{}
+
+func (errNotFound) Error() string { return "configurator row not found" }
+
+// Repository reads the rule matrix and the presets. The configurator has no
+// writes: rules and presets are seeded master data, so the module owns no
+// mutation, no audit row and no event.
 type Repository struct {
 	db *database.DB
 }
@@ -18,151 +33,133 @@ func NewRepository(db *database.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// GetAllRules returns every configurator rule.
-func (r *Repository) GetAllRules(ctx context.Context) ([]ConfiguratorRule, error) {
-	query := `
-		SELECT id, attribute_type, attribute_value, depends_on_type, depends_on_value,
-		       is_allowed, error_message, created_at, updated_at
-		FROM configurator_rules
-		ORDER BY depends_on_type, depends_on_value, attribute_type, attribute_value
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+const ruleColumns = `id, attribute_type, attribute_value, depends_on_type, depends_on_value,
+	is_allowed, error_message, created_at, updated_at`
+
+func scanRule(row pgx.Row) (*Rule, error) {
+	var (
+		r                Rule
+		created, updated time.Time
+	)
+	if err := row.Scan(&r.ID, &r.AttributeType, &r.AttributeValue, &r.DependsOnType,
+		&r.DependsOnValue, &r.IsAllowed, &r.ErrorMessage, &created, &updated); err != nil {
+		return nil, err
+	}
+	r.CreatedAt, r.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
+	return &r, nil
+}
+
+// AllRules returns every rule, deterministically ordered.
+func (r *Repository) AllRules(ctx context.Context) ([]Rule, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT `+ruleColumns+` FROM configurator_rules
+		ORDER BY depends_on_type, depends_on_value, attribute_type, attribute_value`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query rules: %w", err)
 	}
 	defer rows.Close()
-
-	rules := make([]ConfiguratorRule, 0)
+	out := []Rule{}
 	for rows.Next() {
-		var rule ConfiguratorRule
-		if err := rows.Scan(
-			&rule.ID, &rule.AttributeType, &rule.AttributeValue,
-			&rule.DependsOnType, &rule.DependsOnValue,
-			&rule.IsAllowed, &rule.ErrorMessage,
-			&rule.CreatedAt, &rule.UpdatedAt,
-		); err != nil {
+		rule, err := scanRule(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan rule: %w", err)
 		}
-		rules = append(rules, rule)
+		out = append(out, *rule)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rules: %w", err)
-	}
-	return rules, nil
+	return out, rows.Err()
 }
 
-// GetRulesByDependency returns all rules that depend on a specific attribute type+value.
-func (r *Repository) GetRulesByDependency(ctx context.Context, dependsOnType, dependsOnValue string) ([]ConfiguratorRule, error) {
-	query := `
-		SELECT id, attribute_type, attribute_value, depends_on_type, depends_on_value,
-		       is_allowed, error_message, created_at, updated_at
-		FROM configurator_rules
+// RulesByDependency returns the rules that depend on one attribute pair.
+func (r *Repository) RulesByDependency(ctx context.Context, dependsOnType, dependsOnValue string) ([]Rule, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT `+ruleColumns+` FROM configurator_rules
 		WHERE depends_on_type = $1 AND depends_on_value = $2
-		ORDER BY attribute_type, attribute_value
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dependsOnType, dependsOnValue)
+		ORDER BY attribute_type, attribute_value`, dependsOnType, dependsOnValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query rules by dependency: %w", err)
 	}
 	defer rows.Close()
-
-	rules := make([]ConfiguratorRule, 0)
+	out := []Rule{}
 	for rows.Next() {
-		var rule ConfiguratorRule
-		if err := rows.Scan(
-			&rule.ID, &rule.AttributeType, &rule.AttributeValue,
-			&rule.DependsOnType, &rule.DependsOnValue,
-			&rule.IsAllowed, &rule.ErrorMessage,
-			&rule.CreatedAt, &rule.UpdatedAt,
-		); err != nil {
+		rule, err := scanRule(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan rule: %w", err)
 		}
-		rules = append(rules, rule)
+		out = append(out, *rule)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rules: %w", err)
-	}
-	return rules, nil
+	return out, rows.Err()
 }
 
-// GetAllowedValues returns the allowed values for a given attribute type
-// constrained by a parent selection.
-func (r *Repository) GetAllowedValues(ctx context.Context, attributeType, dependsOnType, dependsOnValue string) ([]ConfiguratorRule, error) {
-	query := `
-		SELECT id, attribute_type, attribute_value, depends_on_type, depends_on_value,
-		       is_allowed, error_message, created_at, updated_at
-		FROM configurator_rules
-		WHERE attribute_type = $1
-		  AND depends_on_type = $2
-		  AND depends_on_value = $3
-		ORDER BY attribute_value
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, attributeType, dependsOnType, dependsOnValue)
+// AllowedValues returns the rules constraining one attribute against one
+// parent pair, ordered by value.
+func (r *Repository) AllowedValues(ctx context.Context, attributeType, dependsOnType, dependsOnValue string) ([]Rule, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT `+ruleColumns+` FROM configurator_rules
+		WHERE attribute_type = $1 AND depends_on_type = $2 AND depends_on_value = $3
+		ORDER BY attribute_value`, attributeType, dependsOnType, dependsOnValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query allowed values: %w", err)
 	}
 	defer rows.Close()
-
-	rules := make([]ConfiguratorRule, 0)
+	out := []Rule{}
 	for rows.Next() {
-		var rule ConfiguratorRule
-		if err := rows.Scan(
-			&rule.ID, &rule.AttributeType, &rule.AttributeValue,
-			&rule.DependsOnType, &rule.DependsOnValue,
-			&rule.IsAllowed, &rule.ErrorMessage,
-			&rule.CreatedAt, &rule.UpdatedAt,
-		); err != nil {
+		rule, err := scanRule(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan rule: %w", err)
 		}
-		rules = append(rules, rule)
+		out = append(out, *rule)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating allowed values: %w", err)
-	}
-	return rules, nil
+	return out, rows.Err()
 }
 
-// GetPresets returns all active presets, optionally filtered by product type.
-func (r *Repository) GetPresets(ctx context.Context, productType string) ([]ConfiguratorPreset, error) {
-	var query string
-	var args []interface{}
+const presetColumns = `id, name, description, product_type, config, is_active, created_at, updated_at`
 
-	if productType != "" {
-		query = `
-			SELECT id, name, description, product_type, config, is_active, created_at, updated_at
-			FROM configurator_presets
-			WHERE is_active = true AND product_type = $1
-			ORDER BY name
-		`
-		args = append(args, productType)
-	} else {
-		query = `
-			SELECT id, name, description, product_type, config, is_active, created_at, updated_at
-			FROM configurator_presets
-			WHERE is_active = true
-			ORDER BY name
-		`
+func scanPreset(row pgx.Row) (*Preset, error) {
+	var (
+		p                Preset
+		created, updated time.Time
+	)
+	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.ProductType,
+		&p.Config, &p.IsActive, &created, &updated); err != nil {
+		return nil, err
 	}
+	p.CreatedAt, p.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
+	return &p, nil
+}
 
+// Presets returns the active presets, optionally filtered by product type
+// (the filter filters; an empty product type is the whole master).
+func (r *Repository) Presets(ctx context.Context, productType string) ([]Preset, error) {
+	query := `SELECT ` + presetColumns + ` FROM configurator_presets WHERE is_active = true`
+	args := []any{}
+	if productType != "" {
+		args = append(args, productType)
+		query += fmt.Sprintf(` AND product_type = $%d`, len(args))
+	}
+	query += ` ORDER BY name`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query presets: %w", err)
 	}
 	defer rows.Close()
-
-	presets := make([]ConfiguratorPreset, 0)
+	out := []Preset{}
 	for rows.Next() {
-		var p ConfiguratorPreset
-		if err := rows.Scan(
-			&p.ID, &p.Name, &p.Description, &p.ProductType,
-			&p.Config, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
-		); err != nil {
+		p, err := scanPreset(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan preset: %w", err)
 		}
-		presets = append(presets, p)
+		out = append(out, *p)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating presets: %w", err)
+	return out, rows.Err()
+}
+
+// sortedSelectionKeys gives map iteration a deterministic order, so the same
+// selections always validate and build the same answer.
+func sortedSelectionKeys(selections map[string]string) []string {
+	keys := make([]string, 0, len(selections))
+	for k := range selections {
+		keys = append(keys, k)
 	}
-	return presets, nil
+	sort.Strings(keys)
+	return keys
 }
