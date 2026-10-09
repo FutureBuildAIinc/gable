@@ -161,7 +161,8 @@ write refuses a change of type or `parent_id`
 (`core/internal/location/service.go:171`, "Type and parent_id are not
 mutable here"); the `058` trigger alone would not hold it, it recomputes
 `branch_id` on a `parent_id` update and so permits a move). The company of
-a branch is set at create by its route (section 6) and
+a branch is set at create by its route (section 6), which before item 7
+means the step 4 `DEFAULT` of the seed company (section 10), and it
 never moves in v1: an update that would change a location
 row's company is refused (section 9).
 
@@ -455,7 +456,7 @@ at post, so the credit memo trigger fires on the update that posts the
 memo (a draft carries none), and the seed's and the tests' direct
 function calls ride the trigger instead. The Go helper widens with it:
 `NextGaplessNumber` takes the company's series and infix (today it
-takes the bare series and prefix, `invoice/repository.go:508-520`), and
+takes the bare series and prefix, `invoice/repository.go:511-520`), and
 its prefix rule, one to four uppercase letters
 (`core/internal/platform/httpx/docnum.go:88-98`), widens to accept the
 infix bearing prefix. Item 4's tests prove the hole closed: a raw SQL
@@ -541,9 +542,9 @@ would land in `companies:write` while `RequireRole` is skipped for keys
 (ADR 0002 section 4), and a scope grammar cannot say "no key may hold
 this" (the minted key would simply hold it, ADR 0002 section 4 again, and
 ADR 0007 5.3's mint check accepts any `<vocabulary module>:<verb>`), so
-   every agent and integration that posts a journal entry, pays a bill or
-   imports a bank file through a key would lose the ability the day the
-   build lands, the same breakage this record refuses for unbound keys. AP
+every agent and integration that posts a journal entry, pays a bill or
+imports a bank file through a key would lose the ability the day the
+build lands, the same breakage this record refuses for unbound keys. AP
    needs no branchless route at all: C4-1b gives `vendor_invoices` a
    `branch_id` (ADR 0008 section 12), so AP's routes stay where they are
    (`core/internal/ap/handler.go:38-48`) and the branch wall reaches their
@@ -559,8 +560,7 @@ ADR 0007 5.3's mint check accepts any `<vocabulary module>:<verb>`), so
    routes are wired with `RequireRole("admin", "owner", "finance")` only
    today (`serve.go:555`), no branch middleware, so this filter is their
    wall, and item 5's `wire_company_wall_test.go` covers them. The
-   consolidated report is a GL
-   read under the same segment (section 8).
+   consolidated report is a GL read under the same segment (section 8).
 
 The `companies` segment holds the company resource alone: the company
 list, create, rename, the tax code write, and
@@ -637,8 +637,8 @@ payment key stores and the staff module flags
 `core/internal/staff/repository.go:213`) and the seed, while the
 middleware reads the table itself on refresh (`branch.go:281-282`), so
 the keys change by SQL and a gate on a route would gate nothing. The
-trigger refuses any
-UPDATE or DELETE that would leave `multi_branch_enabled` anything but
+trigger refuses any UPDATE or DELETE that would leave
+`multi_branch_enabled` anything but
 `true` or `default_branch_required` `false` (the kill switch reads
 `false` when its row is absent, so a DELETE is a turn off and is refused
 the same way), its raise carrying the same blocker wording. The item 7
@@ -850,8 +850,8 @@ Up, in order:
    `gl/repository.go:416,439,455,469`), its rows seeded by this
    migration and by item 7's company create, which names the company
    itself; `reorder_runs`' writer is item 3's (section 2). The schedule,
-   each default dropped in
-   the item that converts its writer: item 2 drops `gl_journal_entries`
+   each default dropped in the item that converts its writer: item 2
+   drops `gl_journal_entries`
    and `gl_journal_lines` (`PostEntry` sets both); item 3 the AR, AP
    payment and refund tables' and `reorder_runs`'; item 5 `gl_accounts`,
    `bank_accounts` and `gl_fiscal_periods`'; item 7 `locations`'. The
@@ -894,8 +894,7 @@ present right after this up, and present again once each dropping item's
 down has restored the default it dropped, which is exactly the state
 this down runs in (its round trip test creates them); a missing default
 is a later item still to unwind, and the down refuses rather than guess.
-Each
-refusal names what it found. Otherwise it drops the triggers, the
+Each refusal names what it found. Otherwise it drops the triggers, the
 columns, the seed row and the `company` table, in reverse order. A down
 that would lose a second company's data loses nothing instead: it
 answers. Down ordering against the build items: the runner applies no
