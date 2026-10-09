@@ -14,27 +14,26 @@ original payment.
 
 This page is the current state of the payment module as it is today.
 The full money story is the work of C2-4 (the sales and money core's
-payments and deposits), which converts the module onto the contract
+payments conversion), which converts the module onto the contract
 in place: the events outbox replaces today's in-process bus, the
 revision gate is added, the gapless numbering of payments is settled
 through the gapless counter, and the unapplied cash term is added to
-the customer. After C2-4, this page is the migration guide for what
-moved; today it is the description of what is here.
+the customer. Deposits already live in `core/internal/deposit` and
+the `customer_deposits` table (created by migration 079); C2-4 is
+not the work that brings them. After C2-4, this page is the
+migration guide for what moved; today it is the description of what
+is here.
 
-The Go code is in `core/internal/payment/`. The migration that
-brought the unapplied cash term and the deposits is part of
-`core/migrations/092_orders_wire_contract.sql` and follow-on
-migrations through C2-4.
+The Go code is in `core/internal/payment/`. The payment module has no
+contract migration yet.
 
 ## What it does in a yard
 
 A customer pays an invoice by cash, check, or card (an on-account
 payment against the customer's AR balance is the `ACCOUNT` method).
-The payment is the record of the receipt. The application is the
-link between the payment and the invoice it pays; the unapplied
-cash is what is left when a payment is bigger than the invoice. A
-refund is a separate `Refund` row against the original payment with
-its own positive amount.
+The payment is the record of the receipt; the payment names the
+invoice it pays. A refund is a separate `Refund` row against the
+original payment with its own positive amount.
 
 ## Routes
 
@@ -42,8 +41,8 @@ Every route is in `core/api/fragments/payment.yaml` and the
 registered handles are in `core/internal/payment/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
 `payments` module column. The invoice's payment list is reached
-through `/api/v1/invoices/{id}/payments`, owned by the invoices
-module.
+through `/api/v1/invoices/{id}/payments`, owned by this module,
+though its path sits under `invoices`.
 
 | Method | Path | One line |
 |---|---|---|
@@ -71,7 +70,7 @@ turns this into the error envelope.
 | `id` | UUID | The payment id. |
 | `invoice_id` | UUID | The invoice the payment is against. |
 | `amount` | integer | The amount in cents, always positive. |
-| `method` | lowercase enum | `cash`, `check`, `card`, `account`. |
+| `method` | uppercase enum | `CASH`, `CHECK`, `CARD`, `ACCOUNT`. |
 | `reference` | text | The check number, the last four of the card, or the on-account reference. |
 | `notes` | text | A free text note. |
 | `created_at` | timestamp | When the payment was recorded, RFC 3339 UTC. |
@@ -146,7 +145,8 @@ at the serve layer is `admin`, `owner`, `sales`, `finance`,
 - The `intent` route's request field is renamed to `amount_cents`
   to match the rest of the surface.
 - The payment number is minted from the `PAY` series, gapped; the
-  existing `payment_number_seq` is the sequence.
+  `payment_number_seq` is defined in ADR 0005 section 4.1 and is
+  not yet created.
 - The customer's `unapplied_cash_cents` term is added; the AR
   subledger rule in section 9.1 is the gate.
 - The events `payment.created` and `payment.refunded` are written
