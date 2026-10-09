@@ -839,9 +839,15 @@ Total: 66 to 106 dev hour equivalents. Item 1 lands first, on its own,
 behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
 and 3 land together or in that order, and item 3 drops the defaults in
 the same pull request that makes its writers set the column (items 1 to 3
-may instead land as one pull request, sized as one); 4 to 7 are
-independent of each other; item 7 runs after C5-1a, per the run order
-above.
+may instead land as one pull request, sized as one); 4, 5 and 6 are
+independent of each other; item 7 runs last, after items 2, 4 and 5 and
+after C5-1a, per the run order above: its chart copy and seeded periods
+are item 2's, its numbering is item 4's (before item 4 a second company's
+invoices would mint from the shared `invoice` series, exactly what
+section 4 exists to prevent), and its company scoped branch route sits
+under the segment, the scopes and the wall of item 5. It also carries the
+settings gate of section 6. No second company can exist until item 7
+merges: the company create route is item 7's.
 
 ## Consequences
 
