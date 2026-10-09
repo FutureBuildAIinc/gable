@@ -6,11 +6,11 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 # Payments
 
 A payment is a record of money received against an invoice. The
-payment carries the invoice it pays, the amount in cents, the method
-(cash, check, ACH, card), and a reference (check number, last four
-of the card). A card payment goes through a gateway; a non-card
-payment is recorded directly. A refund is a negative payment that
-references the original.
+payment carries the invoice it pays, the amount in cents, the
+method, and a reference (check number, last four of the card). A
+card payment goes through a gateway; a non-card payment is recorded
+directly. A refund is a separate `Refund` record against the
+original payment.
 
 This page is the current state of the payment module as it is today.
 The full money story is the work of C2-4 (the sales and money core's
@@ -28,26 +28,30 @@ migrations through C2-4.
 
 ## What it does in a yard
 
-A customer pays an invoice by cash, check, ACH, or card. The
-payment is the record of the receipt. The application is the
+A customer pays an invoice by cash, check, or card (an on-account
+payment against the customer's AR balance is the `ACCOUNT` method).
+The payment is the record of the receipt. The application is the
 link between the payment and the invoice it pays; the unapplied
-cash is what is left when a payment is bigger than the invoice.
-The refund is the same shape in reverse.
+cash is what is left when a payment is bigger than the invoice. A
+refund is a separate `Refund` row against the original payment with
+its own positive amount.
 
 ## Routes
 
 Every route is in `core/api/fragments/payment.yaml` and the
 registered handles are in `core/internal/payment/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`payment` module column.
+`payments` module column. The invoice's payment list is reached
+through `/api/v1/invoices/{id}/payments`, owned by the invoices
+module.
 
 | Method | Path | One line |
 |---|---|---|
 | POST | `/api/v1/payments` | Record a non-card payment against an invoice. |
 | POST | `/api/v1/payments/intent` | Get the gateway public key for tokenization (creates nothing). |
 | POST | `/api/v1/payments/card` | Charge a tokenized card. |
-| POST | `/api/v1/payments/refund` | Refund a card payment in part or full. |
-| GET | `/api/v1/invoices/{id}/payments` | List an invoice's payments (the payment module's). |
+| POST | `/api/v1/payments/refund` | Refund a card payment in part or full; creates a `Refund` row. |
+| GET | `/api/v1/invoices/{id}/payments` | List an invoice's payments (the payment module's read). |
 
 The `intent` and `card` routes are the gateway seam and keep their
 own shapes until C2-4; the `intent` response echoes the amount
@@ -59,38 +63,49 @@ turns this into the error envelope.
 
 ## The main resource
 
-The fragment describes `Payment` (the recorded payment) with cents
-money under `_cents` names, and a `PaymentCreateRequest` for the
-create. The fields are:
+`Payment` (see `core/api/fragments/payment.yaml`
+`components.schemas.Payment`).
 
 | Field | Wire form | Note |
 |---|---|---|
 | `id` | UUID | The payment id. |
 | `invoice_id` | UUID | The invoice the payment is against. |
-| `customer_id` | UUID | The customer the payment is from. |
-| `amount_cents` | int64 | The amount, positive on a payment, negative on a refund. |
-| `method` | text | `cash`, `check`, `ach`, `card`. |
-| `reference` | text, nullable | The check number, the last four of the card. |
-| `recorded_at` | timestamp | When the payment was recorded. |
-| `gateway_id` | text, nullable | The gateway transaction id, when the payment is a card. |
-| `card_brand`, `card_last4` | text, nullable | The card brand and last four, when the payment is a card. |
+| `amount` | integer | The amount in cents, always positive. |
+| `method` | lowercase enum | `cash`, `check`, `card`, `account`. |
+| `reference` | text | The check number, the last four of the card, or the on-account reference. |
+| `notes` | text | A free text note. |
+| `created_at` | timestamp | When the payment was recorded, RFC 3339 UTC. |
+| `gateway_tx_id` | text | The gateway transaction id, populated for card payments through Run Payments. |
+| `gateway_status` | text | The gateway's status text, populated for card payments. |
+| `card_last4` | text | The card last four, populated for card payments. |
+| `card_brand` | text | The card brand, populated for card payments. |
+| `auth_code` | text | The card auth code, populated for card payments. |
 
-The `PaymentCreateRequest` carries `invoice_id`, `amount_cents`,
-`method`, `reference`, and the optional `recorded_at`. The
-`idempotency_key` rides in the `Idempotency-Key` header (ADR 0001
-section 9).
+The `PaymentCreateRequest` carries `invoice_id`, `amount`, `method`,
+`reference`, `notes`. The `idempotency_key` rides in the
+`Idempotency-Key` header (ADR 0001 section 9).
+
+`Refund` (see `core/api/fragments/payment.yaml`
+`components.schemas.Refund`) carries `id`, `payment_id`, `amount`
+(integer cents, positive), `reason`, `gateway_refund_id`,
+`status` (`PENDING`, `COMPLETE`, `FAILED`), `created_at`. The
+refund is a positive amount against the original payment;
+`RefundPayment` refuses an amount not positive
+(`core/internal/payment/service.go`) and refuses an amount above the
+original.
 
 ### Money and quantity conventions
 
-`amount_cents` is integer cents under the `_cents` convention. No
-quantity is exposed. The list endpoint returns an array (the
-fragment uses a bare array shape; C2-4 brings it onto the list
-envelope of ADR 0001 section 1).
+`amount` is integer cents (no `_cents` suffix on the payment
+resource, by the fragment; the request's amount rides the same
+name). The `PaymentIntentResponse` echoes the amount under
+`amount_cents` (see the fragment note). No quantity is exposed.
 
 ## Lifecycle and transitions
 
 A payment has no lifecycle of its own. It is created, and a refund
-is a second payment that references the first. The AR subledger is
+is a separate `Refund` row against the original with its own
+positive amount, status and gateway refund id. The AR subledger is
 moved in the same transaction
 (`account.PostTransaction(ctx, inv.CustomerID,
 account.TransactionTypePayment, -amountCents, &p.ID, "Payment
@@ -104,10 +119,11 @@ and the gateway are the systems of record. C2-4 writes
 
 ## Scopes, roles and keys
 
-A machine key reaching the payment routes needs `payment:read` for
-`GET` and `payment:write` for every other method (ADR 0002). The
-user guard at the serve layer is the standard sales and finance
-wall; the exact guard is composed in
+A machine key reaching the payment routes needs `payments:read` for
+`GET` and `payments:write` for every other method (ADR 0002; the
+segment is the first path segment under `/api/v1/`). The user guard
+at the serve layer is `admin`, `owner`, `sales`, `finance`,
+`cashier`; the exact guard is composed in
 `core/internal/app/serve/serve.go` at the payment handler's
 `RegisterRoutes` line. A key without the scope is `403 forbidden`.
 

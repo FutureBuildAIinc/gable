@@ -29,7 +29,7 @@ this so the builder sees the job from their side.
 Every route is in `core/api/fragments/project.yaml` and the
 registered handles are in `core/internal/project/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`project` module column.
+`portal` module column (the project routes share the portal prefix).
 
 | Method | Path | One line |
 |---|---|---|
@@ -54,14 +54,14 @@ customer's project is a 404.
 | `customer_id` | UUID | The customer the project is for. |
 | `name` | text | The job name, free text. |
 | `status` | lowercase enum | `active`, `completed`. `inactive` is a storage value the 091 job merge wrote; writes accept `active` and `completed` only. |
-| `revision` | int64 | Starts at 1; returned as ETag. |
+| `revision` | integer | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
 The `ProjectDashboard` (returned by `GET /api/portal/v1/projects/{id}`)
 embeds the project and three lists: `orders`, `deliveries` and
-`invoices`. Each item is a `ProjectItem`: `id`, `number`, `status`,
-`total_cents`, `created_at`. The totals are integer cents, never
-floats.
+`invoices`. Each item is a `ProjectItem`: `id`, `type`, `status`,
+`total_cents`, `created_at`, `reference`. The totals are integer
+cents, never floats.
 
 ### Money and quantity conventions
 
@@ -99,7 +99,7 @@ as the last statement of its transaction
 
 A machine key does not reach the project routes today; the routes
 are portal-only and authenticate through the portal session. The
-portals's session JWT names the customer and the user, and a
+portal's session JWT names the customer and the user, and a
 request that names another customer's project id is a 404.
 
 ## ADRs that govern this module

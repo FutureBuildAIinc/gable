@@ -50,19 +50,21 @@ Every route registers under the millwork app (a 404
 ## The main resources
 
 `ConfiguratorRule` (see `core/api/fragments/configurator.yaml`
-`components.schemas.ConfiguratorRule`) carries the dependency
-type and value, the attribute type and value, and the action
-(`allow`, `deny`, `require`). The matrix is ordered by
+`components.schemas.ConfiguratorRule`) carries `attribute_type`,
+`attribute_value`, `depends_on_type`, `depends_on_value`,
+`is_allowed` (boolean), `error_message` (nullable). A rule is
+matched by its dependency type and value; the matrix is ordered by
 dependency type and value, then attribute type and value, never
 null.
 
-`ConfiguratorPreset` carries a name, a category, a description
-and a `config` object whose shape is the JSON the dealer
-stored, not a base64 string.
+`ConfiguratorPreset` carries `id`, `name`, `description` (nullable),
+`product_type`, `config` (an object), `is_active`, `created_at`,
+`updated_at`.
 
-`ConfiguratorOptions` is the response of the options route: a
+`ConfiguratorAvailableOption` is the response of the options route: a
 list of allowed values for the named attribute under the given
-selections, deterministically ordered by value.
+selections, deterministically ordered by value. Each carries
+`value`, `allowed` (boolean), `message` (nullable).
 
 ### Money and quantity conventions
 
@@ -81,18 +83,17 @@ and no event. The build route is idempotent through the platform
 ## Events the module writes
 
 The configurator writes no outbox events. The build and validate
-routes may write `audit_log` rows when called by a machine key
-through the integration seam, but the routes are read-shaped.
+routes do not write `audit_log` rows.
 
 ## Scopes, roles and keys
 
 A machine key reaching the configurator routes needs
 `configurator:read` for `GET` and `configurator:write` for
 `POST /api/v1/configurator/validate` and
-`POST /api/v1/configurator/build-sku` (ADR 0002). The user
-guard at the serve layer is `admin`, `owner`, or `sales`. A
-key without the scope is `403 forbidden`; the audit row carries
-the refused scope.
+`POST /api/v1/configurator/build-sku` (ADR 0002; the segment is
+the first path segment under `/api/v1/`). The user guard at the
+serve layer is `admin`, `owner`, or `sales`. A key without the
+scope is `403 forbidden`; the audit row carries the refused scope.
 
 ## ADRs that govern this module
 
