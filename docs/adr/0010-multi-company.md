@@ -413,36 +413,62 @@ company follows by one lookup (the branch row's `company_id`), and a caller
 whose grants reach no branch of that company gets the same 403 the branch
 wall gives. No new guard layer: the existing guard grows one join.
 
-The few routes with no branch at all (a company's GL, AP and bank reads, and
-the consolidated report) take the company as the path parameter of their own
-resource: `/api/v1/companies/{id}/trial-balance`, `.../profit-and-loss`,
-`.../balance-sheet`, `.../accounts`, `.../journal-entries`,
-`.../fiscal-periods`, and the AP and bank reads under the same segment. A
-new module segment `companies` joins ADR 0002's vocabulary and the route
-census test (ADR 0002 section 2), under ADR 0002's plain rule: reads need
-`companies:read`, writes need `companies:write`. The writes under the
-segment are owner and admin acts (creating a company, renaming it, setting
-its tax code, creating its first branches, closing and reopening its
-fiscal periods), so `companies:write` is never granted to a machine key
-in v1: no key can create or rewrite a legal entity. This depends on ADR
-0009 (finer admin and users scopes, in flight on `refactor/c5-1a-admin`,
-PR 49): ADR 0009 keeps ADR 0002's plain `<module>:read` and
-`<module>:write` rule for every module outside the admin segment's
-declared areas (its section 2), and `companies` is such a module, so the
-scope names here hold under ADR 0002 today and under ADR 0009's
-`ValidScopeGrammar()` once it lands; item 7 runs after C5-1a so the
-company admin routes and screens are born on that grammar.
+The branchless routes keep their own module's first segment and put the
+company second, because ADR 0002's derivation rule takes the module from
+the first path segment, verbatim (section 2), and `gl` and `bankrecon`
+are declared modules (`core/pkg/middleware/machinekey.go:95,97,109`). The
+GL routes move to `/api/v1/gl/companies/{company_id}/accounts`,
+`.../journal-entries`, `.../fiscal-periods`, `.../trial-balance`,
+`.../profit-and-loss` and `.../balance-sheet`, keeping `gl:read` and
+`gl:write`; bank reconciliation moves to
+`/api/v1/bankrecon/companies/{company_id}/accounts`, `.../import`,
+`.../sessions`, `.../match` and `.../unmatch`, keeping `bankrecon:read`
+and `bankrecon:write`. Putting them under a `companies` first segment
+would re scope every key that works the books: every GL and bank write
+would land in `companies:write` while `RequireRole` is skipped for keys
+(ADR 0002 section 4), and a scope grammar cannot say "no key may hold
+this" (the minted key would simply hold it, ADR 0002 section 4 again, and
+ADR 0007 5.3's mint check accepts any `<vocabulary module>:<verb>`), so
+every agent and integration that posts a journal entry, pays a bill or
+imports a bank file through a key would lose the ability the day the
+build lands, the same breakage this record refuses for unbound keys. AP
+needs no branchless route at all: C4-1b gives `vendor_invoices` a
+`branch_id` (ADR 0008 section 12), so AP's routes stay where they are
+(`core/internal/ap/handler.go:38-48`) and the branch wall reaches their
+documents like every branch document. The consolidated report is a GL
+read under the same segment (section 8).
 
-The record rule under that segment: every repository read and write of a
-record route carries `WHERE company_id = $path`, so a path id that names
-another company's row answers 404, exactly as an unknown id does.
-`/companies/{id}/journal-entries/{entry_id}`, `.../ap/invoices/{id}`,
-`.../fiscal-periods/{id}/close` and `.../bankrecon/sessions/{id}` can
-never load or touch a row the path's company does not own. Today's
-handlers load by id with no scope at all (`gl/handler.go:39-61`,
-`ap/handler.go:38-48`, `bankrecon/handler.go:37-50`); the conversion
-closes at the company boundary the same hole PR 39 closed for branches on
-path ids. A wall test in the shape of
+The `companies` segment holds the company resource alone: the company
+list, create, rename, the tax code write, and
+`POST /api/v1/companies/{id}/branches` (the branch rule below). The
+segment joins ADR 0002's vocabulary and the route census test (ADR 0002
+section 2), under ADR 0002's plain rule: reads need `companies:read`,
+writes need `companies:write`. The writes under the segment are owner and
+admin acts (creating a company, renaming it, setting its tax code,
+creating its first branches), and they are user only routes in ADR 0002
+section 4's sense: a machine key is refused there whatever scope it
+holds, audited `key.user_required`, exactly as the key management routes
+are, because no key may create or rewrite a legal entity and no scope can
+say so. This depends on ADR 0009 (finer admin and users scopes, in flight
+on `refactor/c5-1a-admin`, PR 49): ADR 0009 keeps ADR 0002's plain
+`<module>:read` and `<module>:write` rule for every module outside the
+admin segment's declared areas (its section 2), and `companies` is such a
+module, so the scope names here hold under ADR 0002 today and under ADR
+0009's `ValidScopeGrammar()` once it lands; item 7 runs after C5-1a so
+the company admin routes and screens are born on that grammar.
+
+The record rule under those company paths: every repository read and write
+of a record route carries `WHERE company_id = $path`, so a path id that
+names another company's row answers 404, exactly as an unknown id does.
+`/api/v1/gl/companies/{id}/journal-entries/{entry_id}` and
+`.../fiscal-periods/{id}/close`, and
+`/api/v1/bankrecon/companies/{id}/sessions/{id}`, can never load or touch
+a row the path's company does not own. Today's handlers load by id with
+no scope at all (`gl/handler.go:39-61`, `bankrecon/handler.go:37-50`);
+the conversion closes at the company boundary the same hole PR 39 closed
+for branches on path ids, and AP's documents close at the branch boundary
+once C4-1b's `vendor_invoices.branch_id` lands, through the same wall. A
+wall test in the shape of
 `core/internal/app/serve/wire_branch_wall_test.go`
 (`wire_company_wall_test.go` beside it) covers each moved route, and item
 5's exit test names it.
@@ -468,9 +494,11 @@ query across all branches), so they reach every company. The role guards
 decide the rest, unchanged: the finance and admin roles that guard a
 company's GL, AP and bank routes today still decide whether a branch user
 may read them, so the derivation widens nothing. Today's branchless GL
-routes (`gl/handler.go:39-61`) move under the company resource, each with
-a row in `docs/refactor/CONTRACT-CHANGES.md`; AP's (`ap/handler.go:38-48`)
-and bank reconciliation's (`bankrecon/handler.go:37-50`) the same.
+routes (`gl/handler.go:39-61`) and bank reconciliation routes
+(`bankrecon/handler.go:37-50`) move under their own module's company
+resource, each with a row in `docs/refactor/CONTRACT-CHANGES.md`; AP's
+routes (`ap/handler.go:38-48`) stay and gain the branch wall through
+C4-1b's `vendor_invoices.branch_id`, also a row.
 
 Keys, per ADR 0002: a branch bound key (ADR 0007 5.5) reaches its branch's
 company and no other, whatever its scopes. An unbound key today reaches
@@ -508,15 +536,17 @@ as every branchless write does today.
 ### 8. Reports and consolidation
 
 - `gl.Service.GetTrialBalance(ctx, asOfDate)` (`service.go:244`) and the
-  statements (`service.go:258,280`) take the company, served by the company
-  routes of section 6. No route answers a company-less trial balance after
-  the conversion; the removal is a listed contract change.
+  statements (`service.go:258,280`) take the company, served by the GL
+  company routes of section 6. No route answers a company-less trial
+  balance after the conversion; the removal is a listed contract change.
 - Consolidated trial balance: `GetTrialBalanceConsolidated(ctx, asOf,
   companyIDs)`, a new read over a named set of company ids the caller's
   grants reach in full; a set holding a company the caller cannot reach is
-  403, the wall of section 6 applied per element. Grouped by currency:
-  companies whose functional currencies differ are consolidated per currency
-  only, never added (section 5). Eliminations have nothing to net in v1
+  403, the wall of section 6 applied per element. It is served at
+  `GET /api/v1/gl/trial-balance-consolidated`, inside the `gl` module and
+  its `gl:read`. Grouped by currency: companies whose functional
+  currencies differ are consolidated per currency only, never added
+  (section 5). Eliminations have nothing to net in v1
   (no inter company documents exist, section 9), so the v1 answer is a plain
   sum per currency per account code across the named companies; the
   elimination rule arrives with the inter company transfer's own record.
@@ -683,7 +713,7 @@ are its own, and their sum is stated rather than rounded):
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
-| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, the record rule with `wire_company_wall_test.go`, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
+| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route; routes and the desk screen) | 6 to 10 |
 
