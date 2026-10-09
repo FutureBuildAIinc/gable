@@ -58,7 +58,7 @@ Today's tenancy, with file and line:
   PR 39 ("Security: the branch wall on path ids (PO receive, location reads)")
   extended the same guard to path ids
   (`core/internal/purchase_order/handler.go:67,233`, wired in
-  `core/internal/app/serve/wire_branch_wall.go:37-38`), and PR 44 ("Security:
+  `core/internal/app/serve/wire_branch_wall.go:38-39`), and PR 44 ("Security:
   lists without a branch header are held to the caller's grants") added the
   list rule (`branch.go:44-59`).
 - The books carry no branch today: the GL tables (`gl_accounts`,
