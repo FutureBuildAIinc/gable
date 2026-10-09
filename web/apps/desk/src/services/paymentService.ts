@@ -3,6 +3,7 @@
 
 import type {
     Payment,
+    PaymentApplication,
     PaymentApplicationPage,
     PaymentApplicationRequest,
     PaymentIntentRequest,
@@ -13,6 +14,7 @@ import type {
     Refund,
     RefundRequest
 } from '../types/payment';
+import { walkCursor } from '../lib/cursorWalk';
 import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -57,10 +59,14 @@ export const paymentService = {
 
     // What settled an invoice: every application against it, payments, credit
     // memos, discounts and write offs, a reversed one still listed.
-    history: async (invoiceId: string): Promise<PaymentApplicationPage> => {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/invoices/${invoiceId}/payments`);
+    history: async (invoiceId: string, cursor?: string): Promise<PaymentApplicationPage> => {
+        const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+        const response = await fetchWithAuth(`${API_URL}/api/v1/invoices/${invoiceId}/payments${qs}`);
         return read(response, 'Failed to fetch payments');
     },
+
+    // Every page of the history, so a long one is not cut at the first.
+    historyAll: (invoiceId: string): Promise<PaymentApplication[]> => walkCursor((cursor) => paymentService.history(invoiceId, cursor)),
 
     // Applies a payment's unapplied cash to invoices. The revision is the
     // precondition (If-Match or the body's revision).

@@ -104,7 +104,7 @@ export class GableInvoiceDetail extends LitElement {
         try {
             // the invoice's applications, newest first; a reversed one is
             // still listed with its reversal date
-            this.applications = (await paymentService.history(id)).items;
+            this.applications = await paymentService.historyAll(id);
         } catch (error) {
             console.error('Failed to load payments', error);
         }

@@ -37,11 +37,11 @@ export class ARAgingReportPage extends LitElement {
     private async _load() {
         this.loading = true;
         try {
-            const [page, summary] = await Promise.all([
-                ArService.aging({ groupBy: this.groupBy, basis: this.basis, asOf: this.asOf || undefined }),
+            const [rows, summary] = await Promise.all([
+                ArService.agingAll({ groupBy: this.groupBy, basis: this.basis, asOf: this.asOf || undefined }),
                 ArService.agingSummary({ basis: this.basis, asOf: this.asOf || undefined })
             ]);
-            this.rows = page.items;
+            this.rows = rows;
             this.totals = summary.totals;
         } catch (err) {
             console.error(err);

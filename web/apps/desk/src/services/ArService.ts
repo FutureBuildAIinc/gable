@@ -4,7 +4,8 @@
 // The AR reads of ADR 0005 section 10: the aging by customer, job or ship-to,
 // its summary, and the customer's statement. Cents on every amount.
 
-import type { ArAgingPage, ArAgingSummary, ArStatement, AgingGroupBy } from '../types/account';
+import type { ArAgingItem, ArAgingPage, ArAgingSummary, ArStatement, AgingGroupBy } from '../types/account';
+import { walkCursor } from '../lib/cursorWalk';
 import { fetchWithAuth } from './fetchClient';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -23,6 +24,10 @@ export const ArService = {
         }
         return response.json();
     },
+
+    // Every page of the aging, so its rows sum to the summary beside them.
+    agingAll: async (params: { groupBy?: AgingGroupBy; asOf?: string; basis?: 'due_date' | 'invoice_date'; customerId?: string } = {}): Promise<ArAgingItem[]> =>
+        walkCursor((cursor) => ArService.aging({ ...params, cursor })),
 
     agingSummary: async (params: { asOf?: string; basis?: 'due_date' | 'invoice_date'; customerId?: string } = {}): Promise<ArAgingSummary> => {
         const qs = new URLSearchParams();
