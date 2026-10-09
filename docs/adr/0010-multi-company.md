@@ -57,7 +57,7 @@ Today's tenancy, with file and line:
   `BranchGuard.CheckPayloadBranch` (`core/pkg/middleware/branch_payload.go:51`),
   PR 39 ("Security: the branch wall on path ids (PO receive, location reads)")
   extended the same guard to path ids
-  (`core/internal/purchase_order/handler.go:34,35,67,233`, wired in
+  (`core/internal/purchase_order/handler.go:67,233`, wired in
   `core/internal/app/serve/wire_branch_wall.go:36-37`), and PR 44 ("Security:
   lists without a branch header are held to the caller's grants") added the
   list rule (`branch.go:44-59`).
@@ -88,7 +88,7 @@ Today's tenancy, with file and line:
   loads the whole chart (`core/internal/gl/service.go:49-71`; the posting
   family `SyncInvoice` to `SyncVendorPayment` at `service.go:426-769` and
   `PostEntry` at `core/internal/gl/postentry.go:67,92`).
-- One fiscal calendar: `gl_fiscal_periods` (`025:28`) with the non overlap
+- One fiscal calendar: `gl_fiscal_periods` (`025:27`) with the non overlap
   exclusion and the closed period trigger of
   `077_gl_reversal_period_hardening.sql` (`:24-27` the exclusion,
   `:29-48` the closed period trigger).
@@ -96,7 +96,7 @@ Today's tenancy, with file and line:
   setting (`core/internal/config/config.go:36,150`), stamped on every
   provider call (`core/internal/tax/avalara.go:107`) and held by the tax
   service at construction (`core/internal/tax/service.go:36,43,111`; wired at
-  `core/internal/app/serve/serve.go:473-483`).
+  `core/internal/app/serve/serve.go:483`).
 - One dealer default currency: `system_settings` key `currency.default`,
   seeded `USD` (`core/migrations/091_customers_wire_contract.sql:36`), inside
   ADR 0005 section 4.2's chain (customer override, else this default).
@@ -216,7 +216,7 @@ row itself.
 | sales | `quotes` | R1 | `063:6` |
 | sales | `invoices` | R1 | `064:7` |
 | sales | `payments` | R1 | `branch_id` is added by C2-4 (ADR 0005 9.1 at `0005:1067`, migration step at `0005:1484`, which lists the column and no backfill source); the backfill is from the invoice, which every legacy payment names (`invoice_id NOT NULL`, `008:11`); the build sets the column NOT NULL, then the standard trigger |
-| sales | `credit_memos` | R1 | `branch_id` is added by C2-3 (ADR 0005 6.3 at `0005:821`, backfilled from the invoice or the customer's primary branch at `0005:1474`, nullable on arrival); the build sets it NOT NULL, then the standard trigger |
+| sales | `credit_memos` | R1 | `branch_id` is added by C2-3 (ADR 0005 6.3 at `0005:821`, backfilled from the invoice or the customer's primary branch at `0005:1474`) and already NOT NULL when it lands (`097:258`); the build adds only the standard trigger |
 | sales (C2-4, ADR 0005 9.2) | `ar_applications` | R2 | child rows of a payment or credit memo and an invoice; the AR core checks both sides name one company and refuses the act when they do not, the R2 check beside the two R1 parents |
 | sales (C2-4, ADR 0005 9.3) | `customer_transactions` | R2 | the AR subledger row; from its invoice, credit memo or payment; the balance invariant of ADR 0005 9.3 holds per company |
 | sales (C2-4) | `payment_refunds` | R2 | from its payment or credit memo |
@@ -367,7 +367,7 @@ company by construction, because every document carries its company:
 
 ADR 0005 section 4.1 gives invoices and credit memos gapless numbers from
 `document_counters (series TEXT PRIMARY KEY, next_value)` with one series
-`invoice` and one `credit_memo` (built by C2-3, in review as PR 46), and the
+`invoice` and one `credit_memo` (built by C2-3, merged as PR 46), and the
 other documents gapped numbers from Postgres sequences; its named escape,
 if a dealer ever reaches the mint's ceiling, is a series per branch with the
 branch code in the prefix.
@@ -520,7 +520,7 @@ disagree with the branch and create a second, inconsistent scope. A
 (ADR 0005 section 4.2).
 
 For a record by path id, PR 39's wall already loads the record's branch
-(`purchase_order/handler.go:34,35`; `wire_branch_wall.go`); the record's
+(`purchase_order/handler.go:67,233`; `wire_branch_wall.go`); the record's
 company follows by one lookup (the branch row's `company_id`), and a caller
 whose grants reach no branch of that company gets the same 403 the branch
 wall gives. No new guard layer: the existing guard grows one join.
@@ -700,7 +700,7 @@ as every branchless write does today.
   `AvalaraClient.CalculateTax`, `avalara.go:107`), and the tax service
   holds the same value at construction (`tax/service.go:36,43`, used at
   `:111`; the service is built by `orderwire.NewTaxService`, called at
-  `serve.go:481`). The build moves the stamp to the document's company
+  `serve.go:483`). The build moves the stamp to the document's company
   at call time: the tax service takes the company code per call and
   passes it into `CalculateTax`, whose request must carry it instead of
   the client's configured value; a company
@@ -816,8 +816,9 @@ Up, in order:
    backfill from the parent, NOT NULL, the foreign key, and the
    `BEFORE INSERT OR UPDATE` trigger that keeps it and refuses a parent of
    another company. Payments and credit memos are R1 from the branch cycle
-   2 adds (section 2): their `branch_id` columns arrive with C2-3 and C2-4
-   and are set NOT NULL here first, then take the same trigger. The till
+   2 adds (section 2): payments' `branch_id` arrives with C2-4 and is set
+   NOT NULL here first; credit memos' arrives with C2-3 already NOT NULL
+   (`097:258`), so only the trigger is added. The till
    tables (`075:21`, `078:15`, `079:42`) are R1 through their register
    (section 2): their trigger keys on the register, not on the nullable
    branch, and their company is backfilled from the register's;
@@ -940,7 +941,7 @@ below.
 
 Against the cycles already running: after C2-5. The cycle 2 chain is C2-2b
 (allocation, back orders, fulfilment; merged as PR 43), C2-3 (invoices,
-credit memos, gapless numbering and void; in review as PR 46), then C2-4
+credit memos, gapless numbering and void; merged as PR 46), then C2-4
 (payments, deposits, AR) and C2-5 (POS, till). C2-3 to C2-5 add and reshape
 the AR and counter tables (`ar_applications`, `document_counters`, the
 payment and credit memo columns, ADR 0005 sections 4.1, 9.1, 9.2 and 13),
