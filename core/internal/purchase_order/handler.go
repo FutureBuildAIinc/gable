@@ -293,8 +293,10 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 // administrator without a header still reads arm 3 today because IsAdmin
 // suppresses GrantsSubForQuery). To keep the HTTP and cron paths writing
 // the same targets, this handler strips the BranchContext the middleware
-// put on the request and marks the resulting context as a system caller,
-// the seam the cron path already is, so the velocity read sees every
+// put on the request — the same scenario the cron path is in, no populated
+// BranchContext on the call, so the velocity read's arm 3 fires — and
+// marks the resulting context as a system caller, the trusted-caller mark
+// the portal and A2A receivers carry, so the velocity read sees every
 // branch's data and a bound user's refresh writes the same targets an
 // administrator's would.
 func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Request) {

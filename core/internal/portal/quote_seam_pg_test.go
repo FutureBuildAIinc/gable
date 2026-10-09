@@ -24,6 +24,10 @@ import (
 )
 
 func TestAcceptQuote_DecidesAsAMarkedSystemCaller(t *testing.T) {
+	// The quote service below writes quote events into events_outbox, which
+	// the events and outbox packages' tests truncate under this lock; take it
+	// so this test's writes and their truncates serialise across packages.
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 

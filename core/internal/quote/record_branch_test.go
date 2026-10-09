@@ -44,6 +44,10 @@ func seedQuote(t *testing.T, svc *quote.Service, customerID, productID uuid.UUID
 }
 
 func TestGetQuote_RecordBranchFailsClosed(t *testing.T) {
+	// seedQuote below writes a quote.created row into events_outbox, which
+	// the events and outbox packages' tests truncate under this lock; take it
+	// so this test's writes and their truncates serialise across packages.
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	ctx := context.Background()
@@ -86,6 +90,10 @@ func TestGetQuote_RecordBranchFailsClosed(t *testing.T) {
 }
 
 func TestUpdateState_RecordBranchFailsClosed(t *testing.T) {
+	// Same outbox lock as TestGetQuote_RecordBranchFailsClosed above: the
+	// seeded quote's events share events_outbox with the truncating tests of
+	// the events and outbox packages.
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	ctx := context.Background()
