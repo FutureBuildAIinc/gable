@@ -33,8 +33,8 @@ forces the sales rep to enter a purchase order number at confirm.
 
 Every route is in `core/api/fragments/customer.yaml` and the registered
 handles are in `core/internal/customer/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `customer` module
-column.
+(`core/api/ROUTES.txt`) lists each one under the `customers`,
+`ship-tos`, `contacts` and `payment-terms` module columns.
 
 | Method | Path | One line |
 |---|---|---|
@@ -60,6 +60,9 @@ column.
 | DELETE | `/api/v1/contacts/{id}` | Delete a contact. |
 | GET | `/api/v1/price_levels` | List the price level master. |
 
+`ship-tos`, `contacts`, `payment-terms` and `price_levels` each carry
+their own scope segment.
+
 ## The main resource
 
 `Customer` (see `core/api/fragments/customer.yaml` `components.schemas.Customer`).
@@ -76,31 +79,33 @@ column.
 | `price_level_id` | UUID, nullable | The price level that drives pricing. |
 | `price_level` | object, nullable | Embedded price level summary. |
 | `salesperson_id`, `salesperson_name` | UUID, text, nullable | The book owner. |
-| `credit_limit_cents` | int64, nullable | The credit limit; null is no limit, zero is a limit of nothing. |
-| `balance_cents` | int64 | The AR balance, read only: the AR core is the single writer. |
+| `credit_limit_cents` | integer, nullable | The credit limit; null is no limit, zero is a limit of nothing. |
+| `balance_cents` | integer | The AR balance, read only: the AR core is the single writer. |
 | `currency` | ISO 4217, nullable | The customer's currency override; null means the dealer default. |
 | `effective_currency` | ISO 4217 | The currency a new document of this customer takes. |
 | `payment_terms_id`, `payment_terms` | UUID, object | The terms master row, embedded. |
 | `po_required` | boolean | Whether an order of this customer must carry a PO number. |
-| `revision` | int64 | Starts at 1; returned as ETag. |
+| `revision` | integer | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
-A `ShipTo` carries `customer_id`, `label`, `line1`, `line2`, `city`,
-`state`, `postal_code`, `country`, `tax_rate_percent`, `is_default`,
-`revision`, `created_at`, `updated_at`.
+A `ShipTo` carries `id`, `customer_id`, `code`, `name`, `line1`,
+`line2`, `city`, `region`, `postal_code`, `country`, `phone`,
+`delivery_instructions`, `tax_rate_percent`, `is_default`,
+`is_active`, `revision`, `created_at`, `updated_at`.
 
-A `Contact` carries `customer_id`, `name`, `email`, `phone`, `role`,
+A `Contact` carries `id`, `customer_id`, `first_name`, `last_name`,
+`title`, `email`, `phone`, `role`, `is_primary`, `is_active`,
 `can_place_orders`, `order_limit_cents`, `revision`, `created_at`,
 `updated_at`. The order confirm checks `can_place_orders` and the
 `order_limit_cents` against the order's total; an over-limit order by
 a contact who cannot place them is refused (blocker
 `contact_authority`).
 
-A `PaymentTermsRecord` carries `code` (one to 32 chars), `name`,
-`kind` (`net`, `cod`, `prepaid`, `ach`, `card`, `custom`), `net_days`
-(integer for `net`), `early_payment_discount_percent` and
-`early_payment_discount_days` (decimal string, scale 4), `is_active`,
-`revision`, `created_at`, `updated_at`.
+A `PaymentTermsRecord` carries `id`, `code`, `name`, `kind`
+(`net_days`, `day_of_month`, `due_on_receipt`), `net_days`,
+`day_of_month`, `discount_percent`, `discount_days`, `is_active`,
+`revision`, `created_at`, `updated_at`. The `kind` and the conditional
+fields together drive the invoice due date.
 
 ### Money and quantity conventions
 
@@ -132,12 +137,19 @@ The data is a small summary; the full document is read through `GET`.
 
 ## Scopes, roles and keys
 
-A machine key reaching the customer routes needs `customer:read` for
-`GET` and `customer:write` for every other method (ADR 0002). The user
-guard at the serve layer is the standard sales and finance wall; the
-exact guard is composed in `core/internal/app/serve/serve.go` at
-`wall.customers(mux, customerSvc)`. A key without the scope is `403
-forbidden`; the audit row carries the refused scope.
+A machine key reaching the customer routes needs `customers:read` for
+`GET` and `customers:write` for every other method (ADR 0002; the
+segment is the first path segment under `/api/v1/`). Ship-tos need
+`ship-tos:read` or `ship-tos:write`; contacts need
+`contacts:read` or `contacts:write`; payment terms writes need
+`payment-terms:read` or `payment-terms:write`; price levels need
+`price_levels:read`. The user guard at the serve layer is
+`admin`, `owner`, `sales` for customer reads and writes, with
+`admin`, `owner`, `finance` taking the narrower payment terms writes;
+the exact guard is composed in
+`core/internal/app/serve/wire_branch_wall.go` at `wall.customers`.
+A key without the scope is `403 forbidden`; the audit row carries the
+refused scope.
 
 ## ADRs that govern this module
 

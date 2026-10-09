@@ -11,17 +11,16 @@ the job, the salesperson, the delivery type) and a list of priced lines
 (product lines, kit lines, component lines, charge lines and text
 lines). The order is the first place inventory is allocated, the first
 place a credit hold lands, the first place the back order state is
-recorded, and the moment a quote becomes a sale. The fulfilment call
+recorded, and the moment a quote becomes a sale. The fulfillment call
 against an order is the money moment: it writes the invoice, posts the
 general ledger, and moves the AR subledger.
 
-The Go code is in `core/internal/order/`. The fulfilment code is in
+The Go code is in `core/internal/order/`. The fulfillment code is in
 `core/internal/order/fulfil.go`, the allocation code in
-`core/internal/order/alloc.go`, the will-call queue in
-`core/internal/order/fulfil_queue.go`. The migration that brought the
+`core/internal/order/alloc.go`. The migration that brought the
 table onto the contract is
 `core/migrations/092_orders_wire_contract.sql`; the migration that
-wired fulfilment and allocation is
+wired fulfillment and allocation is
 `core/migrations/094_fulfilment_and_allocation.sql`.
 
 ## What it does in a yard
@@ -30,16 +29,15 @@ A builder or contractor calls or walks in with a list of materials. The
 sales rep opens an order, picks the customer, picks the ship-to, and
 lines up the products. The order goes through draft, on hold (if
 credit is over the limit), confirmed, back ordered (if stock is short),
-fulfilled and closed. The fulfilment is the act that issues the
-invoice, the picking ticket, and the delivery or the will-call pickup.
-For will-call the order sits at the yard until the customer picks up,
-and the queue holds the lines until they are pulled.
+fulfilled and closed. The fulfillment is the act that issues the
+invoice and the picking ticket and starts the delivery or hands the
+goods to the customer at the counter.
 
 ## Routes
 
 Every route is in `core/api/fragments/order.yaml` and the registered
 handles are in `core/internal/order/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `order` module
+(`core/api/ROUTES.txt`) lists each one under the `orders` module
 column.
 
 | Method | Path | One line |
@@ -50,14 +48,14 @@ column.
 | PUT | `/api/v1/orders/{id}` | Replace a draft order's header and lines, on the client's revision. |
 | POST | `/api/v1/orders/{id}/transitions` | Move an order along its lifecycle, on the client's revision. |
 | POST | `/api/v1/orders/{id}/allocate` | Allocate a back ordered order on demand. |
-| POST | `/api/v1/orders/{id}/fulfillments` | Fulfil an order: invoice, picking ticket, delivery or will-call. |
-| GET | `/api/v1/orders/fulfillment-requests` | List the fulfilment requests of completed deliveries. |
-| POST | `/api/v1/orders/fulfillment-requests/{delivery_id}/retry` | Retry a parked fulfilment request. |
+| POST | `/api/v1/orders/{id}/fulfillments` | Fulfill an order: invoice, picking ticket, delivery or pickup. |
+| GET | `/api/v1/orders/fulfillment-requests` | List the fulfillment requests of completed deliveries. |
+| POST | `/api/v1/orders/fulfillment-requests/{delivery_id}/retry` | Retry a parked fulfillment request. |
 | GET | `/api/v1/orders/{id}/exposure-gate` | Check the pre ship exposure gate. |
 | POST | `/api/v1/orders/{id}/exposure-override` | Override the exposure gate. |
 
 The exposure routes are the pricing module's; the rest are the order
-module's. The exposure-gate read is what the order's fulfilment
+module's. The exposure-gate read is what the order's fulfillment
 consults before it bills.
 
 ## The main resource
@@ -69,6 +67,7 @@ consults before it bills.
 | `id` | UUID | The order id. |
 | `number` | text | The order number, prefix `SO-`, padded to six. |
 | `status` | lowercase enum | `draft`, `on_hold`, `confirmed`, `backordered`, `fulfilled`, `cancelled`. |
+| `revision` | integer | Starts at 1; returned as ETag. |
 | `branch_id` | UUID | The branch the order belongs to. |
 | `customer_id` | UUID | The customer the order is for. |
 | `customer_name` | text | Snapshot of the customer name. |
@@ -79,24 +78,23 @@ consults before it bills.
 | `customer_po` | text, nullable | The customer's purchase order number. |
 | `ordered_by_contact_id` | UUID, nullable | The contact who placed the order. |
 | `salesperson_id` | UUID, nullable | The book's owner. |
+| `salesperson_name` | text, nullable | Snapshot of the salesperson name. |
 | `scheduled_delivery_date` | date, nullable | The planned delivery day. |
 | `delivery_type` | lowercase enum | `delivery`, `pickup`. |
 | `hold_reason` | lowercase enum, nullable | `credit_limit`, `manual`. Set only in `on_hold`. |
 | `hold_note` | text, nullable | A free text note for a manual hold. |
-| `subtotal_cents` | int64 | Sum of `line_total_cents` over non text lines. |
-| `tax_cents` | int64 | The order's tax estimate. |
+| `subtotal_cents` | integer | Sum of `line_total_cents` over non text lines. |
+| `tax_cents` | integer | The order's tax estimate. |
 | `tax_rate_percent` | decimal string, nullable | The rate used for the estimate. |
 | `tax_exempt` | boolean | Whether the customer is exempt. |
 | `tax_source` | lowercase enum | `exempt`, `provider`, `ship_to_rate`, `branch_rate`, `legacy`. |
-| `total_cents` | int64 | The customer's total, in minor units. |
-| `total_cost_cents`, `total_margin_cents`, `margin_percent` | int64, int64, decimal string | Read by margin-aware roles. |
-| `total_commission_cents` | int64 | Read by sales roles. |
+| `total_cents` | integer | The customer's total, in minor units. |
+| `total_cost_cents`, `total_margin_cents`, `margin_percent` | integer, integer, decimal string | Read by margin-aware roles. |
+| `total_commission_cents` | integer | Read by sales roles. |
 | `confirmed_at` | timestamp, nullable | When the order was first confirmed. |
 | `currency` | ISO 4217 | The customer's effective currency. |
 | `lines` | array of `OrderLine` | The priced lines, in position order. |
 | `invoice_ids` | array of UUID | The invoices that have been issued from this order. |
-| `deposit_unapplied_cents` | int64 | The unapplied payments (added by C2-4). |
-| `revision` | int64 | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
 `OrderLine` carries the shared sales line shape of ADR 0005 section 2
@@ -108,21 +106,22 @@ and adds the order-only allocation and back order fields:
 | `parent_line_id` | UUID, nullable | Set on `component` only. |
 | `product_id` | UUID, nullable | Required on `kit` and `component`; optional on `product`; null otherwise. |
 | `charge_code_id` | UUID, nullable | Required on `charge` only. |
+| `charge_code` | text, nullable | Snapshotted at create. |
 | `sku`, `description` | text | Snapshot of the product. |
 | `quantity`, `uom` | decimal string, text | The sale unit, scale 4. |
 | `price_uom`, `uom_qty`, `price_uom_qty` | text, decimal string, decimal string | The price unit and the conversion pair. |
-| `unit_price_ten_thousandths` | int64 | The price per `price_uom`, scale 4. |
-| `priced_unit_price_ten_thousandths` | int64 | What the pricing engine resolved, read only. |
+| `unit_price_ten_thousandths` | integer, nullable | The price per `price_uom`, scale 4. |
+| `priced_unit_price_ten_thousandths` | integer, nullable | What the pricing engine resolved, read only. |
 | `price_source` | lowercase enum | `price_list`, `quote`, `override`, `manual`, `none`. |
 | `override_reason` | text, nullable | Required when `price_source` is `override`. |
 | `discount_percent` | decimal string, nullable | 0 to 100. |
-| `discount_cents` | int64, nullable | Positive. |
+| `discount_cents` | integer, nullable | Positive. |
 | `discount_reason` | text, nullable | Required with either discount. |
 | `price_adjusted_by` | text, nullable | The actor id of the last override or discount. |
-| `line_total_cents` | int64 | The extension, rounded once. |
+| `line_total_cents` | integer, nullable | The extension, rounded once. |
 | `taxable` | boolean | From the product (or the request for a non stock line). |
 | `revenue_account_code` | text, nullable | The charge code's account, snapshotted at create. |
-| `is_special_order`, `vendor_id`, `special_order_unit_cost_ten_thousandths` | boolean, UUID, int64 | A stocked special order line. |
+| `is_special_order`, `vendor_id`, `special_order_unit_cost_ten_thousandths` | boolean, UUID, integer | A stocked special order line. |
 | `quote_line_id` | UUID, nullable | The quote line this came from. |
 | `quantity_allocated`, `quantity_backordered`, `quantity_fulfilled` | decimal string | Order lines only; section 5.4 invariant. |
 | `created_at` | timestamp | RFC 3339 UTC. |
@@ -148,16 +147,25 @@ is refused (ADR 0005 section 5.2):
 | `draft` | `confirmed` | Credit check; over the limit lands `on_hold` with `hold_reason` `credit_limit`; otherwise allocate and derive status; snapshot the ship-to; set `confirmed_at`. | `order.hold` then `order.confirmed`, or `order.confirmed` then `order.backordered` when it lands `backordered`. |
 | `on_hold` | `confirmed` | Release the hold; skip the credit check; allocate if never allocated. | `order.hold_released`, then `order.confirmed` if never confirmed before, then `order.backordered` when it lands `backordered`. |
 | `confirmed`, `backordered` | `on_hold` | Manual hold; allocations kept; `hold_reason` `manual`; `hold_note` required. | `order.hold`. |
-| `draft`, `on_hold`, `confirmed`, `backordered` | `draft` | Reopen: release every allocation, zero back orders. | `order.reopened`. |
-| `draft`, `on_hold`, `confirmed`, `backordered` | `cancelled` | Reason required; release allocations, zero back orders. | `order.cancelled`. |
+| `on_hold`, `confirmed`, `backordered` | `draft` | Reopen: release every allocation, zero back orders. | `order.reopened`. |
+| `on_hold`, `confirmed`, `backordered` | `cancelled` | Reason required; release allocations, zero back orders. | `order.cancelled`. |
 | `confirmed`, `backordered` | `fulfilled` | Close short: release allocations and back orders of the unfulfilled remainder. | `order.closed_short`. |
+
+Reopening is refused with `409 has_fulfilments` once anything was
+billed (the same guard covers reopen and cancel). Cancellations need
+a `reason` in the body and are refused with `409 has_fulfilments`
+once anything was billed. Closing short needs a `reason` and is
+refused with `409 no_fulfilments` when nothing was billed. Releasing a
+hold needs `admin`, `owner` or `finance`.
 
 Derived moves raise their own events: `backordered` to `confirmed` after
 a release on receipt (`order.backorder_released`), `confirmed` to
 `backordered` after an invoice void cannot re-allocate
-(`order.backordered`), a fulfilment that leaves quantity open
-(`order.partially_fulfilled`), a fulfilment that completes the order
-(`order.fulfilled`).
+(`order.backordered`), a fulfillment that leaves quantity open
+(`order.partially_fulfilled`), a fulfillment that completes the order
+(`order.fulfilled`). The events last: `invoice.created` first, then
+`order.fulfilled` or `order.partially_fulfilled`
+(`core/internal/order/fulfil.go`).
 
 Edits: `PUT /api/v1/orders/{id}` replaces header fields and lines in
 `draft` only; any other status is `409 conflict` with blocker
@@ -168,9 +176,10 @@ The events are the constants in `core/internal/order/service.go` and
 (`EventCreated`, `EventUpdated`, `EventConfirmed`, `EventHold`,
 `EventHoldReleased`, `EventReopened`, `EventCancelled`,
 `EventClosedShort`, `EventPartiallyFulfilled`, `EventFulfilled`,
-`EventBackordered`, `EventBackorderReleased`, `EventInvoiceCreated`).
+`EventBackordered`, `EventBackorderReleased`, `EventInvoiceCreated`,
+`EventFulfillmentParked`).
 
-## Allocation, back orders and will-call
+## Allocation, back orders and fulfillment
 
 When an order is confirmed, the service runs `allocateLines` (see
 `core/internal/order/alloc.go`). Each stocked line gets the lesser of
@@ -190,38 +199,45 @@ order line releases the back ordered quantity through the same path
 (`order.backorder_released`, then `order.fulfilled` or
 `order.partially_fulfilled`).
 
-For will-call (`delivery_type` `pickup`), the fulfilment is the
-`fulfilments` call with a `pickup` delivery type. The order sits in the
-queue (`core/internal/order/fulfil_queue.go`) until the customer shows
-up and the lines are pulled. A delivery uses the same call with
-`delivery`; the picking ticket and the delivery route are issued in the
-same transaction as the invoice.
+The fulfillment call is `POST /api/v1/orders/{id}/fulfillments` with
+`OrderFulfilRequest`: `revision`, `lines`, `picked_up_by`,
+`delivery_id`. A pickup order must send `picked_up_by`; a delivery
+order must not. The call is not a will-call queue; it is the act that
+issues the invoice, posts the general ledger, moves the AR subledger
+and writes the picking ticket in the same transaction. Completed
+deliveries leave parked fulfillment requests
+(`order.fulfillment_parked`) in `core/internal/order/fulfil_queue.go`,
+which `POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry`
+re-runs.
 
 ## Events the module writes
 
 Every mutation writes the event as the last statement of its
-transaction ([ADR 0003](../adr/0003-events-outbox.md)). A fulfilment
-that issues an invoice writes `order.fulfilled` and `invoice.created`
-in order. A retry of a parked fulfilment request
-(`POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry`)
-re-runs the same path with the same event ids and the same idempotency.
+transaction ([ADR 0003](../adr/0003-events-outbox.md)). A fulfillment
+that issues an invoice writes `invoice.created` first, then
+`order.fulfilled` or `order.partially_fulfilled`. A retry of a parked
+fulfillment request re-runs the same path with the same event ids and
+the same idempotency.
 
 ## Scopes, roles and keys
 
-A machine key reaching the order routes needs `order:read` for `GET`
-and `HEAD`, and `order:write` for every other method (ADR 0002). The
-user guard at the serve layer is the standard sales and finance wall;
-the exact guard is composed in `core/internal/app/serve/serve.go` at
-`wall.orders(mux, orderSvc)`. A key without the scope is `403
-forbidden`; the audit row carries the refused scope.
+A machine key reaching the order routes needs `orders:read` for `GET`
+and `HEAD`, and `orders:write` for every other method (ADR 0002; the
+segment is the first path segment under `/api/v1/`). The user guard at
+the serve layer is `admin`, `owner`, `sales` for reads and writes,
+with `admin`, `owner`, `finance`, `warehouse` taking the closer
+finance or warehouse paths (the exact guard is composed in
+`core/internal/app/serve/wire_branch_wall.go` at `wall.orders`).
+Releasing a hold needs `admin`, `owner` or `finance`. A key without
+the scope is `403 forbidden`; the audit row carries the refused scope.
 
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 6, 7, 7a, 8, 9, 11, 12.
 - [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
-- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) sections 2, 3, 4.1, 4.2, 5, 6, 7, 8.4: the shared line shape, totals and tax, document numbers, currency, the order state machine, the credit and contact checks, allocation and back orders, fulfilment, the cost basis, the kit definition.
-- [`docs/adr/0006-units-and-pricing.md`](../adr/0006-units-and-pricing.md) section 4.4: the `lines[].tally` field on fulfilment.
+- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) sections 2, 3, 4.1, 4.2, 5, 6, 7, 8.4: the shared line shape, totals and tax, document numbers, currency, the order state machine, the credit and contact checks, allocation and back orders, fulfillment, the cost basis, the kit definition.
+- [`docs/adr/0006-units-and-pricing.md`](../adr/0006-units-and-pricing.md) section 4.4: the `lines[].tally` field on fulfillment.
 
 ## How to try it locally
 
