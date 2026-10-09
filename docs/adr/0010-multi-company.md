@@ -12,8 +12,11 @@ It stands on ADR 0001 (the wire contract), ADR 0002 (machine keys), ADR 0003
 (the outbox), ADR 0005 (the sales and money core), ADR 0006 (units and
 pricing), ADR 0007 (drafts, links and confirm gated scopes) and ADR 0008
 (inventory identity and vendor intake). ADR 0009 (finer admin and users
-scopes) is in flight on `refactor/c5-1a-admin`; this record takes the next
-free number after it, which is why a design record carries 0010.
+scopes) is in flight on `refactor/c5-1a-admin` (PR 49); this record takes
+the next free number after it, which is why a design record carries 0010,
+and its `companies` scope names (section 6) depend on ADR 0009's grammar
+keeping ADR 0002's plain rule for modules outside the admin segment,
+which ADR 0009's own section 2 states.
 
 No merged record is superseded. Two listed contract changes extend merged
 records by their own rules: the gapless counter key of ADR 0005 section 4.1
@@ -415,7 +418,19 @@ resource: `/api/v1/companies/{id}/trial-balance`, `.../profit-and-loss`,
 `.../balance-sheet`, `.../accounts`, `.../journal-entries`,
 `.../fiscal-periods`, and the AP and bank reads under the same segment. A
 new module segment `companies` joins ADR 0002's vocabulary and the route
-census test (ADR 0002 section 2).
+census test (ADR 0002 section 2), under ADR 0002's plain rule: reads need
+`companies:read`, writes need `companies:write`. The writes under the
+segment are owner and admin acts (creating a company, renaming it, setting
+its tax code, creating its first branches, closing and reopening its
+fiscal periods), so `companies:write` is never granted to a machine key
+in v1: no key can create or rewrite a legal entity. This depends on ADR
+0009 (finer admin and users scopes, in flight on `refactor/c5-1a-admin`,
+PR 49): ADR 0009 keeps ADR 0002's plain `<module>:read` and
+`<module>:write` rule for every module outside the admin segment's
+declared areas (its section 2), and `companies` is such a module, so the
+scope names here hold under ADR 0002 today and under ADR 0009's
+`ValidScopeGrammar()` once it lands; item 7 runs after C5-1a so the
+company admin routes and screens are born on that grammar.
 
 The record rule under that segment: every repository read and write of a
 record route carries `WHERE company_id = $path`, so a path id that names
@@ -644,7 +659,9 @@ memo and counter line parity per ADR 0006): it reshapes the lines the
 company migration attaches. After C4-2: the real reason, on the record, is
 that ADR 0008 adds the stock, adjustment, receipt, vendor credit and feed
 tables of section 2, each needing a company rule; the census test then
-covers them from the start. After C5-1's GL, finance and bank reconciliation
+covers them from the start. After C5-1a (ADR 0009's finer admin scopes,
+PR 49): item 7's company admin routes and screens are born on ADR 0009's
+scope grammar, so it runs after C5-1a. After C5-1's GL, finance and bank reconciliation
 conversion and after C5-1c's branch wall: the company filter of sections 6
 and 8 rides the routes and the wall those items build. The design itself,
 this record, can merge now, ahead of all of them: it changes no code.
@@ -665,7 +682,8 @@ are its own, and their sum is stated rather than rounded):
 
 Total: 66 to 106 dev hour equivalents. Item 1 lands first and items 2 to 7
 depend on it; items 2 and 3 land together or in that order; 4 to 7 are
-independent of each other.
+independent of each other; item 7 runs after C5-1a, per the run order
+above.
 
 ## Consequences
 
