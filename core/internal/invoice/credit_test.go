@@ -234,6 +234,43 @@ func TestPartialCreditMemosNeverCreditMoreTaxThanCharged(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0005 3 and 6.3): when single piece returns round their tax DOWN,
+// the last memo still takes the remainder so the credited tax sums to exactly
+// what the invoice charged: five units at 1.05 charge 47 cents of tax
+// (465.9 rounds to 47) and each single return rounds 9.3 down to 9, so only
+// the remainder rule lets the last memo credit 11 instead of 9.
+func TestLastCreditMemoTakesTheRemainderWhenPiecesRoundDown(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	mustExec(t, db, `UPDATE products SET base_price = 1.05 WHERE id = $1`, f.productID)
+	invID, _ := f.invoice("5")
+	if inv := f.getInvoice(invID); num(t, inv.body, "tax_cents") != 47 || num(t, inv.body, "subtotal_cents") != 525 {
+		t.Fatalf("invoice tax %v subtotal %v, want 47 and 525", inv.body["tax_cents"], inv.body["subtotal_cents"])
+	}
+	line := f.firstLineID(invID)
+	var taxes []int64
+	var sum int64
+	for i := 0; i < 5; i++ {
+		cm := f.createCredit(f.creditBody(invID, returnLine(line, "-1", false)))
+		r := f.postCredit(str(t, cm.body, "id"), 1)
+		if r.status != 200 {
+			t.Fatalf("post %d = %d: %s", i, r.status, r.raw)
+		}
+		taxes = append(taxes, -num(t, r.body, "tax_cents"))
+		sum += taxes[i]
+	}
+	if sum != 47 {
+		t.Errorf("tax credited %v sums to %d, want exactly the 47 charged", taxes, sum)
+	}
+	if taxes[4] != 11 {
+		t.Errorf("the last memo credited %d, want the remainder 11", taxes[4])
+	}
+	if f.balance() != 0 {
+		t.Errorf("balance after crediting the whole invoice = %d, want 0", f.balance())
+	}
+}
+
 // RULE (ADR 0005 6.3, 4.1): a draft carries no number and takes the next gapless
 // CM- number at post; a voided draft consumes none; the entry, the subledger and
 // the restock all land in the post.
