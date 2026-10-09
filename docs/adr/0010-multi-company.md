@@ -223,7 +223,7 @@ of their headers.
 | feeds (ADR 0008 8.1 to 8.4) | `vendor_feeds`, `vendor_feed_runs`, `vendor_feed_files`, `vendor_feed_run_rows` | R3 | no feed kind writes a company owned table: none creates a product or changes the dealer's stock (ADR 0008 8.4); they write the shared vendor catalog, cost and availability tables, and the run is the audit of that |
 | feeds (ADR 0008 8.6) | `vendor_document_outbox` | child | the boundary is the document it sends: `document_kind` and `document_id` name the purchase order or vendor return, each of which carries its company |
 | delivery | `deliveries`, routes, stops | child | of the orders and trucks they serve; a delivery's company is its order's |
-| users | `user_locations` | R3 | the grant table stays exactly as it is (`061:10-17`); a user's companies are derived: a user reaches a company exactly when a granted branch is of it. No `company_id` column and no new index |
+| users | `user_locations` | R3 | the grant table stays exactly as it is (`061:9-16`); a user's companies are derived: a user reaches a company exactly when a granted branch is of it. No `company_id` column and no new index |
 | users | `module_grants` | R3 | shared |
 | keys | `api_keys` | key | gains a nullable `company_id`, section 6; the one nullable case in the schema |
 | drafts (ADR 0007) | `drafts` | R1 | the branch is fixed at create (ADR 0007 2.3), so the draft follows it when C5-2a builds the table |
@@ -667,9 +667,10 @@ that ADR 0008 adds the stock, adjustment, receipt, vendor credit and feed
 tables of section 2, each needing a company rule; the census test then
 covers them from the start. After C5-1a (ADR 0009's finer admin scopes,
 PR 49): item 7's company admin routes and screens are born on ADR 0009's
-scope grammar, so it runs after C5-1a. After C5-1's GL, finance and bank reconciliation
-conversion and after C5-1c's branch wall: the company filter of sections 6
-and 8 rides the routes and the wall those items build. The design itself,
+scope grammar, so it runs after C5-1a. After C5-1's GL, finance and bank
+reconciliation conversion and after C5-1c's branch wall: the company
+filter of sections 6 and 8 rides the routes and the wall those items
+build. The design itself,
 this record, can merge now, ahead of all of them: it changes no code.
 
 Sizes, dev hour equivalents, re argued against the code from the round 1
@@ -679,7 +680,7 @@ are its own, and their sum is stated rather than rounded):
 | Order | Item | Size |
 |---|---|---|
 | 1 | The migration and the census test (section 10: about twenty tables, six rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
-| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart seed per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
+| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, the record rule with `wire_company_wall_test.go`, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
