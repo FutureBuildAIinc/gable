@@ -91,10 +91,16 @@ The two "modules" fields are intentionally asymmetric: `modules` here
 is the raw grant set so an admin checkbox shows what was granted even
 while the module is globally off; the integrations surface reports
 `granted AND globally-enabled`, because that is what the caller is
-actually allowed to use right now. `StaffModule` is the per flag row
-the modules list returns (see the tech admin page
-[tech-admin.md](tech-admin.md) for its field set: `id`, `name`,
-`enabled`, `revision`).
+actually allowed to use right now. `StaffModule`
+(`components.schemas.StaffModule`) is the per flag row the modules list
+returns.
+
+| Field | Wire form | Note |
+|---|---|---|
+| `id` | text | The module key (`ai_lm` today). |
+| `name` | text | The human label the modules page shows. |
+| `enabled` | boolean | The current live state of the global flag. |
+| `revision` | integer | The admin_revisions row for `admin.modules.<id>`. |
 
 `AdminCreateStaffRequest` carries `email` (required), `full_name`
 (required), `staff_no` (optional, null by default), `role` (defaults
@@ -131,10 +137,11 @@ validation_failed` naming the field.
 The module flag is a kill switch. A toggle bumps the revision only
 when it changes the flag, takes `If-Match` or the body `revision`
 against the flag's own anchor (`admin.modules.<id>` in
-`admin_revisions`), and writes its audit row and the
-`module.flag_changed` event in one transaction. Turning a module off
-revokes it for every staff member at once WITHOUT deleting any grant;
-turning it back on restores the roster.
+`admin_revisions`), and writes its audit row (`module.flag_changed`)
+and the `module.enabled` or `module.disabled` event in one transaction.
+An unknown `id` is a `404 not_found` (the known module set is `ai_lm`).
+Turning a module off revokes it for every staff member at once WITHOUT
+deleting any grant; turning it back on restores the roster.
 
 ## Events the module writes
 
@@ -144,7 +151,7 @@ statement of its transaction
 ([ADR 0003](../adr/0003-events-outbox.md)), alongside the `audit_log`
 row the service writes. The event names the staff module writes are
 `staff.created`, `staff.updated`, `staff.module_granted`,
-`staff.module_revoked` and `module.flag_changed`.
+`staff.module_revoked`, `module.enabled` and `module.disabled`.
 
 ## Scopes, roles and keys
 
