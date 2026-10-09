@@ -7,9 +7,9 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 A quote is the priced offer a sales rep sends to a customer before a sale.
 It carries the line items, the prices, the units, the total and the
-expiration, and it is the first place a price override or a discount
-appears. The customer accepts or rejects the offer through the portal or
-the integration seam; an accepted quote becomes an order through
+expiration, and it is the first priced document. The customer accepts
+or rejects the offer through the portal or the integration seam; an
+accepted quote becomes an order through
 `POST /api/v1/quotes/{id}/convert`. The lifecycle spans draft, sent,
 accepted, rejected, expired and reopened, every transition writing one
 outbox event.
@@ -25,10 +25,10 @@ that brought the table onto the contract is
 ## What it does in a yard
 
 A yard's sales team prices material for builders and contractors. The
-quote is the document the customer signs off on. It is also the first
-point at which overrides and discounts are recorded with a reason, so
-margin reporting later can ask "why did this line not hit list?" and get
-an answer.
+quote is the document the customer signs off on. The line carries
+the unit price and the unit cost; the order line is where overrides
+and discounts are recorded with a reason, so margin reporting later
+can ask "why did this line not hit list?" and get an answer.
 
 ## Routes
 
@@ -48,9 +48,9 @@ handles are in `core/internal/quote/handler.go`. The route census
 | GET | `/api/v1/quotes/{id}/file` | Download the original parsed file. |
 
 The exposure routes at `/api/v1/quotes/exposure` and
-`/api/v1/quotes/{id}/exposure/...` are owned by the pricing module and
-register under `internal/order` in the route census, even though their
-paths sit under `quotes`.
+`/api/v1/quotes/{id}/exposure/...` belong to the pricing module and
+register under `internal/pricing` in the route census, even though
+their paths sit under `quotes`.
 
 ## The main resource
 
@@ -81,7 +81,7 @@ paths sit under `quotes`.
 | `original_filename` | text, nullable | The name of the original parsed file, when AI sourced. |
 | `original_content_type` | text, nullable | The MIME type of the original parsed file. |
 | `parse_map` | array, nullable | The AI parse mapping data. |
-| `exposure_state` | lowercase enum | The pricing module's worst exposure rollup (`ok`, `warn`, `breach`, etc.). |
+| `exposure_state` | lowercase enum | The pricing module's worst exposure rollup (`ok`, `flagged`, `escalated`, `ack_required`, `acknowledged`, `blocked`, `overridden`). |
 | `exposure_cents` | integer | The exposure dollar value at the rollup. |
 | `exposure_last_checked_at` | timestamp, nullable | When the exposure scanner last looked at this quote. |
 | `lines` | array of `QuoteLine` | The priced lines, in position order. |
@@ -97,7 +97,7 @@ A `QuoteLine` carries:
 | `description` | text | Snapshot of the description. |
 | `customer_note` | text, nullable | The customer's free text note on the line. |
 | `quantity` | decimal string | Scale 4. |
-| `uom` | lowercase enum | The sale unit. |
+| `uom` | uppercase enum | The sale unit (`PCS`, `EA`, `LF`, `SF`, `BF`, `MBF`, `SQ`, `BOX`, `CTN`, `RL`, `GAL`, `LBS`, `BAG`, `BUNDLE`, `PAIR`, `SET`). |
 | `price_uom` | text | The price unit. |
 | `uom_qty` | decimal string | Scale 4. |
 | `price_uom_qty` | decimal string | Scale 4. |
@@ -146,10 +146,10 @@ idempotency key on every mutating request. Events are defined in
 
 Every event is one outbox row in the mutation's transaction
 ([ADR 0003](../adr/0003-events-outbox.md)). The summary is a small
-object: number, status, from status, revision, total in cents, and
-optional note. The event type strings are the constants in
-`core/internal/quote/service.go`. Outbox drain consumers (the exposure
-notifier among them) read by type.
+object: number, customer id, status, revision, total in cents, and,
+on a transition, from status. The event type strings are the
+constants in `core/internal/quote/service.go`. Outbox drain consumers
+(the exposure notifier among them) read by type.
 
 ## Scopes, roles and keys
 
