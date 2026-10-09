@@ -179,9 +179,10 @@ func isAbsentRaw(raw json.RawMessage) bool {
 	return raw == nil || string(raw) == "null"
 }
 
-// unitSetProduct is the product row as the unit set write reads it under its
-// lock: the facts the derivations and the holds need.
-type unitSetProduct struct {
+// UnitSetProduct is the product row as the unit set write reads it under its
+// lock: the facts the derivations and the holds need. Exported because the
+// Repository interface the unit set store belongs to names it.
+type UnitSetProduct struct {
 	Revision     int64
 	SKU          string
 	UOMPrimary   string
@@ -303,7 +304,7 @@ func (s *Service) ReplaceUnitSet(ctx context.Context, id uuid.UUID, req *PutUnit
 // lockForUnitSet takes the product row FOR UPDATE and reads the unit set
 // write's facts. Every read goes through the transaction the context
 // carries.
-func (s *Service) lockForUnitSet(ctx context.Context, id uuid.UUID) (*unitSetProduct, error) {
+func (s *Service) lockForUnitSet(ctx context.Context, id uuid.UUID) (*UnitSetProduct, error) {
 	p, err := s.repo.LockProductForUnitSet(ctx, id)
 	if err != nil {
 		return nil, resolveRevision(err)
@@ -321,7 +322,7 @@ func conflictBlocker(code, message string) *httpx.Error {
 
 // resolveUnitSet applies every check of section 3.2 that answers before the
 // rows are written, and completes the rows by the derivation rules.
-func (s *Service) resolveUnitSet(ctx context.Context, id uuid.UUID, cur *unitSetProduct, existing []UnitSetRowView, req *PutUnitSetRequest) ([]UnitSetRowView, []units.Warning, error) {
+func (s *Service) resolveUnitSet(ctx context.Context, id uuid.UUID, cur *UnitSetProduct, existing []UnitSetRowView, req *PutUnitSetRequest) ([]UnitSetRowView, []units.Warning, error) {
 	// The hold's own rule on the wire (A2's CHECK, 9.1): until C3-2B every
 	// price is in the stocking unit.
 	if req.PriceUOM != req.StockUOM {
@@ -590,8 +591,8 @@ func (r *PostgresRepository) GetUnitSetRows(ctx context.Context, productID uuid.
 
 // LockProductForUnitSet takes the product row FOR UPDATE and reads the unit
 // set write's facts, through the caller's executor.
-func (r *PostgresRepository) LockProductForUnitSet(ctx context.Context, id uuid.UUID) (*unitSetProduct, error) {
-	var p unitSetProduct
+func (r *PostgresRepository) LockProductForUnitSet(ctx context.Context, id uuid.UUID) (*UnitSetProduct, error) {
+	var p UnitSetProduct
 	var basePrice string
 	var thick, width, length *string
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `

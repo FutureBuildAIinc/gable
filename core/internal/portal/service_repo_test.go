@@ -19,6 +19,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
 
@@ -381,6 +382,34 @@ func (f *fakeCustomerRepo) GetCustomerByEmail(context.Context, string) (*custome
 type fakeProductRepo struct {
 	products map[uuid.UUID]*product.Product
 	gets     []uuid.UUID
+}
+
+// The unit set store, served empty: these tests create no unit sets.
+func (f *fakeProductRepo) GetUnitSetRows(_ context.Context, _ uuid.UUID) ([]product.UnitSetRowView, error) {
+	return []product.UnitSetRowView{}, nil
+}
+func (f *fakeProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*product.UnitSetProduct, error) {
+	return nil, product.ErrNotFound
+}
+func (f *fakeProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []product.UnitSetRowView,
+	_, _, _ string, _ *int64, _ int64) (int64, error) {
+	return 0, nil
+}
+func (f *fakeProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
+func (f *fakeProductRepo) ProductStockUnitInUse(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (f *fakeProductRepo) ProductPriceHeld(_ context.Context, _ uuid.UUID) (bool, string, error) {
+	return false, "", nil
+}
+func (f *fakeProductRepo) ProductUnitInUse(_ context.Context, _ uuid.UUID, _ []string) (bool, string, error) {
+	return false, "", nil
 }
 
 var _ product.Repository = (*fakeProductRepo)(nil)
