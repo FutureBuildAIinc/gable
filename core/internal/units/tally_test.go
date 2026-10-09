@@ -65,6 +65,28 @@ func TestTallyArithmetic(t *testing.T) {
 		t.Errorf("a cross section is positive")
 	}
 
+	// The sum cannot overflow into a small quantity: 19 rows of 1,000,000
+	// pieces within the row limits sum to exactly 2^64 + 448384 scaled
+	// units, which a plain int64 accumulator would wrap to 44.8384.
+	var wrap []TallyRow
+	for i := 0; i < 18; i++ {
+		wrap = append(wrap, TallyRow{Pieces: 1_000_000, LengthFT: httpx.Quantity(999999999983 - i)})
+	}
+	wrap = append(wrap, TallyRow{Pieces: 1_000_000, LengthFT: httpx.Quantity(446744074169)})
+	if _, err := LinearFeet(wrap); err != ErrOutOfBound {
+		t.Errorf("a sum past 2^64 is refused, got err %v", err)
+	}
+	// A sum past the bound inside int64 is refused too, and one at the bound
+	// is served.
+	bound := []TallyRow{{Pieces: 1_000_000, LengthFT: httpx.Quantity(999999999)}}
+	if _, err := LinearFeet(bound); err != ErrOutOfBound {
+		t.Errorf("a sum past the quantity bound is refused, got err %v", err)
+	}
+	atBound := []TallyRow{{Pieces: 999_999, LengthFT: httpx.Quantity(1_000_001)}}
+	if lf, err := LinearFeet(atBound); err != nil || lf != httpx.QuantityMax {
+		t.Errorf("a sum at the quantity bound is served, got %s, %v", lf.WireString(), err)
+	}
+
 	// The extension of the tallied line is Extend(linear_feet, pair, price):
 	// 150 LF at 500.00 per MBF with pair (1500, 1) is 5000 cents, and the
 	// 200/3 tally's 100 LF is 3333 cents (R4.1 the only rounding).

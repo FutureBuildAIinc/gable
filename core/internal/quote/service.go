@@ -391,7 +391,8 @@ func (s *Service) resolveLineUnits(v *httpx.Validator, path string, line *QuoteL
 		}
 		linearFeet, err := units.LinearFeet(rows)
 		if err != nil {
-			v.Check(false, path+".tally", "the tally's linear feet are beyond the quantity bound")
+			v.Check(false, path+".tally",
+				"the tally's linear feet are beyond the quantity bound of 99999999.9999 linear feet")
 			return false
 		}
 		if dl.HasQuantity && dl.Quantity != linearFeet {

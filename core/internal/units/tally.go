@@ -23,9 +23,14 @@ type TallyRow struct {
 
 // LinearFeet sums a tally's rows: the exact sum of pieces x length (R3;
 // integers times scale 4 decimals are exact at scale 4), which the ADR makes
-// the tallied line's quantity in LF.
+// the tallied line's quantity in LF. The sum is accumulated in big.Int:
+// rows within their own limits can reach past int64 together, and a wrapped
+// total would slip past the bound check below as a small quantity, so the
+// exact total is compared against the quantity bound before it becomes a
+// Quantity.
 func LinearFeet(rows []TallyRow) (httpx.Quantity, error) {
-	total := int64(0)
+	total := new(big.Int)
+	product := new(big.Int)
 	for i, r := range rows {
 		if r.Pieces <= 0 {
 			return 0, fmt.Errorf("tally row %d: pieces are positive", i)
@@ -33,17 +38,13 @@ func LinearFeet(rows []TallyRow) (httpx.Quantity, error) {
 		if r.LengthFT <= 0 {
 			return 0, fmt.Errorf("tally row %d: the length is positive", i)
 		}
-		p := new(big.Int).Mul(big.NewInt(r.Pieces), big.NewInt(int64(r.LengthFT)))
-		if !p.IsInt64() {
-			return 0, ErrOutOfBound
-		}
-		total += p.Int64()
+		product.Mul(big.NewInt(r.Pieces), big.NewInt(int64(r.LengthFT)))
+		total.Add(total, product)
 	}
-	out := httpx.Quantity(total)
-	if out > httpx.QuantityMax || out < -httpx.QuantityMax {
+	if total.CmpAbs(big.NewInt(int64(httpx.QuantityMax))) > 0 {
 		return 0, ErrOutOfBound
 	}
-	return out, nil
+	return httpx.Quantity(total.Int64()), nil
 }
 
 // BoardFeet computes a tally's board feet exactly (R3): linear feet x

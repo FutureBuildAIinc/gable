@@ -305,6 +305,43 @@ func TestRandomLengthTally(t *testing.T) {
 	}
 }
 
+// TestTallySumBeyondTheBoundRefused proves the tally's sum cannot overflow
+// its int64 accumulator and be accepted as a small quantity: 19 rows of
+// 1,000,000 pieces, each within the row limits, whose true sum is 2^64 +
+// 448384 scaled units, is a 400 naming lines[0].tally that states the
+// quantity bound, never a 201 for the wrapped 44.8384.
+func TestTallySumBeyondTheBoundRefused(t *testing.T) {
+	f := newUnitsFixture(t)
+
+	lengths := []string{
+		"99999999.9983", "99999999.9982", "99999999.9981", "99999999.998", "99999999.9979",
+		"99999999.9978", "99999999.9977", "99999999.9976", "99999999.9975", "99999999.9974",
+		"99999999.9973", "99999999.9972", "99999999.9971", "99999999.997", "99999999.9969",
+		"99999999.9968", "99999999.9967", "99999999.9966", "44674407.4169",
+	}
+	rows := make([]any, len(lengths))
+	for i, l := range lengths {
+		rows[i] = map[string]any{"pieces": 1000000, "length_ft": l}
+	}
+	r := f.do("POST", "/api/v1/quotes", f.createBody(map[string]any{
+		"product_id": f.randomProduct.String(),
+		"uom":        "LF", "price_uom": "MBF", "unit_price_ten_thousandths": 5000000,
+		"tally": map[string]any{"rows": rows},
+	}))
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("a tally whose sum wraps past 2^64 = %d, want 400: %s", r.status, r.raw)
+	}
+	if !strings.Contains(string(r.raw), "lines[0].tally") || !strings.Contains(string(r.raw), "99999999.9999") {
+		t.Errorf("the refusal names lines[0].tally and states the quantity bound, got %s", r.raw)
+	}
+	// The quote was never written.
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM line_tally_rows`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("the refused tally left no row behind, got %d (%v)", n, err)
+	}
+}
+
 // TestNonProductLineStandardPair proves the kept R1-15 rule with section
 // 3.3's refinement: a non stock line's pair is the client's, except that two
 // units with standard sizes in one dimension derive it (EA per M is
