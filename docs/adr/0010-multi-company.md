@@ -525,9 +525,23 @@ company; that reach is kept and restated as this record's known limit
 rather than refused, because refusing would break every existing key the
 day the build lands. This record adds `api_keys.company_id UUID NULL
 REFERENCES company(id)`, minted with the key and never edited, exactly as
-ADR 0007 5.5 adds `branch_id`: a company bound key is pinned to one company;
-a `X-Branch-Id` or payload branch outside it is 403 `forbidden`, audited as
-`key.company_refused` beside `key.branch_refused`.
+ADR 0007 5.5 adds `branch_id`. A company is a set of branches, and the
+repositories' branch idiom filters on one branch or none (ADR 0007 5.5's
+own reason for one branch per key), so a company bound key is pinned to
+one company by naming one branch of it: it must send `X-Branch-Id`, a
+branch of its company, on every branch scoped route, and a request
+without the header is 400 `validation_failed` naming `X-Branch-Id`,
+because headerless the key is no one's user, `GrantsSubForQuery` returns
+nil (`branch.go:53-58`) and every branch scoped list would cover every
+branch of every company, while a headerless write would stamp the default
+branch through `ResolveBranchForWrite` (`branch.go:76-97`), which may be
+another company's. A header or payload branch outside the company is 403
+`forbidden`, audited as `key.company_refused` beside `key.branch_refused`.
+On the branchless company routes (the GL and bankrecon company paths and
+the `companies` segment) the path company is checked against the key's
+the same way: another company's path is that 403. A key minted with both
+`branch_id` and `company_id` is refused at mint unless the branch is of
+the company. Item 5's wall test covers each case.
 
 The integration seam (ADR 0007 5.6) is untouched: it keeps its own key, its
 goldens hold, and its writes resolve the company through the default branch
