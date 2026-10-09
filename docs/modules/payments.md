@@ -15,10 +15,11 @@ original payment.
 This page is the current state of the payment module as it is today.
 The full money story is the work of C2-4 (the sales and money core's
 payments conversion), which converts the module onto the contract
-in place: the events outbox replaces today's in-process bus, the
-revision gate is added, the gapless numbering of payments is settled
-through the gapless counter, and the unapplied cash term is added to
-the customer. Deposits already live in `core/internal/deposit` and
+in place: the events outbox is added; today the module posts a
+paid-invoice notice to FB Brain over HTTP and writes no event,
+the revision gate is added, the gapless numbering of payments is
+settled through the gapless counter, and the unapplied cash term
+is added to the customer. Deposits already live in `core/internal/deposit` and
 the `customer_deposits` table (created by migration 079); C2-4 is
 not the work that brings them. After C2-4, this page is the
 migration guide for what moved; today it is the description of what
@@ -114,7 +115,8 @@ account.TransactionTypePayment, -amountCents, &p.ID, "Payment
 
 The payment module today writes no outbox events; the AR subledger
 and the gateway are the systems of record. C2-4 writes
-`payment.created` and `payment.refunded` through the outbox.
+`payment.recorded` and `payment.refunded`, among the payment events
+of ADR 0005 section 12, through the outbox.
 
 ## Scopes, roles and keys
 
@@ -147,11 +149,11 @@ at the serve layer is `admin`, `owner`, `sales`, `finance`,
 - The payment number is minted from the `PAY` series, gapped; the
   `payment_number_seq` is defined in ADR 0005 section 4.1 and is
   not yet created.
-- The customer's `unapplied_cash_cents` term is added; the AR
-  subledger rule in section 9.1 is the gate.
-- The events `payment.created` and `payment.refunded` are written
-  through the outbox; today's in-process bus traffic from the
-  notifier is replaced.
+- The payment's unapplied amount (`amount_unapplied`, ADR 0005
+  section 9) is added; the AR subledger rule in section 9.3 is the
+  gate.
+- The Brain notice stays as it is, or moves behind the outbox as
+  C2-4 decides.
 - A payment's revision is added and the writes that update it
   take the `If-Match` precondition.
 
