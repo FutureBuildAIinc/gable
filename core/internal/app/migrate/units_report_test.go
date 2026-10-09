@@ -27,7 +27,9 @@ import (
 // and a value that would abort the migration is named, with a non zero
 // exit so an operator's script sees it. The report answers the database as
 // it stands before 099, so the fixture runs in a scratch database built to
-// 097.
+// 098: the catalogue table does not exist, and the report still must not
+// list the section 2.2 seed codes (099 inserts them) as new dealer units;
+// only a code outside both the live catalogue and the seed is listed.
 func TestUnitsReportNamesWhatTheMigrationWouldRefuse(t *testing.T) {
 	scratch := pre099DB(t)
 	ctx := context.Background()
@@ -41,8 +43,10 @@ func TestUnitsReportNamesWhatTheMigrationWouldRefuse(t *testing.T) {
 	if _, err := scratch.ExecContext(ctx, `
 		INSERT INTO quote_lines (id, quote_id, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total)
 		VALUES ('55555555-5555-5555-5555-555555555555', '44444444-4444-4444-4444-444444444444',
-			'REPORT', 'report fixture', 1, 'PCS', 'per skid', 1, 1, 1, 1)`); err != nil {
-		t.Fatalf("cannot write the report's fixture line: %v", err)
+			'REPORT', 'report fixture', 1, 'PCS', 'per skid', 1, 1, 1, 1),
+		       ('66666666-6666-6666-6666-666666666666', '44444444-4444-4444-4444-444444444444',
+			'REPORT', 'dealer unit fixture', 1, 'MBF', 'SKID', 1, 1, 1, 1)`); err != nil {
+		t.Fatalf("cannot write the report's fixture lines: %v", err)
 	}
 
 	restore := captureStdout(t)
@@ -55,8 +59,14 @@ func TestUnitsReportNamesWhatTheMigrationWouldRefuse(t *testing.T) {
 	if !strings.Contains(out, `quote_lines.price_uom = "PER SKID" (1 rows)`) {
 		t.Errorf("the report names the refusing value and its row count; got:\n%s", out)
 	}
-	if !strings.Contains(out, "new dealer units") {
-		t.Errorf("the report lists the values that would become dealer units; got:\n%s", out)
+	if !strings.Contains(out, "new dealer units") || !strings.Contains(out, "SKID (1 rows") {
+		t.Errorf("the report lists the dealer's own code as a new dealer unit; got:\n%s", out)
+	}
+	for _, seeded := range []string{"PCS (", "MBF (", "EA ("} {
+		if strings.Contains(out, seeded) {
+			t.Errorf("the report must not list the section 2.2 seed code %s as a new dealer unit before 099; got:\n%s",
+				strings.TrimSuffix(seeded, " ("), out)
+		}
 	}
 }
 
