@@ -222,8 +222,8 @@ today: `customers.credit_limit`, `customers.payment_terms_id`,
 `vendors.payment_terms` (`020_create_vendors.sql:16`). Balances stay per
 company by construction, because every document carries its company:
 `customers.balance_due` remains the running sum the AR core keeps (ADR 0005
-9.3), now per currency across companies, and every AR read that names a
-company filters documents by it.
+9.3), one number in the customer's one effective currency across companies
+(section 5), and every AR read that names a company filters documents by it.
 
 ### 3. The GL per company
 
@@ -314,19 +314,38 @@ put it (lock order step 8); only the series key and the format change.
 
 ### 5. Currency
 
-ADR 0005 section 4.2 is unchanged: a document's currency is its customer's
-effective currency at create, copied, never sent (a `currency` in a create
-body is a 400 unknown field), never changing; cross currency applications
-are refused; every journal entry carries its currency.
+ADR 0005 section 4.2 is unchanged, every link of it: a document's currency
+is its customer's effective currency at create, the chain being
+`customers.currency` when set, else `system_settings` `currency.default`
+(`091:36`), copied, never sent (a `currency` in a create body is a 400
+unknown field), never changing; cross currency applications are refused;
+every journal entry carries its currency; v1 refuses a document whose
+effective currency is not in `currency.enabled`, exactly as today. This
+record inserts nothing into that chain, so ADR 0005 9.3's footing holds:
+one customer, one effective currency, therefore one `balance_due` number.
 
-The one addition: the dealer default inside that chain becomes per company.
-The chain is: `customers.currency`, when set; else the document's company's
-`functional_currency`; else `system_settings` `currency.default` (`091:36`).
-A customer with no override who trades with two companies of different
-functional currencies is billed in each company's functional currency: one
-document, one company, one currency. The seed company's
-`functional_currency` is the setting's value at migration (section 10), so a
-single company deployment changes nothing.
+`company.functional_currency` is not a default and never feeds the chain.
+It is the currency of that company's own books, the one the company
+reports in, used as a check on documents, not as their source: a document
+of a company may be in a currency other than the company's functional
+currency (ADR 0005 4.2 already allows exactly this through the customer
+override, and its GL reports group by currency), and no amount of it is
+ever added to one of another currency. A customer with no override who
+trades with two companies is billed in the dealer default in both, one
+effective currency, because the chain has one source per customer. The
+seed company's `functional_currency` is the setting's value at migration
+(section 10), so a single company deployment changes nothing.
+
+ADR 0005 9.3's invariants, restated for companies. `customers.balance_due`
+stays the customer's single total in its one currency across companies.
+`customer_transactions.company_id` (R2, section 2) makes the subledger
+testable per company: the sum of a customer's `customer_transactions` in
+one company equals that company's share of the customer's open documents,
+per currency, and the sum of `customer_transactions` per
+`(company, currency)` equals that company's `1020` balance in that
+currency. The place this is checked is the invariant test C2-4 builds
+(ADR 0005 9.3, invariants "true after every act and tested"), extended by
+build item 3 to group by `(company, currency)`.
 
 The ledger rule of ADR 0005 section 4.2 extends to the company boundary
 without change: GL reports group by currency inside a company, and the
