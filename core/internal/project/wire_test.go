@@ -476,6 +476,44 @@ func TestUpdate_NameOnlyKeepsOddStoredStatus(t *testing.T) {
 	}
 }
 
+// The list's status filter matches case insensitively, as the read does:
+// the column is a free VARCHAR and rows can be stored Active, active or
+// COMPLETED, all of which read back lowercase. An exact-match filter would
+// show one spelling of a status and hide another of the same one.
+func TestList_StatusFilterMatchesCaseInsensitively(t *testing.T) {
+	f, _ := newBothFixtures(t)
+	ctx := context.Background()
+	names := map[string]string{
+		"Active":    "title case",
+		"active":    "lower case",
+		"COMPLETED": "shouted done",
+	}
+	for stored, name := range names {
+		created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"`+name+`"}`, nil)
+		id := created.body["id"].(string)
+		if _, err := f.db.Pool.Exec(ctx, `UPDATE projects SET status = $1 WHERE id = $2`, stored, id); err != nil {
+			t.Fatalf("seed a %s row: %v", stored, err)
+		}
+	}
+
+	countNamed := func(status string) int {
+		res := do(t, f.srv, http.MethodGet, "/api/portal/v1/projects?status="+status+"&include=total", "", nil)
+		if res.status != http.StatusOK {
+			t.Fatalf("list status=%s = %d %s", status, res.status, res.raw)
+		}
+		if got := res.body["total"]; got != float64(len(res.body["items"].([]any))) {
+			t.Errorf("status=%s total = %v but %d items served", status, got, len(res.body["items"].([]any)))
+		}
+		return len(res.body["items"].([]any))
+	}
+	if n := countNamed("active"); n != 2 {
+		t.Errorf("status=active served %d projects, want 2 (Active and active both read back active)", n)
+	}
+	if n := countNamed("completed"); n != 1 {
+		t.Errorf("status=completed served %d projects, want 1 (COMPLETED reads back completed)", n)
+	}
+}
+
 // Idempotency through the portal layer: the same create twice with one key
 // returns the first response and makes one row; the same key with another
 // body is 422.

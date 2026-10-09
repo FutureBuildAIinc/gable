@@ -66,8 +66,11 @@ func (r *PostgresRepository) List(ctx context.Context, customerID uuid.UUID, f L
 	conds := []string{"customer_id = $1"}
 	args := []any{customerID}
 	if f.Status != nil {
-		args = append(args, storageOf[*f.Status])
-		conds = append(conds, fmt.Sprintf(`status = $%d`, len(args)))
+		// The column is a free VARCHAR whose rows can be stored Active,
+		// active or COMPLETED while every spelling reads back lowercase:
+		// the filter matches the read, case insensitively.
+		args = append(args, string(*f.Status))
+		conds = append(conds, fmt.Sprintf(`lower(status) = $%d`, len(args)))
 	}
 	if f.AfterTime != nil {
 		args = append(args, *f.AfterTime, f.AfterID)
@@ -103,8 +106,8 @@ func (r *PostgresRepository) List(ctx context.Context, customerID uuid.UUID, f L
 		countArgs := []any{customerID}
 		cc := []string{"customer_id = $1"}
 		if f.Status != nil {
-			countArgs = append(countArgs, storageOf[*f.Status])
-			cc = append(cc, fmt.Sprintf(`status = $%d`, len(countArgs)))
+			countArgs = append(countArgs, string(*f.Status))
+			cc = append(cc, fmt.Sprintf(`lower(status) = $%d`, len(countArgs)))
 		}
 		var n int64
 		if err := r.db.GetExecutor(ctx).QueryRow(ctx,
