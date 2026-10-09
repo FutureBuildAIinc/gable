@@ -156,6 +156,12 @@ func (s *Service) Update(ctx context.Context, projectID, customerID uuid.UUID, d
 			next.Status = d.Status
 			changed = append(changed, "status")
 		}
+		// A body that names nothing to change is not a write: the row answers
+		// with its current revision, and no audit row or event is recorded.
+		if len(changed) == 0 {
+			out = cur
+			return nil
+		}
 		if err := s.repo.Update(ctx, &next); err != nil {
 			return err
 		}

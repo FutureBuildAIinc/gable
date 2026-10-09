@@ -218,6 +218,11 @@ func TestCreate_FieldValidation(t *testing.T) {
 	if res = do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"x","smoke":"signal"}`, nil); res.status != http.StatusBadRequest {
 		t.Errorf("an unknown body field = %d, want 400", res.status)
 	}
+	// The name bound is characters, not bytes: 255 multi-byte letters pass.
+	if res = do(t, f.srv, http.MethodPost, "/api/portal/v1/projects",
+		`{"name":"`+strings.Repeat("é", 255)+`"}`, nil); res.status != http.StatusCreated {
+		t.Errorf("a 255 character name of multi-byte letters = %d %s, want 201", res.status, res.raw)
+	}
 }
 
 // The list: the envelope, a filter that filters, an unknown parameter
@@ -310,6 +315,38 @@ func TestUpdate_Revision(t *testing.T) {
 	if res = do(t, f.srv, http.MethodPut, "/api/portal/v1/projects/"+id,
 		`{"name":"x","revision":9}`, map[string]string{"If-Match": `"2"`}); res.status != http.StatusBadRequest {
 		t.Errorf("header and body disagreeing = %d, want 400", res.status)
+	}
+}
+
+// A PUT that changes nothing is not a write: the row answers 200 with its
+// current revision, and no audit row or event is recorded for it.
+func TestUpdate_NoChangeIsNotAWrite(t *testing.T) {
+	f, _ := newBothFixtures(t)
+	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"as is"}`, nil)
+	id := created.body["id"].(string)
+
+	res := do(t, f.srv, http.MethodPut, "/api/portal/v1/projects/"+id, `{}`, map[string]string{"If-Match": `"1"`})
+	if res.status != http.StatusOK {
+		t.Fatalf("empty update = %d %s, want 200", res.status, res.raw)
+	}
+	if res.body["revision"] != float64(1) || res.header.Get("ETag") != `"1"` {
+		t.Errorf("after an empty update revision = %v, ETag = %q; want 1", res.body["revision"], res.header.Get("ETag"))
+	}
+	if res.body["name"] != "as is" {
+		t.Errorf("name after an empty update = %v", res.body["name"])
+	}
+
+	for _, c := range []struct{ table string }{
+		{"audit_log"}, {"events_outbox"},
+	} {
+		var n int
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM `+c.table+` WHERE entity_type = 'project' AND entity_id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Errorf("%d rows in %s for the project after an empty update, want 1 (the create's)", n, c.table)
+		}
 	}
 }
 
