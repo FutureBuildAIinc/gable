@@ -212,6 +212,7 @@ GET	/api/v1/governance/rfcs	internal/governance	h.HandleListRFCs
 POST	/api/v1/governance/rfcs	internal/governance	h.HandleCreateRFC
 GET	/api/v1/governance/rfcs/{id}	internal/governance	h.HandleGetRFC
 PUT	/api/v1/governance/rfcs/{id}	internal/governance	h.HandleUpdateRFC
+POST	/api/v1/governance/rfcs/{id}/transitions	internal/governance	h.HandleTransition
 GET	/api/v1/inventory	internal/inventory	h.ListInventory
 POST	/api/v1/inventory/adjust	internal/inventory	h.AdjustStock
 POST	/api/v1/inventory/transfer	internal/inventory	h.MoveStock

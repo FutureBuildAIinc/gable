@@ -12,7 +12,7 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 201,
       "content_type": "application/json",
       "body": {
         "api_key": "<api-key>",
@@ -65,10 +65,16 @@
       "path": "/api/v1/admin/keys/<id-2>"
     },
     "response": {
-      "status": 204,
-      "content_type": "",
+      "status": 404,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "error": {
+          "code": "not_found",
+          "message": "no such machine key"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
       }
     }
   }

@@ -148,7 +148,7 @@ export class GableRFCDetail extends LitElement {
           <div class="flex-1 overflow-auto rounded-xl border border-white/10 bg-[#0A0B10] shadow-2xl relative">
             <div class="max-w-4xl mx-auto p-12 min-h-full">
               <div class="prose prose-invert max-w-none">
-                <pre class="font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed text-sm">${rfc.content}</pre>
+                <pre class="font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed text-sm">${rfc.content ?? ""}</pre>
               </div>
             </div>
           </div>
