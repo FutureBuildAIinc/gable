@@ -98,6 +98,10 @@ mint.
   a draft (ADR 0002's known limit says so, ADR 0007 section 5.5 repeats it).
 - Branch bound keys are C5-2a's (ADR 0007 section 5.5).
 - The integration seam keeps `X-Integration-Key` (ADR 0007 section 5.6).
+- `GET /api/v1/branches/{id}/users` lists the users (subs) holding a branch
+  but sits under the `branches` segment, so it stays under `branches:read`
+  in v1 and moves under the `users` segment (and `users:read`) in a later
+  item.
 
 ## Alternatives considered
 
