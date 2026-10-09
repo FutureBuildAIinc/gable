@@ -152,8 +152,12 @@ The invariant: every branch is a `locations` row of type `BRANCH`, and every
 branch belongs to exactly one company. `locations` gains `company_id UUID
 NOT NULL REFERENCES company(id)` on every row (branch rows directly; every
 other row takes its branch's company, which is its company by construction,
-because a non branch row never leaves its branch's subtree,
-`058_locations_branch_denorm_trigger.sql`). The company of a branch is set at create by its route (section 6) and
+because a non branch row never leaves its branch's subtree: the location
+write refuses a change of type or `parent_id`
+(`core/internal/location/service.go:171`, "Type and parent_id are not
+mutable here"); the `058` trigger alone would not hold it, it recomputes
+`branch_id` on a `parent_id` update and so permits a move). The company of
+a branch is set at create by its route (section 6) and
 never moves in v1: an update that would change a location
 row's company is refused (section 9).
 
@@ -205,7 +209,7 @@ row itself.
 | sales | `orders` | R1 | `062:7` (`branch_id` NOT NULL from `062:13`) |
 | sales | `quotes` | R1 | `063:6` |
 | sales | `invoices` | R1 | `064:7` |
-| sales | `payments` | R1 | `branch_id` is added by C2-4 (ADR 0005 9.1 at `0005:1067`, migration step at `0005:1484`, backfilled from the invoice or the receipt branch); the build sets it NOT NULL, then the standard trigger |
+| sales | `payments` | R1 | `branch_id` is added by C2-4 (ADR 0005 9.1 at `0005:1067`, migration step at `0005:1484`, which lists the column and no backfill source); the backfill is from the invoice, which every legacy payment names (`invoice_id NOT NULL`, `008:11`); the build sets the column NOT NULL, then the standard trigger |
 | sales | `credit_memos` | R1 | `branch_id` is added by C2-3 (ADR 0005 6.3 at `0005:821`, backfilled from the invoice or the customer's primary branch at `0005:1474`, nullable on arrival); the build sets it NOT NULL, then the standard trigger |
 | sales (C2-4, ADR 0005 9.2) | `ar_applications` | R2 | child rows of a payment or credit memo and an invoice; the AR core checks both sides name one company and refuses the act when they do not, the R2 check beside the two R1 parents |
 | sales (C2-4, ADR 0005 9.3) | `customer_transactions` | R2 | the AR subledger row; from its invoice, credit memo or payment; the balance invariant of ADR 0005 9.3 holds per company |
@@ -338,7 +342,7 @@ company by construction, because every document carries its company:
   never by raw SQL (the AR core gate of ADR 0005 9.3 covers the writers),
   and every line of the entry carries the same company, set in the same
   act, held by the composite keys above.
-  `entry_number` stays one `SERIAL` across the database (`025:43`): it is an
+  `entry_number` stays one `SERIAL` across the database (`025:44`): it is an
   internal ordering key with no legal reader, cross database uniqueness
   holds, and per company numbering of entries would buy nothing. Stated.
 - **Fiscal periods.** `gl_fiscal_periods.company_id NOT NULL`; the seed
@@ -617,11 +621,16 @@ as every branchless write does today.
 ### 7. Tax
 
 - The provider's company code becomes per company: `company.tax_company_code`
-  (section 1). Today one process setting (`config.go:36,150`) is stamped on
-  every provider call (`avalara.go:107`) and held by the tax service at
-  construction (`tax/service.go:36,43`, used at `:111`; wired at
-  `serve.go:473-483`). The build moves the stamp to the document's company
-  at call time: the tax service takes the company code per call; a company
+  (section 1). Today one process setting (`config.go:36,150`) reaches the
+  provider two ways: the create path stamps the client's own configured
+  value (`CompanyCode: c.config.CompanyCode` inside
+  `AvalaraClient.CalculateTax`, `avalara.go:107`), and the tax service
+  holds the same value at construction (`tax/service.go:36,43`, used at
+  `:111`; the service is built by `orderwire.NewTaxService`, called at
+  `serve.go:481`). The build moves the stamp to the document's company
+  at call time: the tax service takes the company code per call and
+  passes it into `CalculateTax`, whose request must carry it instead of
+  the client's configured value; a company
   row with a null code falls back to the config value, so a single company
   deployment changes nothing. The provider's commit and void paths already
   take the company code as a parameter (`avalara.go:214,242`); their callers
