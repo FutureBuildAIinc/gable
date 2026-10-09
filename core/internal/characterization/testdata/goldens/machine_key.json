@@ -12,7 +12,7 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 201,
       "content_type": "application/json",
       "body": {
         "api_key": "<api-key>",
@@ -129,6 +129,20 @@
       "content_type": "application/x-sql-rows",
       "body": [
         {
+          "action": "key.created",
+          "actor_id": null,
+          "actor_kind": "anonymous",
+          "changes": {
+            "name": "golden-scoped-key",
+            "scopes": [
+              "quotes:read"
+            ]
+          },
+          "entity_id": "<id-1>",
+          "entity_type": "api_key",
+          "user_id": null
+        },
+        {
           "action": "key.scope_refused",
           "actor_id": "<id-1>",
           "actor_kind": "key",
@@ -168,6 +182,156 @@
     }
   },
   {
+    "name": "machine_key.finer_settings_key.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/keys",
+      "body": {
+        "name": "golden-settings-key",
+        "scopes": [
+          "admin:settings"
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "api_key": "<api-key>",
+        "key": {
+          "created_at": "<ts+0d>",
+          "id": "<id-9>",
+          "last_used_at": null,
+          "name": "golden-settings-key",
+          "prefix": "<api-key>",
+          "revoked_at": null,
+          "scopes": [
+            "admin:settings"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.finer_settings_key.reads_settings",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/ai",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "base_url": null,
+        "configured": false,
+        "key_hint": null,
+        "revision": 1,
+        "source": "none"
+      }
+    }
+  },
+  {
+    "name": "machine_key.finer_settings_key_refused_on_staff",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      }
+    },
+    "response": {
+      "status": 403,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message": "machine key lacks required scope admin:staff"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.coarse_admin_key.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/keys",
+      "body": {
+        "name": "golden-coarse-key",
+        "scopes": [
+          "admin:read"
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "api_key": "<api-key>",
+        "key": {
+          "created_at": "<ts+0d>",
+          "id": "<id-11>",
+          "last_used_at": null,
+          "name": "golden-coarse-key",
+          "prefix": "<api-key>",
+          "revoked_at": null,
+          "scopes": [
+            "admin:read"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.coarse_admin_key_refused_on_settings",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/ai",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      }
+    },
+    "response": {
+      "status": 403,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message": "machine key lacks required scope admin:settings"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.coarse_admin_key.refusal_audit_row",
+    "request": {
+      "method": "SQL",
+      "path": "SELECT action, changes->>'scope' AS refused_scope FROM audit_log WHERE entity_type = 'api_key' AND entity_id = '<id-11>'::uuid ORDER BY created_at, id"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "action": "key.created",
+          "refused_scope": null
+        },
+        {
+          "action": "key.scope_refused",
+          "refused_scope": "admin:settings"
+        }
+      ]
+    }
+  },
+  {
     "name": "machine_key.unknown_key",
     "request": {
       "method": "GET",
@@ -185,7 +349,7 @@
           "message": "invalid machine key"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-13>"
         }
       }
     }
