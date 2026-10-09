@@ -14,9 +14,9 @@ master data, the engine is read only, and the wire is a small set
 of read routes plus one build route that turns selections into a
 SKU.
 
-The Go code is in `core/internal/configurator/`. The migration that
-brought the routes onto the contract is part of
-`core/migrations/096_crm_projects_millwork_wire_contract.sql`.
+The Go code is in `core/internal/configurator/`. The rules table
+comes from `core/migrations/024_configurator_rules.sql`; the routes
+needed no contract migration.
 
 ## What it does in a yard
 

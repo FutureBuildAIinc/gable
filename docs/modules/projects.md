@@ -79,9 +79,8 @@ transition is a write through `PUT /api/portal/v1/projects/{id}`
 with `{"name": "...", "status": "completed", "revision": n}`.
 Anything outside the lowercase vocabulary is `400
 validation_failed`. The `inactive` storage value is never set
-through the wire; the migration that brought projects onto the
-contract mapped legacy rows into `inactive` and the wire allows
-reads of those rows.
+through the wire; the job merge in migration 091 wrote it for
+legacy rows, and the wire reads those rows back as `inactive`.
 
 A completed project can be moved back to `active` through the
 same route. The status of the project does not change the status
