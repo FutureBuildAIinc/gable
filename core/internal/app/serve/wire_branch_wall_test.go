@@ -80,6 +80,7 @@ type wallFixture struct {
 	docCust          uuid.UUID
 	orderA, orderB   uuid.UUID
 	invA, invB       uuid.UUID
+	memoA, memoB     uuid.UUID
 	db               *database.DB
 }
 
@@ -94,7 +95,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	ctx := context.Background()
 	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New(),
 		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
-		docCust: uuid.New(), orderA: uuid.New(), orderB: uuid.New(), invA: uuid.New(), invB: uuid.New()}
+		docCust: uuid.New(), orderA: uuid.New(), orderB: uuid.New(), invA: uuid.New(), invB: uuid.New(), memoA: uuid.New(), memoB: uuid.New()}
 	for _, r := range []struct {
 		id     uuid.UUID
 		typ    string
@@ -157,6 +158,20 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 			t.Fatalf("seed invoice: %v", err)
 		}
 	}
+	// One posted credit memo per branch, so the credit memo path-id routes act
+	// on real records of each branch; branch A carries a tax rate so a free
+	// credit memo can be created there.
+	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.05 WHERE id = $1`, f.branchA); err != nil {
+		t.Fatalf("branch rate: %v", err)
+	}
+	for _, m := range []struct{ id, inv, branch uuid.UUID }{{f.memoA, f.invA, f.branchA}, {f.memoB, f.invB, f.branchB}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO credit_memos (id, invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number,
+				memo_date, subtotal, tax_amount, total_amount, tax_rate)
+			VALUES ($1, $2, $3, $4, 'USD', 'OTHER', 'wall', 1, 'OPEN', credit_memo_next_number(), CURRENT_DATE, -1, 0, -1, 0)`,
+			m.id, m.inv, f.docCust, m.branch); err != nil {
+			t.Fatalf("seed credit memo: %v", err)
+		}
+	}
 	for _, sub := range []string{"u-a"} {
 		if _, err := db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, sub, f.branchA); err != nil {
 			t.Fatalf("seed grant: %v", err)
@@ -164,6 +179,9 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'u-a'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM credit_memos WHERE customer_id = $1)`, f.docCust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM credit_memo_lines WHERE credit_memo_id IN (SELECT id FROM credit_memos WHERE customer_id = $1)`, f.docCust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM credit_memos WHERE customer_id = $1`, f.docCust)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoices WHERE id IN ($1, $2)`, f.invA, f.invB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id IN ($1, $2)`, f.orderA, f.orderB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, f.docCust)
@@ -214,6 +232,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))
 	wall.documents(mux, docHandler)
+	wall.invoices(mux, invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).WithOutbox(outbox.NewWriter(db, "")).WithOrders(orderSvc).WithStock(invSvc))
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -1355,5 +1374,92 @@ func TestBranchWall_CatalogReads(t *testing.T) {
 	// A branch route refuses a path id that is not a branch.
 	if got := f.call(t, "PUT", "/api/v1/branches/"+f.yardA.String(), `{"code":"x","revision":1}`, "admin", "boss", ""); got != http.StatusNotFound {
 		t.Errorf("branch update of a yard: %d, want 404", got)
+	}
+}
+
+// The invoice and credit memo routes through serve's wiring: every read is held
+// to the caller's wall (a context branch, else the caller's grants, else every
+// branch for an administrator), a record outside it is a 404 on every route
+// that names it, the list covers the caller's branches only, and a branch a
+// credit memo create names is held to the payload branch rule (403 naming
+// branch_id).
+func TestBranchWall_InvoiceAndCreditMemoRoutes(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A, B := f.branchA.String(), f.branchB.String()
+
+	const ok = http.StatusOK
+	const no = http.StatusForbidden
+	const gone = http.StatusNotFound
+	free := func(branch string) string {
+		b := ""
+		if branch != "" {
+			b = fmt.Sprintf(`"branch_id":%q,`, branch)
+		}
+		return fmt.Sprintf(`{%s"customer_id":%q,"reason_code":"price_adjustment","reason":"wall","lines":[{"line_type":"charge","charge_code":"ADJUST","quantity":"-1","unit_price_ten_thousandths":1000}]}`, b, f.docCust)
+	}
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		// reads of a record by id
+		{"get own invoice", "GET", "/api/v1/invoices/" + f.invA.String(), "", "sales", "u-a", A, ok},
+		{"get foreign invoice, header A", "GET", "/api/v1/invoices/" + f.invB.String(), "", "sales", "u-a", A, gone},
+		{"get foreign invoice, no header", "GET", "/api/v1/invoices/" + f.invB.String(), "", "sales", "u-a", "", gone},
+		{"get own invoice, no header", "GET", "/api/v1/invoices/" + f.invA.String(), "", "sales", "u-a", "", ok},
+		{"get foreign invoice, admin", "GET", "/api/v1/invoices/" + f.invB.String(), "", "admin", "boss", "", ok},
+		{"get own credit memo", "GET", "/api/v1/credit-memos/" + f.memoA.String(), "", "finance", "u-a", A, ok},
+		{"get foreign credit memo, header A", "GET", "/api/v1/credit-memos/" + f.memoB.String(), "", "finance", "u-a", A, gone},
+		{"get foreign credit memo, no header", "GET", "/api/v1/credit-memos/" + f.memoB.String(), "", "finance", "u-a", "", gone},
+		{"get foreign credit memo, admin", "GET", "/api/v1/credit-memos/" + f.memoB.String(), "", "admin", "boss", "", ok},
+		// writes that address a record by path id
+		{"void foreign invoice, no header", "POST", "/api/v1/invoices/" + f.invB.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", "", gone},
+		{"void foreign invoice, header A", "POST", "/api/v1/invoices/" + f.invB.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", A, gone},
+		{"void own invoice with a credit memo, header A", "POST", "/api/v1/invoices/" + f.invA.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", A, http.StatusConflict},
+		{"post foreign credit memo, no header", "POST", "/api/v1/credit-memos/" + f.memoB.String() + "/transitions", `{"to":"open","revision":1}`, "finance", "u-a", "", gone},
+		{"void foreign credit memo, header A", "POST", "/api/v1/credit-memos/" + f.memoB.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", A, gone},
+		{"edit foreign credit memo, no header", "PUT", "/api/v1/credit-memos/" + f.memoB.String(), strings.Replace(free(""), "{", `{"revision":1,`, 1), "sales", "u-a", "", gone},
+		// the payload branch rule on the create
+		{"create naming a foreign branch, header A", "POST", "/api/v1/credit-memos", free(B), "sales", "u-a", A, no},
+		{"create naming a foreign branch, no header", "POST", "/api/v1/credit-memos", free(B), "sales", "u-a", "", no},
+		{"create naming its own branch", "POST", "/api/v1/credit-memos", free(A), "sales", "u-a", A, http.StatusCreated},
+		{"create naming its own branch, no header", "POST", "/api/v1/credit-memos", free(A), "sales", "u-a", "", http.StatusCreated},
+		{"create naming a foreign branch, admin", "POST", "/api/v1/credit-memos", free(B), "admin", "boss", "", http.StatusConflict}, // branch B has no tax rate: a refusal, not the wall
+		{"create against a foreign invoice, header A", "POST", "/api/v1/credit-memos", fmt.Sprintf(`{"invoice_id":%q,"reason_code":"return","reason":"x","lines":[{"line_type":"charge","charge_code":"ADJUST","quantity":"-1","unit_price_ten_thousandths":1000}]}`, f.invB), "sales", "u-a", A, http.StatusBadRequest},
+		// a role the module does not serve
+		{"warehouse reads an invoice", "GET", "/api/v1/invoices/" + f.invA.String(), "", "warehouse", "u-a", A, no},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+
+	// the lists cover the caller's branches only
+	for _, c := range []struct {
+		name, path, role, sub, header string
+		wantA, wantB                  bool
+		idA, idB                      string
+	}{
+		{"invoices, header A", "/api/v1/invoices?limit=200", "sales", "u-a", A, true, false, f.invA.String(), f.invB.String()},
+		{"invoices, no header", "/api/v1/invoices?limit=200", "sales", "u-a", "", true, false, f.invA.String(), f.invB.String()},
+		{"invoices, a user with no grants", "/api/v1/invoices?limit=200", "sales", "u-none", "", false, false, f.invA.String(), f.invB.String()},
+		{"invoices, admin", "/api/v1/invoices?limit=200&customer_id=" + f.docCust.String(), "admin", "boss", "", true, true, f.invA.String(), f.invB.String()},
+		{"credit memos, header A", "/api/v1/credit-memos?limit=200", "finance", "u-a", A, true, false, f.memoA.String(), f.memoB.String()},
+		{"credit memos, no header", "/api/v1/credit-memos?limit=200", "finance", "u-a", "", true, false, f.memoA.String(), f.memoB.String()},
+		{"credit memos, a user with no grants", "/api/v1/credit-memos?limit=200", "finance", "u-none", "", false, false, f.memoA.String(), f.memoB.String()},
+		{"credit memos, admin", "/api/v1/credit-memos?limit=200&customer_id=" + f.docCust.String(), "admin", "boss", "", true, true, f.memoA.String(), f.memoB.String()},
+	} {
+		status, body := f.callBody(t, "GET", c.path, "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("%s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), c.idA); got != c.wantA {
+			t.Errorf("%s: branch A's record present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), c.idB); got != c.wantB {
+			t.Errorf("%s: branch B's record present = %v, want %v", c.name, got, c.wantB)
+		}
 	}
 }

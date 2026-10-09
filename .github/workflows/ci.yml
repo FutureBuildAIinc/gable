@@ -27,7 +27,7 @@ env:
   AUTH_MODE: dev
   # Pinned tool versions. Anything installed with `@latest` in CI makes the
   # build non-deterministic — see the comment on the `vulnerabilities` job.
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
   NODE_VERSION: "20"
   GOVULNCHECK_VERSION: "v1.1.4"
   REUSE_VERSION: "6.2.0"

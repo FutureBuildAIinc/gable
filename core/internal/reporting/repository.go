@@ -120,7 +120,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	queryOutstanding := `
 		SELECT COALESCE(SUM(total_amount), 0)
 		FROM invoices
-		WHERE created_at >= $1 AND created_at < $2 AND status IN ('UNPAID', 'PARTIAL', 'OVERDUE')
+		WHERE created_at >= $1 AND created_at < $2 AND status IN ('UNPAID', 'PARTIAL')
 	`
 	// Note: accurate AR needs to subtract partial payments.
 	// Let's refine: Total Invoiced in Period - Total Payments applied to *those* invoices (even if payment is outside period? Mixed bag).
@@ -155,7 +155,7 @@ func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingRepo
 			COALESCE(SUM(i.total_amount), 0) AS total
 		FROM invoices i
 		LEFT JOIN customers c ON c.id = i.customer_id
-		WHERE i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE')
+		WHERE i.status IN ('UNPAID', 'PARTIAL')
 		GROUP BY i.customer_id, c.name
 		ORDER BY total DESC
 	`

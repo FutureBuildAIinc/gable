@@ -34,7 +34,10 @@ type FulfilmentLine struct {
 	UOMQty             *int64
 	PriceUOMQty        *int64
 	UnitPrice          *int64 // scale 4
+	PricedUnitPrice    *int64 // scale 4: what the engine resolved
 	PriceSource        string
+	OverrideReason     *string
+	PriceAdjustedBy    *string
 	DiscountPercent    *int64 // scale 4
 	DiscountCents      *int64
 	DiscountReason     *string
@@ -54,9 +57,11 @@ type RevenueLeg struct {
 
 // FulfilmentInvoice is the invoice an order fulfilment bills (ADR 0005 5.6 and
 // 6.1) with everything its entry needs: the revenue by account, the tax and
-// the cost of goods sold.
+// the cost of goods sold. The number, the terms and their dates are filled by
+// CreateFulfilmentInvoice (the number is minted late, section 11).
 type FulfilmentInvoice struct {
 	ID         uuid.UUID
+	Number     string
 	BranchID   uuid.UUID
 	OrderID    uuid.UUID
 	CustomerID uuid.UUID
@@ -69,6 +74,11 @@ type FulfilmentInvoice struct {
 	ShipToSnapshot []byte // JSON, or nil
 	ProjectID      *uuid.UUID
 	InvoiceDate    time.Time // the branch's local date
+
+	PaymentTermsID  uuid.UUID
+	DueDate         time.Time
+	DiscountDueDate *time.Time
+	DiscountPercent *int64 // scale 4
 
 	SubtotalCents int64
 	TaxCents      int64
@@ -87,16 +97,21 @@ type FulfilmentInvoice struct {
 // FulfilmentStore is the repository half the fulfilment invoice needs; the
 // Postgres repository implements it.
 type FulfilmentStore interface {
+	TermsFor(ctx context.Context, customerID uuid.UUID) (*CustomerTerms, error)
+	LockCustomer(ctx context.Context, customerID uuid.UUID) error
+	NextInvoiceNumber(ctx context.Context) (string, error)
 	InsertFulfilmentInvoice(ctx context.Context, in *FulfilmentInvoice) error
 	SetInvoiceGLEntry(ctx context.Context, invoiceID, entryID uuid.UUID) error
 }
 
 // CreateFulfilmentInvoice writes the invoice of an order fulfilment inside the
-// caller's transaction (ADR 0005 5.6 step 5 and 6, 8.2): the invoice with its
-// lines, the balanced invoice entry through gl.PostEntry (DR 1020 total and
-// 5010 cost; CR each revenue account, 2020 tax and 1030 cost), and the AR
-// subledger debit through today's PostTransaction. It refuses to run outside
-// a transaction. Until C2-4 moves both postings into the AR core this is the
+// caller's transaction (ADR 0005 5.6 steps 5 and 6, 8.2), in section 11's
+// order: the customer row is locked, THEN the gapless number is minted,
+// immediately before the insert; the journal entry and the subledger follow.
+// It posts the balanced invoice entry through gl.PostEntry (DR 1020 total and
+// 5010 cost; CR each revenue account, 2020 tax and 1030 cost) and the AR
+// subledger debit through today's PostTransaction. It refuses to run outside a
+// transaction. Until C2-4 moves both postings into the AR core this is the
 // path; the events are the caller's, written last.
 func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInvoice) error {
 	if !database.InTx(ctx) {
@@ -111,6 +126,32 @@ func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInv
 	}
 	if len(in.Lines) == 0 {
 		return fmt.Errorf("invoice must have lines")
+	}
+
+	// The terms the invoice snapshots: due date and early pay discount from
+	// the customer's terms at the invoice date (ADR 0005 7.2).
+	terms, err := store.TermsFor(ctx, in.CustomerID)
+	if err != nil {
+		return err
+	}
+	in.PaymentTermsID = terms.ID
+	in.DueDate = terms.Terms.DueDate(in.InvoiceDate)
+	in.DiscountDueDate = terms.Terms.DiscountDueDate(in.InvoiceDate)
+	if in.DiscountDueDate != nil && terms.Terms.DiscountPercent != nil {
+		pct := int64(*terms.Terms.DiscountPercent)
+		in.DiscountPercent = &pct
+	} else {
+		in.DiscountDueDate = nil
+	}
+
+	// Step 7 then 8: the customer row, then the gapless counter. The mint
+	// holds the series until the commit, so it comes after every other lock
+	// of the transaction and just before the insert.
+	if err := store.LockCustomer(ctx, in.CustomerID); err != nil {
+		return err
+	}
+	if in.Number, err = store.NextInvoiceNumber(ctx); err != nil {
+		return err
 	}
 	if err := store.InsertFulfilmentInvoice(ctx, in); err != nil {
 		return err
@@ -130,11 +171,11 @@ func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInv
 	)
 	invID := in.ID
 	entry, err := s.gl.PostEntry(ctx, gl.PostingInput{
-		EntryDate: in.InvoiceDate, Memo: fmt.Sprintf("Invoice %s", in.ID), Source: gl.SourceInvoice,
+		EntryDate: in.InvoiceDate, Memo: fmt.Sprintf("Invoice %s", in.Number), Source: gl.SourceInvoice,
 		SourceRefID: &invID, Currency: in.Currency, PostedBy: in.Actor, Legs: legs,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to post the invoice entry: %w", err)
+		return mapPostingError(fmt.Errorf("failed to post the invoice entry: %w", err))
 	}
 	if entry != nil {
 		if err := store.SetInvoiceGLEntry(ctx, in.ID, entry.ID); err != nil {
@@ -143,7 +184,7 @@ func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInv
 	}
 
 	if s.account != nil {
-		if _, err := s.account.PostTransaction(ctx, in.CustomerID, account.TransactionTypeInvoice, in.TotalCents, &invID, "Invoice #"+in.ID.String()); err != nil {
+		if _, err := s.account.PostTransaction(ctx, in.CustomerID, account.TransactionTypeInvoice, in.TotalCents, &invID, "Invoice "+in.Number); err != nil {
 			return fmt.Errorf("failed to post the invoice to the account ledger: %w", err)
 		}
 	}
@@ -151,7 +192,7 @@ func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInv
 		if err := s.auditLog.Log(ctx, audit.Entry{
 			Action: "invoice.created", EntityType: "invoice", EntityID: in.ID, UserID: in.Actor,
 			Changes: map[string]interface{}{
-				"customer_id": in.CustomerID, "order_id": in.OrderID, "total_cents": in.TotalCents,
+				"number": in.Number, "customer_id": in.CustomerID, "order_id": in.OrderID, "total_cents": in.TotalCents,
 				"cost_cents": in.CostCents, "delivery_id": in.DeliveryID,
 			},
 		}); err != nil {

@@ -16,6 +16,11 @@ const (
 	TransactionTypePayment    TransactionType = "PAYMENT"
 	TransactionTypeAdjustment TransactionType = "ADJUSTMENT"
 	TransactionTypeRefund     TransactionType = "REFUND"
+	// The credit memo and reversal rows of ADR 0005 section 9.3 (the type
+	// CHECK has allowed them since C2-2): a posted credit memo is a negative
+	// CREDIT_MEMO row; a voided invoice or credit memo is the opposite REVERSAL.
+	TransactionTypeCreditMemo TransactionType = "CREDIT_MEMO"
+	TransactionTypeReversal   TransactionType = "REVERSAL"
 )
 
 type CustomerTransaction struct {

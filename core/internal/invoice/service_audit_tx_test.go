@@ -49,10 +49,10 @@ func TestCreateInvoiceAuditRollsBackWithFailedMutation(t *testing.T) {
 		t.Fatalf("insert product: %v", err)
 	}
 
-	inv := &invoice.Invoice{
+	inv := &invoice.LegacyInvoice{
 		ID:         uuid.New(),
 		CustomerID: custID,
-		Lines:      []invoice.InvoiceLine{{ProductID: productID, Quantity: 1, PriceEach: 7500}},
+		Lines:      []invoice.LegacyLine{{ProductID: productID, Quantity: 1, PriceEach: 7500}},
 	}
 
 	err := db.RunInTx(ctx, func(txCtx context.Context) error {
