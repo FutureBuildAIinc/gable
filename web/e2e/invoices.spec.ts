@@ -38,12 +38,14 @@ async function freshCustomer(request: APIRequestContext) {
 // Products with plenty on hand in total; an earlier spec's back order may have
 // emptied the default branch of some, so the caller tries each until one confirms.
 async function stockedProducts(request: APIRequestContext) {
-  const products = (await (await request.get('/api/v1/products')).json()) as { id: string; sku: string }[] | { data: { id: string; sku: string }[] };
-  const list = Array.isArray(products) ? products : products.data;
+  // The product list and the inventory levels list are cursor envelopes (C3-1,
+  // C3-1b); walk the seed's products oldest first, as fulfilment.spec.ts does.
+  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string }[] };
+  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
   const out: { id: string; sku: string }[] = [];
   for (const p of list) {
-    const inv = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { quantity: number; allocated: number }[];
-    if (Array.isArray(inv) && inv.reduce((n, r) => n + (r.quantity - r.allocated), 0) >= 50) out.push(p);
+    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { items: { available: string }[] };
+    if (page.items.reduce((n, r) => n + (Number(r.available) || 0), 0) >= 50) out.push(p);
   }
   if (out.length === 0) throw new Error('no stocked product in the demo seed');
   return out;
