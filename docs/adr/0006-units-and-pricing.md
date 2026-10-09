@@ -941,9 +941,7 @@ table the column and the index). `created_at` defaults to the
 transaction's `NOW()`, so a row inserted by a long-running transaction
 that commits after a client has already walked past its `created_at`
 position is not returned to that in-progress walk; the next walk sees it.
-The walk is at most one keyset lag behind the writer's commit, never
-ahead, never silent on a row the writer has already committed before the
-walk started.
+A row committed before a walk starts is always returned by that walk.
 
 #### 7.3 Pricing
 

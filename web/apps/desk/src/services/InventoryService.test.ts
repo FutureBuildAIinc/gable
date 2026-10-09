@@ -62,18 +62,49 @@ describe('InventoryService.getInventoryByProduct', () => {
         expect(urlOf(0).searchParams.get('cursor')).toBeNull()
     })
 
-    it('stops at the cap when the server keeps offering a cursor', async () => {
+    it('stops at the cap when the server keeps offering a fresh cursor', async () => {
         // The walk is bounded: a server that keeps minting next_cursor cannot
-        // hang the desk past the cap (LIST_ALL_INVENTORY_CAP, mirror of the
-        // product walk's posture).
-        fetchMock.mockImplementation(async () => jsonResponse({
-            items: [row('r-1')],
-            next_cursor: 'more',
-            limit: 1,
-        }))
+        // hang the desk past the cap (2000 rows in pages of 200: ten calls).
+        let n = 0
+        fetchMock.mockImplementation(async () => {
+            n++
+            return jsonResponse({
+                items: Array.from({ length: 200 }, (_, i) => row(`p${n}-${i}`)),
+                next_cursor: `c${n}`,
+                limit: 200,
+            })
+        })
         const all = await InventoryService.getInventoryByProduct('p-1')
-        expect(all.length).toBeLessThanOrEqual(2000)
-        expect(all[0].id).toBe('r-1')
+        expect(all.length).toBe(2000)
+        expect(fetchMock).toHaveBeenCalledTimes(10)
+    })
+
+    it('stops on an empty page that still carries a cursor', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse({ items: [], next_cursor: 'again', limit: 200 }))
+        const all = await InventoryService.getInventoryByProduct('p-1')
+        expect(all).toEqual([])
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('stops when the server hands back the cursor it was just sent', async () => {
+        fetchMock
+            .mockImplementationOnce(async () => jsonResponse({ items: [row('r-1')], next_cursor: 'same', limit: 200 }))
+            .mockImplementation(async () => jsonResponse({ items: [row('r-2')], next_cursor: 'same', limit: 200 }))
+        const all = await InventoryService.getInventoryByProduct('p-1')
+        expect(all.map(r => r.id)).toEqual(['r-1', 'r-2'])
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('answers an empty list when the first page is empty', async () => {
+        fetchMock.mockImplementationOnce(async () => jsonResponse({ items: [], next_cursor: null, limit: 200 }))
+        expect(await InventoryService.getInventoryByProduct('p-1')).toEqual([])
+    })
+
+    it('throws when a later page fails, rather than answering a partial list', async () => {
+        fetchMock
+            .mockImplementationOnce(async () => jsonResponse({ items: [row('r-1')], next_cursor: 'c2', limit: 200 }))
+            .mockImplementationOnce(async () => jsonResponse({ error: { code: 'internal_error' } }, 500))
+        await expect(InventoryService.getInventoryByProduct('p-1')).rejects.toThrow('Failed to fetch inventory')
     })
 
     it('sends the product_id filter on every page of the walk', async () => {
