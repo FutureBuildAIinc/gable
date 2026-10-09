@@ -556,7 +556,9 @@ func r1bAInventoryGroups() []groupDef {
 					"product_id": "{a_product}", "from_location_id": "{a_from}", "to_location_id": "{a_to}",
 					"quantity": 12, "reason": "golden transfer",
 				}},
-			{name: "inventory.list_after_transfer", method: "GET", path: "/api/v1/inventory?product_id={a_product}", sortPrimaryArray: true},
+			{name: "inventory.list_after_transfer", method: "GET", path: "/api/v1/inventory?product_id={a_product}"},
+			{name: "inventory.list_include_product", method: "GET", path: "/api/v1/inventory?product_id={a_product}&include=product"},
+			{name: "inventory.list_unknown_param", method: "GET", path: "/api/v1/inventory?product_id={a_product}&warehouse=x"},
 			{name: "inventory.transfer.insufficient", method: "POST", path: "/api/v1/inventory/transfer",
 				body: map[string]any{
 					"product_id": "{a_product}", "from_location_id": "{a_from}", "to_location_id": "{a_to}",

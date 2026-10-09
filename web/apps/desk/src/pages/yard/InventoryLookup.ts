@@ -188,9 +188,9 @@ export class YardInventoryLookup extends LitElement {
                                         <div class="flex items-center gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/5">
                                             ${icon(MapPin, 14, 'text-zinc-600 shrink-0')}
                                             <div class="flex-1 text-xs">
-                                                <span class="text-zinc-300">${inv.location_name || inv.location}</span>
+                                                <span class="text-zinc-300">${inv.location_name}</span>
                                             </div>
-                                            <span class="font-mono text-xs text-zinc-300">${inv.quantity}</span>
+                                            <span class="font-mono text-xs text-zinc-300">${formatQuantity(inv.quantity)}</span>
                                         </div>
                                     `)}
 
