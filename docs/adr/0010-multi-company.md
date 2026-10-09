@@ -143,7 +143,10 @@ row's company is refused (section 9).
 
 ### 2. The table, by module
 
-Every table gets exactly one of three rules:
+Every table gets exactly one named rule, stated against the schema as it
+stands when the build runs (after C2-5 and C4-2), not as it stands today;
+where a column the rule leans on is not present yet, the row names the
+cycle that adds it. The rules:
 
 - **R1, follows its parent.** The row carries a NOT NULL parent that already
   names a company (today always `branch_id`; a bank account for the bank
@@ -174,9 +177,9 @@ place per document.
 | sales | `orders` | R1 | `062:7` (`branch_id` NOT NULL from `062:13`) |
 | sales | `quotes` | R1 | `063:6` |
 | sales | `invoices` | R1 | `064:7` |
-| sales | `payments` | R2 | no branch (`008:9`); the AR core sets it from the branch context of the receipt act |
-| sales | `credit_memos` | R2 | no branch (`018:14`); from its invoice or branch context |
-| sales (C2-4, ADR 0005 9.2) | `ar_applications` | R2 | child of a payment or credit memo and an invoice of one company; the AR core checks both sides agree |
+| sales | `payments` | R1 | `branch_id` is added by C2-4 (ADR 0005 9.1 at `0005:1067`, migration step at `0005:1484`, backfilled from the invoice or the receipt branch); the build sets it NOT NULL, then the standard trigger |
+| sales | `credit_memos` | R1 | `branch_id` is added by C2-3 (ADR 0005 6.3 at `0005:821`, backfilled from the invoice or the customer's primary branch at `0005:1474`, nullable on arrival); the build sets it NOT NULL, then the standard trigger |
+| sales (C2-4, ADR 0005 9.2) | `ar_applications` | R2 | child rows of a payment or credit memo and an invoice; the AR core checks both sides name one company and refuses the act when they do not, the R2 check beside the two R1 parents |
 | sales (C2-4, ADR 0005 9.3) | `customer_transactions` | R2 | the AR subledger row; from its invoice, credit memo or payment; the balance invariant of ADR 0005 9.3 holds per company |
 | sales (C2-4) | `payment_refunds` | R2 | from its payment or credit memo |
 | sales (legacy) | `customer_deposits`, `customer_deposit_applications` | left alone | renamed `*_legacy` by C2-4 (ADR 0005 9.1); no rule, no reader |
@@ -497,15 +500,19 @@ Up, in order:
    its `branch_id` first backfilled from its ancestor chain where null
    (`057:21` allows null; `058` and `060` keep and backfill it). The
    update trigger of step 4 refuses a later move.
-3. The R1 tables of section 2 that exist today: add `company_id`, backfill
-   from the parent, NOT NULL, the foreign key, and the `BEFORE INSERT OR
-   UPDATE` trigger that keeps it and refuses a parent of another company.
-   The nullable branch rows (`075:21`, `078:15`, `079:42`) are backfilled
-   from their register or sale; `079:79` is left alone (legacy after C2-4,
-   ADR 0005 9.1); `089:64` is left alone (no company column, section 2).
-4. The R2 tables of section 2 that exist today: add `company_id`, backfill
-   every row to the seed company, NOT NULL, the foreign key. No trigger:
-   the writers of section 11's third item set it from then on.
+3. The R1 tables of section 2 that exist when it runs: add `company_id`,
+   backfill from the parent, NOT NULL, the foreign key, and the
+   `BEFORE INSERT OR UPDATE` trigger that keeps it and refuses a parent of
+   another company. Payments and credit memos are R1 from the branch cycle
+   2 adds (section 2): their `branch_id` columns arrive with C2-3 and C2-4
+   and are set NOT NULL here first, then take the same trigger. The
+   nullable branch rows that stay nullable (`075:21`, `078:15`, `079:42`)
+   keep their named writer rule (section 2), their company backfilled from
+   their register or sale; `079:79` is left alone (legacy after C2-4, ADR
+   0005 9.1); `089:64` is left alone (no company column, section 2).
+4. The R2 tables of section 2 that exist when it runs: add `company_id`,
+   backfill every row to the seed company, NOT NULL, the foreign key. No
+   trigger: the writers of section 11's third item set it from then on.
 5. GL: `UNIQUE (code)` dropped and `UNIQUE (company_id, code)` added
    (`025:10`); `UNIQUE (company_id, id)` added; the composite foreign keys
    of section 3; `charge_codes.revenue_account_code`'s FK dropped
@@ -532,13 +539,17 @@ Tests, in the migration item:
   names), proving idempotency and the round trip.
 - The refusal paths of the down: one extra company row, and one row pointed
   at a made up company, each making the down raise.
-- **The census test**: it fails when any table with a `branch_id` column
-  (minus the legacy renames and `events_outbox`) lacks its company rule
-  (trigger or named writer), and when any table named in section 2's per
+- **The census test**: it reads the census list that lives beside the
+  migration, one line per table, so the test reads as the table of
+  section 2 does. It fails when a table with a `branch_id` column (minus
+  the legacy renames and `events_outbox`) carries no line; when a line's
+  rule is R1 but the trigger is missing; when a line's rule is R2 but the
+  `company_id` column is missing; when a table's `branch_id` is NOT NULL
+  and its rule is not R1, because a NOT NULL branch is always a parent
+  the trigger can follow; and when a table named in section 2's per
   company list lacks `company_id`. Every later item that adds a branch
   carrying table extends the census in the same pull request, so a table
-  cannot land without its rule. The census list lives beside the migration,
-  one line per table, so the test reads as the table of section 2 does.
+  cannot land without its rule.
 
 ### 11. Items, order and sizes
 
