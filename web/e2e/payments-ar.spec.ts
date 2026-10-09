@@ -153,9 +153,25 @@ test.describe('Payments, unapplied cash and AR', () => {
   test('the aging groups by job and by ship-to, and the statement reads on the new route', async ({ page, request }) => {
     await signIn(page, 'Playwright Aging');
 
-    // A seeded customer with jobs (its projects), a second ship-to added, and
-    // two billed invoices: one on each job and ship-to.
-    const kelbrook = '18d59971-b538-48e8-8921-bffcda281cd5';
+    // A customer with at least two quoted jobs (the seed draws fresh ids every
+    // run, so the customer is discovered through its quotes, never hardcoded).
+    const quotes = ((await (await request.get('/api/v1/quotes?limit=200')).json()) as { items: { customer_id: string; customer_name?: string; job_id: string | null }[] }).items;
+    const jobsByCustomer = new Map<string, Set<string>>();
+    for (const q of quotes) {
+        if (!q.job_id) continue;
+        if (!jobsByCustomer.has(q.customer_id)) jobsByCustomer.set(q.customer_id, new Set());
+        jobsByCustomer.get(q.customer_id)!.add(q.job_id);
+    }
+    let kelbrook = '';
+    for (const [customer, jobs] of jobsByCustomer) {
+        if (jobs.size >= 2) { kelbrook = customer; break; }
+    }
+    if (!kelbrook) {
+        test.skip(true, 'the seed holds no customer with two jobs to age by');
+        return;
+    }
+    const jobIds = [...jobsByCustomer.get(kelbrook)!];
+    const customerName = ((await (await request.get(`/api/v1/customers/${kelbrook}`)).json()) as { name: string }).name;
     const shipTos = ((await (await request.get(`/api/v1/customers/${kelbrook}/ship-tos`)).json()) as { items: { id: string; code: string }[] }).items;
     expect(shipTos.length).toBeGreaterThanOrEqual(1);
     if (shipTos.length < 2) {
@@ -165,16 +181,8 @@ test.describe('Payments, unapplied cash and AR', () => {
       expect(second.status(), await second.text()).toBe(201);
       shipTos.push(await second.json());
     }
-    // The customer's two jobs, discovered through its quotes (each quote
-    // carries its job; the projects themselves are a portal read).
-    const quotes = ((await (await request.get(`/api/v1/quotes?customer_id=${kelbrook}&limit=50`)).json()) as { items: { job_id: string | null }[] }).items;
-    const jobIds = [...new Set(quotes.map((q) => q.job_id).filter((j): j is string => !!j))];
-    if (jobIds.length < 2) {
-      test.skip(true, 'the seed customer holds fewer than two jobs to age by');
-      return;
-    }
-    await billedInvoice(request, { id: kelbrook, name: 'Kelbrook Building Centre' }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
-    await billedInvoice(request, { id: kelbrook, name: 'Kelbrook Building Centre' }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
+    await billedInvoice(request, { id: kelbrook, name: customerName }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
+    await billedInvoice(request, { id: kelbrook, name: customerName }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
 
     // By customer first, then by job and by ship-to: the toggle re-reads the
     // aging and the group rows split.
@@ -194,8 +202,8 @@ test.describe('Payments, unapplied cash and AR', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'aging-by-job.png'), fullPage: true });
 
     await page.getByTestId('group-by-ship_to').click();
-    await expect(page.getByTestId('aging-row').filter({ hasText: 'MAIN' }).first()).toBeVisible({ timeout: 15000 });
-    await expect(page.getByTestId('aging-row').filter({ hasText: 'E2ESITE' }).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('aging-row').filter({ hasText: shipTos[0].code }).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('aging-row').filter({ hasText: shipTos[1].code }).first()).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(SHOTS_DIR, 'aging-by-ship-to.png'), fullPage: true });
 
     // The statement on the new AR route: the seeded customer's activity.
