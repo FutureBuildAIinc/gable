@@ -992,7 +992,8 @@ are item 2's, its numbering is item 4's (before item 4 a second company's
 invoices would mint from the shared `invoice` series, exactly what
 section 4 exists to prevent), and its company scoped branch route sits
 under the segment, the scopes and the wall of item 5. It also carries the
-settings gate of section 6. No second company can exist until item 7
+`system_settings` gate of section 6 and drops the last step 4 default
+(`locations`). No second company can exist until item 7
 merges: the company create route is item 7's.
 
 ## Consequences
