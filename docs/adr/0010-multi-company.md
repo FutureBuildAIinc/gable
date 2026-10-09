@@ -708,10 +708,18 @@ trigger refuses any UPDATE or DELETE that would leave
 `multi_branch_enabled` anything but
 `true` or `default_branch_required` `false` (the kill switch reads
 `false` when its row is absent, so a DELETE is a turn off and is refused
-the same way), its raise carrying the same blocker wording. The item 7
+the same way), its raise carrying the same blocker wording. The
+trigger parses its value with the same vocabulary `readBoolSetting`
+uses (`branch.go:298-302`: `true`, `t`, `1`, `yes`, `on` as true;
+`false`, `f`, `0`, `no`, `off` as false), so a write of `on` is still
+a refusal by intent, by matching the reader rather than failing it.
+A row trigger cannot see `TRUNCATE system_settings`, so the same
+condition holds there too: a statement level `BEFORE TRUNCATE` trigger
+refuses a `TRUNCATE` while more than one company exists, its raise
+carrying the same blocker wording. The item 7
 create check reads the table, not the middleware's cached flags. Sized
-inside item 7, with the refusals tested at the database: an UPDATE and
-a DELETE, each raising.
+inside item 7, with the refusals tested at the database: an UPDATE, a
+DELETE, and a `TRUNCATE system_settings`, each raising.
 
 Who reaches a company: a caller reaches a company exactly when their
 grants reach a branch of it, one query over `user_locations` joined to
