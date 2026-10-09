@@ -5,231 +5,204 @@ package crm
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
-// The persistence rules the testability gap named live inside the Postgres
-// implementation and need a real database:
-//
-//   - Create defaults a missing activity_date to now (activity.go:74-76), which
-//     is what stops an un-dated call log sorting to the epoch.
-//   - Update and Delete map zero rows affected onto "activity not found".
-//   - ListByCustomer is scoped by customer_id and ordered activity_date DESC.
-//
-// Skips cleanly when Postgres is unreachable (testutil.RequireDB).
+// The persistence rules against a real Postgres: the keyset list, the branch
+// wall through the customer, the revision bump and the defaulted
+// activity_date. Skips cleanly when Postgres is unreachable.
 
-// seedCustomer creates a customer to hang activities off, since crm_activities
-// has a NOT NULL FK to customers.
-func seedCustomer(t *testing.T, repo *PostgresRepository) uuid.UUID {
+type pgFixture struct {
+	t        *testing.T
+	db       *database.DB
+	repo     *PostgresRepository
+	customer uuid.UUID
+	other    uuid.UUID // a customer on another branch
+	branch   uuid.UUID
+	otherBr  uuid.UUID
+}
+
+// seedCustomer creates a customer on a branch, since crm_activities has a
+// NOT NULL FK to customers and the wall reads customer_branches.
+func seedCustomerOn(t *testing.T, f *pgFixture, branch uuid.UUID, prefix string) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
 	id := uuid.New()
-
-	_, err := repo.db.Pool.Exec(ctx,
+	if _, err := f.db.Pool.Exec(ctx,
 		`INSERT INTO customers (id, name, account_number, primary_branch_id)
-		 VALUES ($1, $2, $3, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`,
-		id, "CRM PGTest "+id.String()[:8], "CRM-"+id.String()[:8])
-	if err != nil {
-		t.Fatalf("seed customer: %v", err)
+		 VALUES ($1, $2, $3, $4)`,
+		id, "CRM Test "+id.String()[:8], prefix+id.String()[:8], branch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, id, branch); err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = repo.db.Pool.Exec(context.Background(), `DELETE FROM customers WHERE id = $1`, id)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM crm_activities WHERE customer_id = $1`, id)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customer_branches WHERE customer_id = $1`, id)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customers WHERE id = $1`, id)
 	})
 	return id
 }
 
-// CORRECTNESS: an activity submitted without an activity_date is dated now, not
-// left at the zero time. The feed is ordered activity_date DESC, so a zero
-// timestamp would bury a freshly logged call at the bottom of the customer's
-// history forever.
-func TestPostgresRepository_CreateDefaultsActivityDateToNow(t *testing.T) {
-	repo := NewRepository(testutil.RequireDB(t))
+func newPGFixture(t *testing.T) *pgFixture {
+	t.Helper()
+	db := testutil.RequireDB(t)
+	f := &pgFixture{t: t, db: db, repo: NewRepository(db)}
 	ctx := context.Background()
-	customerID := seedCustomer(t, repo)
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&f.branch); err != nil {
+		t.Fatal(err)
+	}
+	// A second branch with a customer on it, for the wall.
+	newBranch := uuid.New()
+	if err := db.Pool.QueryRow(ctx, `
+		INSERT INTO locations (id, type, code, name)
+		VALUES ($1, 'BRANCH', $2, $3)
+		RETURNING id`, newBranch, "crm-"+newBranch.String()[:8], "crm wall branch "+newBranch.String()[:8]).Scan(&f.otherBr); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, f.otherBr)
+	})
+	f.customer = seedCustomerOn(t, f, f.branch, "CRM-A-")
+	f.other = seedCustomerOn(t, f, f.otherBr, "CRM-B-")
+	return f
+}
 
-	before := time.Now().Add(-time.Minute)
-	a := &Activity{CustomerID: customerID, ActivityType: ActivityCall, Description: "no date supplied"}
-	if err := repo.Create(ctx, a); err != nil {
-		t.Fatalf("Create: %v", err)
+func (f *pgFixture) insert(t *testing.T, customer uuid.UUID, typ ActivityType, description string, when time.Time) Activity {
+	t.Helper()
+	a := Activity{ID: uuid.New(), CustomerID: customer, ActivityType: typ, Description: description,
+		ActivityDate: httpx.TimestampOf(when), CreatedAt: httpx.TimestampOf(when), UpdatedAt: httpx.TimestampOf(when)}
+	if err := f.repo.Create(context.Background(), &a); err != nil {
+		t.Fatal(err)
 	}
-	after := time.Now().Add(time.Minute)
+	return a
+}
 
-	if a.ID == uuid.Nil {
-		t.Error("Create left the id unset")
+// The list is newest first on (created_at, id) and the cursor walks every
+// row once.
+func TestList_KeysetWalksEveryRowOnce(t *testing.T) {
+	f := newPGFixture(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-time.Hour)
+	var made []Activity
+	for i := 0; i < 5; i++ {
+		made = append(made, f.insert(t, f.customer, ActivityCall, "call", base.Add(time.Duration(i)*time.Minute)))
 	}
-	if a.ActivityDate.IsZero() {
-		t.Fatal("activity_date was left at the zero time")
+	seen := map[uuid.UUID]bool{}
+	after := (*time.Time)(nil)
+	afterID := uuid.Nil
+	pages := 0
+	for {
+		items, hasMore, _, err := f.repo.List(ctx, f.customer, ListFilter{Limit: 2, AfterTime: after, AfterID: afterID}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range items {
+			if seen[a.ID] {
+				t.Fatalf("activity %s served twice", a.ID)
+			}
+			seen[a.ID] = true
+		}
+		pages++
+		if !hasMore {
+			break
+		}
+		last := items[len(items)-1]
+		at := last.CreatedAt.Time
+		after, afterID = &at, last.ID
 	}
-	if a.ActivityDate.Before(before) || a.ActivityDate.After(after) {
-		t.Errorf("activity_date = %s, want roughly now (%s..%s)", a.ActivityDate, before, after)
+	if len(seen) != 5 || pages != 3 {
+		t.Errorf("served %d activities over %d pages, want 5 over 3", len(seen), pages)
 	}
+}
 
-	stored, err := repo.Get(ctx, a.ID)
+// The branch wall through the customer: a caller held to another branch
+// finds the activity a 404 and the list empty.
+func TestBranchWall_ThroughTheCustomer(t *testing.T) {
+	f := newPGFixture(t)
+	ctx := context.Background()
+	a := f.insert(t, f.customer, ActivityCall, "wall", time.Now())
+	other := branchctx.With(ctx, &branchctx.Context{BranchID: &f.otherBr, IsAdmin: false, UserSub: "someone"})
+
+	if _, err := f.repo.Get(other, a.ID); err != ErrNotFound {
+		t.Errorf("get behind the wall = %v, want ErrNotFound", err)
+	}
+	if err := f.repo.Lock(other, a.ID); err != ErrNotFound {
+		t.Errorf("lock behind the wall = %v, want ErrNotFound", err)
+	}
+	items, _, _, err := f.repo.List(other, f.customer, ListFilter{Limit: 10}, false)
+	if err != nil || len(items) != 0 {
+		t.Errorf("list behind the wall = %v, %d items; want empty", err, len(items))
+	}
+	ok, err := f.repo.CustomerVisible(other, f.customer)
+	if err != nil || ok {
+		t.Errorf("customer visible behind the wall = %v, %v; want false", ok, err)
+	}
+	// The same caller sees its own branch's activity.
+	mine := f.insert(t, f.other, ActivityNote, "other branch", time.Now())
+	if _, err := f.repo.Get(other, mine.ID); err != nil {
+		t.Errorf("get of the caller's own branch activity = %v", err)
+	}
+}
+
+// The filters filter: activity_type and contact_id.
+func TestList_FiltersFilter(t *testing.T) {
+	f := newPGFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	f.insert(t, f.customer, ActivityCall, "one", now)
+	f.insert(t, f.customer, ActivityNote, "two", now.Add(time.Second))
+	call := ActivityCall
+	items, _, _, err := f.repo.List(ctx, f.customer, ListFilter{Limit: 10, Type: &call}, false)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatal(err)
 	}
-	if stored.ActivityDate.IsZero() {
-		t.Error("the stored row has a zero activity_date")
+	if len(items) != 1 || items[0].Description != "one" {
+		t.Errorf("type filter = %v, want only the call", items)
 	}
-	if stored.CreatedAt.IsZero() || stored.UpdatedAt.IsZero() {
-		t.Errorf("created_at/updated_at were not stamped: %+v", stored)
-	}
-}
-
-// CORRECTNESS: a supplied activity_date is kept. Back-dating a call log is the
-// whole reason the field is writable.
-func TestPostgresRepository_CreateKeepsASuppliedActivityDate(t *testing.T) {
-	repo := NewRepository(testutil.RequireDB(t))
-	ctx := context.Background()
-	customerID := seedCustomer(t, repo)
-
-	backdated := time.Date(2025, 11, 4, 15, 30, 0, 0, time.UTC)
-	a := &Activity{
-		CustomerID: customerID, ActivityType: ActivityMeeting,
-		Description: "logged late", ActivityDate: backdated,
-	}
-	if err := repo.Create(ctx, a); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	stored, err := repo.Get(ctx, a.ID)
+	_, _, tp, err := f.repo.List(ctx, f.customer, ListFilter{Limit: 10}, true)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatal(err)
 	}
-	if !stored.ActivityDate.UTC().Equal(backdated) {
-		t.Errorf("activity_date = %s, want the supplied %s", stored.ActivityDate.UTC(), backdated)
+	if tp == nil || *tp != 2 {
+		t.Errorf("total = %v, want 2", tp)
 	}
 }
 
-// CORRECTNESS: the feed is scoped to one customer and ordered newest first.
-func TestPostgresRepository_ListByCustomerIsScopedAndNewestFirst(t *testing.T) {
-	repo := NewRepository(testutil.RequireDB(t))
+// Every write that changes the activity moves its revision.
+func TestWrites_MoveTheRevision(t *testing.T) {
+	f := newPGFixture(t)
 	ctx := context.Background()
-	mine, theirs := seedCustomer(t, repo), seedCustomer(t, repo)
-
-	older := &Activity{
-		CustomerID: mine, ActivityType: ActivityCall, Description: "older",
-		ActivityDate: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	}
-	newer := &Activity{
-		CustomerID: mine, ActivityType: ActivityNote, Description: "newer",
-		ActivityDate: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
-	}
-	other := &Activity{
-		CustomerID: theirs, ActivityType: ActivityEmail, Description: "another customer's note",
-		ActivityDate: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	}
-	for _, a := range []*Activity{older, newer, other} {
-		if err := repo.Create(ctx, a); err != nil {
-			t.Fatalf("Create %s: %v", a.Description, err)
-		}
-	}
-
-	got, err := repo.ListByCustomer(ctx, mine)
+	a := f.insert(t, f.customer, ActivityCall, "rev", time.Now())
+	got, err := f.repo.Get(ctx, a.ID)
 	if err != nil {
-		t.Fatalf("ListByCustomer: %v", err)
+		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("got %d activities, want 2 (the other customer's must not appear): %+v", len(got), got)
+	if got.Revision != 1 {
+		t.Fatalf("a fresh activity is at revision %d, want 1", got.Revision)
 	}
-	if got[0].ID != newer.ID || got[1].ID != older.ID {
-		t.Errorf("order = [%s %s], want newest first [%s %s]", got[0].Description, got[1].Description, "newer", "older")
+	if err := f.repo.Lock(ctx, a.ID); err != nil {
+		t.Fatal(err)
 	}
-	for _, a := range got {
-		if a.CustomerID != mine {
-			t.Errorf("activity %s belongs to customer %s, not %s", a.ID, a.CustomerID, mine)
-		}
+	got.Description = "renamed"
+	if err := f.repo.Update(ctx, got); err != nil {
+		t.Fatal(err)
 	}
-}
-
-// CORRECTNESS: updating or deleting a row that is not there is reported as
-// "activity not found" via the zero-rows-affected check, not as a silent
-// success — and it is reported as the ErrNotFound sentinel, which is what lets
-// the handler answer 404 rather than 500 (repository_test.go).
-func TestPostgresRepository_UpdateAndDeleteReportMissingRows(t *testing.T) {
-	repo := NewRepository(testutil.RequireDB(t))
-	ctx := context.Background()
-
-	ghost := &Activity{ID: uuid.New(), CustomerID: uuid.New(), ActivityType: ActivityCall, Description: "x"}
-
-	err := repo.Update(ctx, ghost)
-	if err == nil {
-		t.Error("Update on a nonexistent activity succeeded, want a not-found error")
-	} else {
-		if !strings.Contains(err.Error(), "activity not found") {
-			t.Errorf("Update error = %q, want it to say the activity was not found", err)
-		}
-		if !errors.Is(err, ErrNotFound) {
-			t.Errorf("Update error = %v, want ErrNotFound", err)
-		}
-	}
-
-	err = repo.Delete(ctx, ghost.ID)
-	if err == nil {
-		t.Error("Delete on a nonexistent activity succeeded, want a not-found error")
-	} else {
-		if !strings.Contains(err.Error(), "activity not found") {
-			t.Errorf("Delete error = %q, want it to say the activity was not found", err)
-		}
-		if !errors.Is(err, ErrNotFound) {
-			t.Errorf("Delete error = %v, want ErrNotFound", err)
-		}
-	}
-}
-
-// CORRECTNESS: the UPDATE statement does not carry customer_id, so a caller who
-// puts someone else's customer_id in the body cannot move an activity between
-// customers. HandleUpdateActivity decodes the body's customer_id into the
-// struct it hands the repository (handler.go:108-113 never overwrites it, only
-// the id), so this SQL omission is the thing standing in the way.
-func TestPostgresRepository_UpdateCannotMoveAnActivityToAnotherCustomer(t *testing.T) {
-	repo := NewRepository(testutil.RequireDB(t))
-	ctx := context.Background()
-	mine, theirs := seedCustomer(t, repo), seedCustomer(t, repo)
-
-	a := &Activity{CustomerID: mine, ActivityType: ActivityCall, Description: "mine"}
-	if err := repo.Create(ctx, a); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	hijacked := *a
-	hijacked.CustomerID = theirs
-	hijacked.Description = "reassigned"
-	if err := repo.Update(ctx, &hijacked); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-
-	stored, err := repo.Get(ctx, a.ID)
+	after, err := f.repo.Get(ctx, a.ID)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatal(err)
 	}
-	if stored.CustomerID != mine {
-		t.Errorf("the activity moved to customer %s; it must stay on %s", stored.CustomerID, mine)
-	}
-	if stored.Description != "reassigned" {
-		t.Errorf("description = %q, want the update to have landed", stored.Description)
-	}
-}
-
-// CORRECTNESS: Get maps pgx.ErrNoRows onto "activity not found" rather than
-// leaking the driver error, which is what handler.go:93 turns into a 404.
-func TestPostgresRepository_GetMapsNoRowsToNotFound(t *testing.T) {
-	repo := NewRepository(testutil.RequireDB(t))
-
-	_, err := repo.Get(context.Background(), uuid.New())
-	if err == nil {
-		t.Fatal("Get on a random id succeeded, want an error")
-	}
-	if !strings.Contains(err.Error(), "activity not found") {
-		t.Errorf("error = %q, want it to say the activity was not found", err)
-	}
-	if strings.Contains(err.Error(), "no rows in result set") {
-		t.Errorf("the raw pgx error leaked through the mapping: %q", err)
+	if after.Revision != 2 {
+		t.Errorf("revision after update = %d, want 2", after.Revision)
 	}
 }

@@ -187,7 +187,7 @@ var modelBoundSchemas = []struct {
 	{"PortalInvite", portal.PortalInvite{}},
 	// project (R1-7c)
 	{"Project", project.Project{}},
-	{"ProjectDashboard", project.ProjectDashboardDTO{}},
+	{"ProjectDashboard", project.ProjectDashboard{}},
 	{"ProjectItem", project.ProjectItem{}},
 	// partner (R1-7c)
 	{"PartnerDashboard", partner.DashboardDTO{}},
@@ -203,12 +203,12 @@ var modelBoundSchemas = []struct {
 	{"AppsManifestStatus", apps.Manifest{}},
 	{"RFC", governance.RFC{}},
 	{"RFCSummary", governance.RFCSummary{}},
-	{"MillworkOption", millwork.MillworkOption{}},
-	{"ConfiguratorRule", configurator.ConfiguratorRule{}},
-	{"ConfiguratorPreset", configurator.ConfiguratorPreset{}},
+	{"MillworkOption", millwork.Option{}},
+	{"ConfiguratorRule", configurator.Rule{}},
+	{"ConfiguratorPreset", configurator.Preset{}},
 	{"ConfiguratorAvailableOption", configurator.AvailableOption{}},
 	{"ConfiguratorValidationConflict", configurator.ValidationConflict{}},
-	{"ConfiguratorValidateResponse", configurator.ValidateConfigResponse{}},
+	{"ConfiguratorValidateResponse", configurator.ValidateResponse{}},
 	{"ConfiguratorBuildSKUResponse", configurator.BuildSKUResponse{}},
 	// reporting, reports, dashboard (R1-7f)
 	{"ReportingSavedReport", reporting.SavedReport{}},

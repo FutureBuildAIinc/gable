@@ -237,8 +237,9 @@ GET	/api/v1/matching/exceptions	internal/matching	h.ListExceptions
 GET	/api/v1/matching/results/{po_id}	internal/matching	h.GetMatchResult
 POST	/api/v1/matching/run/{po_id}	internal/matching	h.RunMatch
 GET	/api/v1/me/branches	internal/location	h.ListMyBranches
-GET	/api/v1/millwork/options	internal/millwork	h.handleGetOptions
+GET	/api/v1/millwork/options	internal/millwork	h.handleListOptions
 POST	/api/v1/millwork/options	internal/millwork	h.handleCreateOption
+GET	/api/v1/millwork/options/{id}	internal/millwork	h.handleGetOption
 GET	/api/v1/orders	internal/order	h.HandleListOrders
 POST	/api/v1/orders	internal/order	h.HandleCreateOrder
 GET	/api/v1/orders/fulfillment-requests	internal/order	h.HandleListFulfilmentRequests

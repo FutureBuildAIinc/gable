@@ -64,6 +64,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customerId}/activities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's activities
+         * @description The cursor list envelope, newest first on (created_at, id). activity_type and contact_id filter; total appears only under include=total. A parameter the route does not declare, an activity type outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400. A customer the caller cannot see behind the branch wall serves an empty page.
+         */
+        get: operations["activityList"];
+        put?: never;
+        /**
+         * Log an activity
+         * @description activity_type and description are required; contact_id and logged_by are optional; activity_date defaults to now. The customer is named by the path: a body customer_id is a 400, and a customer the caller cannot see behind the branch wall is a 404. Writes the audit row activity.created and the event activity.created in the same transaction, the event last.
+         */
+        post: operations["activityCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/activities/{id}": {
         parameters: {
             query?: never;
@@ -71,15 +95,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get one activity */
+        /**
+         * Get one activity
+         * @description The activity with its ETag. An activity behind the caller's branch wall is a 404.
+         */
         get: operations["activityGet"];
         /**
          * Update an activity
-         * @description The write replaces contact_id, activity_type, description, logged_by and activity_date; an omitted field is cleared.
+         * @description Replaces contact_id, activity_type, description, logged_by and activity_date (an omitted activity_date keeps its stored value) on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. A body customer_id is a 400: the customer is fixed at create. The response is the stored row, not the echo of the body. Writes the audit row activity.updated and the event activity.updated in the same transaction, the event last.
          */
         put: operations["activityUpdate"];
         post?: never;
-        /** Delete an activity */
+        /**
+         * Delete an activity
+         * @description Deletes on the client's revision, carried by If-Match alone (a DELETE has no body). Writes the audit row activity.deleted and the event activity.deleted in the same transaction, the event last.
+         */
         delete: operations["activityDelete"];
         options?: never;
         head?: never;
@@ -704,7 +734,7 @@ export interface paths {
         };
         /**
          * List every configurator rule
-         * @description Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+         * @description The whole rule matrix, the charge codes master shape: ordered by dependency type and value, then attribute type and value, never null. A query parameter the route does not declare is a 400 unsupported_query_parameter.
          */
         get: operations["configuratorListRules"];
         put?: never;
@@ -724,7 +754,7 @@ export interface paths {
         };
         /**
          * List the allowed values of one attribute
-         * @description Admin, owner or sales. Every query parameter other than attribute_type is read as a current selection (attribute type to chosen value, first value wins), for example attribute_type=Grade&Species=SYP. With no selections, or when no rule matches them, the static defaults for the attribute are answered (an empty array for an unknown attribute). Otherwise the order of the options is unspecified.
+         * @description The values the attribute may take under the current selections, deterministically ordered by value. attribute_type is required; the selections ride as one parameter, a comma separated list of Type=Value pairs (selections=Species=SYP,Treatment=None), so the route declares exactly the two names it reads (the base consumed every unknown query name as a selection and never said so). With no selections, or when no rule matches them, the static defaults for the attribute answer (an empty array for an unknown attribute). A parameter the route does not declare, a missing attribute_type or a malformed selections value is a 400.
          */
         get: operations["configuratorListOptions"];
         put?: never;
@@ -744,7 +774,7 @@ export interface paths {
         };
         /**
          * List the active presets
-         * @description Admin, owner or sales. Active presets only, ordered by name. Never null.
+         * @description Active presets ordered by name, never null. product_type filters (the filter filters); a parameter the route does not declare is a 400 unsupported_query_parameter.
          */
         get: operations["configuratorListPresets"];
         put?: never;
@@ -766,7 +796,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a set of selections against the rules
-         * @description Admin, owner or sales. The body is capped at 64 KiB; an oversized or malformed body is a 400, as is an empty selections map. A rule conflict is a 200 with valid false and the conflicts listed.
+         * @description The body is capped at 64 KiB; an oversized or malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
          */
         post: operations["configuratorValidate"];
         delete?: never;
@@ -786,7 +816,7 @@ export interface paths {
         put?: never;
         /**
          * Build a non stock SKU from selections
-         * @description Admin, owner or sales. The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict, and any other service failure including a database fault, answers 400 (never 500). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+         * @description The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
          */
         post: operations["configuratorBuildSku"];
         delete?: never;
@@ -965,27 +995,6 @@ export interface paths {
          */
         put: operations["paymentTermsUpdate"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customers/{customerId}/activities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List customer activities
-         * @description Returns activities for a customer, ordered by activity_date descending. The handler guarantees a bare array: an empty array, never null, when the customer has no activities.
-         */
-        get: operations["customerListActivities"];
-        put?: never;
-        /** Create a customer activity */
-        post: operations["customerCreateActivity"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2864,15 +2873,35 @@ export interface paths {
         };
         /**
          * List the options of a category
-         * @description Admin, owner or sales. Ordered by name. Not paginated. Answers null, not an empty array, when the category has no options.
+         * @description The cursor list envelope, newest first on (created_at, id); total appears only under include=total. category is required and filters; a parameter the route does not declare, a missing or repeated category, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["millworkListOptions"];
         put?: never;
         /**
          * Create an option
-         * @description Admin, owner or sales. No field is validated by the handler; a value the table refuses (a category over 50 characters, a name over 100) surfaces as a 500.
+         * @description category (at most 50 characters), name (at most 100) and price_adjustment_cents are required; the adjustment may be negative (a discount option); attributes is any JSON the dealer sends, stored as sent and null when absent. Writes the audit row millwork_option.created and the event millwork_option.created in the same transaction, the event last.
          */
         post: operations["millworkCreateOption"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/millwork/options/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one option
+         * @description The option with its ETag, so the create's Location resolves.
+         */
+        get: operations["millworkGetOption"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4944,13 +4973,13 @@ export interface paths {
         };
         /**
          * The customer's jobs
-         * @description A bare array, newest created first, no page envelope.
+         * @description The cursor list envelope, newest first on (created_at, id). status filters (lowercase); total appears only under include=total. A parameter the route does not declare, a status outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["projectList"];
         put?: never;
         /**
          * Create a job
-         * @description An empty name is a 500 today (the handler's status is fixed). The project starts Active.
+         * @description name is required (1 to 255 characters); the project starts active and no status is accepted on create. Writes the audit row project.created and the event project.created in the same transaction, the event last.
          */
         post: operations["projectCreate"];
         delete?: never;
@@ -4968,12 +4997,12 @@ export interface paths {
         };
         /**
          * One job with its orders, deliveries and invoices
-         * @description The dashboard aggregate. Scoped to the caller; any failure, including another customer's project, is the handler's fixed 404.
+         * @description The dashboard aggregate with the project's ETag. Scoped to the caller: another customer's project is a 404. Item statuses are lowercase summaries of each document's own status; totals are integer cents (null on a delivery, which carries no money).
          */
         get: operations["projectGetDashboard"];
         /**
          * Rename a job or change its status
-         * @description Partial update; absent fields keep their values. An empty name or a status outside Active and Completed is a 500 today (the handler's status is fixed), and so is a project the caller does not own.
+         * @description Partial update on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. Absent fields keep their values; status accepts active or completed. Writes the audit row project.updated and the event project.updated (with the changed field list) in the same transaction, the event last.
          */
         put: operations["projectUpdate"];
         post?: never;
@@ -6080,37 +6109,60 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        /** @enum {string} */
-        ActivityType: "CALL" | "MEETING" | "EMAIL" | "NOTE";
-        /** @description crm.Activity. contact_id and logged_by are omitted when unset. The customer routes of the customer fragment return the same schema. */
+        /**
+         * @description Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
+         * @enum {string}
+         */
+        ActivityType: "call" | "meeting" | "email" | "note";
+        /** @description One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value. */
         Activity: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             customer_id: string;
             /** Format: uuid */
-            contact_id?: string;
+            contact_id: string | null;
             activity_type: components["schemas"]["ActivityType"];
+            /** @description 1 to 4000 characters. */
             description: string;
             /** Format: uuid */
-            logged_by?: string;
+            logged_by: string | null;
             /** Format: date-time */
             activity_date: string;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description The Activity decoded from the body; a missing or unknown activity_type answers 400. */
-        ActivityUpdate: {
+        /** @description The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. */
+        ActivityRequest: {
             /** Format: uuid */
-            contact_id?: string;
+            contact_id?: string | null;
             activity_type: components["schemas"]["ActivityType"];
-            description?: string;
+            description: string;
             /** Format: uuid */
-            logged_by?: string;
-            /** Format: date-time */
+            logged_by?: string | null;
+            /**
+             * Format: date-time
+             * @description Optional; defaults to now on create, keeps its stored value on update when absent.
+             */
             activity_date?: string;
+            /**
+             * Format: int64
+             * @description The body revision, on update only. A create carrying one is a 400.
+             */
+            revision?: number;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        ActivityPage: {
+            items: components["schemas"]["Activity"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never leaves the package; only the 12 character prefix identifies a key. */
         ApiKey: {
@@ -6616,7 +6668,7 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description Go type configurator.ConfiguratorRule. error_message is a pointer with omitempty, so it is absent when the database value is null. */
+        /** @description One dependency rule. error_message is present as null when the database value is null, never omitted (ADR 0001 section 12). */
         ConfiguratorRule: {
             /** Format: uuid */
             id: string;
@@ -6625,41 +6677,41 @@ export interface components {
             depends_on_type: string;
             depends_on_value: string;
             is_allowed: boolean;
-            error_message?: string;
+            error_message: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type configurator.ConfiguratorPreset. config is a Go byte slice, so it serializes as a base64 string of the stored JSON text, not as a JSON object. description is a pointer with omitempty, absent when null. */
+        /** @description One preset. config is the JSON the dealer stored, carried as JSON (it serialized as a base64 string before the conversion); description is present as null when the database value is null. */
         ConfiguratorPreset: {
             /** Format: uuid */
             id: string;
             name: string;
-            description?: string;
+            description: string | null;
             product_type: string;
-            config: string | null;
+            /** @description The preset's attribute selections, as stored. */
+            config: unknown;
             is_active: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type configurator.AvailableOption. message is omitted when empty. */
+        /** @description One value with its verdict; message is present as null when no rule explained a refusal. */
         ConfiguratorAvailableOption: {
             value: string;
             allowed: boolean;
             /** @description Why the value is disallowed. */
-            message?: string;
+            message: string | null;
         };
-        /** @description Go type configurator.ValidateConfigRequest. An empty map is a 400. */
+        /** @description An empty map is a 400 naming selections. */
         ConfiguratorValidateRequest: {
             /** @description Attribute type to chosen value, for example Species to SYP. */
             selections: {
                 [key: string]: string;
             };
         };
-        /** @description Go type configurator.ValidationConflict. */
         ConfiguratorValidationConflict: {
             attribute_type: string;
             attribute_value: string;
@@ -6667,12 +6719,12 @@ export interface components {
             depends_on_value: string;
             message: string;
         };
-        /** @description Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none. */
+        /** @description conflicts is always an array, empty when the selections are valid. */
         ConfiguratorValidateResponse: {
             valid: boolean;
-            conflicts?: components["schemas"]["ConfiguratorValidationConflict"][];
+            conflicts: components["schemas"]["ConfiguratorValidationConflict"][];
         };
-        /** @description Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400. */
+        /** @description An empty product type or an empty selections map is a 400 naming the field. */
         ConfiguratorBuildSKURequest: {
             /** @description Lumber, Door, Trim or Panel map to LBR, DR, TRM and PNL; any other value is upper cased and cut to three characters. */
             product_type: string;
@@ -6680,7 +6732,6 @@ export interface components {
                 [key: string]: string;
             };
         };
-        /** @description Go type configurator.BuildSKUResponse. */
         ConfiguratorBuildSKUResponse: {
             sku: string;
             description: string;
@@ -7071,17 +7122,6 @@ export interface components {
              * @description PUT only, beside If-Match.
              */
             revision?: number;
-        };
-        /** @description The Activity decoded from the body; customer_id comes from the path and created_at and updated_at are set by the server. A supplied id is kept. A missing or unknown activity_type answers 400. */
-        CustomerActivityCreate: {
-            /** Format: uuid */
-            contact_id?: string;
-            activity_type: components["schemas"]["ActivityType"];
-            description?: string;
-            /** Format: uuid */
-            logged_by?: string;
-            /** Format: date-time */
-            activity_date?: string;
         };
         /** @description dashboard.DashboardSummary. Money is int64 cents. */
         DashboardSummary: {
@@ -8990,29 +9030,45 @@ export interface components {
             line_count: number;
             exception_count: number;
         };
-        /** @description Go type millwork.MillworkOption. */
+        /** @description One catalog option. The price adjustment is integer cents; attributes is whatever JSON the create carried, null when it carried none. */
         MillworkOption: {
             /** Format: uuid */
             id: string;
             category: string;
             name: string;
-            /** @description Float dollars today. */
-            price_adjustment: number;
-            /** @description Any JSON value stored as sent (an object in practice); null when the create request omitted it. */
-            attributes: unknown;
+            /**
+             * Format: int64
+             * @description A positive option adds to the configured price, a negative one discounts it.
+             */
+            price_adjustment_cents: number;
+            /** @description Any JSON value stored as sent (an object in practice). */
+            attributes: Record<string, never> | unknown[] | string | number | boolean | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type millwork.CreateOptionRequest. */
+        /** @description Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. */
         MillworkCreateOptionRequest: {
-            category?: string;
-            name?: string;
-            /** @description Float dollars today; absent means 0. */
-            price_adjustment?: number;
-            /** @description Any JSON value; stored as sent. Absent is stored as null. */
-            attributes?: unknown;
+            /** @description 1 to 50 characters. */
+            category: string;
+            /** @description 1 to 100 characters. */
+            name: string;
+            /** Format: int64 */
+            price_adjustment_cents: number;
+            /** @description Optional; stored as sent, null when absent. */
+            attributes?: Record<string, never> | unknown[] | string | number | boolean;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        MillworkOptionPage: {
+            items: components["schemas"]["MillworkOption"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         /**
          * @description The lifecycle, lowercase on the wire (ADR 0001 section 6; ADR 0005 section 5.2). The database keeps its uppercase CHECK.
@@ -11233,12 +11289,26 @@ export interface components {
             /** Format: uuid */
             customer_id: string;
             name: string;
-            /** @enum {string} */
-            status: "Active" | "Completed";
+            /**
+             * @description Lowercase on the wire (ADR 0001 section 6). inactive is a storage value the 091 job merge wrote; writes accept active and completed.
+             * @enum {string}
+             */
+            status: "active" | "completed" | "inactive";
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        ProjectPage: {
+            items: components["schemas"]["Project"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         ProjectDashboard: {
             project: components["schemas"]["Project"];
@@ -11252,24 +11322,34 @@ export interface components {
         ProjectItem: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            type: "ORDER" | "DELIVERY" | "INVOICE";
+            /**
+             * @description Lowercase.
+             * @enum {string}
+             */
+            type: "order" | "delivery" | "invoice";
+            /** @description A lowercase summary of the document's own status. */
             status: string;
-            /** @description Float dollars; omitted when zero. */
-            total_amount?: number;
+            /**
+             * Format: int64
+             * @description Integer cents (ADR 0001 section 7); null on a delivery, which carries no money.
+             */
+            total_cents: number | null;
             /** Format: date-time */
             created_at: string;
-            /** @description A human label such as "Order 1a2b3c4d"; omitted when empty. */
-            reference?: string;
+            /** @description A human label such as "Order 1a2b3c4d". */
+            reference: string;
         };
-        ProjectCreateRequest: {
-            name: string;
-        };
-        /** @description Partial: only the fields present are applied. */
-        ProjectUpdateRequest: {
+        /** @description The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. On create only name applies (required); on update absent fields keep their values. */
+        ProjectRequest: {
+            /** @description 1 to 255 characters. */
             name?: string;
             /** @enum {string} */
-            status?: "Active" | "Completed";
+            status?: "active" | "completed";
+            /**
+             * Format: int64
+             * @description The body revision, on update only. A create carrying one is a 400.
+             */
+            revision?: number;
         };
         /** @description A purchase order. Lines appear only on create and get; line_count and total_cost only on the list (omitted when zero). total_cost is float dollars today. */
         PurchaseOrder: {
@@ -12718,6 +12798,88 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    activityList: {
+        parameters: {
+            query?: {
+                /** @description One lowercase activity type. */
+                activity_type?: "call" | "meeting" | "email" | "note";
+                /** @description Only the activities of this contact. */
+                contact_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                customerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of activities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    activityCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                customerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivityRequest"];
+            };
+        };
+        responses: {
+            /** @description The logged activity, with its ETag and a Location header. */
+            201: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activity"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
     activityGet: {
         parameters: {
             query?: never;
@@ -12735,16 +12897,19 @@ export interface operations {
             /** @description The activity. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Activity"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     activityUpdate: {
@@ -12755,6 +12920,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -12763,13 +12930,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ActivityUpdate"];
+                "application/json": components["schemas"]["ActivityRequest"];
             };
         };
         responses: {
-            /** @description The activity as the request wrote it. customer_id, created_at and any field the body omitted come back as zero values, because the handler echoes the decoded body rather than re-reading the row. */
+            /** @description The activity at its new revision, with its ETag. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12779,11 +12948,12 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     activityDelete: {
@@ -12792,6 +12962,10 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -12807,11 +12981,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     adminListKeys: {
@@ -14165,10 +14341,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorRule"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorListOptions: {
@@ -14176,6 +14353,8 @@ export interface operations {
             query: {
                 /** @description The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType. */
                 attribute_type: string;
+                /** @description The current selections as Type=Value pairs, comma separated. */
+                selections?: string;
             };
             header?: never;
             path?: never;
@@ -14192,11 +14371,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorAvailableOption"][];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorListPresets: {
@@ -14220,10 +14399,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorPreset"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorValidate: {
@@ -14255,10 +14435,9 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorBuildSku: {
@@ -14290,9 +14469,9 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     customerList: {
@@ -14877,73 +15056,6 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalErrorEither"];
-        };
-    };
-    customerListActivities: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                customerId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Activities, a bare array that is empty when none exist. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Activity"][];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    customerCreateActivity: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                customerId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CustomerActivityCreate"];
-            };
-        };
-        responses: {
-            /** @description The created activity. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Activity"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
         };
     };
     customerListContacts: {
@@ -18751,8 +18863,14 @@ export interface operations {
     millworkListOptions: {
         parameters: {
             query: {
-                /** @description Exact match on the category column. An empty or missing value is a 400. */
+                /** @description Exact match on the category column. */
                 category: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: never;
             path?: never;
@@ -18760,20 +18878,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The options, or null when none match. */
+            /** @description The page of options. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MillworkOption"][] | null;
+                    "application/json": components["schemas"]["MillworkOptionPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     millworkCreateOption: {
@@ -18792,9 +18910,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created option. */
+            /** @description The created option, with its ETag and a Location header. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -18805,10 +18926,39 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    millworkGetOption: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The option. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MillworkOption"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["AppDisabled"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     orderList: {
@@ -22755,24 +22905,34 @@ export interface operations {
     };
     projectList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description One lowercase status. */
+                status?: "active" | "completed";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The projects, a bare array, never null. */
+            /** @description The page of projects. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Project"][];
+                    "application/json": components["schemas"]["ProjectPage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectCreate: {
@@ -22787,13 +22947,16 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProjectCreateRequest"];
+                "application/json": components["schemas"]["ProjectRequest"];
             };
         };
         responses: {
-            /** @description The created project. */
+            /** @description The created project, with its ETag and a Location header. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -22802,10 +22965,10 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectGetDashboard: {
@@ -22822,15 +22985,18 @@ export interface operations {
             /** @description The project and its associated documents. */
             200: {
                 headers: {
+                    /** @description The project's revision in quotes. Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectDashboard"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectUpdate: {
@@ -22839,6 +23005,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -22847,13 +23015,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProjectUpdateRequest"];
+                "application/json": components["schemas"]["ProjectRequest"];
             };
         };
         responses: {
-            /** @description The updated project. */
+            /** @description The updated project at its new revision, with its ETag. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -22862,10 +23032,12 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     purchaseOrderList: {

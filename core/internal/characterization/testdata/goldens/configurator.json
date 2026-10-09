@@ -1,5 +1,403 @@
 [
   {
+    "name": "configurator.rules",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/rules"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "error_message": null,
+          "id": "<id-1>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Clear",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "error_message": null,
+          "id": "<id-2>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "STK",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "error_message": null,
+          "id": "<id-3>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "error_message": "Cedar is not rated for structural applications — use SYP or Douglas Fir",
+          "id": "<id-4>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Cedar",
+          "error_message": "Cedar is naturally rot-resistant and should not be pressure treated",
+          "id": "<id-5>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#1",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "error_message": null,
+          "id": "<id-6>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "error_message": null,
+          "id": "<id-7>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "error_message": null,
+          "id": "<id-8>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Select Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "error_message": null,
+          "id": "<id-9>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "error_message": null,
+          "id": "<id-10>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Douglas Fir",
+          "error_message": "Douglas Fir cannot be pressure treated — use SYP, Hem-Fir, or SPF for treatable applications",
+          "id": "<id-11>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "error_message": null,
+          "id": "<id-12>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "error_message": "Hem-Fir is not available in Appearance grade — use Cedar or Douglas Fir",
+          "id": "<id-13>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "error_message": null,
+          "id": "<id-14>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Stud",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "error_message": null,
+          "id": "<id-15>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "Hem-Fir",
+          "error_message": null,
+          "id": "<id-16>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "error_message": null,
+          "id": "<id-17>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "error_message": "SPF is not available in Appearance grade — use Cedar or Douglas Fir",
+          "id": "<id-18>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "error_message": "SPF is not rated for structural applications — use SYP, Douglas Fir, or Hem-Fir",
+          "id": "<id-19>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Stud",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "error_message": null,
+          "id": "<id-20>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SPF",
+          "error_message": null,
+          "id": "<id-21>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#1",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "error_message": null,
+          "id": "<id-22>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#2",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "error_message": null,
+          "id": "<id-23>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "#3",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "error_message": null,
+          "id": "<id-24>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Appearance",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "error_message": "SYP is not available in Appearance grade — use Cedar or Douglas Fir for appearance applications",
+          "id": "<id-25>",
+          "is_allowed": false,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Grade",
+          "attribute_value": "Structural",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "error_message": null,
+          "id": "<id-26>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "attribute_type": "Treatment",
+          "attribute_value": "Treatable",
+          "created_at": "<ts+0d>",
+          "depends_on_type": "Species",
+          "depends_on_value": "SYP",
+          "error_message": null,
+          "id": "<id-27>",
+          "is_allowed": true,
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "configurator.presets",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/presets"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "config": {
+            "dimensions": "1x6-6",
+            "grade": "STK",
+            "species": "Cedar",
+            "treatment": "None"
+          },
+          "created_at": "<ts+0d>",
+          "description": "Western Red Cedar fence boards",
+          "id": "<id-28>",
+          "is_active": true,
+          "name": "Cedar Fence Picket",
+          "product_type": "Lumber",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "config": {
+            "grade": "#2",
+            "height": 80,
+            "species": "SYP",
+            "treatment": "None",
+            "width": 36
+          },
+          "created_at": "<ts+0d>",
+          "description": "Basic interior passage door",
+          "id": "<id-29>",
+          "is_active": true,
+          "name": "Standard Interior Door",
+          "product_type": "Door",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "config": {
+            "dimensions": "2x6-10",
+            "grade": "#2",
+            "species": "SYP",
+            "treatment": "Treatable"
+          },
+          "created_at": "<ts+0d>",
+          "description": "Pressure-treated SYP for deck framing",
+          "id": "<id-30>",
+          "is_active": true,
+          "name": "Treated Deck Frame",
+          "product_type": "Lumber",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "configurator.presets.filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/presets?product_type=Door"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "config": {
+            "grade": "#2",
+            "height": 80,
+            "species": "SYP",
+            "treatment": "None",
+            "width": 36
+          },
+          "created_at": "<ts+0d>",
+          "description": "Basic interior passage door",
+          "id": "<id-29>",
+          "is_active": true,
+          "name": "Standard Interior Door",
+          "product_type": "Door",
+          "updated_at": "<ts+0d>"
+        }
+      ]
+    }
+  },
+  {
     "name": "configurator.options",
     "request": {
       "method": "GET",
@@ -11,25 +409,94 @@
       "body": [
         {
           "allowed": true,
+          "message": null,
           "value": "SYP"
         },
         {
           "allowed": true,
+          "message": null,
           "value": "Douglas Fir"
         },
         {
           "allowed": true,
+          "message": null,
           "value": "Cedar"
         },
         {
           "allowed": true,
+          "message": null,
           "value": "Hem-Fir"
         },
         {
           "allowed": true,
+          "message": null,
           "value": "SPF"
         }
       ]
+    }
+  },
+  {
+    "name": "configurator.options.selected",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/options?attribute_type=Grade&selections=Species%3DSYP"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": [
+        {
+          "allowed": true,
+          "message": null,
+          "value": "#1"
+        },
+        {
+          "allowed": true,
+          "message": null,
+          "value": "#2"
+        },
+        {
+          "allowed": true,
+          "message": null,
+          "value": "#3"
+        },
+        {
+          "allowed": false,
+          "message": "SYP is not available in Appearance grade — use Cedar or Douglas Fir for appearance applications",
+          "value": "Appearance"
+        },
+        {
+          "allowed": true,
+          "message": null,
+          "value": "Structural"
+        }
+      ]
+    }
+  },
+  {
+    "name": "configurator.options.unknown_param",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/configurator/options?attribute_type=Grade&Species=SYP"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "Species",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-31>"
+        }
+      }
     }
   },
   {
@@ -48,7 +515,37 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "conflicts": [],
         "valid": true
+      }
+    }
+  },
+  {
+    "name": "configurator.validate.conflict",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/configurator/validate",
+      "body": {
+        "selections": {
+          "Grade": "Appearance",
+          "Species": "SYP"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "conflicts": [
+          {
+            "attribute_type": "Grade",
+            "attribute_value": "Appearance",
+            "depends_on_type": "Species",
+            "depends_on_value": "SYP",
+            "message": "SYP is not available in Appearance grade — use Cedar or Douglas Fir for appearance applications"
+          }
+        ],
+        "valid": false
       }
     }
   },
@@ -76,6 +573,39 @@
     }
   },
   {
+    "name": "configurator.build_sku.conflict",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/configurator/build-sku",
+      "body": {
+        "product_type": "Lumber",
+        "selections": {
+          "Grade": "Appearance",
+          "Species": "SYP"
+        }
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "code": "config_conflict",
+              "message": "SYP is not available in Appearance grade — use Cedar or Douglas Fir for appearance applications"
+            }
+          ],
+          "message": "cannot build a SKU: the selections have 1 conflict(s)"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
+      }
+    }
+  },
+  {
     "name": "configurator.validate.empty",
     "request": {
       "method": "POST",
@@ -89,11 +619,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "selections",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-1>"
+          "request_id": "<id-33>"
         }
       }
     }

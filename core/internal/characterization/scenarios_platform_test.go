@@ -75,11 +75,16 @@ func millworkGroups() []groupDef {
 				path:   "/api/v1/millwork/options",
 				body: map[string]any{
 					"category": "Species", "name": "Golden Douglas Fir",
-					"price_adjustment": 1.5, "attributes": map[string]any{"grade": "Clear"},
+					"price_adjustment_cents": 150, "attributes": map[string]any{"grade": "Clear"},
 				},
 				extract: map[string]string{"myMillworkOption": "/id"},
 			},
-			{name: "millwork.option.list", method: "GET", path: "/api/v1/millwork/options?category=Species"},
+			{name: "millwork.option.get", method: "GET", path: "/api/v1/millwork/options/{myMillworkOption}"},
+			{name: "millwork.option.list", method: "GET", path: "/api/v1/millwork/options?category=Species&limit=2"},
+			{name: "millwork.option.list.unknown_param", method: "GET", path: "/api/v1/millwork/options?category=Species&zzz=1"},
+			// The module's event, read back from the feed (ADR 0003).
+			{name: "millwork.option.events", method: "GET",
+				path: "/api/v1/events?types=millwork_option.created&limit=1"},
 		},
 	}}
 }
@@ -88,12 +93,27 @@ func configuratorGroups() []groupDef {
 	return []groupDef{{
 		name: "configurator",
 		steps: []stepDef{
+			{name: "configurator.rules", method: "GET", path: "/api/v1/configurator/rules"},
+			{name: "configurator.presets", method: "GET", path: "/api/v1/configurator/presets"},
+			{name: "configurator.presets.filter", method: "GET", path: "/api/v1/configurator/presets?product_type=Door"},
 			{name: "configurator.options", method: "GET", path: "/api/v1/configurator/options?attribute_type=Species"},
+			// The selections ride as one declared parameter, not as any
+			// unknown query name (the strict query posture).
+			{name: "configurator.options.selected", method: "GET",
+				path: "/api/v1/configurator/options?attribute_type=Grade&selections=Species%3DSYP"},
+			{name: "configurator.options.unknown_param", method: "GET",
+				path: "/api/v1/configurator/options?attribute_type=Grade&Species=SYP"},
 			{
 				name:   "configurator.validate",
 				method: "POST",
 				path:   "/api/v1/configurator/validate",
 				body:   map[string]any{"selections": map[string]any{"Species": "SYP", "Grade": "#2"}},
+			},
+			{
+				name:   "configurator.validate.conflict",
+				method: "POST",
+				path:   "/api/v1/configurator/validate",
+				body:   map[string]any{"selections": map[string]any{"Species": "SYP", "Grade": "Appearance"}},
 			},
 			{
 				name:   "configurator.build_sku",
@@ -102,6 +122,15 @@ func configuratorGroups() []groupDef {
 				body: map[string]any{
 					"product_type": "Lumber",
 					"selections":   map[string]any{"Species": "SYP", "Grade": "#2", "Length": "8"},
+				},
+			},
+			{
+				name:   "configurator.build_sku.conflict",
+				method: "POST",
+				path:   "/api/v1/configurator/build-sku",
+				body: map[string]any{
+					"product_type": "Lumber",
+					"selections":   map[string]any{"Species": "SYP", "Grade": "Appearance"},
 				},
 			},
 			{name: "configurator.validate.empty", method: "POST", path: "/api/v1/configurator/validate",
@@ -213,6 +242,21 @@ func portalGroups() []groupDef {
 				extract: map[string]string{"myProject": "/id"},
 			},
 			{name: "project.get", method: "GET", path: "/api/portal/v1/projects/{myProject}"},
+			// A write with no precondition is 428 (ADR 0001 section 11).
+			{name: "project.update.no_precondition", method: "PUT", path: "/api/portal/v1/projects/{myProject}",
+				body: map[string]any{"name": "Golden Project Renamed"}},
+			{name: "project.update", method: "PUT", path: "/api/portal/v1/projects/{myProject}",
+				headers: map[string]string{"If-Match": `\"1\"`},
+				body:    map[string]any{"status": "completed"}},
+			{name: "project.get.after_update", method: "GET", path: "/api/portal/v1/projects/{myProject}"},
+			// The list: the envelope, a filter that filters, an unknown
+			// parameter refused (the strict query posture).
+			{name: "project.list", method: "GET", path: "/api/portal/v1/projects?limit=2"},
+			{name: "project.list.filter", method: "GET", path: "/api/portal/v1/projects?status=completed"},
+			{name: "project.list.unknown_param", method: "GET", path: "/api/portal/v1/projects?zzz=1"},
+			// The module's events, read back from the feed (ADR 0003).
+			{name: "project.events", method: "GET",
+				path: "/api/v1/events?types=project.created,project.updated&limit=2", sortPrimaryArray: true},
 		},
 	}}
 }
