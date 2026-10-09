@@ -64,10 +64,16 @@ The pages:
 - Events are written through the outbox as the last statement of
   the mutation's transaction. The event constants live in the
   module's `service.go` (or `model.go` when the service is small).
-- The scopes a machine key needs are `<module>:read` for `GET` and
-  `HEAD`, and `<module>:write` for every other method. The user
-  guard is the standard sales and finance wall; the exact guard is
-  composed in `core/internal/app/serve/serve.go`.
+- The scopes a machine key needs are `<segment>:read` for `GET` and
+  `HEAD`, and `<segment>:write` for every other method, where
+  `<segment>` is the first path segment under `/api/v1/` (for the
+  pages here: `invoices`, `quotes`, `orders`, `customers`,
+  `products`, `inventory`, `activities`, `ship-tos`, `contacts`,
+  `payment-terms`, `price_levels`, `credit-memos`, `configurator`,
+  `millwork`, `payments`). The user guard is composed at the serve
+  layer in `core/internal/app/serve/serve.go` and
+  `core/internal/app/serve/wire_branch_wall.go`; the guard a page
+  lists is the one the wiring code applies.
 - No calendar dates, no schedule durations, no em or en dashes.
   Examples use the repository's own seed data or invented generic
   values.
