@@ -29,12 +29,16 @@ var wireNames = map[ActivityType]string{
 	ActivityNote:    "note",
 }
 
-// MarshalText writes the lowercase wire spelling.
+// MarshalText writes the lowercase wire spelling. A value outside the four
+// degrades to the catch-all note instead of failing: the column held free
+// text for the base's whole life, and an error here fires while the response
+// is being encoded (a 200 already sent, then a truncated body). Migration
+// 096 normalises and constrains the column; this is the read-side backstop.
 func (t ActivityType) MarshalText() ([]byte, error) {
 	if s, ok := wireNames[t]; ok {
 		return []byte(s), nil
 	}
-	return nil, &httpx.Error{Status: 500, Code: "internal_error", Message: "unknown activity type " + string(t)}
+	return []byte("note"), nil
 }
 
 // ParseActivityType accepts only the lowercase spelling; any other casing is

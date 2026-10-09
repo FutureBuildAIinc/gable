@@ -196,3 +196,63 @@ func TestMigration096_BackfillsRowsThatExist(t *testing.T) {
 	}
 	apply096(t, conn, target)
 }
+
+// Migration 096 normalises activity_type: 033 left the column unconstrained
+// TEXT, so a legacy import or a direct insert could hold any spelling, and
+// the wire read (a closed vocabulary) fails on a value outside the four.
+// Every stored value is uppercased and trimmed, whatever is still outside
+// CALL, MEETING, EMAIL and NOTE maps to NOTE, and a CHECK then holds the
+// column to the four. The NULL row needs the column's own NOT NULL dropped
+// first (033 declares NOT NULL, so the test simulates a drifted legacy
+// schema to prove the rewrite covers that arm too).
+func TestMigration096_NormalisesActivityType(t *testing.T) {
+	conn := scratchDB(t)
+	before, target := migration096Files(t)
+	for _, f := range before {
+		apply096(t, conn, f)
+	}
+	ctx := context.Background()
+	if _, err := conn.Exec(ctx, `ALTER TABLE crm_activities ALTER COLUMN activity_type DROP NOT NULL`); err != nil {
+		t.Fatalf("drift the column nullable: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ('00000000-0000-0000-0000-00000000e002', 'Mig Odd Types', 'MIG-CRM-2',
+			(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'));
+		INSERT INTO crm_activities (id, customer_id, activity_type, description, created_at)
+		VALUES
+		 ('00000000-0000-0000-0000-00000000a101','00000000-0000-0000-0000-00000000e002','call','lowercase',now()),
+		 ('00000000-0000-0000-0000-00000000a102','00000000-0000-0000-0000-00000000e002','WeIrD','mixed case',now()),
+		 ('00000000-0000-0000-0000-00000000a103','00000000-0000-0000-0000-00000000e002','','empty',now()),
+		 ('00000000-0000-0000-0000-00000000a104','00000000-0000-0000-0000-00000000e002',NULL,'null type',now()),
+		 ('00000000-0000-0000-0000-00000000a105','00000000-0000-0000-0000-00000000e002','  meeting  ','padded',now()),
+		 ('00000000-0000-0000-0000-00000000a106','00000000-0000-0000-0000-00000000e002','EMAIL','already fine',now())`); err != nil {
+		t.Fatalf("legacy odd rows: %v", err)
+	}
+
+	apply096(t, conn, target)
+
+	// Both rewrites: upper(btrim(...)) first, then everything still outside
+	// the four values (a NULL included) maps to NOTE.
+	for id, want := range map[string]string{
+		"00000000-0000-0000-0000-00000000a101": "CALL",
+		"00000000-0000-0000-0000-00000000a102": "NOTE",
+		"00000000-0000-0000-0000-00000000a103": "NOTE",
+		"00000000-0000-0000-0000-00000000a104": "NOTE",
+		"00000000-0000-0000-0000-00000000a105": "MEETING",
+		"00000000-0000-0000-0000-00000000a106": "EMAIL",
+	} {
+		if got := scalar096[string](t, conn, `SELECT activity_type FROM crm_activities WHERE id = $1`, id); got != want {
+			t.Errorf("activity %s normalised to %q, want %q", id[len(id)-4:], got, want)
+		}
+	}
+	// The CHECK holds the column to the four storage values.
+	if _, err := conn.Exec(ctx, `UPDATE crm_activities SET activity_type = 'WeIrD' WHERE id = $1`,
+		"00000000-0000-0000-0000-00000000a101"); err == nil {
+		t.Error("the activity_type CHECK accepts a value outside the four")
+	}
+	if _, err := conn.Exec(ctx, `UPDATE crm_activities SET activity_type = 'call' WHERE id = $1`,
+		"00000000-0000-0000-0000-00000000a101"); err == nil {
+		t.Error("the activity_type CHECK accepts a lowercase spelling")
+	}
+}

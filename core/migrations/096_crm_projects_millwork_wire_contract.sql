@@ -26,12 +26,29 @@
 -- of the three exposes one. crm_activities.description becomes NOT NULL with
 -- legacy NULLs backfilled to the empty string, the value the old Go zero
 -- value already wrote on the wire.
+--
+-- crm_activities.activity_type is normalised before it is constrained: the
+-- column was unconstrained TEXT, and the wire's closed vocabulary cannot
+-- read a stray spelling. Two rewrites, in order: every stored value is
+-- uppercased and trimmed (a lowercase 'call' and a padded '  meeting  '
+-- become their storage spellings), then whatever is still outside the four
+-- storage values (an empty string, a mixed-case word, a NULL on a schema
+-- that drifted nullable) maps to NOTE, the catch-all the old free-text
+-- column always meant. A CHECK then holds the column to the four values,
+-- so the list's exact-match activity_type filter and the wire's vocabulary
+-- agree with what is stored from here on.
 
 -- 1. crm_activities.
 UPDATE crm_activities SET created_at = COALESCE(activity_date, updated_at, NOW()) WHERE created_at IS NULL;
 ALTER TABLE crm_activities ALTER COLUMN created_at SET NOT NULL;
 UPDATE crm_activities SET description = '' WHERE description IS NULL;
 ALTER TABLE crm_activities ALTER COLUMN description SET NOT NULL;
+UPDATE crm_activities SET activity_type = upper(btrim(activity_type));
+UPDATE crm_activities SET activity_type = 'NOTE'
+    WHERE activity_type IS NULL OR activity_type NOT IN ('CALL', 'MEETING', 'EMAIL', 'NOTE');
+ALTER TABLE crm_activities DROP CONSTRAINT IF EXISTS crm_activities_activity_type_check;
+ALTER TABLE crm_activities ADD CONSTRAINT crm_activities_activity_type_check
+    CHECK (activity_type IN ('CALL', 'MEETING', 'EMAIL', 'NOTE'));
 ALTER TABLE crm_activities ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_crm_activities_customer_created_at_id_desc
     ON crm_activities (customer_id, created_at DESC, id DESC);

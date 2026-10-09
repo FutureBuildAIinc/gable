@@ -341,3 +341,28 @@ func TestRequestParse_RefusesBodyCustomerID(t *testing.T) {
 }
 
 func strp(s string) *string { return &s }
+
+// MarshalText degrades, never errors: the storage column held free text for
+// the base's whole life and one stray row must not fail a response midway
+// through encoding (a 200 with a truncated body). A value outside the four
+// reads as the wire's catch-all, note, so the closed wire vocabulary holds.
+func TestActivityTypeMarshalTextDegrades(t *testing.T) {
+	for _, storage := range []ActivityType{ActivityCall, ActivityMeeting, ActivityEmail, ActivityNote} {
+		text, err := storage.MarshalText()
+		if err != nil {
+			t.Fatalf("%s MarshalText: %v", storage, err)
+		}
+		if want := wireNames[storage]; string(text) != want {
+			t.Errorf("%s MarshalText = %q, want %q", storage, text, want)
+		}
+	}
+	for _, stray := range []ActivityType{"call", "WeIrD", "", "SOMEDAY"} {
+		text, err := stray.MarshalText()
+		if err != nil {
+			t.Fatalf("a stray storage value %q failed the read: %v", stray, err)
+		}
+		if string(text) != "note" {
+			t.Errorf("a stray storage value %q read as %q, want the catch-all note", stray, text)
+		}
+	}
+}
