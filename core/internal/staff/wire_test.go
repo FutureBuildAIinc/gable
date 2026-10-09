@@ -608,6 +608,67 @@ func (v staffKeyValidator) ValidateKey(ctx context.Context, rawKey string) (midd
 	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
 }
 
+// RULE: a grant made by a machine key attributes to the key. The caller has
+// no JWT subject, so the module_grants row names the key's id as the
+// key:<id> principal (the same one the idempotency layer keys on), never a
+// blank.
+func TestWire_GrantByAKeyAttributesToTheKey(t *testing.T) {
+	f := newFixture(t)
+	db := f.db
+	keySvc := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
+	validator := staffKeyValidator{svc: keySvc, db: db}
+	auth := middleware.NewMachineKeyAuth(validator, nil, nil, nil)
+	svc := staff.NewService(staff.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	mux := http.NewServeMux()
+	staff.NewHandler(svc).RegisterRoutes(mux)
+	srv := httptest.NewServer(auth.Handler(mux))
+	defer srv.Close()
+
+	created := f.do("POST", "/api/v1/admin/staff", map[string]any{
+		"email": "key-grant-" + uuid.NewString()[:8] + "@example.com", "full_name": "Key Grant",
+	})
+	if created.status != http.StatusCreated {
+		t.Fatalf("create = %d: %s", created.status, created.raw)
+	}
+	id, _ := created.body["id"].(string)
+	t.Cleanup(func() { dropStaff(t, db, uuid.MustParse(id)) })
+
+	raw, key, err := keySvc.GenerateKey(context.Background(), "granting key", []string{"admin:staff"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'api_key' AND entity_id = $1`, key.ID)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id = $1`, key.ID)
+	})
+
+	req, err := http.NewRequest("POST", srv.URL+"/api/v1/admin/staff/"+id+"/modules",
+		strings.NewReader(`{"module_id":"ai_lm","revision":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+raw)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("grant by key = %d, want 200", res.StatusCode)
+	}
+
+	var grantedBy *string
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT granted_by FROM module_grants WHERE staff_id = $1 AND module_id = 'ai_lm'`, id).Scan(&grantedBy); err != nil {
+		t.Fatal(err)
+	}
+	if grantedBy == nil || *grantedBy != "key:"+key.ID.String() {
+		t.Errorf("granted_by = %v, want key:%s: a key caller's grant must attribute to the key", grantedBy, key.ID)
+	}
+}
+
 // RULE (ADR 0001 section 9): the same create twice with one idempotency key
 // replays the stored response and makes one row and one event; the same key
 // with another body is 422 idempotency_key_reused.

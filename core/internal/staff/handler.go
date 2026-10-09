@@ -367,13 +367,18 @@ func (h *Handler) SetModuleEnabled(w http.ResponseWriter, r *http.Request) {
 }
 
 // requesterSub returns the JWT subject of the calling admin for grant
-// attribution, or "" in dev mode (no auth claims).
+// attribution, the machine key's id prefixed "key:" when a key made the call
+// (the same principal the idempotency layer keys on, so one caller reads one
+// way everywhere), or "" in dev mode (no auth claims).
 func requesterSub(r *http.Request) string {
 	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
 		if claims.Subject != "" {
 			return claims.Subject
 		}
 		return claims.Email
+	}
+	if id, ok := middleware.KeyIDFromContext(r.Context()); ok {
+		return "key:" + id
 	}
 	return ""
 }
