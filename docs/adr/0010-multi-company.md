@@ -617,9 +617,22 @@ writes to the default branch whether or not their grants reach it. Two
 gates close this: creating a second company requires
 `multi_branch_enabled` and `default_branch_required` both true (else 409
 `conflict`, blocker `multi_branch_disabled`), and while more than one
-company exists a settings write that would turn either off is refused
-with the same blocker. Sized inside item 7, with a test for each
-refusal.
+company exists nothing may turn either off. The second gate is a
+trigger on `system_settings`, not a route refusal, because no
+application path writes either key: the table's writers are the AI and
+payment key stores and the staff module flags
+(`core/internal/ai/keystore.go:64`, `core/internal/payment/keystore.go:138`,
+`core/internal/staff/repository.go:213`) and the seed, while the
+middleware reads the table itself on refresh (`branch.go:281-282`), so
+the keys change by SQL and a gate on a route would gate nothing. The
+trigger refuses any
+UPDATE or DELETE that would leave `multi_branch_enabled` anything but
+`true` or `default_branch_required` `false` (the kill switch reads
+`false` when its row is absent, so a DELETE is a turn off and is refused
+the same way), its raise carrying the same blocker wording. The item 7
+create check reads the table, not the middleware's cached flags. Sized
+inside item 7, with the refusals tested at the database: an UPDATE and
+a DELETE, each raising.
 
 Who reaches a company: a caller reaches a company exactly when their
 grants reach a branch of it, one query over `user_locations` joined to
@@ -946,7 +959,7 @@ writes (5), and the settings gate (7):
 | 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `097` `DEFAULT` mint replaced by the per company mint trigger and the helper widened with it, the raw insert test for a second company, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`, the `gl_accounts`, `bank_accounts` and `gl_fiscal_periods` step 4 defaults dropped with the reroutes) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
-| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route and drop the step 4 `locations` default with both branch routes stamping the column; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
+| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route and drop the step 4 `locations` default with both branch routes stamping the column; the `system_settings` trigger of section 6 with its update and delete refusals tested at the database; routes and the desk screen) | 9 to 13 |
 
 Total: 74 to 114 dev hour equivalents. Item 1 lands first, on its own,
 behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
