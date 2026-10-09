@@ -403,12 +403,33 @@ resource: `/api/v1/companies/{id}/trial-balance`, `.../profit-and-loss`,
 `.../balance-sheet`, `.../accounts`, `.../journal-entries`,
 `.../fiscal-periods`, and the AP and bank reads under the same segment. A
 new module segment `companies` joins ADR 0002's vocabulary and the route
-census test (ADR 0002 section 2). A caller reaches a company exactly when
-their grants reach a branch of it: one query over `user_locations` joined to
-branch rows. Today's branchless GL routes (`gl/handler.go:39-61`) move under
-the company resource, each with a row in `docs/refactor/CONTRACT-CHANGES.md`;
-AP's (`ap/handler.go:38-48`) and bank reconciliation's
-(`bankrecon/handler.go:37-50`) the same.
+census test (ADR 0002 section 2).
+
+The record rule under that segment: every repository read and write of a
+record route carries `WHERE company_id = $path`, so a path id that names
+another company's row answers 404, exactly as an unknown id does.
+`/companies/{id}/journal-entries/{entry_id}`, `.../ap/invoices/{id}`,
+`.../fiscal-periods/{id}/close` and `.../bankrecon/sessions/{id}` can
+never load or touch a row the path's company does not own. Today's
+handlers load by id with no scope at all (`gl/handler.go:39-61`,
+`ap/handler.go:38-48`, `bankrecon/handler.go:37-50`); the conversion
+closes at the company boundary the same hole PR 39 closed for branches on
+path ids. A wall test in the shape of
+`core/internal/app/serve/wire_branch_wall_test.go`
+(`wire_company_wall_test.go` beside it) covers each moved route, and item
+5's exit test names it.
+
+Who reaches a company: a caller reaches a company exactly when their
+grants reach a branch of it, one query over `user_locations` joined to
+branch rows. Admins and owners with no grants reach every branch today
+(`branch.go:105-110` point 3: an admin or owner may omit the header to
+query across all branches), so they reach every company. The role guards
+decide the rest, unchanged: the finance and admin roles that guard a
+company's GL, AP and bank routes today still decide whether a branch user
+may read them, so the derivation widens nothing. Today's branchless GL
+routes (`gl/handler.go:39-61`) move under the company resource, each with
+a row in `docs/refactor/CONTRACT-CHANGES.md`; AP's (`ap/handler.go:38-48`)
+and bank reconciliation's (`bankrecon/handler.go:37-50`) the same.
 
 Keys, per ADR 0002: a branch bound key (ADR 0007 5.5) reaches its branch's
 company and no other, whatever its scopes. An unbound key today reaches
@@ -611,7 +632,7 @@ are its own, and their sum is stated rather than rounded):
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart seed per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
-| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
+| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, the record rule with `wire_company_wall_test.go`, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code; routes and the desk screen) | 6 to 10 |
 
