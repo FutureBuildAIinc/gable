@@ -4,8 +4,9 @@
 /**
  * The payment modal is the one place a user types money into the ERP, so it
  * straddles the cents/dollars boundary in both directions: it receives
- * `amount-due` as int64 cents, shows dollars, and must post integer cents back.
- * A missed conversion in either direction posts a payment 100x wrong.
+ * `amount-due` as int64 cents, shows dollars, and must post integer cents
+ * back, applied to the invoice in the same act. A missed conversion in either
+ * direction posts a payment 100x wrong.
  */
 import { describe, it, expect, vi } from 'vitest'
 import './PaymentModal'
@@ -17,6 +18,7 @@ function open(amountDueCents: number) {
   return mount<GablePaymentModal>('gable-payment-modal', {
     isOpen: true,
     invoiceId: 'inv-1',
+    customerId: 'cust-1',
     amountDue: amountDueCents,
   })
 }
@@ -70,41 +72,55 @@ describe('gable-payment-modal — cents in', () => {
 describe('gable-payment-modal — cents out', () => {
   it('posts the prefilled balance back as the same integer cents it received', async () => {
     const el = await open(7388)
-    expect(submit(el).amount).toBe(7388)
+    expect(submit(el).amount_cents).toBe(7388)
   })
 
   it('converts a typed dollar amount to cents', async () => {
     const el = await open(7388)
     await typeAmount(el, '50.25')
-    expect(submit(el).amount).toBe(5025)
+    expect(submit(el).amount_cents).toBe(5025)
   })
 
   it('rounds float multiplication error rather than truncating', async () => {
     // 19.99 * 100 === 1998.9999999999998
     const el = await open(0)
     await typeAmount(el, '19.99')
-    expect(submit(el).amount).toBe(1999)
+    expect(submit(el).amount_cents).toBe(1999)
   })
 
   it('never posts a fractional cent', async () => {
     const el = await open(0)
     await typeAmount(el, '10.999')
-    const { amount } = submit(el)
-    expect(Number.isInteger(amount)).toBe(true)
-    expect(amount).toBe(1100)
+    const { amount_cents } = submit(el)
+    expect(Number.isInteger(amount_cents)).toBe(true)
+    expect(amount_cents).toBe(1100)
   })
 
-  it('carries the invoice id, method and reference through', async () => {
+  it('applies the payment to the invoice in the same act, capped at what it owes', async () => {
+    const el = await open(2500)
+    const payload = submit(el)
+    expect(payload.customer_id).toBe('cust-1')
+    expect(payload.applications).toEqual([{ invoice_id: 'inv-1', amount_cents: 2500 }])
+  })
+
+  it('holds an overpayment as unapplied cash: the application is capped at the open amount', async () => {
+    const el = await open(2500)
+    await typeAmount(el, '40.00')
+    const payload = submit(el)
+    expect(payload.amount_cents).toBe(4000)
+    expect(payload.applications).toEqual([{ invoice_id: 'inv-1', amount_cents: 2500 }])
+  })
+
+  it('carries the method and reference through, lowercase as the route takes them', async () => {
     const el = await open(2500)
     const select = q<HTMLSelectElement>(el, 'select')
-    select.value = 'CHECK'
+    select.value = 'check'
     select.dispatchEvent(new Event('change', { bubbles: true }))
     await update(el, {})
 
     const payload = submit(el)
-    expect(payload.invoice_id).toBe('inv-1')
-    expect(payload.method).toBe('CHECK')
-    expect(payload.amount).toBe(2500)
+    expect(payload.method).toBe('check')
+    expect(payload.amount_cents).toBe(2500)
   })
 
   it('emits close alongside save so the caller can dismiss it', async () => {

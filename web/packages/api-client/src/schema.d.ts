@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Get account summary
-         * @description Balance due, credit limit and available credit, all in cents. Any service error, including an unknown customer, answers 500.
+         * @description The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404.
          */
         get: operations["accountSummary"];
         put?: never;
@@ -53,11 +53,111 @@ export interface paths {
         };
         /**
          * List account transactions
-         * @description The list is not paginated: limit and offset are not read.
+         * @description The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope.
          */
         get: operations["accountTransactions"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/aging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receivable aging by customer, job or ship-to
+         * @description One item per group per currency, ordered by customer name, customer id, group id and currency. Every amount is taken as of as_of (default the branch's today), so the aging of a past date ignores later applications, counts an invoice voided after that date, and ties to the balances of 1020 and 2200 on it. current_cents is not yet due; the day buckets count days past the basis date; unapplied_cents is the open credit memos plus unapplied cash, negative, on the row of their own job (a payment carries a job, never a ship-to); total_cents is the buckets plus unapplied_cents. The fields of the coarser groupings are null.
+         */
+        get: operations["arAging"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/aging/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receivable aging bucket totals per currency
+         * @description The same parameters as the aging (group_by is read and has no effect); the answer is not a list.
+         */
+        get: operations["arAgingSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/customers/{id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Customer statement
+         * @description Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today.
+         */
+        get: operations["arStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reconcile the subledger, the documents and the ledger
+         * @description Roles admin, owner, finance. Lists every customer whose balance_due, subledger sum and document open amounts disagree, per currency, and for each currency whether the sum of balances equals account 1020 and unapplied cash equals account 2200. Rows written before cycle 2 show here; nothing repairs a difference.
+         */
+        get: operations["arReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/applications/{id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reverse one application
+         * @description Roles admin, owner, finance; a reason is required. Reverses one live application of any kind: a payment application (and the discount applications of the same act on the same invoice), a credit memo application, or a write off. A payment application posts the reversal of its own entry, or, when it has none (a migrated one), a new DR 1020 / CR 2200 entry. A discount alone is refused with 409 discount_stands_with_payment. Writes payment.unapplied or credit_memo.reopened (none for a write off), then invoice.reopened, then customer.updated.
+         */
+        post: operations["arApplicationReverse"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1513,67 +1613,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/deposits": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List a customer's deposits
-         * @description A missing customer_id answers 400. The list is not paginated.
-         */
-        get: operations["depositList"];
-        put?: never;
-        /**
-         * Record a customer deposit
-         * @description Every service failure, such as a non positive amount, answers 400.
-         */
-        post: operations["depositCreate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/deposits/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get one deposit */
-        get: operations["depositGet"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/deposits/{id}/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Apply a deposit against AR
-         * @description Every service failure, such as a deposit not OPEN or an amount over the remainder, answers 400.
-         */
-        post: operations["depositApply"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/documents/print/invoice/{id}": {
         parameters: {
             query?: never;
@@ -2427,7 +2466,7 @@ export interface paths {
         put?: never;
         /**
          * Void an invoice
-         * @description The only client transition is void (roles admin, owner, finance; a reason is required). unpaid, partial, paid and written_off are derived by payments and credit memos, so asking for one is 409 invalid_state_transition. A void is refused with the blocker has_applications while a payment is recorded against the invoice or an applied credit memo names it, and with has_credit_memos while a credit memo that is not void names it. It runs in one transaction: it locks the invoice's order row first, reverses the invoice's whole journal entry (dated the void date), returns its billed stock to on hand, reduces the order lines' fulfilled quantities, re-runs allocation for those quantities and derives the order status; the subledger is credited back. The number is kept; nothing deletes an invoice. Writes invoice.voided (and order.backordered when the order cannot re-allocate) last.
+         * @description The only client transition is void (roles admin, owner, finance; a reason is required). unpaid, partial, paid and written_off are derived by payments and credit memos, so asking for one is 409 invalid_state_transition. A void is refused with the blocker has_applications while the invoice has a live application (a payment, an applied credit memo, a discount or a write off), and with has_credit_memos while a credit memo that is not void names it. It runs in one transaction: it locks the invoice's order row first, reverses the invoice's whole journal entry (dated the void date), returns its billed stock to on hand, reduces the order lines' fulfilled quantities, re-runs allocation for those quantities and derives the order status; the subledger is credited back. The number is kept; nothing deletes an invoice. Writes invoice.voided (and order.backordered when the order cannot re-allocate) last.
          */
         post: operations["invoiceTransition"];
         delete?: never;
@@ -2515,9 +2554,69 @@ export interface paths {
         put?: never;
         /**
          * Post or void a credit memo
-         * @description draft to open posts the credit memo (roles admin, owner, finance): it locks the invoice it names (409 invoice_void when that invoice is void), recomputes its lines against what was posted, restocks the lines that restock, mints the gapless CM- number, posts the balanced entry (revenue and tax back, receivable down, and for a restocked line the cost back to inventory and out of cost of goods sold at the original cost) and the subledger credit, and writes credit_memo.posted last. draft to void ends a draft and consumes no number; open to void (roles admin, owner, finance; a reason is required) reverses the entry and the restock and puts the credit back on the receivable. The statuses past open (partial, applied) arrive with the payment and AR item and are not reachable here (409 invalid_state_transition). Writes credit_memo.posted or credit_memo.voided.
+         * @description draft to open posts the credit memo (roles admin, owner, finance): it locks the invoice it names (409 invoice_void when that invoice is void), recomputes its lines against what was posted, restocks the lines that restock, mints the gapless CM- number, posts the balanced entry (revenue and tax back, receivable down, and for a restocked line the cost back to inventory and out of cost of goods sold at the original cost) and the subledger credit, and writes credit_memo.posted last. draft to void ends a draft and consumes no number; open to void (roles admin, owner, finance; a reason is required) reverses the entry and the restock and puts the credit back on the receivable. partial and applied are reached by applications and refunds (POST /credit-memos/{id}/applications and /refunds) and reopened by reversing an application; asking for them here is 409 invalid_state_transition. A credit memo is voided from open only while no application or refund has used it (409 has_applications). Writes credit_memo.posted or credit_memo.voided.
          */
         post: operations["creditMemoTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{id}/write-offs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write off part or all of an invoice's open amount
+         * @description Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition is the invoice's revision. Refused with 409 exceeds_open_amount, invoice_not_open (invalid_state_transition) or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated. Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.
+         */
+        post: operations["invoiceWriteOff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{id}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an invoice's applications
+         * @description The applications that settled (or settle) the invoice: payment applications, credit memo applications, early pay discounts and write offs, oldest first, reversed ones included with their reversal. The path keeps its name; the payments of a legacy invoice are its PAYMENT applications.
+         */
+        get: operations["invoiceApplications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-memos/{id}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a credit memo's open credit to invoices
+         * @description Uses the open credit of an open or partial credit memo on invoices of the same customer and currency. No ledger entry (both sides are in 1020) and no subledger row; each application is a CREDIT_MEMO application. The precondition is the credit memo's revision. Refused with 409 exceeds_open_credit, exceeds_open_amount, invoice_void, customer_mismatch or currency_mismatch. Writes credit_memo.partial or credit_memo.applied, and invoice.partial or invoice.paid per invoice.
+         */
+        post: operations["creditMemoApply"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3131,13 +3230,114 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List payments
+         * @description The cursor list envelope, newest first (created_at, then id). customer_id, order_id and job_id filter on their document; status and method take comma separated lowercase lists; unapplied=true lists the posted payments that still hold unapplied cash and unapplied=false the rest. total appears only under include=total. A parameter the route does not declare, a value outside its vocabulary, a malformed cursor or an out of range limit is a 400.
+         */
+        get: operations["paymentList"];
+        put?: never;
+        /**
+         * Record a payment
+         * @description Records a posted payment for a customer (cash, check, ach or other; a card is taken through POST /payments/card, and account is not a payment). The whole amount is posted to 2200 (DR 1010 / CR 2200). Without applications the payment is unapplied cash. With applications each invoice takes its cash (and an early pay discount, on or before the invoice's discount date, up to what its terms allow) in the same transaction, each application its own entry (DR 2200 / CR 1020) and subledger row. Refused with 409 and a blocker: exceeds_unapplied, exceeds_open_amount, invoice_void, customer_mismatch, currency_mismatch, discount_not_available, period_closed. Writes payment.recorded, then payment.applied and invoice.partial or invoice.paid per invoice, then customer.updated (part balance).
+         */
+        post: operations["paymentCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one payment with its applications and refunds */
+        get: operations["paymentGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
         get?: never;
         put?: never;
         /**
-         * Record a non card payment
-         * @description Cash, check or account payments against an invoice.
+         * Apply a payment's unapplied cash to invoices
+         * @description Applies unapplied cash later, partly, across many invoices; each application posts its own DR 2200 / CR 1020 entry and a PAYMENT subledger row. The precondition is the payment's revision. Refused with 409 exceeds_unapplied, exceeds_open_amount, invoice_void, payment_voided, customer_mismatch, currency_mismatch, discount_not_available or period_closed. Writes payment.applied, invoice.partial or invoice.paid per invoice, and customer.updated.
          */
-        post: operations["paymentCreate"];
+        post: operations["paymentApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void a payment
+         * @description The only client transition is voided (roles admin, owner, finance; a reason is required). It reverses every live application (with its discounts), then posts the void entry (DR 2200 / CR 1010) for the amount still unapplied, which is the amount less refunds; a payment with refunds can be voided and the void covers only what was not refunded. A card payment is refused with 409 card_payment (it is refunded through the gateway). Writes payment.unapplied per reversed application, invoice.reopened per invoice, customer.updated and payment.voided.
+         */
+        post: operations["paymentTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refund a payment's unapplied cash
+         * @description Pays unapplied cash back out (DR 2200 / CR 1010), limited to the unapplied amount (409 exceeds_unapplied). A card payment is refunded through the gateway before the transaction. The precondition is the payment's revision. Writes payment.refunded.
+         */
+        post: operations["paymentRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-memos/{id}/refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay a credit memo's open credit out
+         * @description Roles admin, owner, finance. Pays the open credit of an open or partial credit memo out (DR 1020 / CR 1010) by check, ach, other or card (a card refund names the card payment it goes back to and goes through the gateway before the transaction), limited to the open credit (409 exceeds_open_credit). The credit leaves the receivable: a REFUND subledger row. The precondition is the credit memo's revision. Writes credit_memo.refunded, then credit_memo.partial or credit_memo.applied, and customer.updated.
+         */
+        post: operations["creditMemoRefund"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3175,46 +3375,9 @@ export interface paths {
         put?: never;
         /**
          * Charge a tokenized card
-         * @description A charge captured at the gateway whose persistence then fails is a generic 402; the token is never echoed back.
+         * @description Charges the gateway (outside the transaction, in the customer's currency), then records and applies the payment as POST /payments does. An invoice that cannot take the payment (void, over open) is refused before the card is charged. When the system refuses the payment after the gateway approved the charge (409), the charge is voided (same day) or refunded before the refusal returns, and the message says which. When the void and the refund both fail the route answers 502 with code charge_not_reversed and a message saying the card was charged and finance must reconcile the named gateway transaction id (the id and nothing else about the card); the attempt is on record as the audit row payment.charge_reversal. A declined card or a gateway fault before anything is recorded is 402 payment_required. The token is never echoed back.
          */
         post: operations["paymentCard"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/payments/refund": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Refund a card payment in part or full */
-        post: operations["paymentRefund"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/invoices/{id}/payments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List an invoice's payments
-         * @description Registered by the payment module on the invoice's path.
-         */
-        get: operations["paymentHistory"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5931,7 +6094,7 @@ export interface components {
         WireError: {
             error: {
                 /** @enum {string} */
-                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
+                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
                 message: string;
                 details?: components["schemas"]["WireErrorDetail"][];
             };
@@ -6021,44 +6184,243 @@ export interface components {
         AccountSummary: {
             /** Format: uuid */
             customer_id: string;
+            currency: string;
+            /** Format: int64 */
+            balance_cents: number;
             /**
              * Format: int64
-             * @description Cents.
+             * @description null for no limit; 0 is no credit.
              */
-            balance_due: number;
+            credit_limit_cents: number | null;
             /**
              * Format: int64
-             * @description Cents.
+             * @description Limit less balance; null for no limit.
              */
-            credit_limit: number;
+            available_credit_cents: number | null;
             /**
              * Format: int64
-             * @description Cents.
+             * @description Open credit memos plus unapplied cash, negative or zero.
              */
-            available_credit: number;
+            unapplied_cents: number;
         };
-        CustomerTransaction: {
+        /** @enum {string} */
+        AccountTransactionType: "INVOICE" | "PAYMENT" | "ADJUSTMENT" | "REFUND" | "CREDIT_MEMO" | "DISCOUNT" | "WRITE_OFF" | "REVERSAL";
+        AccountTransaction: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             customer_id: string;
-            /** @enum {string} */
-            type: "INVOICE" | "PAYMENT" | "ADJUSTMENT" | "REFUND" | "CREDIT_MEMO" | "REVERSAL";
+            type: components["schemas"]["AccountTransactionType"];
             /**
              * Format: int64
-             * @description Cents.
+             * @description Signed, debit positive.
              */
-            amount: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            balance_after: number;
+            amount_cents: number;
+            /** Format: int64 */
+            balance_after_cents: number;
+            currency: string;
+            /** @description invoice, credit_memo, application, refund or pos_return; null on a row written before cycle 2. */
+            source_kind: string | null;
             /** Format: uuid */
             reference_id: string | null;
             description: string;
             /** Format: date-time */
             created_at: string;
+        };
+        AccountTransactionPage: {
+            items: components["schemas"]["AccountTransaction"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        /** @enum {string} */
+        ArApplicationKind: "payment" | "credit_memo" | "discount" | "write_off";
+        /** @description The one record of AR being settled; a reversed application is never deleted. */
+        ArApplication: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            currency: string;
+            kind: components["schemas"]["ArApplicationKind"];
+            /** Format: uuid */
+            payment_id: string | null;
+            /** Format: uuid */
+            credit_memo_id: string | null;
+            /** Format: uuid */
+            invoice_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** @description Required for a write off. */
+            reason: string | null;
+            /** Format: date */
+            applied_on: string;
+            applied_by: string | null;
+            /**
+             * Format: uuid
+             * @description Groups the applications one request made.
+             */
+            act_id: string;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /** Format: date-time */
+            reversed_at: string | null;
+            reversed_by: string | null;
+            reversal_reason: string | null;
+            /** Format: uuid */
+            reversal_gl_entry_id: string | null;
+            /** Format: date */
+            reversed_on: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ArApplicationReverseRequest: {
+            reason: string;
+        };
+        ArAgingItem: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            job_id: string | null;
+            job_name: string | null;
+            /** Format: uuid */
+            ship_to_id: string | null;
+            ship_to_code: string | null;
+            currency: string;
+            /** Format: int64 */
+            current_cents: number;
+            /** Format: int64 */
+            days_1_30_cents: number;
+            /** Format: int64 */
+            days_31_60_cents: number;
+            /** Format: int64 */
+            days_61_90_cents: number;
+            /** Format: int64 */
+            over_90_cents: number;
+            /** Format: int64 */
+            unapplied_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+        };
+        ArAgingPage: {
+            items: components["schemas"]["ArAgingItem"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        ArAgingTotal: {
+            currency: string;
+            /** Format: int64 */
+            current_cents: number;
+            /** Format: int64 */
+            days_1_30_cents: number;
+            /** Format: int64 */
+            days_31_60_cents: number;
+            /** Format: int64 */
+            days_61_90_cents: number;
+            /** Format: int64 */
+            over_90_cents: number;
+            /** Format: int64 */
+            unapplied_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+        };
+        ArAgingSummary: {
+            /** Format: date */
+            as_of: string;
+            /** @enum {string} */
+            basis: "due_date" | "invoice_date";
+            totals: components["schemas"]["ArAgingTotal"][];
+        };
+        ArStatementLine: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            date: string;
+            type: components["schemas"]["AccountTransactionType"];
+            description: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** Format: int64 */
+            balance_after_cents: number;
+            source_kind: string | null;
+            /** Format: uuid */
+            reference_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+        };
+        ArOpenDocument: {
+            /** @enum {string} */
+            kind: "invoice" | "credit_memo";
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: date */
+            date: string;
+            /** Format: date */
+            due_date: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: int64 */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description Negative for a credit memo.
+             */
+            open_cents: number;
+        };
+        ArStatementCurrency: {
+            currency: string;
+            /** Format: int64 */
+            opening_balance_cents: number;
+            lines: components["schemas"]["ArStatementLine"][];
+            /** Format: int64 */
+            closing_balance_cents: number;
+            open_documents: components["schemas"]["ArOpenDocument"][];
+        };
+        ArStatement: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** Format: uuid */
+            job_id: string | null;
+            currencies: components["schemas"]["ArStatementCurrency"][];
+        };
+        ArDriftRow: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /** Format: int64 */
+            balance_cents: number;
+            /** Format: int64 */
+            subledger_cents: number;
+            /** Format: int64 */
+            documents_cents: number;
+        };
+        ArLedgerRow: {
+            currency: string;
+            /** Format: int64 */
+            receivable_ledger_cents: number;
+            /** Format: int64 */
+            balance_sum_cents: number;
+            /** Format: int64 */
+            deposits_ledger_cents: number;
+            /** Format: int64 */
+            unapplied_sum_cents: number;
+            receivable_in_sync: boolean;
+            deposits_in_sync: boolean;
+        };
+        ArReconciliation: {
+            customers: components["schemas"]["ArDriftRow"][];
+            currencies: components["schemas"]["ArLedgerRow"][];
         };
         /** @enum {string} */
         ActivityType: "CALL" | "MEETING" | "EMAIL" | "NOTE";
@@ -7407,94 +7769,6 @@ export interface components {
             total_duration_mins: number;
             total_distance_miles: number;
         };
-        /** @description deposit.CustomerDeposit. The branch, reference, note and ledger entry are omitted when empty. */
-        Deposit: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            customer_id: string;
-            /** Format: uuid */
-            branch_id?: string;
-            /**
-             * Format: int64
-             * @description Cents, original.
-             */
-            amount: number;
-            /**
-             * Format: int64
-             * @description Cents, cumulative applied.
-             */
-            applied_amount: number;
-            /**
-             * Format: int64
-             * @description Cents, amount minus applied.
-             */
-            remaining: number;
-            /** @enum {string} */
-            status: "OPEN" | "APPLIED" | "REFUNDED";
-            /** @description How the prepayment was taken; free text, CASH when the request leaves it empty. */
-            method: string;
-            reference?: string;
-            note?: string;
-            /** Format: uuid */
-            gl_entry_id?: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        /** @description deposit.DepositApplication. The invoice and ledger entry are omitted when empty. */
-        DepositApplication: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            deposit_id: string;
-            /** Format: uuid */
-            customer_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            /** Format: uuid */
-            invoice_id?: string;
-            /** Format: uuid */
-            gl_entry_id?: string;
-            /** Format: date-time */
-            created_at: string;
-        };
-        /** @description The list wrapper; deposits is null when the customer has none. */
-        DepositList: {
-            deposits: components["schemas"]["Deposit"][] | null;
-            /** Format: int64 */
-            open_balance_cents: number;
-        };
-        /** @description RecordDepositRequest. */
-        DepositCreate: {
-            /** Format: uuid */
-            customer_id: string;
-            /** Format: uuid */
-            branch_id?: string;
-            /**
-             * Format: int64
-             * @description Must be positive.
-             */
-            amount_cents: number;
-            /** @description Free text; defaults to CASH. */
-            method?: string;
-            reference?: string;
-            note?: string;
-        };
-        /** @description ApplyDepositRequest. */
-        DepositApply: {
-            /**
-             * Format: int64
-             * @description Must be positive and at most the remainder.
-             */
-            amount_cents: number;
-            /** Format: uuid */
-            invoice_id?: string;
-        };
         /** @description A trading partner. Used as the create and update request body and as the response body; on a request the id and timestamps are ignored or overwritten by the server. */
         EdiTradingPartner: {
             /** Format: uuid */
@@ -7719,8 +7993,10 @@ export interface components {
             created_at: string;
         };
         GlFiscalPeriodList: components["schemas"]["GlFiscalPeriod"][] | null;
-        /** @description One trial balance row (gl.TrialBalanceRow). debit and credit are int64 cents. */
+        /** @description One trial balance row (gl.TrialBalanceRow), per account and currency. debit and credit are int64 cents. */
         GlTrialBalanceRow: {
+            /** @description The ISO 4217 code of the entries summed in this row. */
+            currency: string;
             /** Format: uuid */
             account_id: string;
             account_code: string;
@@ -7749,8 +8025,9 @@ export interface components {
              */
             amount: number;
         };
-        /** @description The income statement (gl.ProfitAndLossReport). Every amount is int64 cents. */
+        /** @description The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency. */
         GlProfitAndLossReport: {
+            currency: string;
             /** @description YYYY-MM-DD. */
             start_date: string;
             /** @description YYYY-MM-DD. */
@@ -7772,8 +8049,9 @@ export interface components {
             /** Format: int64 */
             net_income: number;
         };
-        /** @description The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents. */
+        /** @description The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency. */
         GlBalanceSheetReport: {
+            currency: string;
             /** @description YYYY-MM-DD. */
             as_of_date: string;
             assets: components["schemas"]["GlAccountLineItem"][];
@@ -8187,7 +8465,7 @@ export interface components {
             total_cents: number;
             /**
              * Format: int64
-             * @description What is still owed: the total less the payments recorded against the invoice while it is unpaid or partial, 0 when paid, written off or void.
+             * @description What is still owed: the total less the live applications (stored by the AR core as amount_open), 0 when paid, written off or void.
              */
             open_cents: number;
             /** @description Computed: open and its due_date is before the branch's today. OVERDUE is not a status. */
@@ -8275,7 +8553,7 @@ export interface components {
             total_cents: number;
             /**
              * Format: int64
-             * @description What is still owed: the total less the payments recorded against the invoice while it is unpaid or partial, 0 when paid, written off or void.
+             * @description What is still owed: the total less the live applications (stored by the AR core as amount_open), 0 when paid, written off or void.
              */
             open_cents: number;
             /** @description Computed: open and its due_date is before the branch's today. OVERDUE is not a status. */
@@ -8482,7 +8760,7 @@ export interface components {
             total_cents: number;
             /**
              * Format: int64
-             * @description The credit not yet used: the total while the memo is open, 0 for a draft or a void memo. NEGATIVE like the total.
+             * @description The credit not yet used: the total plus its applications and refunds (stored by the AR core as amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.
              */
             open_cents: number;
             /** Format: uuid */
@@ -8553,7 +8831,7 @@ export interface components {
             total_cents: number;
             /**
              * Format: int64
-             * @description The credit not yet used: the total while the memo is open, 0 for a draft or a void memo. NEGATIVE like the total.
+             * @description The credit not yet used: the total plus its applications and refunds (stored by the AR core as amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.
              */
             open_cents: number;
             /** Format: uuid */
@@ -8737,6 +9015,35 @@ export interface components {
             revision?: number;
             /** @description Required by a void. */
             reason?: string;
+        };
+        InvoiceWriteOffRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string;
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        CreditMemoApplicationRequest: {
+            /** Format: uuid */
+            invoice_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+        };
+        CreditMemoApplyRequest: {
+            applications: components["schemas"]["CreditMemoApplicationRequest"][];
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        InvoiceApplicationPage: {
+            items: components["schemas"]["ArApplication"][];
+            next_cursor: string | null;
+            limit: number;
         };
         /** @enum {string} */
         LocationType: "branch" | "zone" | "aisle" | "rack" | "shelf" | "bin" | "yard";
@@ -9232,6 +9539,11 @@ export interface components {
             updated_at: string;
             /** @description The invoices written against the order, oldest first. */
             invoice_ids: string[];
+            /**
+             * Format: int64
+             * @description The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.
+             */
+            deposit_unapplied_cents: number;
         };
         /** @description The full order document. */
         Order: {
@@ -9318,6 +9630,11 @@ export interface components {
             updated_at: string;
             /** @description The invoices written against the order, oldest first. */
             invoice_ids: string[];
+            /**
+             * Format: int64
+             * @description The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.
+             */
+            deposit_unapplied_cents: number;
             /** @description The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one. */
             ship_to: {
                 /** Format: uuid */
@@ -9536,99 +9853,257 @@ export interface components {
             /** @description Float dollars. */
             credit_limit: number;
         };
+        /**
+         * @description account stays for history and is refused on a new payment.
+         * @enum {string}
+         */
+        PaymentMethod: "cash" | "card" | "check" | "ach" | "other" | "account";
         /** @enum {string} */
-        PaymentMethod: "CASH" | "CARD" | "CHECK" | "ACCOUNT";
-        Payment: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            method: components["schemas"]["PaymentMethod"];
-            reference: string;
-            notes: string;
-            /** Format: date-time */
-            created_at: string;
-            gateway_tx_id?: string;
-            gateway_status?: string;
-            card_last4?: string;
-            card_brand?: string;
-            auth_code?: string;
-        };
-        PaymentCreateRequest: {
-            /** Format: uuid */
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            method: components["schemas"]["PaymentMethod"];
-            reference?: string;
-            notes?: string;
-        };
-        PaymentIntentRequest: {
-            /** Format: uuid */
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-        };
-        PaymentIntentResponse: {
-            public_key: string;
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents, echoed from the request's amount field under this name.
-             */
-            amount_cents: number;
-        };
-        CardPaymentRequest: {
-            /** Format: uuid */
-            invoice_id: string;
-            /** @description The Runner.js tokenization result; required. */
-            token_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            notes?: string;
-        };
-        RefundRequest: {
-            /** Format: uuid */
-            payment_id: string;
-            /**
-             * Format: int64
-             * @description Cents, partial or full.
-             */
-            amount: number;
-            reason?: string;
-        };
+        PaymentStatus: "posted" | "voided";
         Refund: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            payment_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            reason: string;
-            gateway_refund_id?: string;
+            payment_id: string | null;
+            /** Format: uuid */
+            credit_memo_id: string | null;
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string | null;
+            method: components["schemas"]["PaymentMethod"];
+            gateway_refund_id: string | null;
             /** @enum {string} */
             status: "PENDING" | "COMPLETE" | "FAILED";
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /** Format: date */
+            refunded_on: string;
             /** Format: date-time */
             created_at: string;
         };
-        PaymentList: components["schemas"]["Payment"][] | null;
+        /** @description A payment's head, a list item; the invoice a legacy payment named is not on the wire. */
+        PaymentSummary: {
+            /** Format: uuid */
+            id: string;
+            /** @description PAY-000001, human readable. */
+            number: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            status: components["schemas"]["PaymentStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description ISO 4217, the customer's at record time. */
+            currency: string;
+            method: components["schemas"]["PaymentMethod"];
+            /** Format: int64 */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description amount less live applications and refunds; held in 2200.
+             */
+            unapplied_cents: number;
+            /**
+             * Format: date
+             * @description The business date.
+             */
+            received_on: string;
+            reference: string | null;
+            notes: string | null;
+            /**
+             * Format: uuid
+             * @description Set on a deposit against an order.
+             */
+            order_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            card_last4: string | null;
+            card_brand: string | null;
+            gateway_tx_id: string | null;
+            auth_code: string | null;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The full payment document - the head with its applications and its refunds. */
+        Payment: {
+            /** Format: uuid */
+            id: string;
+            /** @description PAY-000001, human readable. */
+            number: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            status: components["schemas"]["PaymentStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description ISO 4217, the customer's at record time. */
+            currency: string;
+            method: components["schemas"]["PaymentMethod"];
+            /** Format: int64 */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description amount less live applications and refunds; held in 2200.
+             */
+            unapplied_cents: number;
+            /**
+             * Format: date
+             * @description The business date.
+             */
+            received_on: string;
+            reference: string | null;
+            notes: string | null;
+            /**
+             * Format: uuid
+             * @description Set on a deposit against an order.
+             */
+            order_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            card_last4: string | null;
+            card_brand: string | null;
+            gateway_tx_id: string | null;
+            auth_code: string | null;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            applications: components["schemas"]["ArApplication"][];
+            refunds: components["schemas"]["Refund"][];
+        };
+        PaymentPage: {
+            items: components["schemas"]["PaymentSummary"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        PaymentApplicationRequest: {
+            /** Format: uuid */
+            invoice_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description The early pay discount taken beside this cash (a DISCOUNT application, DR 4050 / CR 1020).
+             */
+            discount_cents?: number;
+        };
+        PaymentCreateRequest: {
+            /** Format: uuid */
+            customer_id: string;
+            /**
+             * Format: uuid
+             * @description Defaults to the caller's branch, else the customer's primary branch.
+             */
+            branch_id?: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** @enum {string} */
+            method: "cash" | "check" | "ach" | "other";
+            reference?: string;
+            notes?: string;
+            /**
+             * Format: date
+             * @description Defaults to the branch's business date.
+             */
+            received_on?: string;
+            /**
+             * Format: uuid
+             * @description A deposit against this order.
+             */
+            order_id?: string;
+            /** Format: uuid */
+            job_id?: string;
+            applications?: components["schemas"]["PaymentApplicationRequest"][];
+        };
+        CardPaymentRequest: {
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description The gateway tokenizer's result; required. */
+            token_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+            notes?: string;
+            /** Format: uuid */
+            order_id?: string;
+            /** Format: uuid */
+            job_id?: string;
+            applications?: components["schemas"]["PaymentApplicationRequest"][];
+        };
+        PaymentApplyRequest: {
+            applications: components["schemas"]["PaymentApplicationRequest"][];
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        PaymentTransitionRequest: {
+            to: components["schemas"]["PaymentStatus"];
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+            reason: string;
+        };
+        PaymentRefundRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string;
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        CreditMemoRefundRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string;
+            /** @enum {string} */
+            method: "card" | "check" | "ach" | "other";
+            /**
+             * Format: uuid
+             * @description The card payment a card refund goes back to; only for method card.
+             */
+            payment_id?: string;
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        PaymentIntentRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+        };
+        PaymentIntentResponse: {
+            public_key: string;
+            /** Format: int64 */
+            amount_cents: number;
+        };
         PortalLoginRequest: {
             email: string;
             password: string;
@@ -12473,6 +12948,33 @@ export interface components {
                 "application/json": components["schemas"]["IntegrationError"];
             };
         };
+        /** @description The card was declined or the gateway could not take the charge; nothing was recorded. */
+        WirePaymentRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The payment gateway is not configured or cannot be reached. */
+        WireServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The card was charged, the system refused the payment, and neither the gateway void nor the refund went through. The message names the gateway transaction id finance must reconcile; it is the one 5xx whose message reaches the client. */
+        ChargeNotReversed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
     };
     parameters: {
         /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
@@ -12609,15 +13111,22 @@ export interface operations {
                     "application/json": components["schemas"]["AccountSummary"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     accountTransactions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -12629,18 +13138,184 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every transaction of the customer, newest first. The body is null when there are none. */
+            /** @description The page of subledger rows. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CustomerTransaction"][] | null;
+                    "application/json": components["schemas"]["AccountTransactionPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arAging: {
+        parameters: {
+            query?: {
+                group_by?: "customer" | "job" | "ship_to";
+                as_of?: string;
+                basis?: "due_date" | "invoice_date";
+                customer_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of aging rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArAgingPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arAgingSummary: {
+        parameters: {
+            query?: {
+                group_by?: "customer" | "job" | "ship_to";
+                as_of?: string;
+                basis?: "due_date" | "invoice_date";
+                customer_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bucket totals, one entry per currency. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArAgingSummary"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatement: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                job_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatement"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arReconciliation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The drift and the ledger comparison. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArReconciliation"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arApplicationReverse: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArApplicationReverseRequest"];
+            };
+        };
+        responses: {
+            /** @description The application, reversed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArApplication"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15970,137 +16645,6 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    depositList: {
-        parameters: {
-            query: {
-                /** @description Required. */
-                customer_id: string;
-            };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The deposits and the customer's open balance. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepositList"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    depositCreate: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DepositCreate"];
-            };
-        };
-        responses: {
-            /** @description The recorded deposit. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Deposit"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    depositGet: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The deposit. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Deposit"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    depositApply: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DepositApply"];
-            };
-        };
-        responses: {
-            /** @description The recorded application. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepositApplication"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-        };
-    };
     documentsPrintInvoice: {
         parameters: {
             query?: never;
@@ -16685,6 +17229,8 @@ export interface operations {
             query?: {
                 /** @description Cut-off date, YYYY-MM-DD. Defaults to today. */
                 as_of?: string;
+                /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): omitted, every currency's rows are returned, each row naming its currency; given, that currency alone. */
+                currency?: string;
             };
             header?: never;
             path?: never;
@@ -16714,6 +17260,8 @@ export interface operations {
                 start?: string;
                 /** @description Last day, YYYY-MM-DD. Defaults to today. */
                 end?: string;
+                /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the report is in that one currency. */
+                currency?: string;
             };
             header?: never;
             path?: never;
@@ -16741,6 +17289,8 @@ export interface operations {
             query?: {
                 /** @description Statement date, YYYY-MM-DD. Defaults to today. */
                 as_of?: string;
+                /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the sheet is in that one currency. */
+                currency?: string;
             };
             header?: never;
             path?: never;
@@ -17816,6 +18366,123 @@ export interface operations {
         };
         responses: {
             /** @description The credit memo after the transition. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditMemo"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    invoiceWriteOff: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceWriteOffRequest"];
+            };
+        };
+        responses: {
+            /** @description The invoice after the write off. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    invoiceApplications: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The applications, in the list envelope (one page, no further cursor). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceApplicationPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    creditMemoApply: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditMemoApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description The credit memo after the applications. */
             200: {
                 headers: {
                     /** @description The document's revision. */
@@ -19182,10 +19849,54 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    paymentList: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                /** @description Comma separated lowercase statuses (posted, voided). */
+                status?: string;
+                unapplied?: "true" | "false";
+                order_id?: string;
+                job_id?: string;
+                /** @description Comma separated lowercase methods (cash, card, check, ach, other, account). */
+                method?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of payments. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     paymentCreate: {
         parameters: {
             query?: never;
             header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19199,8 +19910,12 @@ export interface operations {
         };
         responses: {
             /** @description The recorded payment. */
-            200: {
+            201: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    /** @description The payment's route. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -19209,10 +19924,213 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    paymentGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The payment. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Payment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    paymentApply: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description The payment after the applications. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Payment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    paymentTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentTransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description The payment after the void. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Payment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    paymentRefund: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentRefundRequest"];
+            };
+        };
+        responses: {
+            /** @description The refund. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Refund"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    creditMemoRefund: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditMemoRefundRequest"];
+            };
+        };
+        responses: {
+            /** @description The refund. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Refund"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -19232,7 +20150,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The public key and the echoed invoice and amount. */
+            /** @description The public key and the echoed amount. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19243,17 +20161,18 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            503: components["responses"]["ServiceUnavailable"];
+            503: components["responses"]["WireServiceUnavailable"];
         };
     };
     paymentCard: {
         parameters: {
             query?: never;
             header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -19266,9 +20185,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The processed payment. */
-            200: {
+            /** @description The recorded card payment. */
+            201: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    /** @description The payment's route. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -19277,71 +20200,13 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            402: components["responses"]["PaymentRequired"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            402: components["responses"]["WirePaymentRequired"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    paymentRefund: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RefundRequest"];
-            };
-        };
-        responses: {
-            /** @description The processed refund. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Refund"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    paymentHistory: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The payments, a bare array that is null when the invoice has none. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaymentList"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            502: components["responses"]["ChargeNotReversed"];
+            503: components["responses"]["WireServiceUnavailable"];
         };
     };
     portalLogin: {
