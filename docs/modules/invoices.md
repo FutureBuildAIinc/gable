@@ -43,14 +43,14 @@ handles are in `core/internal/invoice/handler.go`. The route census
 | POST | `/api/v1/invoices/{id}/transitions` | Void an invoice. |
 | POST | `/api/v1/invoices/{id}/email` | Email invoice to customer (render only; the legacy route kept). |
 | GET | `/api/v1/invoices/{id}/payments` | List an invoice's payments (the payment module's read). |
-| GET | `/api/v1/credit-memos` | Cursor list of credit memos, newest first; status, customer_id filter. |
+| GET | `/api/v1/credit-memos` | Cursor list of credit memos, newest first; status, customer_id, invoice_id, job_id filter. |
 | POST | `/api/v1/credit-memos` | Create a draft credit memo. |
 | GET | `/api/v1/credit-memos/{id}` | One credit memo with its lines and revision as ETag. |
 | PUT | `/api/v1/credit-memos/{id}` | Replace a draft credit memo's header and lines, on the client's revision. |
 | POST | `/api/v1/credit-memos/{id}/transitions` | Post or void a credit memo. |
 
 The print routes at `/api/v1/documents/print/invoice/{id}` and
-`api/v1/documents/print/pickticket/{id}` live in
+`/api/v1/documents/print/pickticket/{id}` live in
 `core/api/fragments/documents.yaml` and are owned by the documents
 module. The email route is the legacy render, kept on its existing
 path.
@@ -65,7 +65,7 @@ path.
 | `id` | UUID | The invoice id. |
 | `number` | text | The invoice number, gapless, prefix `IN-`, padded to six. |
 | `status` | lowercase enum | `unpaid`, `partial`, `paid`, `void`, `written_off`. The wire name is `status`; the database column is `state`. |
-| `is_overdue` | boolean | Computed from `status` being `unpaid` or `partial` (`core/internal/invoice/repository.go` `isOverdue`). |
+| `is_overdue` | boolean | True when `status` is `unpaid` or `partial` and `due_date` is before today in the branch's time zone (`core/internal/invoice/repository.go` `overdueExpr`). |
 | `branch_id` | UUID | The branch the invoice belongs to. |
 | `customer_id` | UUID | The customer the invoice is for. |
 | `customer_name` | text | Snapshot of the customer name. |
@@ -103,6 +103,8 @@ plus the invoice-only fields:
 
 | Field | Wire form | Note |
 |---|---|---|
+| `id` | UUID | The line id. |
+| `position` | integer | The line's place on the document; a kit's components follow it. |
 | `line_type` | lowercase enum | `product`, `kit`, `component`, `charge`, `text`. |
 | `parent_line_id` | UUID, nullable | Set on `component` only. |
 | `product_id`, `charge_code_id` | UUID, nullable | The product or charge code. |
@@ -127,12 +129,15 @@ plus the invoice-only fields:
 | `cost_cents` | integer | The cost of the billed quantity, read by margin-aware roles. |
 | `created_at` | timestamp | RFC 3339 UTC. |
 
-`CreditMemo` carries the same fields (minus `delivery_type`,
-`picked_up_by`, `delivery_id`, `payment_terms_id`, `discount_*`,
-`origin`) and adds `memo_date`, `reason_code`, `reason`,
-`restock` (boolean on each line) and `invoice_line_id`. The `number`
-is gapless, prefix `CM-`, padded to six. The wire shape is
-`CreditMemo` in the same fragment.
+`CreditMemo` has its own field set (see
+`core/api/fragments/invoice.yaml` `components.schemas.CreditMemo`):
+the sales header fields without the invoice's order, date, terms,
+delivery and payment fields, plus `invoice_id`, `pos_return_id`,
+`open_cents`, `memo_date`, `reason_code` (`return`,
+`price_adjustment`, `damage`, `other`) and `reason`; each line adds
+`invoice_line_id` and `restock`. The `number` is gapless, prefix
+`CM-`, padded to six, and is null while the memo is a draft (a voided
+draft never had one).
 
 ### Money and quantity conventions
 
@@ -188,17 +193,20 @@ entry. On the invoice (`core/internal/gl/postentry.go`,
 `fulfilments` description in `core/api/fragments/order.yaml`), the
 entry debits the customer's AR (`AccountCodeAR = "1020"`), credits
 each line's revenue account (the product's `4010` for products, the
-charge code's account for charges, `AccountCodeDeliveryRev = "4020"`
-for delivery), credits sales tax payable (`AccountCodeSalesTax =
-"2020"`), debits cost of goods sold (`AccountCodeCOGS = "5010"`) and
-credits inventory (`AccountCodeInventory = "1030"`) on the lines that
-move stock. Account `2200` is Customer Deposits (`AccountCodeCustomerDeposit`),
-not sales tax payable. The AR subledger
-(`account.PostTransaction` with `TransactionTypeInvoice`, see
+charge code's account for charges), credits sales tax payable
+(`AccountCodeSalesTax = "2020"`), debits cost of goods sold
+(`AccountCodeCOGS = "5010"`) and credits inventory
+(`AccountCodeInventory = "1030"`) on the lines that move stock. Account
+`2200` is Customer Deposits (`AccountCodeCustomerDeposit`), not sales
+tax payable. Delivery revenue reaches `AccountCodeDeliveryRev = "4020"`
+through the seeded FREIGHT and FUEL charge codes, not through the
+invoice posting itself. The AR subledger (`account.PostTransaction`
+with `TransactionTypeInvoice`, see
 `core/internal/invoice/fulfilment.go`) is updated in the same
 transaction. A credit memo posts the same way in the opposite
-direction. A void reverses the journal entry with its own
-`posted_at`, keeping the row for the audit trail.
+direction. A void reverses the journal entry with the void date
+(`PostReversal`'s `EntryDate`, the branch's local date at the void),
+keeping the row for the audit trail.
 
 ## Events the module writes
 
