@@ -762,19 +762,39 @@ Up, in order:
    a `DEFAULT` of the seed company's id, which the migration knows from
    step 1 and writes as a literal through `EXECUTE format(...)`. The
    default is the bridge that lets item 1 land on its own: between this
-   item and item 3, every insert into an R2 table (a posting through
-   `PostEntry`, an account create, a fiscal period, an AP payment, a bank
-   account, an AR transaction, a refund) would otherwise
-   fail a NOT NULL violation and turn `refactor/v1` red, and no writer
-   sets the column until item 3. `locations.company_id` (step 2) sits
-   under the same bridge for the same reason: it is the one R1 column
-   whose rows include BRANCH rows, which no trigger can source, and item 7
-   drops it in the same pull request that builds the company scoped
-   branch route and makes the old route stamp the column (section 6). No trigger: item 3's writers set the
-   value from then on, and each default is dropped in the same pull
-   request that makes its writer set it, the census test extended in that
-   same pull request to fail while any R2 `company_id` column still
-   carries a default.
+   item and the item that converts each table's writer, every insert (a
+   posting through `PostEntry`, an account create, a fiscal period, an AP
+   payment, a bank account, an AR transaction, a refund, a branch) would
+   otherwise fail a NOT NULL violation and turn `refactor/v1` red.
+   `locations.company_id` (step 2) sits under the same bridge for the
+   same reason: it is the one R1 column whose rows include BRANCH rows,
+   which no trigger can source, and item 7 drops it in the same pull
+   request that builds the company scoped branch route and makes the old
+   route stamp the column (section 6). No trigger: the converting items'
+   writers set the value from then on. The defaults are not dropped in
+   one place, because the writers convert at different items:
+   `gl_accounts` is written by the account create route
+   `POST /api/v1/gl/accounts` (`gl/repository.go:136`) and
+   `bank_accounts` by `POST /api/v1/bankrecon/accounts`
+   (`bankrecon/repository.go:54`), and both
+   writers set the column only when item 5 moves them under their
+   company paths; `gl_fiscal_periods` has no Go insert writer at all
+   (reads and the close and reopen updates only, at
+   `gl/repository.go:416,439,455,469`), its rows seeded by this
+   migration and by item 7's company create, which names the company
+   itself; `reorder_runs`' writer is item 3's (section 2). The schedule,
+   each default dropped in
+   the item that converts its writer: item 2 drops `gl_journal_entries`
+   and `gl_journal_lines` (`PostEntry` sets both); item 3 the AR, AP
+   payment and refund tables' and `reorder_runs`'; item 5 `gl_accounts`,
+   `bank_accounts` and `gl_fiscal_periods`'; item 7 `locations`'. The
+   census test carries an allowlist of bridged tables whose default may
+   remain, and each dropping item shrinks it in the same pull request.
+   No second company can be created while an entry remains: the company
+   create route is item 7's, and item 7's own merge drops the last entry
+   (`locations`) beside building that route, so the allowlist is empty
+   from the moment a second company can exist and no company column
+   inherits the seed company after that.
 5. GL: `UNIQUE (code)` dropped and `UNIQUE (company_id, code)` added
    (`025:10`); `UNIQUE (company_id, id)` added to `gl_accounts` and
    `gl_journal_entries`; `gl_journal_lines.company_id` added and
@@ -798,8 +818,16 @@ row of any table the up touched points at a company other than the seed;
 and it refuses while any later item's objects still exist: a
 `document_counters` series other than `invoice` or `credit_memo` (item
 4's per company rows), a composite foreign key on `gl_journal_lines`,
-`gl_journal_entries` or `bank_accounts` (item 2's), or a `company_id`
-column that still carries a DEFAULT (item 3's drop has not run). Each
+`gl_journal_entries` or `bank_accounts` (item 2's), or a bridged
+`company_id` column (`locations` and the R2 set of step 4) that no
+longer carries its DEFAULT, which means a dropping item's drop is still
+in place and that item's own down has not run. The probe runs that way
+round because the defaults are what this down expects to find: they are
+present right after this up, and present again once each dropping item's
+down has restored the default it dropped, which is exactly the state
+this down runs in (its round trip test creates them); a missing default
+is a later item still to unwind, and the down refuses rather than guess.
+Each
 refusal names what it found. Otherwise it drops the triggers, the
 columns, the seed row and the `company` table, in reverse order. A down
 that would lose a second company's data loses nothing instead: it
@@ -819,8 +847,9 @@ Tests, in the migration item:
   names), proving idempotency and the round trip.
 - The refusal paths of the down: one extra company row, one row pointed
   at a made up company, and each later item's object (a per company
-  counter row, a composite foreign key of section 3, a remaining
-  `company_id` default), each making the down raise.
+  counter row, a composite foreign key of section 3, a bridged
+  `company_id` column whose DEFAULT a dropping item removed and whose
+  restoring down has not run), each making the down raise.
 - **The census test**: it reads the census list that lives beside the
   migration, one line per table, so the test reads as the table of
   section 2 does. It fails when a table with a `branch_id` column (minus
@@ -873,18 +902,20 @@ writes (5), and the settings gate (7):
 | Order | Item | Size |
 |---|---|---|
 | 1 | The migration and the census test (section 10: about twenty five tables, six rules, triggers, per company GL constraints, the step 4 default bridge, the down's refusal probes, the company row's series identity, round trip and refusal tests) | 16 to 24 |
-| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test) | 14 to 20 |
-| 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks; C2-4's invariant test extended per `(company, currency)`, the `1020` and `2200` balances both; each step 4 default dropped with its writer) | 14 to 24 |
+| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test, the entries and lines step 4 defaults dropped with `PostEntry`) | 14 to 20 |
+| 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank, and the reorder run writer, whose run's `branch_id` names its company, section 2; the AR core's checks; C2-4's invariant test extended per `(company, currency)`, the `1020` and `2200` balances both; the AR, AP payment, refund and `reorder_runs` step 4 defaults dropped with their writers) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
-| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
+| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`, the `gl_accounts`, `bank_accounts` and `gl_fiscal_periods` step 4 defaults dropped with the reroutes) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route and drop the step 4 `locations` default with both branch routes stamping the column; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
 
 Total: 74 to 114 dev hour equivalents. Item 1 lands first, on its own,
 behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
-and 3 land together or in that order, and item 3 drops the defaults in
-the same pull request that makes its writers set the column (items 1 to 3
-may instead land as one pull request, sized as one); 4, 5 and 6 are
+and 3 land together or in that order, and each item drops its own
+tables' step 4 defaults in the pull request that converts their writers,
+per section 10's schedule and its allowlist (items 1 to 3
+may instead land as one pull request, sized as one, taking item 2's and
+item 3's drops with it); 4, 5 and 6 are
 independent of each other; item 7 runs last, after items 2, 4 and 5 and
 after C5-1a, per the run order above: its chart copy and seeded periods
 are item 2's, its numbering is item 4's (before item 4 a second company's
