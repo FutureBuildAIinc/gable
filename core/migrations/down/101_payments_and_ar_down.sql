@@ -61,14 +61,39 @@ BEGIN
 END $$;
 
 -- A refund that consumed a migrated excess credit memo goes back to its payment;
--- the memos the migration wrote are removed with their lines.
-UPDATE payment_refunds f SET payment_id = m.source_payment_id, credit_memo_id = NULL
-FROM credit_memos m WHERE f.credit_memo_id = m.id AND m.source_payment_id IS NOT NULL;
+-- the memos the migration wrote are removed with their lines. A refund the
+-- migration split in two (the part that consumed the memo, the rest) is merged
+-- back into the row it was split from: same payment, time, reason, gateway
+-- reference and status.
+DO $$
+DECLARE
+    moved RECORD;
+    kept UUID;
+BEGIN
+    FOR moved IN
+        SELECT f.id, f.amount, f.reason, f.gateway_refund_id, f.status, f.created_at, m.source_payment_id
+        FROM payment_refunds f JOIN credit_memos m ON m.id = f.credit_memo_id
+        WHERE m.source_payment_id IS NOT NULL
+        ORDER BY f.created_at, f.id
+    LOOP
+        SELECT s.id INTO kept FROM payment_refunds s
+        WHERE s.payment_id = moved.source_payment_id AND s.credit_memo_id IS NULL AND s.created_at = moved.created_at
+          AND s.reason IS NOT DISTINCT FROM moved.reason AND s.gateway_refund_id IS NOT DISTINCT FROM moved.gateway_refund_id
+          AND s.status = moved.status
+        ORDER BY s.id LIMIT 1;
+        IF kept IS NOT NULL THEN
+            UPDATE payment_refunds SET amount = amount + moved.amount WHERE id = kept;
+            DELETE FROM payment_refunds WHERE id = moved.id;
+        ELSE
+            UPDATE payment_refunds SET payment_id = moved.source_payment_id, credit_memo_id = NULL WHERE id = moved.id;
+        END IF;
+    END LOOP;
+END $$;
 DELETE FROM payment_refunds WHERE credit_memo_id IS NOT NULL;
 DELETE FROM ar_applications WHERE credit_memo_id IN (SELECT id FROM credit_memos WHERE source_payment_id IS NOT NULL);
 DELETE FROM credit_memos WHERE source_payment_id IS NOT NULL;
 UPDATE document_counters
-SET next_value = GREATEST(1, COALESCE((SELECT MAX(substring(number FROM 4)::bigint) FROM credit_memos), 0) + 1)
+SET next_value = GREATEST(1, COALESCE((SELECT MAX(substring(number FROM 4)::bigint) FROM credit_memos WHERE number ~ '^CM-[0-9]+$'), 0) + 1)
 WHERE series = 'credit_memo';
 
 -- A payment recorded without an invoice names the invoice of its newest application.
