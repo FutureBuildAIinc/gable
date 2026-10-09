@@ -421,7 +421,34 @@ stay shared across companies: gaps are allowed there by ADR 0005 section
 4.1's own table, cross database uniqueness holds, and interleaved internal
 numbers across companies cost nothing. Stated, so the next record does not
 re litigate it. The mint stays where ADR 0005 section 4.1 and section 11
-put it (lock order step 8); only the series key and the format change.
+put it (lock order step 8); the series key and the format change, and
+one more thing changes with them, because C2-3 as merged mints through
+the schema as well as the helper: `invoices.number` carries `DEFAULT
+invoice_next_number()` (`097:84`), and both counter functions hard code
+the seed series in their `WHERE series = 'invoice'` and `'credit_memo'`
+(`097:55-65`), so a raw SQL insert that relies on the default draws from
+the seed company's counter whatever company the row belongs to (the
+seed inserts credit memos through `credit_memo_next_number()` directly
+at `seed.go:1240`, and tests do the same at
+`serve/wire_branch_wall_test.go:170` and `invoice/wire_test.go:413`);
+a column DEFAULT cannot read the row's `company_id`, which the R1
+trigger stamps in any case. Item 4 replaces the DEFAULT, and the choice
+is named: a `BEFORE INSERT OR UPDATE` trigger on both tables that mints
+only when `number` is null, from the row's company's `invoice_series`
+or `credit_memo_series` and its infix, through the same locked counter
+read, named to fire after the R1 company trigger because Postgres fires
+same timing triggers in name order, so the company is stamped before
+the mint reads it. Invoices mint at insert as today; credit memos mint
+at post, so the credit memo trigger fires on the update that posts the
+memo (a draft carries none), and the seed's and the tests' direct
+function calls ride the trigger instead. The Go helper widens with it:
+`NextGaplessNumber` takes the company's series and infix (today it
+takes the bare series and prefix, `invoice/repository.go:508-520`), and
+its prefix rule, one to four uppercase letters
+(`core/internal/platform/httpx/docnum.go:88-98`), widens to accept the
+infix bearing prefix. Item 4's tests prove the hole closed: a raw SQL
+insert for a second company draws from that company's series and
+carries its infix, never the seed's.
 
 ### 5. Currency
 
@@ -904,7 +931,7 @@ writes (5), and the settings gate (7):
 | 1 | The migration and the census test (section 10: about twenty five tables, six rules, triggers, per company GL constraints, the step 4 default bridge, the down's refusal probes, the company row's series identity, round trip and refusal tests) | 16 to 24 |
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test, the entries and lines step 4 defaults dropped with `PostEntry`) | 14 to 20 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank, and the reorder run writer, whose run's `branch_id` names its company, section 2; the AR core's checks; C2-4's invariant test extended per `(company, currency)`, the `1020` and `2200` balances both; the AR, AP payment, refund and `reorder_runs` step 4 defaults dropped with their writers) | 14 to 24 |
-| 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
+| 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `097` `DEFAULT` mint replaced by the per company mint trigger and the helper widened with it, the raw insert test for a second company, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`, the `gl_accounts`, `bank_accounts` and `gl_fiscal_periods` step 4 defaults dropped with the reroutes) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route and drop the step 4 `locations` default with both branch routes stamping the column; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
