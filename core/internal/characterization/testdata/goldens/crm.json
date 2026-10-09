@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/v1/customers/<id-1>/activities",
       "body": {
-        "activity_type": "NOTE",
+        "activity_type": "note",
         "description": "golden characterisation note"
       }
     },
@@ -14,11 +14,14 @@
       "content_type": "application/json",
       "body": {
         "activity_date": "<ts+0d>",
-        "activity_type": "NOTE",
+        "activity_type": "note",
+        "contact_id": null,
         "created_at": "<ts+0d>",
         "customer_id": "<id-1>",
         "description": "golden characterisation note",
         "id": "<id-2>",
+        "logged_by": null,
+        "revision": 1,
         "updated_at": "<ts+0d>"
       }
     }
@@ -32,17 +35,53 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "activity_date": "<ts+0d>",
-          "activity_type": "NOTE",
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-1>",
-          "description": "golden characterisation note",
-          "id": "<id-2>",
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "activity_date": "<ts+0d>",
+            "activity_type": "note",
+            "contact_id": null,
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "description": "golden characterisation note",
+            "id": "<id-2>",
+            "logged_by": null,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "crm.activity.list.filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/activities?activity_type=note"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "activity_date": "<ts+0d>",
+            "activity_type": "note",
+            "contact_id": null,
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "description": "golden characterisation note",
+            "id": "<id-2>",
+            "logged_by": null,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -60,8 +99,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "activity_type",
+              "message": "must be one of: call, meeting, email, note"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-3>"

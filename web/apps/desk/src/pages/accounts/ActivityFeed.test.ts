@@ -59,8 +59,8 @@ function serve() {
       const body = typeof init?.body === 'string' ? init.body : null
       calls.push({ url, method, body })
 
-      if (method === 'GET' && url.endsWith('/activities')) {
-        return Promise.resolve(jsonResponse(activities))
+      if (method === 'GET' && new URL(url, 'http://localhost').pathname.endsWith('/activities')) {
+        return Promise.resolve(jsonResponse({ items: activities, next_cursor: null, limit: 50 }))
       }
       if (method === 'GET' && new URL(url, 'http://localhost').pathname.endsWith('/contacts')) {
         return Promise.resolve(jsonResponse({ items: [CONTACT], next_cursor: null, limit: 200 }))
@@ -70,10 +70,12 @@ function serve() {
         const created: Activity = {
           id: 'a-1',
           customer_id: CUSTOMER,
-          contact_id: sent.contact_id,
+          contact_id: sent.contact_id ?? null,
           activity_type: sent.activity_type,
           description: sent.description,
+          logged_by: null,
           activity_date: sent.activity_date,
+          revision: 1,
           created_at: sent.activity_date,
           updated_at: sent.activity_date,
         }
@@ -148,7 +150,7 @@ describe('gable-activity-feed — Log Activity', () => {
     const posted = calls.find((c) => c.method === 'POST' && c.url.endsWith('/activities'))
     expect(posted).toBeDefined()
     expect(JSON.parse(posted!.body ?? '{}')).toMatchObject({
-      activity_type: 'CALL',
+      activity_type: 'call',
       description: 'Called about the framing package',
     })
 
