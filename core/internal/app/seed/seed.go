@@ -1262,7 +1262,7 @@ func Run() {
 		{"Q3 Inventory Audit Procedure", "approved", "Need stricter control on lumber counts"},
 		{"Vendor Onboarding Requirements", "review", "Compliance with new insurance regs"},
 		{"Credit Limit Approval Workflow", "approved", "Automate approvals under $10k"},
-		{"Safety Gear Mandatory List", "published", "Update per WorkSafeBC 2025 guidelines"},
+		{"Safety Gear Mandatory List", "approved", "Update per WorkSafeBC 2025 guidelines"},
 		{"Returns Restocking Fee Policy", "draft", "Customer complaints on 15% fee"},
 		{"Special Order Deposit Increase", "review", "Increase from 25% to 50% for non-stock"},
 	}

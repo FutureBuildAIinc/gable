@@ -8,7 +8,11 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -24,7 +28,7 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 201,
       "content_type": "application/json",
       "body": {
         "api_key": "<api-key>",
@@ -38,6 +42,144 @@
           "scopes": [
             "quotes:read"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.keys.list.after_create",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/keys?limit=2"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "id": "<id-1>",
+            "last_used_at": null,
+            "name": "golden-key",
+            "prefix": "<api-key>",
+            "revoked_at": null,
+            "scopes": [
+              "quotes:read"
+            ]
+          }
+        ],
+        "limit": 2,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "techadmin.keys.list.unknown_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/keys?status=active"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "status",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.key.revoke.unknown",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/keys/<id-3>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "no such machine key"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.key.revoke",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/keys/<id-1>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "techadmin.key.revoke.again",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/keys/<id-1>"
+    },
+    "response": {
+      "status": 204,
+      "content_type": "",
+      "body": {
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "techadmin.key.create.missing_name",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/keys",
+      "body": {
+        "name": "",
+        "scopes": [
+          ""
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "name",
+              "message": "is required"
+            },
+            {
+              "field": "scopes[0]",
+              "message": "must not be empty"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-5>"
         }
       }
     }

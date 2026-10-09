@@ -4,60 +4,24 @@
 package techadmin
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 
-	"github.com/gablelbm/gable/internal/ai"
-	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/google/uuid"
 )
 
-// settingStore is the subset of *ai.KeyStore the admin settings handler needs,
-// narrowed to an interface so the handler can be unit-tested with a fake (the
-// concrete KeyStore wraps a *pgxpool.Pool that a unit test can't supply).
-type settingStore interface {
-	Get(ctx context.Context) string
-	Set(ctx context.Context, value string) error
-	Delete(ctx context.Context) error
-	HasDBOverride(ctx context.Context) bool
-}
+// cursorScope names the key list's ordering: created_at then id, newest
+// first. A cursor minted for any other ordering is refused (ADR 0001
+// section 2).
+const cursorScope = "api_keys.created_at_id_desc"
 
 type Handler struct {
-	service      *Service
-	aiKeyStore   settingStore // openrouter_api_key
-	baseURLStore settingStore // openrouter_base_url
-	orsKeyStore  settingStore // openrouteservice_api_key
+	service *Service
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
-}
-
-// WithAIKeyStore sets the OpenRouter API key store for admin settings management.
-func (h *Handler) WithAIKeyStore(ks *ai.KeyStore) {
-	// Guard against wrapping a nil *ai.KeyStore in a non-nil interface, which would
-	// defeat the nil checks in the handlers.
-	if ks != nil {
-		h.aiKeyStore = ks
-	}
-}
-
-// WithAIBaseURLStore sets the OpenRouter base-URL store. The base URL is a
-// separate setting key because KeyStore is single-valued, so the admin-editable
-// base URL needs its own store alongside the API key.
-func (h *Handler) WithAIBaseURLStore(ks *ai.KeyStore) {
-	if ks != nil {
-		h.baseURLStore = ks
-	}
-}
-
-// WithORSKeyStore sets the OpenRouteService API key store (route optimization +
-// geocoding). Key-only — no base URL override.
-func (h *Handler) WithORSKeyStore(ks *ai.KeyStore) {
-	if ks != nil {
-		h.orsKeyStore = ks
-	}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -70,7 +34,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		return handler
 	}
 
-	// All admin routes require admin/owner role
+	// All admin routes require admin/owner role. A machine key is refused on
+	// the key routes themselves (they are user only, ADR 0002 section 4) and
+	// needs the finer admin:settings scope on the settings routes (ADR 0009).
 	mux.HandleFunc("POST /api/v1/admin/keys", guard(h.CreateKey))
 	mux.HandleFunc("GET /api/v1/admin/keys", guard(h.ListKeys))
 	mux.HandleFunc("DELETE /api/v1/admin/keys/{id}", guard(h.RevokeKey))
@@ -82,262 +48,243 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("DELETE /api/v1/admin/settings/routing", guard(h.DeleteRoutingSettings))
 }
 
-type CreateKeyRequest struct {
-	Name   string   `json:"name"`
-	Scopes []string `json:"scopes"`
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
-type CreateKeyResponse struct {
-	APIKey string  `json:"api_key"` // The raw key, shown once
-	Key    *APIKey `json:"key"`
+// noQuery refuses every query parameter: these routes declare none.
+func noQuery(r *http.Request) error {
+	_, err := httpx.StrictQuery(r)
+	return err
+}
+
+func pathID(r *http.Request) (uuid.UUID, error) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return uuid.Nil, httpx.BadRequest("invalid key id",
+			httpx.FieldError{Field: "id", Message: "must be a UUID"})
+	}
+	return id, nil
+}
+
+// notFound maps the repository's sentinel to the wire's 404.
+func notFound(err error) error {
+	if err == ErrNotFound {
+		return httpx.NotFound("no such machine key")
+	}
+	return err
 }
 
 func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	var req CreateKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "failed to decode create key request", http.StatusBadRequest, err)
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	rawKey, apiKey, err := h.service.GenerateKey(r.Context(), req.Name, req.Scopes)
+	name, scopes, err := req.Parse()
 	if err != nil {
-		httputil.RespondError(w, r, "failed to generate API key", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(CreateKeyResponse{
-		APIKey: rawKey,
-		Key:    apiKey,
-	})
+	raw, key, err := h.service.GenerateKey(r.Context(), name, scopes)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/admin/keys/"+key.ID.String())
+	writeJSON(w, http.StatusCreated, CreatedKey{APIKey: raw, Key: *key})
 }
 
 func (h *Handler) ListKeys(w http.ResponseWriter, r *http.Request) {
-	keys, err := h.service.ListKeys(r.Context())
+	_, err := httpx.StrictQuery(r, "cursor", "limit", "include")
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list API keys", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
+	page, err := httpx.ParseListQuery(r, cursorScope)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f := ListFilter{Limit: page.Limit}
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		f.AfterAt, f.AfterID = &at, id
+	}
+	wantTotal := false
+	if q := r.URL.Query(); len(q["include"]) > 0 {
+		set, ierr := httpx.ParseInclude(q["include"][0])
+		if ierr != nil {
+			httpx.WriteError(w, r, ierr)
+			return
+		}
+		wantTotal = set.Has(httpx.IncludeTotal)
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(keys)
+	items, hasMore, total, err := h.service.ListKeys(r.Context(), f, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1]
+		next, err = httpx.MintCursor(cursorScope, httpx.FormatKeyTime(last.CreatedAt.Time), last.ID.String())
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	var opts []httpx.ListOption
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, page.Limit, opts...)
+}
+
+func cursorError() error {
+	return httpx.BadRequest("cursor keyset is malformed",
+		httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
 }
 
 func (h *Handler) RevokeKey(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		httputil.RespondError(w, r, "missing id", http.StatusBadRequest, nil)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.service.RevokeKey(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to revoke API key", http.StatusInternalServerError, err)
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
+	if _, err := h.service.RevokeKey(r.Context(), id); err != nil {
+		httpx.WriteError(w, r, notFound(err))
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- AI Settings ---
-
-type AISettingsResponse struct {
-	Configured bool   `json:"configured"`
-	Source     string `json:"source"`             // "admin", "env", or "none"
-	KeyHint    string `json:"key_hint,omitempty"` // e.g. "sk-or-...4f2e"
-	BaseURL    string `json:"base_url,omitempty"` // OpenRouter base URL (default or admin override)
-}
+// --- AI settings ---
 
 func (h *Handler) GetAISettings(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if h.aiKeyStore == nil {
-		json.NewEncoder(w).Encode(AISettingsResponse{Source: "none"})
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	ctx := r.Context()
-	key := h.aiKeyStore.Get(ctx)
-	hasDB := h.aiKeyStore.HasDBOverride(ctx)
-
-	resp := AISettingsResponse{
-		Configured: key != "",
+	out, err := h.service.GetAISettings(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
 	}
-
-	if key != "" {
-		// Show a masked hint
-		if len(key) > 12 {
-			resp.KeyHint = key[:10] + "..." + key[len(key)-4:]
-		} else {
-			resp.KeyHint = "****"
-		}
-
-		if hasDB {
-			resp.Source = "admin"
-		} else {
-			resp.Source = "env"
-		}
-	} else {
-		resp.Source = "none"
-	}
-
-	// Only surface a base URL when it's an admin override, so the UI can tell
-	// "override set" from "using the default" (mirrors the Source derivation
-	// above) and never re-persists the default back into system_settings.
-	if h.baseURLStore != nil && h.baseURLStore.HasDBOverride(ctx) {
-		resp.BaseURL = h.baseURLStore.Get(ctx)
-	}
-
-	json.NewEncoder(w).Encode(resp)
+	httpx.WriteRevisionETag(w, out.Revision)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
-	if h.aiKeyStore == nil {
-		httputil.RespondError(w, r, "AI key store not available", http.StatusInternalServerError, nil)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	// base_url is a pointer so we can distinguish "omitted" (leave as-is) from
-	// "present but empty" (clear the admin override, reverting to env/default).
-	var body struct {
-		APIKey  string  `json:"api_key"`
-		BaseURL *string `json:"base_url"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req SaveAISettingsRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if body.APIKey == "" {
-		httputil.RespondError(w, r, "api_key is required", http.StatusBadRequest, nil)
+	apiKey, baseURL, revision, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	// Validate the base URL BEFORE persisting anything, so a bad URL returns 400
-	// without leaving the API key saved.
-	setBaseURL := body.BaseURL != nil && h.baseURLStore != nil
-	var baseURL string
-	if setBaseURL {
-		baseURL = strings.TrimSpace(*body.BaseURL)
-		if err := ai.ValidateBaseURL(baseURL); err != nil {
-			httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
-			return
-		}
-	}
-
-	if err := h.aiKeyStore.Set(r.Context(), body.APIKey); err != nil {
-		httputil.RespondError(w, r, "failed to save API key", http.StatusInternalServerError, err)
+	out, err := h.service.SaveAISettings(r.Context(), apiKey, baseURL,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision})
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if setBaseURL {
-		if baseURL == "" {
-			// Empty clears the override entirely (reverting to env/default) rather
-			// than persisting an empty row that would read back as "overridden".
-			if err := h.baseURLStore.Delete(r.Context()); err != nil {
-				httputil.RespondError(w, r, "failed to clear base URL", http.StatusInternalServerError, err)
-				return
-			}
-		} else if err := h.baseURLStore.Set(r.Context(), baseURL); err != nil {
-			httputil.RespondError(w, r, "failed to save base URL", http.StatusInternalServerError, err)
-			return
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+	httpx.WriteRevisionETag(w, out.Revision)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) DeleteAISettings(w http.ResponseWriter, r *http.Request) {
-	if h.aiKeyStore == nil {
-		httputil.RespondError(w, r, "AI key store not available", http.StatusInternalServerError, nil)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.aiKeyStore.Delete(r.Context()); err != nil {
-		httputil.RespondError(w, r, "failed to delete API key", http.StatusInternalServerError, err)
+	err := h.service.DeleteAISettings(r.Context(),
+		Precondition{IfMatch: r.Header.Get("If-Match")})
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	// Removing the admin AI config also clears any base-URL override so both
-	// revert to their env/defaults together.
-	if h.baseURLStore != nil {
-		if err := h.baseURLStore.Delete(r.Context()); err != nil {
-			httputil.RespondError(w, r, "failed to delete base URL", http.StatusInternalServerError, err)
-			return
-		}
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- Routing (OpenRouteService) Settings ---
-// Key-only; reuses AISettingsResponse for the {configured, source, key_hint} shape.
+// --- routing settings ---
 
 func (h *Handler) GetRoutingSettings(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if h.orsKeyStore == nil {
-		json.NewEncoder(w).Encode(AISettingsResponse{Source: "none"})
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	ctx := r.Context()
-	key := h.orsKeyStore.Get(ctx)
-	resp := AISettingsResponse{Configured: key != ""}
-	if key != "" {
-		if len(key) > 12 {
-			resp.KeyHint = key[:10] + "..." + key[len(key)-4:]
-		} else {
-			resp.KeyHint = "****"
-		}
-		if h.orsKeyStore.HasDBOverride(ctx) {
-			resp.Source = "admin"
-		} else {
-			resp.Source = "env"
-		}
-	} else {
-		resp.Source = "none"
+	out, err := h.service.GetRoutingSettings(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
 	}
-	json.NewEncoder(w).Encode(resp)
+	httpx.WriteRevisionETag(w, out.Revision)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) SaveRoutingSettings(w http.ResponseWriter, r *http.Request) {
-	if h.orsKeyStore == nil {
-		httputil.RespondError(w, r, "routing key store not available", http.StatusInternalServerError, nil)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	var body struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req SaveRoutingSettingsRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	if body.APIKey == "" {
-		httputil.RespondError(w, r, "api_key is required", http.StatusBadRequest, nil)
+	apiKey, revision, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.orsKeyStore.Set(r.Context(), body.APIKey); err != nil {
-		httputil.RespondError(w, r, "failed to save routing API key", http.StatusInternalServerError, err)
+	out, err := h.service.SaveRoutingSettings(r.Context(), apiKey,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision})
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+	httpx.WriteRevisionETag(w, out.Revision)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) DeleteRoutingSettings(w http.ResponseWriter, r *http.Request) {
-	if h.orsKeyStore == nil {
-		httputil.RespondError(w, r, "routing key store not available", http.StatusInternalServerError, nil)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.orsKeyStore.Delete(r.Context()); err != nil {
-		httputil.RespondError(w, r, "failed to delete routing API key", http.StatusInternalServerError, err)
+	err := h.service.DeleteRoutingSettings(r.Context(),
+		Precondition{IfMatch: r.Header.Get("If-Match")})
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }

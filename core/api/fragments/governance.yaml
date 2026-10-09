@@ -1,47 +1,57 @@
-# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The governance (RFC) app, transcribed from internal/governance as it
-# behaves today. Quirks the transcription preserves: the two input structs
-# carry no json tags, so the request keys are the Go field names matched
-# case insensitively and snake_case keys such as problem_statement are
-# silently ignored (the stored value is then empty); an update overwrites
-# every field, so an omitted one becomes empty; status is not validated by
-# the handler; a missing RFC is a 404 on read but a 500 on update; the list
-# is null when there are no RFCs. Every route sits behind the governance app
-# gate (404 app_disabled when the app is off) and the admin or owner guard.
+# The governance (RFC) app on the wire contract of ADR 0001 (item C5-1a):
+# the cursor list envelope with a working status filter, the one error
+# envelope, a lowercase status with the transitions route, RFC- document
+# numbers, and a revision with its ETag behind If-Match. The routes sit
+# behind the apps registry: when the governance app is disabled they answer
+# 404 app_disabled.
 paths:
   /api/v1/governance/rfcs:
     get:
-      operationId: governanceListRfcs
+      operationId: governanceListRFCs
       tags: [governance]
       summary: List RFCs
       description: >-
-        Admin or owner only. Newest first. Not paginated. Answers null, not an
-        empty array, when there are no RFCs.
+        The cursor list envelope, newest first, one summary per RFC (the
+        body never rides the list). status filters on the lowercase
+        vocabulary (a comma separated list); total appears only under
+        include=total. A parameter the route does not declare, a status
+        outside the vocabulary (uppercase included), a malformed cursor or
+        an out of range limit is a 400.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Comma separated lowercase statuses (draft, review, approved, rejected).
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: Every RFC, or null when none exist.
+          description: The page of RFC summaries.
           content:
             application/json:
               schema:
-                type: [array, "null"]
-                items:
-                  $ref: "#/components/schemas/GovernanceRFC"
+                $ref: "#/components/schemas/RFCPage"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/AppDisabled" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     post:
-      operationId: governanceCreateRfc
+      operationId: governanceCreateRFC
       tags: [governance]
       summary: Draft an RFC
       description: >-
-        Admin or owner only. The content is expanded from a fixed Markdown
-        template (no model is called). The new RFC is always status draft. The
-        request keys are the Go field names matched case insensitively; the
-        snake_case spelling of ProblemStatement, ProposedSolution and AuthorID
-        is ignored without an error.
+        Creates an RFC in draft. The content is generated from the triple by
+        the provider (a template today), never sent by the client; a request
+        carrying content, status or revision is a 400 naming the field. The
+        number is minted from the sequence (RFC-000001), the create, its
+        audit row and rfc.created are one transaction, and the answer carries
+        the revision and its ETag.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -53,26 +63,33 @@ paths:
       responses:
         "201":
           description: The drafted RFC.
+          headers:
+            Location:
+              description: The new RFC's own URL.
+              schema:
+                type: string
+            ETag:
+              description: The revision (1) in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GovernanceRFC"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+                $ref: "#/components/schemas/RFC"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/AppDisabled" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+        "503": { $ref: "#/components/responses/WireUnavailable" }
   /api/v1/governance/rfcs/{id}:
     get:
-      operationId: governanceGetRfc
+      operationId: governanceGetRFC
       tags: [governance]
-      summary: Get an RFC
-      description: >-
-        Admin or owner only. Any lookup failure, including a database fault,
-        answers 404.
+      summary: Read one RFC
+      description: The full document with its revision and ETag.
       parameters:
         - name: id
           in: path
@@ -83,44 +100,46 @@ paths:
       responses:
         "200":
           description: The RFC.
+          headers:
+            ETag:
+              description: The revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GovernanceRFC"
-        "400": { $ref: "#/components/responses/BadRequest" }
+                $ref: "#/components/schemas/RFC"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404":
-          description: >-
-            The RFC does not exist (or the lookup failed), or the governance
-            app is disabled (the app_disabled body). The standard envelope in
-            the first case.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: "#/components/schemas/Error"
-                  - $ref: "#/components/schemas/AppsDisabledError"
-        "500": { $ref: "#/components/responses/InternalError" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     put:
-      operationId: governanceUpdateRfc
+      operationId: governanceUpdateRFC
       tags: [governance]
-      summary: Replace an RFC's editable fields
+      summary: Update an RFC
       description: >-
-        Admin or owner only. A full overwrite: title, status, problem
-        statement, proposed solution and content are all set from the body, so
-        an omitted key blanks the stored value. Status is not validated by the
-        handler and the database has no check on it: any string up to 50
-        characters is stored (an empty one when the key is omitted), and only
-        a longer one is a 500. An unknown id is a 500, not a 404.
+        Every editable field is optional: nil leaves it alone. status moves
+        through the transitions route (a request carrying it is a 400 naming
+        it and pointing there); author_id is set once at create. Takes
+        If-Match or the body revision (428 without, 409 stale) and answers
+        the document with its new revision and ETag. An RFC under review may
+        still be edited; an approved or rejected one refuses the edit with a
+        409 blocker until it is reopened.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          description: The revision this write preconditions on, quoted ("3"); the weak form is accepted.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -129,84 +148,196 @@ paths:
               $ref: "#/components/schemas/GovernanceUpdateRFCRequest"
       responses:
         "200":
-          description: The updated RFC.
+          description: The RFC after the update.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GovernanceRFC"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+                $ref: "#/components/schemas/RFC"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/AppDisabled" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/governance/rfcs/{id}/transitions:
+    post:
+      operationId: governanceTransitionRFC
+      tags: [governance]
+      summary: Move an RFC along its lifecycle
+      description: >-
+        The allowed edges are draft to review, review to approved, review to
+        rejected and rejected back to draft (a reopen); approved is terminal.
+        A forbidden edge is a 409 invalid_state_transition. Takes If-Match or
+        the body revision like every write, and writes the transition's
+        event (rfc.review, rfc.approved, rfc.rejected, rfc.reopened).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: If-Match
+          in: header
+          required: false
+          description: The revision this write preconditions on, quoted.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceTransitionRequest"
+      responses:
+        "200":
+          description: The RFC after the transition.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RFC"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "409": { $ref: "#/components/responses/WireConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
 components:
   schemas:
-    GovernanceRFC:
+    RFCSummary:
       type: object
-      required: [id, title, status, problem_statement, proposed_solution, content, author_id, created_at, updated_at]
-      description: Go type governance.RFC.
+      required: [id, number, title, status, author_id, revision, created_at, updated_at]
+      description: Go type governance.RFCSummary, the list item; the full document embeds it.
       properties:
         id:
           type: string
           format: uuid
+        number:
+          type: string
+          description: The human readable document number (RFC-000001), minted from the sequence.
         title:
           type: string
         status:
           type: string
-          description: >-
-            Normally one of draft, review, approved or rejected. The database
-            has no check on it, so an RFC updated with another string (or
-            with the key omitted, which stores an empty string) reads back
-            with that value.
-        problem_statement:
-          type: string
-        proposed_solution:
-          type: string
-        content:
-          type: string
-          description: Markdown.
+          enum: [draft, review, approved, rejected]
         author_id:
           type: [string, "null"]
           format: uuid
+        revision:
+          type: integer
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    RFC:
+      type: object
+      required: [id, number, title, status, author_id, revision, created_at, updated_at, problem_statement, proposed_solution, content]
+      description: >-
+        Go type governance.RFC, the summary fields spelled out with the body
+        behind them. content is generated by the provider at create and null
+        only on rows the legacy seed wrote without one.
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: The human readable document number (RFC-000001), minted from the sequence.
+        title:
+          type: string
+        status:
+          type: string
+          enum: [draft, review, approved, rejected]
+        author_id:
+          type: [string, "null"]
+          format: uuid
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        problem_statement:
+          type: string
+        proposed_solution:
+          type: string
+        content:
+          type: [string, "null"]
+    RFCPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RFCSummary"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+        total:
+          type: integer
     GovernanceCreateRFCRequest:
       type: object
-      description: >-
-        Go type governance.CreateRFCInput, which has no json tags. Keys match
-        the Go field names case insensitively; any other spelling is ignored.
+      required: [title, problem_statement, proposed_solution]
+      description: Go type governance.CreateRFCInput. content, status and revision are refused on a create.
       properties:
-        Title:
+        title:
           type: string
-        ProblemStatement:
+        problem_statement:
           type: string
-        ProposedSolution:
+        proposed_solution:
           type: string
-        AuthorID:
+        author_id:
           type: [string, "null"]
           format: uuid
     GovernanceUpdateRFCRequest:
       type: object
       description: >-
-        Go type governance.UpdateRFCInput, which has no json tags. Keys match
-        the Go field names case insensitively; any other spelling is ignored.
-        Every field is written, so an omitted key becomes the empty string.
+        Go type governance.UpdateRFCInput. Every editable field is a pointer:
+        nil leaves it alone.
       properties:
-        Title:
+        title:
+          type: [string, "null"]
+        problem_statement:
+          type: [string, "null"]
+        proposed_solution:
+          type: [string, "null"]
+        content:
+          type: [string, "null"]
+        revision:
+          type: integer
+    GovernanceTransitionRequest:
+      type: object
+      required: [to]
+      description: Go type governance.TransitionRequest.
+      properties:
+        to:
           type: string
-        Status:
-          type: string
-          description: Stored as sent; the handler does not check it against the status vocabulary (draft, review, approved, rejected).
-        ProblemStatement:
-          type: string
-        ProposedSolution:
-          type: string
-        Content:
-          type: string
+          enum: [draft, review, approved, rejected]
+        revision:
+          type: integer
