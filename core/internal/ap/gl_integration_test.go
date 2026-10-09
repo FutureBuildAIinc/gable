@@ -88,12 +88,14 @@ func (m *MockGLRepository) GetAccount(ctx context.Context, id uuid.UUID) (*gl.GL
 }
 func (m *MockGLRepository) CreateAccount(ctx context.Context, acct *gl.GLAccount) error { return nil }
 func (m *MockGLRepository) UpdateAccount(ctx context.Context, acct *gl.GLAccount) error { return nil }
-func (m *MockGLRepository) GetTrialBalance(ctx context.Context, asOf time.Time) ([]gl.TrialBalanceRow, error) {
+func (m *MockGLRepository) GetTrialBalance(ctx context.Context, asOf time.Time, currency string) ([]gl.TrialBalanceRow, error) {
 	return nil, nil
 }
 
 // AP never reads financial statements; this satisfies gl.Repository only.
-func (m *MockGLRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]gl.AccountActivity, error) {
+func (m *MockGLRepository) DefaultCurrency(ctx context.Context) (string, error) { return "USD", nil }
+
+func (m *MockGLRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string) ([]gl.AccountActivity, error) {
 	return nil, nil
 }
 func (m *MockGLRepository) ListFiscalPeriods(ctx context.Context) ([]gl.FiscalPeriod, error) {

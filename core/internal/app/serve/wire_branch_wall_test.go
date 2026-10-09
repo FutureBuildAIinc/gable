@@ -227,7 +227,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
 	docSvc := document.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
-	accountSvc := account.NewService(account.NewRepository(db), db, slog.Default())
+	accountSvc := account.NewService(db, glSvc, slog.Default())
 	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db)
 	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))

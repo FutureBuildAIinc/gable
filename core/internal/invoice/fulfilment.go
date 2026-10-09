@@ -92,6 +92,10 @@ type FulfilmentInvoice struct {
 	CostCents int64 // the entry's COGS legs
 
 	Actor string
+
+	// Effects is what the AR core did posting the invoice: the caller writes
+	// its events (customer.updated, part balance) last.
+	Effects *account.Effects
 }
 
 // FulfilmentStore is the repository half the fulfilment invoice needs; the
@@ -101,7 +105,6 @@ type FulfilmentStore interface {
 	LockCustomer(ctx context.Context, customerID uuid.UUID) error
 	NextInvoiceNumber(ctx context.Context) (string, error)
 	InsertFulfilmentInvoice(ctx context.Context, in *FulfilmentInvoice) error
-	SetInvoiceGLEntry(ctx context.Context, invoiceID, entryID uuid.UUID) error
 }
 
 // CreateFulfilmentInvoice writes the invoice of an order fulfilment inside the
@@ -110,9 +113,9 @@ type FulfilmentStore interface {
 // immediately before the insert; the journal entry and the subledger follow.
 // It posts the balanced invoice entry through gl.PostEntry (DR 1020 total and
 // 5010 cost; CR each revenue account, 2020 tax and 1030 cost) and the AR
-// subledger debit through today's PostTransaction. It refuses to run outside a
-// transaction. Until C2-4 moves both postings into the AR core this is the
-// path; the events are the caller's, written last.
+// subledger debit through the AR core (C2-4 moved both postings there). It
+// refuses to run outside a transaction; the events are the caller's, written
+// last.
 func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInvoice) error {
 	if !database.InTx(ctx) {
 		return gl.ErrNoTransaction
@@ -157,36 +160,24 @@ func (s *Service) CreateFulfilmentInvoice(ctx context.Context, in *FulfilmentInv
 		return err
 	}
 
-	// The invoice entry: the total and the cost relieved from inventory.
-	legs := []gl.Leg{
-		{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: in.TotalCents},
-		{AccountCode: gl.AccountCodeCOGS, Description: "Cost of Goods Sold", Debit: in.CostCents},
-	}
-	for _, r := range in.Revenue {
-		legs = append(legs, gl.Leg{AccountCode: r.AccountCode, Description: "Revenue " + r.AccountCode, Credit: r.Cents})
-	}
-	legs = append(legs,
-		gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Credit: in.TaxCents},
-		gl.Leg{AccountCode: gl.AccountCodeInventory, Description: "Inventory", Credit: in.CostCents},
-	)
-	invID := in.ID
-	entry, err := s.gl.PostEntry(ctx, gl.PostingInput{
-		EntryDate: in.InvoiceDate, Memo: fmt.Sprintf("Invoice %s", in.Number), Source: gl.SourceInvoice,
-		SourceRefID: &invID, Currency: in.Currency, PostedBy: in.Actor, Legs: legs,
-	})
-	if err != nil {
-		return mapPostingError(fmt.Errorf("failed to post the invoice entry: %w", err))
-	}
-	if entry != nil {
-		if err := store.SetInvoiceGLEntry(ctx, in.ID, entry.ID); err != nil {
-			return err
-		}
-	}
-
+	// The invoice's posting goes through the AR core (ADR 0005 8.2, 9.3): the
+	// balanced entry (DR 1020 for the total, which the core adds, and the cost
+	// relieved from inventory), the subledger debit, invoices.gl_entry_id.
 	if s.account != nil {
-		if _, err := s.account.PostTransaction(ctx, in.CustomerID, account.TransactionTypeInvoice, in.TotalCents, &invID, "Invoice "+in.Number); err != nil {
-			return fmt.Errorf("failed to post the invoice to the account ledger: %w", err)
+		legs := []gl.Leg{{AccountCode: gl.AccountCodeCOGS, Description: "Cost of Goods Sold", Debit: in.CostCents}}
+		for _, r := range in.Revenue {
+			legs = append(legs, gl.Leg{AccountCode: r.AccountCode, Description: "Revenue " + r.AccountCode, Credit: r.Cents})
 		}
+		legs = append(legs,
+			gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Credit: in.TaxCents},
+			gl.Leg{AccountCode: gl.AccountCodeInventory, Description: "Inventory", Credit: in.CostCents},
+		)
+		fx, err := s.account.PostInvoice(ctx, account.PostInvoiceIn{InvoiceID: in.ID, CustomerID: in.CustomerID, Number: in.Number,
+			Currency: in.Currency, TotalCents: in.TotalCents, On: in.InvoiceDate, Actor: in.Actor, Legs: legs})
+		if err != nil {
+			return mapPostingError(fmt.Errorf("failed to post the invoice: %w", err))
+		}
+		in.Effects = fx
 	}
 	if s.auditLog != nil {
 		if err := s.auditLog.Log(ctx, audit.Entry{

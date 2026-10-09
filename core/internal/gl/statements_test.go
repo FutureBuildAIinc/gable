@@ -683,7 +683,7 @@ func TestServiceGetBalanceSheetQueriesBothHalvesInceptionToDate(t *testing.T) {
 	}
 	svc := NewService(repo, nil, nil)
 
-	report, err := svc.GetBalanceSheet(context.Background(), "2026-08-31")
+	report, err := svc.GetBalanceSheet(context.Background(), "2026-08-31", "")
 	if err != nil {
 		t.Fatalf("GetBalanceSheet: %v", err)
 	}
@@ -724,7 +724,7 @@ func TestServiceGetProfitAndLossBoundsTheWindow(t *testing.T) {
 	}
 	svc := NewService(repo, nil, nil)
 
-	if _, err := svc.GetProfitAndLoss(context.Background(), "2026-08-01", "2026-08-31"); err != nil {
+	if _, err := svc.GetProfitAndLoss(context.Background(), "2026-08-01", "2026-08-31", ""); err != nil {
 		t.Fatalf("GetProfitAndLoss: %v", err)
 	}
 
@@ -755,27 +755,27 @@ func TestServiceStatementDateValidation(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("malformed P&L start", func(t *testing.T) {
-		if _, err := svc.GetProfitAndLoss(ctx, "08/01/2026", "2026-08-31"); err == nil {
+		if _, err := svc.GetProfitAndLoss(ctx, "08/01/2026", "2026-08-31", ""); err == nil {
 			t.Error("expected an error for a non-ISO start date")
 		}
 	})
 	t.Run("malformed P&L end", func(t *testing.T) {
-		if _, err := svc.GetProfitAndLoss(ctx, "2026-08-01", "not-a-date"); err == nil {
+		if _, err := svc.GetProfitAndLoss(ctx, "2026-08-01", "not-a-date", ""); err == nil {
 			t.Error("expected an error for a non-ISO end date")
 		}
 	})
 	t.Run("inverted P&L window", func(t *testing.T) {
-		if _, err := svc.GetProfitAndLoss(ctx, "2026-08-31", "2026-08-01"); err == nil {
+		if _, err := svc.GetProfitAndLoss(ctx, "2026-08-31", "2026-08-01", ""); err == nil {
 			t.Error("expected an error when end precedes start")
 		}
 	})
 	t.Run("malformed balance sheet date", func(t *testing.T) {
-		if _, err := svc.GetBalanceSheet(ctx, "31-08-2026"); err == nil {
+		if _, err := svc.GetBalanceSheet(ctx, "31-08-2026", ""); err == nil {
 			t.Error("expected an error for a non-ISO as_of date")
 		}
 	})
 	t.Run("a single-day window is valid", func(t *testing.T) {
-		if _, err := svc.GetProfitAndLoss(ctx, "2026-08-31", "2026-08-31"); err != nil {
+		if _, err := svc.GetProfitAndLoss(ctx, "2026-08-31", "2026-08-31", ""); err != nil {
 			t.Errorf("a one-day P&L should be allowed: %v", err)
 		}
 	})
@@ -787,7 +787,7 @@ func TestServiceStatementRepositoryFailurePropagates(t *testing.T) {
 
 	t.Run("profit and loss", func(t *testing.T) {
 		svc := NewService(&MockRepository{activityErr: sentinel}, nil, nil)
-		_, err := svc.GetProfitAndLoss(ctx, "2026-08-01", "2026-08-31")
+		_, err := svc.GetProfitAndLoss(ctx, "2026-08-01", "2026-08-31", "")
 		if !errors.Is(err, sentinel) {
 			t.Errorf("err = %v, want it to wrap %v — a failed query must not read as an empty statement", err, sentinel)
 		}
@@ -795,7 +795,7 @@ func TestServiceStatementRepositoryFailurePropagates(t *testing.T) {
 
 	t.Run("balance sheet", func(t *testing.T) {
 		svc := NewService(&MockRepository{activityErr: sentinel}, nil, nil)
-		_, err := svc.GetBalanceSheet(ctx, "2026-08-31")
+		_, err := svc.GetBalanceSheet(ctx, "2026-08-31", "")
 		if !errors.Is(err, sentinel) {
 			t.Errorf("err = %v, want it to wrap %v", err, sentinel)
 		}

@@ -113,6 +113,7 @@ type TrialBalanceRow struct {
 	AccountCode string    `json:"account_code"`
 	AccountName string    `json:"account_name"`
 	AccountType string    `json:"account_type"`
+	Currency    string    `json:"currency"`
 	Debit       int64     `json:"debit"`  // Cents
 	Credit      int64     `json:"credit"` // Cents
 }
@@ -165,6 +166,7 @@ type AccountLineItem struct {
 
 // ProfitAndLossReport is an income statement covering [StartDate, EndDate].
 type ProfitAndLossReport struct {
+	Currency      string            `json:"currency"`
 	StartDate     string            `json:"start_date"`
 	EndDate       string            `json:"end_date"`
 	Revenue       []AccountLineItem `json:"revenue"`
@@ -186,6 +188,7 @@ type ProfitAndLossReport struct {
 // under the equity accounts and then showing TotalEquity is therefore correct
 // and does not double-count.
 type BalanceSheetReport struct {
+	Currency         string            `json:"currency"`
 	AsOfDate         string            `json:"as_of_date"`
 	Assets           []AccountLineItem `json:"assets"`
 	Liabilities      []AccountLineItem `json:"liabilities"`

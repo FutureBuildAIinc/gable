@@ -96,11 +96,13 @@ func (m *MockRepository) UpdateJournalEntryStatus(ctx context.Context, id uuid.U
 	return nil
 }
 
-func (m *MockRepository) GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error) {
+func (m *MockRepository) GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error) {
 	return m.trialBalance, nil
 }
 
-func (m *MockRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]AccountActivity, error) {
+func (m *MockRepository) DefaultCurrency(ctx context.Context) (string, error) { return "USD", nil }
+
+func (m *MockRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string) ([]AccountActivity, error) {
 	m.activityCalls = append(m.activityCalls, activityCall{start: start, end: end, types: accountTypes})
 	if m.activityErr != nil {
 		return nil, m.activityErr

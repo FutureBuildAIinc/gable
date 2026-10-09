@@ -215,6 +215,7 @@ The code table:
 | 428 | `precondition_required` | the write needs `If-Match` or a body revision and carries neither (section 11) |
 | 429 | `rate_limited` | too many requests |
 | 500 | `internal_error` | an unexpected server fault |
+| 502 | `charge_not_reversed` | a card charge the gateway approved, the system refused to record, and nothing gave back (`POST /api/v1/payments/card`); the one 5xx whose message reaches the client, because finance must read the gateway transaction id to reconcile it (the id and nothing else about the card) |
 | 503 | `unavailable` | the service or a dependency it needs is down, retry later |
 
 Errors written by middleware (auth, rate limit, idempotency, the router's

@@ -131,6 +131,20 @@ func (s *Service) resolveCredit(ctx context.Context, st Store, d *CreditInput, s
 	return cc, nil
 }
 
+// recordEffects writes the events the AR core's act produced (the credit memo
+// or invoice status events and customer.updated), after the act's own.
+func (s *Service) recordEffects(ctx context.Context, fx *account.Effects) error {
+	if fx == nil {
+		return nil
+	}
+	for _, ev := range fx.Events() {
+		if err := s.record(ctx, ev); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) recordCredit(ctx context.Context, cm *CreditMemo, eventType, from string) error {
 	data := map[string]any{
 		"number": cm.Number, "customer_id": cm.CustomerID, "status": cm.Status.Status(), "revision": cm.Revision,
@@ -408,10 +422,11 @@ func (s *Service) postCredit(ctx context.Context, id uuid.UUID, pre Precondition
 			return err
 		}
 
-		// Step 9: the entry. Revenue and tax come back, the receivable falls,
-		// and a restocked line returns its cost to inventory at the cost that
-		// left (COGS reverses at the original cost).
-		legs := []gl.Leg{{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: -total}}
+		// Steps 7 to 9, through the AR core: the entry (revenue and tax come
+		// back, the receivable falls, a restocked line returns its cost to
+		// inventory at the cost that left, so COGS reverses at the original
+		// cost), the negative subledger row, and the draft goes to open.
+		var legs []gl.Leg
 		for _, g := range salesdoc.RevenueGroups(creditLinesAsDoc(b.lines)) {
 			legs = append(legs, gl.Leg{AccountCode: g.AccountCode, Description: "Revenue " + g.AccountCode, Debit: -int64(g.Cents)})
 		}
@@ -420,29 +435,17 @@ func (s *Service) postCredit(ctx context.Context, id uuid.UUID, pre Precondition
 			gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Debit: -b.tax},
 			gl.Leg{AccountCode: gl.AccountCodeInventory, Description: "Inventory", Debit: restocked},
 			gl.Leg{AccountCode: gl.AccountCodeCOGS, Description: "Cost of Goods Sold", Credit: restocked})
-		cmID := cm.ID
-		var glID *uuid.UUID
-		if s.gl != nil {
-			entry, err := s.gl.PostEntry(ctx, gl.PostingInput{EntryDate: date, Memo: "Credit memo " + number, Source: gl.SourceCreditMemo,
-				SourceRefID: &cmID, Currency: cm.Currency, PostedBy: body.Actor, Legs: legs})
-			if err != nil {
-				return mapPostingError(fmt.Errorf("failed to post the credit memo entry: %w", err))
-			}
-			if entry != nil {
-				glID = &entry.ID
-			}
+		if s.account == nil {
+			return errors.New("invoice: the AR core is not wired")
 		}
-		if s.account != nil {
-			if _, err := s.account.PostTransaction(ctx, cm.CustomerID, account.TransactionTypeCreditMemo, total, &cmID, "Credit memo "+number); err != nil {
-				return fmt.Errorf("failed to post the credit memo to the account ledger: %w", err)
-			}
-		}
-		h := &CreditHeader{ID: cm.ID, MemoDate: date, SubtotalCents: b.subtotal, TaxCents: b.tax, TotalCents: total, TaxRate: b.taxRate}
 		if err := st.ReplaceCreditLines(ctx, cm.ID, b.lines); err != nil {
 			return err
 		}
-		if err := st.PostCredit(ctx, h, number, glID); err != nil {
-			return err
+		fx, err := s.account.PostCreditMemo(ctx, account.PostCreditMemoIn{MemoID: cm.ID, CustomerID: cm.CustomerID, Number: number,
+			Currency: cm.Currency, MemoDate: date, SubtotalCents: b.subtotal, TaxCents: b.tax, TotalCents: total, TaxRate: b.taxRate,
+			Actor: body.Actor, Legs: legs})
+		if err != nil {
+			return mapPostingError(fmt.Errorf("failed to post the credit memo: %w", err))
 		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{Action: "credit_memo.posted", EntityType: "credit_memo", EntityID: cm.ID, UserID: body.Actor,
@@ -453,7 +456,10 @@ func (s *Service) postCredit(ctx context.Context, id uuid.UUID, pre Precondition
 		if out, err = st.GetCreditMemo(ctx, cm.ID); err != nil {
 			return err
 		}
-		return s.recordCredit(ctx, out, EventCreditPosted, CreditDraft.Status())
+		if err := s.recordCredit(ctx, out, EventCreditPosted, CreditDraft.Status()); err != nil {
+			return err
+		}
+		return s.recordEffects(ctx, fx)
 	})
 	if err != nil {
 		return nil, err
@@ -565,28 +571,13 @@ func (s *Service) voidCredit(ctx context.Context, id uuid.UUID, pre Precondition
 			if err := s.restockLines(ctx, cm.BranchID, cm.Lines, false); err != nil { // step 6
 				return err
 			}
-			if err := st.LockCustomer(ctx, cm.CustomerID); err != nil { // step 7
-				return err
-			}
-			if cm.GLEntryID != nil && s.gl != nil { // step 9
-				if _, err := s.gl.PostReversal(ctx, gl.ReversalInput{EntryID: *cm.GLEntryID, EntryDate: date, Currency: cm.Currency,
-					Reason: "credit memo voided", PostedBy: body.Actor}); err != nil {
-					return mapPostingError(err)
-				}
-			}
-			if s.account != nil {
-				cmID := cm.ID
-				num := ""
-				if cm.Number != nil {
-					num = *cm.Number
-				}
-				if _, err := s.account.PostTransaction(ctx, cm.CustomerID, account.TransactionTypeReversal, -int64(cm.TotalCents), &cmID, "Void of credit memo "+num); err != nil {
-					return fmt.Errorf("failed to reverse the credit memo in the account ledger: %w", err)
-				}
-			}
 		}
-		if err := st.MarkCreditVoid(ctx, id, body.Actor, body.Reason, date); err != nil {
-			return err
+		if s.account == nil {
+			return errors.New("invoice: the AR core is not wired")
+		}
+		fx, err := s.account.VoidCreditMemo(ctx, account.VoidCreditMemoIn{MemoID: id, Actor: body.Actor, Reason: body.Reason, On: date})
+		if err != nil {
+			return mapPostingError(err)
 		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{Action: "credit_memo.voided", EntityType: "credit_memo", EntityID: id, UserID: body.Actor,
@@ -597,7 +588,10 @@ func (s *Service) voidCredit(ctx context.Context, id uuid.UUID, pre Precondition
 		if out, err = st.GetCreditMemo(ctx, id); err != nil {
 			return err
 		}
-		return s.recordCredit(ctx, out, EventCreditVoided, from.Status())
+		if err := s.recordCredit(ctx, out, EventCreditVoided, from.Status()); err != nil {
+			return err
+		}
+		return s.recordEffects(ctx, fx)
 	})
 	if err != nil {
 		return nil, err

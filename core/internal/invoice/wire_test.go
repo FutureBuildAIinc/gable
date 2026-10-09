@@ -211,7 +211,7 @@ func TestOverdueIsComputedNotStored(t *testing.T) {
 	current, _ := f.invoice("1")
 	paid, _ := f.invoice("1")
 	mustExec(t, db, `UPDATE invoices SET due_date = CURRENT_DATE - 40 WHERE id = ANY($1)`, []uuid.UUID{uuid.MustParse(late), uuid.MustParse(paid)})
-	mustExec(t, db, `UPDATE invoices SET status = 'PAID', paid_at = NOW() WHERE id = $1`, paid)
+	mustExec(t, db, `UPDATE invoices SET status = 'PAID', amount_open = 0, paid_at = NOW() WHERE id = $1`, paid)
 
 	list := func(q string) []string {
 		r := f.do("GET", "/api/v1/invoices?customer_id="+f.customerID.String()+q, nil)
@@ -401,7 +401,7 @@ func TestInvoiceVoidRefusals(t *testing.T) {
 
 	// a payment recorded against the invoice
 	paid, _ := f.invoice("1")
-	mustExec(t, db, `INSERT INTO payments (invoice_id, amount, method, reference) VALUES ($1, 1.00, 'CASH', 'REF')`, paid)
+	f.liveApplication(paid, 100)
 	r := f.voidInvoice(paid, rev(t, f.getInvoice(paid)), "has a payment")
 	if code, blockers, _ := errorOf(t, r); r.status != 409 || code != "conflict" || fmt.Sprint(blockers) != "[has_applications]" {
 		t.Errorf("void with a payment = %d %q %v, want 409 conflict has_applications", r.status, code, blockers)
@@ -409,8 +409,9 @@ func TestInvoiceVoidRefusals(t *testing.T) {
 
 	// an applied credit memo naming it
 	applied, _ := f.invoice("1")
-	mustExec(t, db, `INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number, memo_date, subtotal, tax_amount, total_amount, tax_rate)
-		VALUES ($1, $2, `+defaultBranch+`, 'USD', 'OTHER', 'applied', 5, 'APPLIED', credit_memo_next_number(), CURRENT_DATE, -5, 0, -5, 0)`, applied, f.customerID)
+	mustExec(t, db, `INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number, memo_date, subtotal, tax_amount, total_amount, tax_rate, amount_open)
+		VALUES ($1, $2, `+defaultBranch+`, 'USD', 'OTHER', 'applied', 5, 'APPLIED', credit_memo_next_number(), CURRENT_DATE, -5, 0, -5, 0, 0)`, applied, f.customerID)
+	f.liveCreditApplication(applied)
 	r = f.voidInvoice(applied, rev(t, f.getInvoice(applied)), "has an applied memo")
 	if _, blockers, _ := errorOf(t, r); r.status != 409 || fmt.Sprint(blockers) != "[has_applications]" {
 		t.Errorf("void with an applied credit memo = %d %v, want has_applications", r.status, blockers)
@@ -432,9 +433,9 @@ func TestInvoiceVoidRefusals(t *testing.T) {
 	if r = f.voidInvoice(named, rev(t, f.getInvoice(named)), "now free"); r.status != 200 {
 		t.Errorf("void after the credit memo is void = %d: %s", r.status, r.raw)
 	}
-	// a payment against a void invoice is refused by the payment module
-	if n := countOf(t, db, `SELECT count(*) FROM payments WHERE invoice_id = $1`, named); n != 0 {
-		t.Errorf("%d payments on the void invoice", n)
+	// a payment against a void invoice is refused by the AR core
+	if n := countOf(t, db, `SELECT count(*) FROM ar_applications WHERE invoice_id = $1`, named); n != 0 {
+		t.Errorf("%d applications on the void invoice", n)
 	}
 }
 

@@ -185,12 +185,14 @@ func newOutboxDrain(db *database.DB, logger *slog.Logger, orderSvc *order.Servic
 // the rate resolver and the exposure gate, so the delivery completions this
 // role bills are priced exactly as the desk's fulfilments are.
 func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
+	accounts := newAccountService(db)
 	return orderwire.New(orderwire.Deps{
 		DB:         db,
 		Config:     cfg,
 		Logger:     slog.Default(),
 		Inventory:  inventory.NewService(inventory.NewRepository(db)),
-		Invoices:   newInvoiceService(db),
+		Invoices:   newInvoiceServiceWith(db, accounts),
+		Accounts:   accounts,
 		Pricing:    pricing.NewService(pricing.NewRepository(db)),
 		Customers:  customer.NewService(customer.NewRepository(db)),
 		Escalators: pricing.NewEscalatorRepository(db),
@@ -201,9 +203,18 @@ func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
 // newInvoiceService builds the invoice service the fulfilment worker writes
 // through: the real GL and account ledger, the audit log.
 func newInvoiceService(db *database.DB) *invoice.Service {
+	return newInvoiceServiceWith(db, newAccountService(db))
+}
+
+// newAccountService builds the AR core on the real ledger.
+func newAccountService(db *database.DB) *account.Service {
 	logger := slog.Default()
-	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
-	return invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(account.NewRepository(db), db, logger), db).
+	return account.NewService(db, gl.NewService(gl.NewRepository(db), nil, logger), logger)
+}
+
+func newInvoiceServiceWith(db *database.DB, accounts *account.Service) *invoice.Service {
+	glSvc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	return invoice.NewService(invoice.NewRepository(db), glSvc, accounts, db).
 		WithAuditLog(audit.NewLogger(db))
 }
 

@@ -96,12 +96,9 @@ func wall(alias string, branch, grants int) string {
 const overdueExpr = `(i.status IN ('UNPAID', 'PARTIAL') AND i.due_date IS NOT NULL
 	AND i.due_date < (NOW() AT TIME ZONE COALESCE((SELECT lc.timezone FROM locations lc WHERE lc.id = i.branch_id), 'UTC'))::date)`
 
-// openExpr is the open amount in cents: the total less the payments recorded
-// against the invoice while it is unpaid or partial.
-const openExpr = `CASE WHEN i.status IN ('UNPAID', 'PARTIAL') THEN GREATEST(
-		ROUND(i.total_amount * 100)::bigint
-		- COALESCE((SELECT SUM(ROUND(p.amount * 100)::bigint) FROM payments p WHERE p.invoice_id = i.id), 0), 0)
-	ELSE 0 END`
+// openExpr is the open amount in cents, stored by the AR core: the total less
+// the live applications, zero when paid, written off or void.
+const openExpr = `ROUND(i.amount_open * 100)::bigint`
 
 // summaryColumns is the one invoice header projection: a list item and the
 // head of the full document both read it.
@@ -623,24 +620,15 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 	return nil
 }
 
-// SetInvoiceGLEntry records the invoice's journal entry on the invoice.
-func (r *PostgresRepository) SetInvoiceGLEntry(ctx context.Context, invoiceID, entryID uuid.UUID) error {
-	if _, err := r.db.GetExecutor(ctx).Exec(ctx, `UPDATE invoices SET gl_entry_id = $2 WHERE id = $1`, invoiceID, entryID); err != nil {
-		return fmt.Errorf("failed to record the invoice entry: %w", err)
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // The void.
 // ---------------------------------------------------------------------------
 
 // VoidFacts are the documents that stand in the way of a void (ADR 0005
-// 6.2): a payment recorded against the invoice, an applied credit memo
-// naming it, any credit memo naming it that is not void.
+// 6.2): a live application (a payment, a credit memo, a discount or a write
+// off), any credit memo naming the invoice that is not void.
 type VoidFacts struct {
-	Payments     int
-	AppliedMemos int
+	Applications int
 	LiveMemos    int
 }
 
@@ -650,11 +638,9 @@ type VoidFacts struct {
 func (r *PostgresRepository) VoidFactsFor(ctx context.Context, invoiceID uuid.UUID) (VoidFacts, error) {
 	var f VoidFacts
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT (SELECT count(*) FROM payments WHERE invoice_id = $1)
-		       + (SELECT count(*) FROM customer_deposit_applications WHERE invoice_id = $1),
-		       (SELECT count(*) FROM credit_memos WHERE invoice_id = $1 AND status IN ('APPLIED', 'PARTIAL')),
+		SELECT (SELECT count(*) FROM ar_applications WHERE invoice_id = $1 AND reversed_at IS NULL),
 		       (SELECT count(*) FROM credit_memos WHERE invoice_id = $1 AND status <> 'VOID')`, invoiceID).
-		Scan(&f.Payments, &f.AppliedMemos, &f.LiveMemos)
+		Scan(&f.Applications, &f.LiveMemos)
 	if err != nil {
 		return f, fmt.Errorf("failed to read what stands in the way of a void: %w", err)
 	}
@@ -678,21 +664,6 @@ func (r *PostgresRepository) InvoiceEntryID(ctx context.Context, invoiceID uuid.
 		return nil, fmt.Errorf("failed to find the invoice's entry: %w", err)
 	}
 	return &id, nil
-}
-
-// MarkVoid ends the invoice: status VOID, the void columns, the revision.
-func (r *PostgresRepository) MarkVoid(ctx context.Context, id uuid.UUID, actor, reason string, voidedOn time.Time) error {
-	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
-		UPDATE invoices SET status = 'VOID', voided_at = NOW(), voided_by = NULLIF($2, ''), void_reason = $3,
-			voided_on = $4::date, updated_at = NOW(), revision = revision + 1
-		WHERE id = $1`, id, actor, reason, voidedOn.Format("2006-01-02"))
-	if err != nil {
-		return fmt.Errorf("failed to void the invoice: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return errInvoiceNotFound
-	}
-	return nil
 }
 
 // BilledLine is a line an invoice billed against an order line: what a void

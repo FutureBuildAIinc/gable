@@ -127,6 +127,11 @@ type OrderSummary struct {
 	UpdatedAt   httpx.Timestamp  `json:"updated_at"`
 
 	InvoiceIDs []uuid.UUID `json:"invoice_ids"`
+
+	// DepositUnappliedCents is the unapplied amount of the posted payments
+	// taken against this order (ADR 0005 5.1, from C2-4): deposits it will
+	// apply to its invoices as they are billed.
+	DepositUnappliedCents httpx.Cents `json:"deposit_unapplied_cents"`
 }
 
 // Order is the full document: the summary, the ship-to captured at confirm,
