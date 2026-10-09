@@ -733,8 +733,15 @@ trigger refuses any UPDATE or DELETE that would leave
 the same way), its raise carrying the same blocker wording. The
 trigger parses its value with the same vocabulary `readBoolSetting`
 uses (`branch.go:298-302`: `true`, `t`, `1`, `yes`, `on` as true;
-`false`, `f`, `0`, `no`, `off` as false), so a write of `on` is still
-a refusal by intent, by matching the reader rather than failing it.
+`false`, `f`, `0`, `no`, `off` as false), so a write of `on` is a
+valid `true` and passes the gate; a write of `off`, or of any value
+the reader does not know (which falls through to the reader's default,
+`branch.go:303-304`), is refused for `multi_branch_enabled`. For
+`default_branch_required` only a value the reader reads as `false` is
+refused (the rule's own phrasing: a write that would leave
+`multi_branch_enabled` anything but `true`, or `default_branch_required`
+anything but `false`, raises), and the trigger matches the reader
+rather than failing it on vocabulary alone.
 A row trigger cannot see `TRUNCATE system_settings`, so the same
 condition holds there too: a statement level `BEFORE TRUNCATE` trigger
 refuses a `TRUNCATE` while more than one company exists, its raise
