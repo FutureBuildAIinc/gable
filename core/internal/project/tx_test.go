@@ -119,8 +119,9 @@ func TestFailedEventWriteRollsBackEachWrite(t *testing.T) {
 	}
 }
 
-// The same rule for the audit row.
-func TestFailedAuditWriteRollsBackTheCreate(t *testing.T) {
+// The same rule for the audit row, for each kind of write: a mutation whose
+// audit row cannot be written does not happen.
+func TestFailedAuditWriteRollsBackEachWrite(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newTxFixture(t, testutil.RequireDB(t))
 	svc := project.NewService(project.NewRepository(f.db)).
@@ -130,6 +131,20 @@ func TestFailedAuditWriteRollsBackTheCreate(t *testing.T) {
 	}
 	if n := f.count(`SELECT count(*) FROM projects WHERE customer_id = $1`, f.customer); n != 0 {
 		t.Errorf("%d projects survived a rolled back create", n)
+	}
+
+	created, err := f.good().Create(context.Background(), f.customer, named("to update"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(context.Background(), created.ID, f.customer, named("nope"), rev(1)); err == nil {
+		t.Error("update succeeded though its audit row could not be written")
+	}
+	if n := f.count(`SELECT count(*) FROM projects WHERE id = $1 AND name = 'nope'`, created.ID); n != 0 {
+		t.Error("an update survived a rolled back audit row")
+	}
+	if n := f.count(`SELECT revision FROM projects WHERE id = $1`, created.ID); n != 1 {
+		t.Errorf("revision moved to %d on a rolled back update", n)
 	}
 }
 

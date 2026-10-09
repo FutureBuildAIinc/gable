@@ -401,6 +401,9 @@ func TestMutation_AuditRowAndEvent(t *testing.T) {
 		t.Errorf("%d project.created events, want 1", n)
 	}
 	do(t, f.srv, http.MethodPut, "/api/portal/v1/projects/"+id, `{"status":"completed"}`, map[string]string{"If-Match": `"1"`})
+	if n := count(`SELECT count(*) FROM audit_log WHERE entity_type = 'project' AND entity_id = $1 AND action = 'project.updated' AND changes @> '{"changed":["status"]}'::jsonb`); n != 1 {
+		t.Errorf(`%d project.updated audit rows carrying changed ["status"], want 1`, n)
+	}
 	if n := count(`SELECT count(*) FROM events_outbox WHERE entity_type = 'project' AND entity_id = $1 AND type = 'project.updated'`); n != 1 {
 		t.Errorf("%d project.updated events, want 1", n)
 	}

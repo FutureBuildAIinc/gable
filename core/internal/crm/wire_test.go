@@ -418,10 +418,16 @@ func TestMutation_AuditRowAndEvent(t *testing.T) {
 
 	f.do(t, http.MethodPut, "/api/v1/activities/"+id,
 		`{"activity_type":"note","description":"after","revision":1}`, nil)
+	if n := count(`SELECT count(*) FROM audit_log WHERE entity_type = 'activity' AND entity_id = $1 AND action = 'activity.updated'`); n != 1 {
+		t.Errorf("%d activity.updated audit rows, want 1", n)
+	}
 	if n := count(`SELECT count(*) FROM events_outbox WHERE entity_type = 'activity' AND entity_id = $1 AND type = 'activity.updated'`); n != 1 {
 		t.Errorf("%d activity.updated events, want 1", n)
 	}
 	f.do(t, http.MethodDelete, "/api/v1/activities/"+id, "", map[string]string{"If-Match": `"2"`})
+	if n := count(`SELECT count(*) FROM audit_log WHERE entity_type = 'activity' AND entity_id = $1 AND action = 'activity.deleted'`); n != 1 {
+		t.Errorf("%d activity.deleted audit rows, want 1", n)
+	}
 	if n := count(`SELECT count(*) FROM events_outbox WHERE entity_type = 'activity' AND entity_id = $1 AND type = 'activity.deleted'`); n != 1 {
 		t.Errorf("%d activity.deleted events, want 1", n)
 	}
