@@ -30,8 +30,8 @@ sales rep opens an order, picks the customer, picks the ship-to, and
 lines up the products. The order goes through draft, on hold (if
 credit is over the limit), confirmed, back ordered (if stock is short),
 fulfilled and closed. The fulfillment is the act that issues the
-invoice and the picking ticket and starts the delivery or hands the
-goods to the customer at the counter.
+invoice and either hands the goods to the customer at the counter
+or bills the completed delivery.
 
 ## Routes
 
@@ -48,13 +48,14 @@ column.
 | PUT | `/api/v1/orders/{id}` | Replace a draft order's header and lines, on the client's revision. |
 | POST | `/api/v1/orders/{id}/transitions` | Move an order along its lifecycle, on the client's revision. |
 | POST | `/api/v1/orders/{id}/allocate` | Allocate a back ordered order on demand. |
-| POST | `/api/v1/orders/{id}/fulfillments` | Fulfill an order: invoice, picking ticket, delivery or pickup. |
+| POST | `/api/v1/orders/{id}/fulfillments` | Fulfill an order: write the invoice for the quantities named, pickup or delivery. |
 | GET | `/api/v1/orders/fulfillment-requests` | List the fulfillment requests of completed deliveries. |
 | POST | `/api/v1/orders/fulfillment-requests/{delivery_id}/retry` | Retry a parked fulfillment request. |
 | GET | `/api/v1/orders/{id}/exposure-gate` | Check the pre ship exposure gate. |
 | POST | `/api/v1/orders/{id}/exposure-override` | Override the exposure gate. |
 
-The exposure routes are the pricing module's; the rest are the order
+The two exposure routes belong to the order module and consult the
+pricing exposure state; the rest of the routes are the order
 module's. The exposure-gate read is what the order's fulfillment
 consults before it bills.
 
@@ -102,6 +103,8 @@ and adds the order-only allocation and back order fields:
 
 | Field | Wire form | Note |
 |---|---|---|
+| `id` | UUID | The line id. |
+| `position` | integer | The line's place on the document; a kit's components follow it. |
 | `line_type` | lowercase enum | `product`, `kit`, `component`, `charge`, `text`. |
 | `parent_line_id` | UUID, nullable | Set on `component` only. |
 | `product_id` | UUID, nullable | Required on `kit` and `component`; optional on `product`; null otherwise. |
@@ -139,16 +142,16 @@ into the exact product before the one rounding.
 ## Lifecycle and transitions
 
 The wire vocabulary is lowercase. The transitions are below; the
-guard codes in parentheses are the `409` blockers when the transition
-is refused (ADR 0005 section 5.2):
+guard codes the body can return are listed in the prose after the
+table (ADR 0005 section 5.2):
 
 | From | To | Effect | Events, in order |
 |---|---|---|---|
-| `draft` | `confirmed` | Credit check; over the limit lands `on_hold` with `hold_reason` `credit_limit`; otherwise allocate and derive status; snapshot the ship-to; set `confirmed_at`. | `order.hold` then `order.confirmed`, or `order.confirmed` then `order.backordered` when it lands `backordered`. |
+| `draft` | `confirmed` | Credit check; over the limit lands `on_hold` with `hold_reason` `credit_limit`; otherwise allocate and derive status; snapshot the ship-to; set `confirmed_at`. | `order.hold` only when it lands `on_hold`; otherwise `order.confirmed`, then `order.backordered` when it lands `backordered`. |
 | `on_hold` | `confirmed` | Release the hold; skip the credit check; allocate if never allocated. | `order.hold_released`, then `order.confirmed` if never confirmed before, then `order.backordered` when it lands `backordered`. |
 | `confirmed`, `backordered` | `on_hold` | Manual hold; allocations kept; `hold_reason` `manual`; `hold_note` required. | `order.hold`. |
 | `on_hold`, `confirmed`, `backordered` | `draft` | Reopen: release every allocation, zero back orders. | `order.reopened`. |
-| `on_hold`, `confirmed`, `backordered` | `cancelled` | Reason required; release allocations, zero back orders. | `order.cancelled`. |
+| `draft`, `on_hold`, `confirmed`, `backordered` | `cancelled` | Reason required; release allocations, zero back orders. | `order.cancelled`. |
 | `confirmed`, `backordered` | `fulfilled` | Close short: release allocations and back orders of the unfulfilled remainder. | `order.closed_short`. |
 
 Reopening is refused with `409 has_fulfilments` once anything was
@@ -196,15 +199,15 @@ Non stock product lines, kit lines and charge lines carry
 `quantity_fulfilled` only. A cancel, a reopen, and a close short release
 what is allocated and zero the back orders. The receipt of a purchase
 order line releases the back ordered quantity through the same path
-(`order.backorder_released`, then `order.fulfilled` or
-`order.partially_fulfilled`).
+(`order.backorder_released`, when the order moves from `backordered`
+to `confirmed`).
 
 The fulfillment call is `POST /api/v1/orders/{id}/fulfillments` with
 `OrderFulfilRequest`: `revision`, `lines`, `picked_up_by`,
 `delivery_id`. A pickup order must send `picked_up_by`; a delivery
 order must not. The call is not a will-call queue; it is the act that
-issues the invoice, posts the general ledger, moves the AR subledger
-and writes the picking ticket in the same transaction. Completed
+issues the invoice, posts the general ledger and moves the AR
+subledger in the same transaction. Completed
 deliveries leave parked fulfillment requests
 (`order.fulfillment_parked`) in `core/internal/order/fulfil_queue.go`,
 which `POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry`
