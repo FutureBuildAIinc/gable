@@ -38,6 +38,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	testutil.LockOutboxTables(t)
 	t.Setenv("AUTH_MODE", "dev")
 	db := testutil.RequireDB(t)
 	f := &fixture{t: t, db: db}

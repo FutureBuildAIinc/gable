@@ -42,6 +42,7 @@ type fixture struct {
 // a scoped key reaches (ADR 0009).
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	testutil.LockOutboxTables(t)
 	t.Setenv("AUTH_MODE", "dev")
 	db := testutil.RequireDB(t)
 	f := &fixture{t: t, db: db}
