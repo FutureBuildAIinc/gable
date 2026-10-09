@@ -50,10 +50,17 @@ const (
 	EventReorderRecommended = "reorder.recommended"
 )
 
+// TxRunner runs fn inside a transaction; *database.DB satisfies it, and a
+// test can inject a gated runner (the recipe's saturation test).
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
 type Service struct {
 	events       EventRecorder
 	repo         *Repository
 	db           *database.DB
+	tx           TxRunner
 	edi          *edi.Service
 	inventorySvc *inventory.Service
 	productSvc   *product.Service
@@ -63,7 +70,14 @@ type Service struct {
 }
 
 func NewService(repo *Repository, db *database.DB, ediSvc *edi.Service, inventorySvc *inventory.Service, productSvc *product.Service, vendorSvc *vendor.Service) *Service {
-	return &Service{repo: repo, db: db, edi: ediSvc, inventorySvc: inventorySvc, productSvc: productSvc, vendorSvc: vendorSvc}
+	return &Service{repo: repo, db: db, tx: db, edi: ediSvc, inventorySvc: inventorySvc, productSvc: productSvc, vendorSvc: vendorSvc}
+}
+
+// WithTxRunner swaps the transaction runner (the recipe's gated saturation
+// test injects one; serve keeps the database).
+func (s *Service) WithTxRunner(r TxRunner) *Service {
+	s.tx = r
+	return s
 }
 
 // WithOutbox wires the outbox the purchasing acts write their events to.
@@ -153,7 +167,7 @@ func (s *Service) CreatePO(ctx context.Context, draft *CreateDraft) (*PurchaseOr
 	if draft.BranchID != nil {
 		po.BranchID = *draft.BranchID
 	}
-	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
 		// The unit hold and the defaults that need the product.
 		stocking := map[uuid.UUID]string{}
 		unitFor := func(l *CreateLineDraft, i int) error {
@@ -434,7 +448,7 @@ func (s *Service) GetPOBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, er
 // demo write and the sent event follow. A purchase order that is not a
 // draft is refused; the base commit sent a RECEIVED order again.
 func (s *Service) SubmitPO(ctx context.Context, id uuid.UUID, ifMatch string, bodyRevision *int64) (*PurchaseOrder, error) {
-	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
 		po, err := s.repo.LockPO(txCtx, id)
 		if errors.Is(err, ErrNotFound) {
 			return httpx.NotFound("no such purchase order")
@@ -511,7 +525,7 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, ifMatch string,
 		}
 		byLine[l.LineID] = l
 	}
-	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
 		// 1. Lock the purchase order; check the revision and the status.
 		po, err := s.repo.LockPO(txCtx, poID)
 		if errors.Is(err, ErrNotFound) {
@@ -1160,7 +1174,7 @@ func (s *Service) storeRecommendations(ctx context.Context, recs []ReorderRecomm
 		byBranch[recs[i].BranchID] = append(byBranch[recs[i].BranchID], &recs[i])
 	}
 	for branch, list := range byBranch {
-		if err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
 			runID, err := s.repo.StartBranchReorderRun(txCtx, "refresh_targets", false, branch)
 			if err != nil {
 				return err
