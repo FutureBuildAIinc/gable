@@ -5,6 +5,7 @@ package httpx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -91,6 +92,71 @@ func validateDocPrefix(prefix string) error {
 	for i := 0; i < len(prefix); i++ {
 		if prefix[i] < 'A' || prefix[i] > 'Z' {
 			return fmt.Errorf("document number prefix %q must be uppercase letters", prefix)
+		}
+	}
+	return nil
+}
+
+// NextGaplessNumber takes the next value of a gapless series through the
+// caller's transaction and formats it like NextDocumentNumber (ADR 0005
+// section 4.1): `UPDATE document_counters SET next_value = next_value + 1
+// WHERE series = $1 RETURNING next_value - 1`. The row stays locked from the
+// mint to the commit, so the minting transactions serialize, and a rollback
+// undoes the increment with it: no number is lost, the next mint takes it.
+// That is the whole difference from a sequence, and its cost: take the mint
+// late in the act, after every other row lock and immediately before the
+// document insert (ADR 0005 section 11, step 8).
+//
+// q must be the caller's open transaction. Outside a transaction the
+// statement would commit on its own and a failure after the mint would leave
+// a gap, which is the one thing this function exists to prevent; the helper
+// cannot tell the two apart through the Querier seam, so the rule is the
+// caller's, and the invoice and credit memo repositories pass the executor
+// the platform database hands out inside RunInTx (never the pool).
+//
+// The series is seeded by the migration that introduces the counter
+// (document_counters); a series with no row is an error naming it, never a
+// number from nowhere. The series name is a server side constant: lowercase
+// letters, digits, underscores, hyphens and colons (a per branch series is
+// "invoice:<branch code>"). The prefix and width follow NextDocumentNumber.
+func NextGaplessNumber(ctx context.Context, q Querier, series, prefix string, width int) (string, error) {
+	if err := validateSeriesName(series); err != nil {
+		return "", err
+	}
+	if err := validateDocPrefix(prefix); err != nil {
+		return "", err
+	}
+	if width < 1 {
+		return "", fmt.Errorf("document number width must be at least 1, got %d", width)
+	}
+	if q == nil {
+		return "", fmt.Errorf("document number querier is nil")
+	}
+	var n int64
+	err := q.QueryRow(ctx,
+		`UPDATE document_counters SET next_value = next_value + 1 WHERE series = $1 RETURNING next_value - 1`,
+		series).Scan(&n)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("gapless series %q has no counter row", series)
+		}
+		return "", fmt.Errorf("gapless counter %s: %w", series, err)
+	}
+	return fmt.Sprintf("%s-%0*d", prefix, width, n), nil
+}
+
+// validateSeriesName accepts a counter series key: lowercase letters, digits,
+// underscores, hyphens and colons, not starting with a digit.
+func validateSeriesName(name string) error {
+	if name == "" {
+		return fmt.Errorf("series name is empty")
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c == '_', c == '-', c == ':', i > 0 && c >= '0' && c <= '9':
+		default:
+			return fmt.Errorf("series name %q is not a plain lowercase key", name)
 		}
 	}
 	return nil

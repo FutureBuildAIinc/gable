@@ -121,6 +121,8 @@ components:
           - PAYMENT
           - ADJUSTMENT
           - REFUND
+          - CREDIT_MEMO
+          - REVERSAL
         amount:
           type: integer
           format: int64

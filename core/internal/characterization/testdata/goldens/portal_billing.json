@@ -255,28 +255,47 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "data": [
+        "items": [
           {
             "branch_id": "<id-10>",
             "created_at": "<ts+0d>",
+            "currency": "USD",
             "customer_id": "<id-2>",
             "customer_name": "Kelbrook Construction",
-            "due_date": "<ts+30d>",
+            "delivery_id": null,
+            "delivery_type": "pickup",
+            "discount_due_date": null,
+            "discount_percent": null,
+            "due_date": "<day+30>",
+            "gl_entry_id": null,
             "id": "<id-13>",
+            "invoice_date": "<day+0>",
+            "is_overdue": false,
+            "job_id": null,
+            "number": "IN-000052",
+            "open_cents": 1064,
             "order_id": "<id-7>",
+            "origin": "order",
             "paid_at": null,
-            "payment_terms": "NET30",
-            "status": "UNPAID",
-            "subtotal": 950,
-            "tax_amount": 114,
-            "tax_rate": 0.12,
-            "total_amount": 1064,
-            "updated_at": "<ts+0d>"
+            "payment_terms_id": "<id-14>",
+            "picked_up_by": null,
+            "revision": 1,
+            "ship_to_id": null,
+            "status": "unpaid",
+            "subtotal_cents": 950,
+            "tax_cents": 114,
+            "tax_exempt": false,
+            "tax_rate_percent": "12",
+            "tax_source": "legacy",
+            "total_cents": 1064,
+            "updated_at": "<ts+0d>",
+            "void_reason": null,
+            "voided_at": null,
+            "voided_by": null
           }
         ],
         "limit": 1,
-        "offset": 0,
-        "total": 52
+        "next_cursor": "<cursor>"
       }
     }
   },
@@ -293,7 +312,9 @@
         "created_at": "<ts+0d>",
         "due_date": "<ts+30d>",
         "id": "<id-13>",
+        "is_overdue": false,
         "lines": [],
+        "number": "IN-000052",
         "order_id": "<id-7>",
         "paid_at": null,
         "payment_terms": "NET30",
@@ -319,7 +340,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -328,7 +349,7 @@
     "name": "portal_billing.invoice.unknown",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/invoices/<id-15>"
+      "path": "/api/portal/v1/invoices/<id-16>"
     },
     "response": {
       "status": 404,
@@ -339,7 +360,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-17>"
         }
       }
     }
@@ -353,7 +374,7 @@
         "X-Integration-Key": "fb-brain-demo-key-2026"
       },
       "body": {
-        "driver_id": "<id-17>",
+        "driver_id": "<id-18>",
         "scheduled_date": "<day+11>",
         "stops": [
           {
@@ -361,7 +382,7 @@
             "sequence": 1
           }
         ],
-        "vehicle_id": "<id-18>"
+        "vehicle_id": "<id-19>"
       }
     },
     "response": {
@@ -370,7 +391,7 @@
       "body": {
         "created": true,
         "replaced": false,
-        "route_id": "<id-19>",
+        "route_id": "<id-20>",
         "stop_count": 1
       }
     }
@@ -379,7 +400,7 @@
     "name": "portal_billing.erp_route_deliveries",
     "request": {
       "method": "GET",
-      "path": "/api/v1/delivery/routes/<id-19>/deliveries"
+      "path": "/api/v1/delivery/routes/<id-20>/deliveries"
     },
     "response": {
       "status": 200,
@@ -390,7 +411,7 @@
           "created_at": "<ts+0d>",
           "customer_name": "Kelbrook Construction",
           "delivery_instructions": null,
-          "id": "<id-20>",
+          "id": "<id-21>",
           "latitude": null,
           "longitude": null,
           "order_id": "<id-9>",
@@ -398,7 +419,7 @@
           "pod_proof_url": null,
           "pod_signed_by": null,
           "pod_timestamp": null,
-          "route_id": "<id-19>",
+          "route_id": "<id-20>",
           "status": "PENDING",
           "stop_sequence": 1,
           "updated_at": "<ts+0d>"
@@ -410,7 +431,7 @@
     "name": "portal_billing.delivery.get",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/deliveries/<id-20>"
+      "path": "/api/portal/v1/deliveries/<id-21>"
     },
     "response": {
       "status": 200,
@@ -423,7 +444,7 @@
         "driver_phone": "250-555-4005",
         "driver_photo_url": null,
         "estimated_arrival": null,
-        "id": "<id-20>",
+        "id": "<id-21>",
         "order_id": "<id-9>",
         "order_number": "<id-9>",
         "pod_proof_url": null,
@@ -453,7 +474,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-21>"
+          "request_id": "<id-22>"
         }
       }
     }
@@ -462,7 +483,7 @@
     "name": "portal_billing.delivery.unknown",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/deliveries/<id-15>"
+      "path": "/api/portal/v1/deliveries/<id-16>"
     },
     "response": {
       "status": 404,
@@ -473,7 +494,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-22>"
+          "request_id": "<id-23>"
         }
       }
     }
@@ -482,7 +503,7 @@
     "name": "portal_billing.reschedule.none",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/deliveries/<id-20>/reschedule"
+      "path": "/api/portal/v1/deliveries/<id-21>/reschedule"
     },
     "response": {
       "status": 204,
@@ -507,7 +528,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-23>"
+          "request_id": "<id-24>"
         }
       }
     }
@@ -516,7 +537,7 @@
     "name": "portal_billing.reschedule.unknown",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/deliveries/<id-15>/reschedule"
+      "path": "/api/portal/v1/deliveries/<id-16>/reschedule"
     },
     "response": {
       "status": 404,
@@ -527,7 +548,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-24>"
+          "request_id": "<id-25>"
         }
       }
     }
@@ -536,7 +557,7 @@
     "name": "portal_billing.reschedule.request",
     "request": {
       "method": "POST",
-      "path": "/api/portal/v1/deliveries/<id-20>/reschedule",
+      "path": "/api/portal/v1/deliveries/<id-21>/reschedule",
       "body": {
         "reason": "golden reschedule",
         "requested_date": "<day+12>"
@@ -549,8 +570,8 @@
         "applied": false,
         "created_at": "<ts+0d>",
         "current_scheduled_date": "<day+11>",
-        "delivery_id": "<id-20>",
-        "id": "<id-25>",
+        "delivery_id": "<id-21>",
+        "id": "<id-26>",
         "order_id": "<id-9>",
         "reason": "golden reschedule",
         "requested_date": "<day+12>",
@@ -564,33 +585,10 @@
     "name": "portal_billing.reschedule.past",
     "request": {
       "method": "POST",
-      "path": "/api/portal/v1/deliveries/<id-20>/reschedule",
+      "path": "/api/portal/v1/deliveries/<id-21>/reschedule",
       "body": {
         "reason": "too late",
         "requested_date": "<day-3>"
-      }
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-26>"
-        }
-      }
-    }
-  },
-  {
-    "name": "portal_billing.reschedule.bad_date",
-    "request": {
-      "method": "POST",
-      "path": "/api/portal/v1/deliveries/<id-20>/reschedule",
-      "body": {
-        "requested_date": "soon"
       }
     },
     "response": {
@@ -608,11 +606,13 @@
     }
   },
   {
-    "name": "portal_billing.reschedule.bad_body",
+    "name": "portal_billing.reschedule.bad_date",
     "request": {
       "method": "POST",
-      "path": "/api/portal/v1/deliveries/<id-20>/reschedule",
-      "body": "not an object"
+      "path": "/api/portal/v1/deliveries/<id-21>/reschedule",
+      "body": {
+        "requested_date": "soon"
+      }
     },
     "response": {
       "status": 400,
@@ -629,10 +629,31 @@
     }
   },
   {
+    "name": "portal_billing.reschedule.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/portal/v1/deliveries/<id-21>/reschedule",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-29>"
+        }
+      }
+    }
+  },
+  {
     "name": "portal_billing.reschedule.unknown_post",
     "request": {
       "method": "POST",
-      "path": "/api/portal/v1/deliveries/<id-15>/reschedule",
+      "path": "/api/portal/v1/deliveries/<id-16>/reschedule",
       "body": {
         "requested_date": "<day+3>"
       }
@@ -646,7 +667,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-29>"
+          "request_id": "<id-30>"
         }
       }
     }
@@ -655,7 +676,7 @@
     "name": "portal_billing.reschedule.get",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/deliveries/<id-20>/reschedule"
+      "path": "/api/portal/v1/deliveries/<id-21>/reschedule"
     },
     "response": {
       "status": 200,
@@ -664,8 +685,8 @@
         "applied": false,
         "created_at": "<ts+0d>",
         "current_scheduled_date": "<day+11>",
-        "delivery_id": "<id-20>",
-        "id": "<id-25>",
+        "delivery_id": "<id-21>",
+        "id": "<id-26>",
         "order_id": "<id-9>",
         "reason": "golden reschedule",
         "requested_date": "<day+12>",

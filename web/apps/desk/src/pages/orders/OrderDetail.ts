@@ -6,6 +6,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { OrderService } from '../../services/OrderService.ts';
+import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import { type Order, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
@@ -22,6 +23,7 @@ export class GableOrderDetail extends LitElement {
 
     @state() private order: Order | null = null;
     @state() private salesperson: SalesPerson | null = null;
+    @state() private invoiceNumbers: Record<string, string> = {};
     @state() private loading = true;
     @state() private error = false;
     @state() private processing = false;
@@ -45,6 +47,7 @@ export class GableOrderDetail extends LitElement {
         try {
             const data = await OrderService.getOrder(orderId);
             this.order = data;
+            this.loadInvoiceNumbers(data.id, data.invoice_ids);
             if (data.salesperson_id) {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(data.salesperson_id);
@@ -59,6 +62,19 @@ export class GableOrderDetail extends LitElement {
             ToastService.show('Failed to load order details', 'error');
         } finally {
             this.loading = false;
+        }
+    }
+
+    /** The numbers of the invoices this order billed, for the links; the id stands in until they arrive. */
+    private async loadInvoiceNumbers(orderId: string, invoiceIds: string[]) {
+        if (invoiceIds.length === 0) return;
+        try {
+            const page = await InvoiceService.listInvoices({ orderId, limit: 100 });
+            const numbers: Record<string, string> = {};
+            for (const inv of Array.isArray(page?.items) ? page.items : []) numbers[inv.id] = inv.number;
+            this.invoiceNumbers = numbers;
+        } catch {
+            // the number is a convenience: the link works by id
         }
     }
 
@@ -457,7 +473,7 @@ export class GableOrderDetail extends LitElement {
                             ${order.invoice_ids.length > 0 ? html`
                                 <div class="space-y-2">
                                     ${order.invoice_ids.map(id => html`
-                                        <a href="/invoices/${id}" class="block font-mono text-sm text-gable-green hover:underline">${id.slice(0, 8)}</a>
+                                        <a href="/invoices/${id}" class="block font-mono text-sm text-gable-green hover:underline">${this.invoiceNumbers[id] ?? id.slice(0, 8)}</a>
                                     `)}
                                 </div>
                             ` : html`

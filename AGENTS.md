@@ -47,7 +47,7 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 ## Tech Stack
 
 ### Backend
-- **Language:** Go 1.25 (`core/go.mod`)
+- **Language:** Go 1.26 (`core/go.mod`)
 - **Router:** Go 1.22+ stdlib `net/http.ServeMux` — **not** Chi. Modules expose `RegisterRoutes(mux, mw)` to attach handlers
 - **Database:** PostgreSQL 16+ via pgx v5 (`pkg/database` wraps a `*pgxpool.Pool`)
 - **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL` is required (fail-closed)
@@ -205,7 +205,7 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 
 | Surface | Wire format | Notes |
 |---|---|---|
-| ERP `/api/v1/orders`, `/api/v1/invoices` | **int64 cents** | `order/repository.go` does `dollarsToInt64Cents()` on read, `/100.0` on write. DB column is `DECIMAL(10,2)` dollars |
+| ERP `/api/v1/orders`, `/api/v1/invoices`, `/api/v1/credit-memos` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths, quantities decimal strings | Converted onto ADR 0001 by C2-2 (orders) and C2-3 (invoices, credit memos): the list envelope, a lowercase status with the transitions route, a document number (`IN-` and `CM-` gapless), a revision with its `ETag`, the shared sales line shape (`docs/adr/0005-sales-and-money-core.md` sections 2 and 6). Credit memo lines, totals and open amounts are NEGATIVE. DB columns stay `NUMERIC`; the modules convert in SQL |
 | Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go:61` has a TODO to migrate. Don't mix with ERP frontend helpers |
 | Quotes `/api/v1/quotes` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths (`unit_price_ten_thousandths`) | Converted by R1-15 onto ADR 0001; the template is `docs/refactor/MODULE-RECIPE.md`. DB columns stay `NUMERIC`; the module converts in SQL, never through float64 |
 | Customers `/api/v1/customers` | **int64 cents** (`credit_limit_cents`, null for no limit; `balance_cents`, read only) | Converted by C2-1 onto ADR 0001 with ship-tos and the payment terms master (`docs/adr/0005-sales-and-money-core.md` section 7). `customers.credit_limit` is NULL for no limit and 0 is no credit. DB columns stay `NUMERIC(12,2)`; the module converts in SQL |
@@ -216,7 +216,7 @@ When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/s
 
 ### AR balance: read live from invoices; `customers.balance_due` is a secondary record
 For **reads / decisions**, compute the customer's AR balance live from open invoices —
-`SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL','OVERDUE')`. The
+`SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')`. The
 canonical status set lives in `invoice.OpenInvoiceStatuses`; the portal AR summary,
 dashboard, reporting, and the order **credit-limit gate** (`order.Service.overCreditLimit`)
 all go through it, so they agree. The credit gate no longer reads the denormalized

@@ -146,7 +146,7 @@ func r1bBBillingGroups() []groupDef {
 				sql: `SELECT count(*) AS invoices FROM invoices WHERE order_id = '{b_invOrder}'::uuid`,
 				setup: func(t *testing.T, h *harness) {
 					goldenExec(t, h, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status,
-						total_amount, subtotal, tax_rate, tax_amount, due_date, payment_terms, created_at, updated_at)
+						total_amount, subtotal, tax_rate, tax_amount, due_date, created_at, updated_at)
 						VALUES (gen_random_uuid(), '{b_invOrder}'::uuid,
 						(SELECT customer_id FROM orders WHERE id = '{b_invOrder}'::uuid),
 						(SELECT branch_id FROM orders WHERE id = '{b_invOrder}'::uuid), 'UNPAID',
@@ -154,10 +154,10 @@ func r1bBBillingGroups() []groupDef {
 						ROUND((SELECT subtotal FROM orders WHERE id = '{b_invOrder}'::uuid), 2),
 						COALESCE((SELECT tax_rate FROM orders WHERE id = '{b_invOrder}'::uuid), 0),
 						ROUND((SELECT tax_amount FROM orders WHERE id = '{b_invOrder}'::uuid), 2),
-						CURRENT_DATE + 30, 'NET30', NOW(), NOW())`)
+						CURRENT_DATE + 30, NOW(), NOW())`)
 				}},
 			{name: "portal_billing.erp_invoices", method: "GET", path: "/api/v1/invoices?limit=1",
-				extract: map[string]string{"b_invoice": "/data/0/id"}},
+				extract: map[string]string{"b_invoice": "/items/0/id"}},
 			{name: "portal_billing.invoice.get", method: "GET", path: "/api/portal/v1/invoices/{b_invoice}"},
 			{name: "portal_billing.invoice.bad_id", method: "GET", path: "/api/portal/v1/invoices/not-a-uuid"},
 			{name: "portal_billing.invoice.unknown", method: "GET", path: "/api/portal/v1/invoices/" + bNoSuchID},

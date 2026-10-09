@@ -260,3 +260,7 @@ func (m *MockRepository) FulfillStockQty(ctx context.Context, inventoryID uuid.U
 func (m *MockRepository) RestockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
 	return nil
 }
+
+func (m *MockRepository) UnstockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	return nil
+}
