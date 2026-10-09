@@ -7,17 +7,33 @@ import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+/** The most options one category read collects (default pages), so a broken cursor cannot loop forever. */
+export const MILLWORK_OPTIONS_CAP = 2000;
+
 export const MillworkService = {
-    async getOptionsByCategory(category: string, opts: { limit?: number; cursor?: string } = {}): Promise<MillworkOption[]> {
-        const params = new URLSearchParams({ category });
-        if (opts.limit) params.set('limit', String(opts.limit));
-        if (opts.cursor) params.set('cursor', opts.cursor);
-        const response = await fetchWithAuth(`${API_URL}/api/v1/millwork/options?${params.toString()}`);
-        if (!response.ok) {
-            throw await parseApiError(response, 'Failed to fetch millwork options');
+    /**
+     * Every option of one category, following the page cursor to the end and
+     * sorted by name: the wire orders the catalog newest first, and the
+     * configurator's pickers read it alphabetically.
+     */
+    async getOptionsByCategory(category: string, opts: { limit?: number } = {}): Promise<MillworkOption[]> {
+        const all: MillworkOption[] = [];
+        let cursor: string | undefined;
+        while (all.length < MILLWORK_OPTIONS_CAP) {
+            const params = new URLSearchParams({ category });
+            if (opts.limit) params.set('limit', String(opts.limit));
+            if (cursor) params.set('cursor', cursor);
+            const response = await fetchWithAuth(`${API_URL}/api/v1/millwork/options?${params.toString()}`);
+            if (!response.ok) {
+                throw await parseApiError(response, 'Failed to fetch millwork options');
+            }
+            const page = await response.json() as MillworkOptionPage;
+            all.push(...page.items);
+            if (!page.next_cursor) break;
+            cursor = page.next_cursor;
         }
-        const page = await response.json() as MillworkOptionPage;
-        return page.items;
+        return all.slice(0, MILLWORK_OPTIONS_CAP)
+            .sort((a, b) => a.name.localeCompare(b.name));
     },
 
     async createOption(option: CreateOptionRequest): Promise<MillworkOption> {

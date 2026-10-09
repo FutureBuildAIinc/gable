@@ -37,11 +37,11 @@ export class GableActivityFeed extends LitElement {
     private async _fetchData() {
         try {
             this.loading = true;
-            const [page, conts] = await Promise.all([
-                crmApi.listActivities(this.customerId, { limit: 50 }),
+            const [activities, conts] = await Promise.all([
+                crmApi.listAllActivities(this.customerId),
                 CustomerService.listContacts(this.customerId, { limit: 200 }),
             ]);
-            this.activities = page.items;
+            this.activities = activities;
             this.contacts = conts.items;
         } catch (err: unknown) {
             console.error('Failed to load activity data', err);

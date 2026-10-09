@@ -30,8 +30,7 @@ export class ProjectList extends LitElement {
         this.loading = true;
         this.error = '';
         try {
-            const page = await ProjectService.listProjects({ limit: 50 });
-            this.projects = page.items;
+            this.projects = await ProjectService.listAllProjects();
         } catch (err) {
             this.error = err instanceof Error ? err.message : 'Failed to load projects';
         } finally {

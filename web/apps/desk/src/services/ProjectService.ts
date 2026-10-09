@@ -25,6 +25,9 @@ async function authedFetch<T>(url: string, options: RequestInit = {}, fallback: 
     return await response.json() as T;
 }
 
+/** The most projects listAllProjects collects (pages of 50), so a broken cursor cannot loop forever. */
+export const LIST_ALL_PROJECTS_CAP = 2000;
+
 export const ProjectService = {
     async listProjects(opts: { status?: 'active' | 'completed'; limit?: number; cursor?: string } = {}): Promise<ProjectPage> {
         const params = new URLSearchParams();
@@ -33,6 +36,19 @@ export const ProjectService = {
         if (opts.cursor) params.set('cursor', opts.cursor);
         const q = params.toString();
         return authedFetch<ProjectPage>(`${API_URL}/api/portal/v1/projects${q ? `?${q}` : ''}`, {}, 'Failed to load projects');
+    },
+
+    /** Pages by cursor until the last page or LIST_ALL_PROJECTS_CAP projects, for the portal's project list. */
+    async listAllProjects(opts: { status?: 'active' | 'completed'; limit?: number } = {}): Promise<Project[]> {
+        const all: Project[] = [];
+        let cursor: string | undefined;
+        while (all.length < LIST_ALL_PROJECTS_CAP) {
+            const page = await this.listProjects({ ...opts, limit: opts.limit ?? 50, cursor });
+            all.push(...page.items);
+            if (!page.next_cursor) break;
+            cursor = page.next_cursor;
+        }
+        return all.slice(0, LIST_ALL_PROJECTS_CAP);
     },
 
     async getProjectDashboard(id: string): Promise<ProjectDashboard> {
