@@ -364,7 +364,7 @@ BEGIN
                 take := LEAST(a.amount, pg_temp.mig101_invoice_room(a.invoice_id));
                 kept_entry := NULL;
                 IF a.gl_entry_id IS NOT NULL AND take = a.amount
-                   AND (SELECT COALESCE(SUM(l.debit), 0) FROM gl_journal_lines l WHERE l.journal_entry_id = a.gl_entry_id) = round(a.amount * 100)::bigint
+                   AND (SELECT COALESCE(SUM(l.debit), 0) FROM gl_journal_lines l WHERE l.journal_entry_id = a.gl_entry_id) = a.amount
                    AND NOT EXISTS (SELECT 1 FROM ar_applications x WHERE x.gl_entry_id = a.gl_entry_id)
                    AND (SELECT count(*) FROM customer_deposit_applications y WHERE y.gl_entry_id = a.gl_entry_id) = 1 THEN
                     kept_entry := a.gl_entry_id;
