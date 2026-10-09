@@ -645,10 +645,15 @@ as every branchless write does today.
   `GET /api/v1/gl/trial-balance-consolidated`, inside the `gl` module and
   its `gl:read`. Grouped by currency: companies whose functional
   currencies differ are consolidated per currency only, never added
-  (section 5). Eliminations have nothing to net in v1
-  (no inter company documents exist, section 9), so the v1 answer is a plain
-  sum per currency per account code across the named companies; the
-  elimination rule arrives with the inter company transfer's own record.
+  (section 5). A code is summed only where its account's type and normal
+  balance agree in every named company's chart (charts are copies, but
+  dealers edit them); a code whose type or normal balance differs across
+  the set is refused with 409 `conflict`, blocker `chart_mismatch`,
+  naming the code, never summed. Eliminations have nothing to net in v1
+  (no inter company documents exist, section 9), so the v1 answer is a
+  plain sum per currency per account code across the named companies that
+  agree; the elimination rule arrives with the inter company transfer's
+  own record.
 - The reporting module's queries over invoices, orders and inventory carry
   no branch predicate today, and the dashboard cache key carries no branch
   scope; that is C5-1c's branch wall to build, per its brief. The company
