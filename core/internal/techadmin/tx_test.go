@@ -219,6 +219,20 @@ func TestConcurrency_Pool4ThreeContenders(t *testing.T) {
 		t.Errorf("%d key.created events for %d keys", n, contenders)
 	}
 
+	// The anchor exists before the race (one save), so the racers meet on the
+	// FOR UPDATE in LockRevision rather than on the INSERT that creates the
+	// row: with the anchor already present, the lock is the only thing that
+	// makes the losers see the bumped revision instead of all reading the
+	// same one and every racer winning (a lost update).
+	one := int64(1)
+	if _, err := svc.SaveAISettings(ctx, "sk-or-anchor", nil, techadmin.Precondition{Revision: &one}); err != nil {
+		t.Fatal(err)
+	}
+	anchored, err := svc.GetAISettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Three racers, one settings revision: exactly one wins, the others 409.
 	var winners, stale int
 	var rmu sync.Mutex
@@ -226,7 +240,7 @@ func TestConcurrency_Pool4ThreeContenders(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := svc.SaveAISettings(ctx, "sk-or-race", nil, techadmin.Precondition{IfMatch: `"1"`})
+			_, err := svc.SaveAISettings(ctx, "sk-or-race", nil, techadmin.Precondition{Revision: &anchored.Revision})
 			rmu.Lock()
 			defer rmu.Unlock()
 			var he *httpx.Error

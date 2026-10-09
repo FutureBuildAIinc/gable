@@ -231,6 +231,58 @@ func TestConcurrency_Pool4ThreeContenders(t *testing.T) {
 		t.Errorf("winners=%d stale=%d, want exactly one winner and %d refused", winners, stale, contenders-1)
 	}
 
+	// One module flag, the same race (the staff module owns the kill
+	// switches): the anchor exists first (one real toggle to the opposite
+	// value, so the row and its revision are live), then three racers hold
+	// the current revision and exactly one wins. Without the FOR UPDATE in
+	// LockModuleRevision every racer reads the same revision from the
+	// existing row and all win (a lost update).
+	var seeded string
+	_ = db.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'modules.ai_lm.enabled'`).Scan(&seeded)
+	flagRev := int64(1)
+	_ = db.Pool.QueryRow(ctx, `SELECT revision FROM admin_revisions WHERE resource = 'admin.modules.ai_lm'`).Scan(&flagRev)
+	if _, err := svc.SetModuleEnabled(ctx, "ai_lm", seeded != "true", staff.Precondition{Revision: &flagRev}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if seeded == "" {
+			_, _ = db.Pool.Exec(context.Background(), `DELETE FROM system_settings WHERE key = 'modules.ai_lm.enabled'`)
+		} else {
+			_, _ = db.Pool.Exec(context.Background(),
+				`INSERT INTO system_settings (key, value, updated_at) VALUES ('modules.ai_lm.enabled', $1, NOW())
+				 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, seeded)
+		}
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM admin_revisions WHERE resource = 'admin.modules.ai_lm'`)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'module'`)
+	})
+	mod, err := svc.ModuleByID(ctx, "ai_lm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flagWins, flagStale int
+	for i := 0; i < contenders; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.SetModuleEnabled(ctx, "ai_lm", seeded == "true", staff.Precondition{Revision: &mod.Revision})
+			rmu.Lock()
+			defer rmu.Unlock()
+			var he *httpx.Error
+			switch {
+			case err == nil:
+				flagWins++
+			case errors.As(err, &he) && he.Status == http.StatusConflict:
+				flagStale++
+			default:
+				t.Errorf("module racer: unexpected error %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if flagWins != 1 || flagStale != contenders-1 {
+		t.Errorf("module flag winners=%d stale=%d, want exactly one winner and %d refused", flagWins, flagStale, contenders-1)
+	}
+
 	stop := make(chan struct{})
 	readerDone := make(chan error, 1)
 	go func() {

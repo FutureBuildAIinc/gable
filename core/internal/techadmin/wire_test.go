@@ -562,7 +562,8 @@ func TestWire_AISettingsRevisionAndBaseURL(t *testing.T) {
 }
 
 // RULE: the routing settings follow the AI settings' rules without the base
-// URL; the two resources carry independent revisions.
+// URL; the two resources carry independent revisions, and the save and the
+// delete take the precondition alike (428 without one, 409 on a stale one).
 func TestWire_RoutingSettings(t *testing.T) {
 	f := newFixture(t)
 	r := f.do("PUT", "/api/v1/admin/settings/routing", map[string]any{"api_key": ""})
@@ -573,12 +574,60 @@ func TestWire_RoutingSettings(t *testing.T) {
 	if code != "validation_failed" || details[0]["field"] != "api_key" {
 		t.Errorf("details = %v", details)
 	}
-	r = f.do("PUT", "/api/v1/admin/settings/routing", map[string]any{"api_key": "ors-key-1", "revision": 1})
+	get := f.do("GET", "/api/v1/admin/settings/routing", nil)
+	if get.status != http.StatusOK {
+		t.Fatalf("get = %d: %s", get.status, get.raw)
+	}
+	rev := num(t, get.body, "revision")
+
+	// The save needs the precondition: 428 without one, 409 on a stale one.
+	r = f.do("PUT", "/api/v1/admin/settings/routing", map[string]any{"api_key": "ors-key-1"})
+	if r.status != http.StatusPreconditionRequired {
+		t.Fatalf("save without precondition = %d, want 428", r.status)
+	}
+	if code, _, _ := errorOf(t, r); code != "precondition_required" {
+		t.Errorf("code = %q", code)
+	}
+	r = f.do("PUT", "/api/v1/admin/settings/routing", map[string]any{"api_key": "ors-key-1", "revision": rev + 1})
+	if r.status != http.StatusConflict {
+		t.Fatalf("stale save = %d, want 409", r.status)
+	}
+	if code, _, _ := errorOf(t, r); code != "stale_revision" {
+		t.Errorf("code = %q", code)
+	}
+
+	r = f.do("PUT", "/api/v1/admin/settings/routing", map[string]any{"api_key": "ors-key-1", "revision": rev})
 	if r.status != http.StatusOK {
 		t.Fatalf("save = %d: %s", r.status, r.raw)
 	}
 	if _, present := r.body["base_url"]; present {
 		t.Error("routing settings carry no base_url")
+	}
+	if bodyRev := num(t, r.body, "revision"); bodyRev != rev+1 {
+		t.Errorf("revision after save = %d, want %d", bodyRev, rev+1)
+	} else if etag := r.header.Get("ETag"); etag != fmt.Sprintf(`"%d"`, bodyRev) {
+		t.Errorf("ETag = %q, want the new revision", etag)
+	}
+
+	// The delete takes the precondition too: 428 without one, 409 on a stale
+	// one, 204 on the current revision.
+	r = f.do("DELETE", "/api/v1/admin/settings/routing", nil)
+	if r.status != http.StatusPreconditionRequired {
+		t.Fatalf("delete without precondition = %d, want 428", r.status)
+	}
+	r = f.do("DELETE", "/api/v1/admin/settings/routing", nil, "If-Match", fmt.Sprintf(`"%d"`, rev))
+	if r.status != http.StatusConflict {
+		t.Fatalf("stale delete = %d, want 409", r.status)
+	}
+	if r := f.do("DELETE", "/api/v1/admin/settings/routing", nil, "If-Match", fmt.Sprintf(`"%d"`, rev+1)); r.status != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204", r.status)
+	}
+	after := f.do("GET", "/api/v1/admin/settings/routing", nil)
+	if after.body["configured"] != false || after.body["source"] != "none" {
+		t.Errorf("after delete = %v", after.body)
+	}
+	if bodyRev := num(t, after.body, "revision"); bodyRev != rev+2 {
+		t.Errorf("revision after delete = %d, want %d (a delete moves it, never back)", bodyRev, rev+2)
 	}
 	// The events of the settings resources name their resource's stable id,
 	// so a consumer can subscribe to one resource alone.
