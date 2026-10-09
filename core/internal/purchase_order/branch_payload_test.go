@@ -43,12 +43,12 @@ func TestReceivePO_RefusesForeignBranchLocation(t *testing.T) {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, own, other)
 	})
 
-	h := purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil), nil).
+	h := purchase_order.NewHandler(purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil)).
 		WithBranchGuard(middleware.NewBranchGuard(db))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := fmt.Sprintf(`{"lines":[{"line_id":%q,"qty_received":1,"location_id":%q}]}`, uuid.New(), yard)
+	body := fmt.Sprintf(`{"revision":1,"lines":[{"line_id":%q,"qty_received":"1","location_id":%q}]}`, uuid.New(), yard)
 	req := httptest.NewRequest("POST", "/api/v1/purchase-orders/"+uuid.NewString()+"/receive", strings.NewReader(body)).
 		WithContext(branchctx.With(ctx, &branchctx.Context{UserSub: "u", BranchID: &own}))
 	rec := httptest.NewRecorder()

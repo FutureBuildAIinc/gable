@@ -14,8 +14,10 @@ package purchase_order_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/branchctx"
@@ -23,9 +25,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// RULE: a receipt into another branch's location writes purchase_order.received
-// carrying that branch, in the envelope and in the payload the subscriber
-// reads, with the products that landed there.
+// RULES: a receipt into another branch's location is refused with the
+// cross_branch blocker (ADR 0008 section 11's same branch rule, C4-1a's
+// fix: the base commit let an administrator receive branch A's purchase
+// order into branch B), and a receipt into the purchase order's own branch
+// writes purchase_order.received carrying the location's branch, with the
+// products that landed there.
 func TestReceivePO_ReceivedEventCarriesTheLocationBranch(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
@@ -47,25 +52,57 @@ func TestReceivePO_ReceivedEventCarriesTheLocationBranch(t *testing.T) {
 	// The purchase order hangs on the default branch; its stock is received
 	// into the OTHER branch's yard.
 	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'SENT', 'MANUAL', `+branch+`)`, po, vendor)
-	must(`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost) VALUES ($1, $2, $3, 'sheet', 10, 9.00)`, line, po, product)
+	must(`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, unit_cost, line_total) VALUES ($1, $2, $3, 'sheet', 10, 9.00, 90.00)`, line, po, product)
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'purchase_order' AND entity_id = $1`, po)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id = $1`, po)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM inventory WHERE location_id = $1`, yard)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM inventory WHERE location_id IN ($1)`, yard)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, product)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, yard, other)
 	})
 
-	svc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil).
+	invSvc := inventory.NewService(inventory.NewRepository(db))
+	svc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, invSvc, nil, nil).
 		WithOutbox(outbox.NewWriter(db, ""))
-	if err := svc.ReceivePO(ctx, po, []purchase_order.ReceiveLineInput{
-		{LineID: line.String(), LocationID: yard.String(), QtyReceived: 10},
-	}); err != nil {
+	rev := int64(1)
+	otherYardDraft := func() []purchase_order.ReceiveLineDraft {
+		return []purchase_order.ReceiveLineDraft{
+			{LineID: line, QtyReceived: 100000, LocationID: yard},
+		}
+	}
+	// The cross branch receipt is refused, with the blocker naming the rule.
+	_, err := svc.ReceivePO(ctx, po, "", &rev, otherYardDraft())
+	if err == nil {
+		t.Fatal("a receipt into another branch's yard was accepted, want the cross_branch refusal")
+	}
+	if !strings.Contains(err.Error(), "another branch") {
+		t.Fatalf("the refusal does not name the cross branch rule: %v", err)
+	}
+
+	// A yard of the purchase order's own branch: the event carries that
+	// branch (which the location shares with the purchase order) and the
+	// products that landed there.
+	ownYard := uuid.New()
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, ownYard)
+	})
+	must(`INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+branch+`, `+branch+`)`, ownYard, "po-ev-own-"+ownYard.String()[:6])
+	rev = 1 // the refused act moved nothing, so the revision still stands
+	ownDraft := []purchase_order.ReceiveLineDraft{
+		{LineID: line, QtyReceived: 100000, LocationID: ownYard},
+	}
+	if _, err := svc.ReceivePO(ctx, po, "", &rev, ownDraft); err != nil {
 		t.Fatalf("receive: %v", err)
 	}
 
+	// The event's branch is the receipt location's branch, which the same
+	// branch rule now holds equal to the purchase order's own.
+	var defaultBranch string
+	if err := db.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&defaultBranch); err != nil {
+		t.Fatal(err)
+	}
 	var envelopeBranch, payloadBranch, products string
 	if err := db.Pool.QueryRow(ctx, `
 		SELECT COALESCE(branch_id::text, ''), data->>'branch_id', data->>'product_ids'
@@ -73,8 +110,8 @@ func TestReceivePO_ReceivedEventCarriesTheLocationBranch(t *testing.T) {
 		Scan(&envelopeBranch, &payloadBranch, &products); err != nil {
 		t.Fatalf("no purchase_order.received event: %v", err)
 	}
-	if envelopeBranch != other.String() || payloadBranch != other.String() {
-		t.Errorf("received event branch = envelope %s payload %s, want the RECEIPT location's branch %s (the stock landed there, not on the purchase order's branch)", envelopeBranch, payloadBranch, other)
+	if envelopeBranch != defaultBranch || payloadBranch != defaultBranch {
+		t.Errorf("received event branch = envelope %s payload %s, want the RECEIPT location's branch %s", envelopeBranch, payloadBranch, defaultBranch)
 	}
 	if products == "" || products == "[]" {
 		t.Errorf("received event product_ids = %s, want the received product", products)

@@ -38,16 +38,16 @@ func (m *mockProductRepo) ListBelowReorder(_ context.Context) ([]product.Reorder
 	return nil, nil // Not used in this test
 }
 
-func (m *mockProductRepo) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error {
-	return nil
+func (m *mockProductRepo) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) (int64, error) {
+	return 1, nil
 }
 
 func (m *mockProductRepo) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64, revision int64) (int64, error) {
 	return 0, nil
 }
 
-func (m *mockProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
-	return nil
+func (m *mockProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) (int64, error) {
+	return 1, nil
 }
 
 func (m *mockProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {

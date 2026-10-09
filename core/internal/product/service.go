@@ -232,17 +232,18 @@ func (s *Service) ListBelowReorder(ctx context.Context) ([]ReorderAlert, error) 
 // order receive does); the nested runner joins it.
 func (s *Service) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error {
 	return s.inTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.UpdateAverageCost(ctx, id, avgCost); err != nil {
+		revision, err := s.repo.UpdateAverageCost(ctx, id, avgCost)
+		if err != nil {
 			return err
 		}
 		p, err := s.repo.GetProduct(ctx, id)
 		if err != nil {
 			return err
 		}
-		if err := s.auditChange(ctx, id, p.SKU, p.Revision, EventProductUpdated, map[string]any{"parts": []string{"average_cost"}}); err != nil {
+		if err := s.auditChange(ctx, id, p.SKU, revision, EventProductUpdated, map[string]any{"parts": []string{"average_cost"}}); err != nil {
 			return err
 		}
-		return s.recordEvent(ctx, id, p.SKU, p.Revision, EventProductUpdated, "average_cost")
+		return s.recordEvent(ctx, id, p.SKU, revision, EventProductUpdated, "average_cost")
 	})
 }
 
@@ -288,17 +289,18 @@ func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMar
 // and carries no revision.
 func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
 	return s.inTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty); err != nil {
+		revision, err := s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty)
+		if err != nil {
 			return err
 		}
 		p, err := s.repo.GetProduct(ctx, id)
 		if err != nil {
 			return err
 		}
-		if err := s.auditChange(ctx, id, p.SKU, p.Revision, EventProductUpdated, map[string]any{"parts": []string{"reorder_targets"}}); err != nil {
+		if err := s.auditChange(ctx, id, p.SKU, revision, EventProductUpdated, map[string]any{"parts": []string{"reorder_targets"}}); err != nil {
 			return err
 		}
-		return s.recordEvent(ctx, id, p.SKU, p.Revision, EventProductUpdated, "reorder_targets")
+		return s.recordEvent(ctx, id, p.SKU, revision, EventProductUpdated, "reorder_targets")
 	})
 }
 

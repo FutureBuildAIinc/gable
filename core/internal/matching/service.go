@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/money"
@@ -145,17 +146,22 @@ func (s *Service) RunMatch(ctx context.Context, poID uuid.UUID) (*MatchResult, e
 	matchedCount := 0
 	exceptionCount := 0
 
+	// The purchase line's quantities and unit cost now travel the wire's
+	// exact scale 4 (C4-1a); the float seams here read them back as the
+	// floats this module's own wire still carries until C4-2 E converts it.
+	poQtyFloat := func(q httpx.Quantity) float64 { return float64(int64(q)) / 10000 }
+	poCostDollars := func(p httpx.Price) float64 { return float64(int64(p)) / 10000 }
 	for i, poLine := range po.Lines {
 		detail := MatchLineDetail{
 			MatchResultID: result.ID,
 			POLineID:      poLine.ID,
 			Description:   poLine.Description,
-			POQty:         poLine.Quantity,
-			ReceivedQty:   poLine.QtyReceived,
+			POQty:         poQtyFloat(poLine.Quantity),
+			ReceivedQty:   poQtyFloat(poLine.QtyReceived),
 			// Round, never truncate: $10.99 is 1098.9999999999998 in float64
 			// and a bare cast made every downstream price comparison start a
 			// cent wrong.
-			POUnitCost: money.DollarsToCents(poLine.Cost),
+			POUnitCost: money.DollarsToCents(poCostDollars(poLine.UnitCostTenThousandths)),
 		}
 
 		// Get corresponding invoice line (matched by position)

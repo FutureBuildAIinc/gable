@@ -6,6 +6,7 @@ package inventory
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -89,6 +90,7 @@ func (r *PostgresRepository) CreateInventory(ctx context.Context, inv *Inventory
 	if err != nil {
 		return fmt.Errorf("failed to create inventory: %w", err)
 	}
+	r.markDirtyByProductLocation(ctx, inv.ProductID, inv.LocationID)
 	return nil
 }
 
@@ -206,6 +208,7 @@ func (r *PostgresRepository) AllocateStock(ctx context.Context, inventoryID uuid
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("insufficient available stock for allocation")
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
 }
 
@@ -222,6 +225,7 @@ func (r *PostgresRepository) DeallocateStock(ctx context.Context, inventoryID uu
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("insufficient allocated stock for deallocation")
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
 }
 
@@ -238,6 +242,7 @@ func (r *PostgresRepository) RevertFulfillStock(ctx context.Context, inventoryID
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("inventory record not found for revert")
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
 }
 
@@ -254,6 +259,7 @@ func (r *PostgresRepository) FulfillStock(ctx context.Context, inventoryID uuid.
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("insufficient stock for fulfillment")
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
 }
 
@@ -292,6 +298,7 @@ func (r *PostgresRepository) AllocateStockQty(ctx context.Context, inventoryID u
 	if ct.RowsAffected() == 0 {
 		return ErrInsufficientAvailable
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
 }
 
@@ -305,6 +312,7 @@ func (r *PostgresRepository) DeallocateStockQty(ctx context.Context, inventoryID
 	if ct.RowsAffected() == 0 {
 		return ErrInsufficientAllocated
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
 }
 
@@ -318,6 +326,7 @@ func (r *PostgresRepository) FulfillStockQty(ctx context.Context, inventoryID uu
 	if ct.RowsAffected() == 0 {
 		return ErrInsufficientAllocated
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
 }
 
@@ -330,5 +339,140 @@ func (r *PostgresRepository) RestockQty(ctx context.Context, inventoryID uuid.UU
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("inventory record not found for restock")
 	}
+	r.markDirtyByRow(ctx, inventoryID)
 	return nil
+}
+
+// markDirtyByRow feeds the stock level job's queue (ADR 0008 section 10.2):
+// any act that changes a quantity or an allocation marks the product and
+// branch dirty. The insert takes no lock on existing rows.
+func (r *PostgresRepository) markDirtyByRow(ctx context.Context, inventoryID uuid.UUID) {
+	_, _ = r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO stock_level_dirty (product_id, branch_id)
+		SELECT i.product_id, l.branch_id
+		FROM inventory i JOIN locations l ON l.id = i.location_id
+		WHERE i.id = $1 AND l.branch_id IS NOT NULL
+		ON CONFLICT DO NOTHING`, inventoryID)
+}
+
+func (r *PostgresRepository) markDirtyByProductLocation(ctx context.Context, productID uuid.UUID, locationID *uuid.UUID) {
+	_, _ = r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO stock_level_dirty (product_id, branch_id)
+		SELECT $1, l.branch_id FROM locations l
+		WHERE l.id = $2 AND l.branch_id IS NOT NULL
+		ON CONFLICT DO NOTHING`, productID, locationID)
+}
+
+// StockWriter is the receipt's locked stock write: the row is created where
+// absent and the update itself takes the row lock, so concurrent receipts
+// of one product and location serialize on the row (ADR 0008 section 4
+// step 2's lock, ahead of the stock ledger C4-2 A builds).
+type StockWriter interface {
+	ReceiveStockQty(ctx context.Context, productID, locationID uuid.UUID, delta int64) error
+}
+
+// ReceiveStockQty adds delta (the scale 4 integer) to the product's stock
+// at the location, creating the row where absent, and marks the stock
+// level dirty.
+func (r *PostgresRepository) ReceiveStockQty(ctx context.Context, productID, locationID uuid.UUID, delta int64) error {
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO inventory (product_id, location_id, location, quantity, allocated)
+		VALUES ($1, $2, '', $3::numeric / 10000, 0)
+		ON CONFLICT DO NOTHING`, productID, locationID, delta)
+	if err != nil {
+		return fmt.Errorf("failed to create inventory row: %w", err)
+	}
+	_ = ct
+	ct, err = r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE inventory SET quantity = quantity + $1::numeric / 10000, updated_at = NOW()
+		WHERE product_id = $2 AND location_id = $3`, delta, productID, locationID)
+	if err != nil {
+		return fmt.Errorf("failed to receive stock: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("inventory record not found for receipt")
+	}
+	r.markDirtyByProductLocation(ctx, productID, &locationID)
+	return nil
+}
+
+// StockLevel is one stock_levels row the job reads and writes.
+type StockLevel struct {
+	ProductID       uuid.UUID
+	BranchID        uuid.UUID
+	ReorderPoint    *float64
+	LowSince        *time.Time
+	Revision        int64
+}
+
+// NextDirtyStockLevel claims the oldest dirty row FOR UPDATE SKIP LOCKED,
+// inside the caller's transaction; false when the queue is empty.
+func (r *PostgresRepository) NextDirtyStockLevel(ctx context.Context) (productID, branchID uuid.UUID, ok bool, err error) {
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT d.product_id, d.branch_id
+		FROM stock_level_dirty d
+		ORDER BY d.product_id, d.branch_id
+		LIMIT 1
+		FOR UPDATE OF d SKIP LOCKED`).Scan(&productID, &branchID)
+	if err == pgx.ErrNoRows {
+		return uuid.Nil, uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, uuid.Nil, false, fmt.Errorf("claim dirty stock level: %w", err)
+	}
+	return productID, branchID, true, nil
+}
+
+// SumAvailable computes the branch's available stock of a product: the sum
+// of quantity - allocated over the branch's rows.
+func (r *PostgresRepository) SumAvailable(ctx context.Context, productID, branchID uuid.UUID) (string, error) {
+	var available string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT COALESCE(SUM(i.quantity - i.allocated), 0)::text
+		FROM inventory i JOIN locations l ON l.id = i.location_id
+		WHERE i.product_id = $1 AND l.branch_id = $2`, productID, branchID).Scan(&available)
+	return available, err
+}
+
+// GetStockLevel reads the product and branch's stock level row, if any.
+func (r *PostgresRepository) GetStockLevel(ctx context.Context, productID, branchID uuid.UUID) (*StockLevel, error) {
+	var sl StockLevel
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT product_id, branch_id, reorder_point::float8, low_since, revision
+		FROM stock_levels WHERE product_id = $1 AND branch_id = $2`,
+		productID, branchID).Scan(&sl.ProductID, &sl.BranchID, &sl.ReorderPoint, &sl.LowSince, &sl.Revision)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sl, nil
+}
+
+// UpsertStockLevel keeps the product and branch's stock level row (creating
+// it from the product's own targets where absent) and sets low_since.
+func (r *PostgresRepository) UpsertStockLevel(ctx context.Context, productID, branchID uuid.UUID, lowSince *time.Time) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO stock_levels (product_id, branch_id, reorder_point, reorder_quantity, low_since, revision, updated_at)
+		SELECT $1, $2, p.reorder_point, p.reorder_qty, $3, 1, NOW() FROM products p WHERE p.id = $1
+		ON CONFLICT (product_id, branch_id) DO UPDATE
+		SET low_since = EXCLUDED.low_since, revision = stock_levels.revision + 1, updated_at = NOW()`,
+		productID, branchID, lowSince)
+	return err
+}
+
+// ClearDirtyStockLevel removes the processed row.
+func (r *PostgresRepository) ClearDirtyStockLevel(ctx context.Context, productID, branchID uuid.UUID) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`DELETE FROM stock_level_dirty WHERE product_id = $1 AND branch_id = $2`, productID, branchID)
+	return err
+}
+
+// ProductStockingUnit reads the product's stocking unit for the event data.
+func (r *PostgresRepository) ProductStockingUnit(ctx context.Context, productID uuid.UUID) (string, error) {
+	var uom string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT uom_primary::text FROM products WHERE id = $1`, productID).Scan(&uom)
+	return uom, err
 }

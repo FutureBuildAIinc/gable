@@ -43,14 +43,14 @@ func (f *fakeProductRepo) CountProducts(_ context.Context) (int64, error) {
 func (f *fakeProductRepo) ListBelowReorder(_ context.Context) ([]ReorderAlert, error) {
 	return nil, nil
 }
-func (f *fakeProductRepo) UpdateAverageCost(_ context.Context, _ uuid.UUID, _ float64) error {
-	return nil
+func (f *fakeProductRepo) UpdateAverageCost(_ context.Context, _ uuid.UUID, _ float64) (int64, error) {
+	return 1, nil
 }
 func (f *fakeProductRepo) UpdateMarginRules(_ context.Context, _ uuid.UUID, _ float64, _ float64, _ int64) (int64, error) {
 	return 0, nil
 }
-func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
-	return nil
+func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) (int64, error) {
+	return 1, nil
 }
 func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil

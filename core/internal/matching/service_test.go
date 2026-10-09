@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/google/uuid"
 )
@@ -192,6 +193,11 @@ type poLineSpec struct {
 	cost     float64 // dollars, as purchase_order stores them
 }
 
+// qty4 and price4 build the wire's scale 4 values from the floats this
+// module's own specs still carry (its wire converts in C4-2 E).
+func qty4(f float64) httpx.Quantity  { return httpx.Quantity(math.Round(f * 10000)) }
+func price4(f float64) httpx.Price   { return httpx.Price(math.Round(f * 10000)) }
+
 func poWithLines(specs ...poLineSpec) *purchase_order.PurchaseOrder {
 	po := &purchase_order.PurchaseOrder{ID: uuid.New()}
 	for _, s := range specs {
@@ -199,9 +205,9 @@ func poWithLines(specs ...poLineSpec) *purchase_order.PurchaseOrder {
 			ID:          uuid.New(),
 			POID:        po.ID,
 			Description: "2x4x8 SPF",
-			Quantity:    s.ordered,
-			QtyReceived: s.received,
-			Cost:        s.cost,
+			Quantity:    qty4(s.ordered),
+			QtyReceived: qty4(s.received),
+			UnitCostTenThousandths: price4(s.cost),
 		})
 	}
 	return po

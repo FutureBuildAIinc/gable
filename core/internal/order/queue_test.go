@@ -10,6 +10,7 @@ package order_test
 // inventory lock, so it cannot deadlock against a confirm.
 
 import (
+	"math"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/database"
@@ -333,7 +335,7 @@ func TestReceiveDrivesTheBackorderReleaseThroughTheDrain(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'SENT', 'MANUAL', `+branchSQL+`)`, po, vendor); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost) VALUES ($1, $2, $3, 'recv', 12, 3)`, poLine, po, w.f.productID); err != nil {
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, unit_cost, line_total) VALUES ($1, $2, $3, 'recv', 12, 3, 36)`, poLine, po, w.f.productID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -392,9 +394,10 @@ func receive(t *testing.T, db *database.DB, po, line, yard uuid.UUID, qty float6
 	svc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil,
 		inventory.NewService(inventory.NewRepository(db)), product.NewService(product.NewRepository(db)), nil).
 		WithOutbox(outbox.NewWriter(db, ""))
-	if err := svc.ReceivePO(context.Background(), po, []purchase_order.ReceiveLineInput{
-		{LineID: line.String(), LocationID: yard.String(), QtyReceived: qty},
-	}); err != nil {
+	draft := []purchase_order.ReceiveLineDraft{
+		{LineID: line, QtyReceived: httpx.Quantity(math.Round(qty * 10000)), LocationID: yard},
+	}
+	if _, err := svc.ReceivePO(context.Background(), po, "", nil, draft); err != nil {
 		t.Fatalf("receive: %v", err)
 	}
 }

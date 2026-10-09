@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/gablelbm/gable/pkg/middleware"
 	jose "github.com/go-jose/go-jose/v4"
@@ -114,19 +113,7 @@ func (ar *A2AReceiver) ReceiveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Check idempotency — reject duplicates
-	isDuplicate, err := ar.checkIdempotencyKey(r.Context(), idempotencyKey)
-	if err != nil {
-		ar.logger.Error("idempotency check failed", "error", err)
-		ar.writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "idempotency check failed")
-		return
-	}
-	if isDuplicate {
-		ar.writeError(w, http.StatusConflict, "DUPLICATE", "idempotency key already processed")
-		return
-	}
-
-	// 6. Parse the webhook envelope
+	// 5. Parse the webhook envelope
 	var webhook InboundPOWebhook
 	if err := json.Unmarshal(body, &webhook); err != nil {
 		ar.writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid JSON body")
@@ -151,28 +138,51 @@ func (ar *A2AReceiver) ReceiveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 8. Create the PO via the service
+	// 6. Create the PO via the service. The idempotency log row is inserted
+	// first, ON CONFLICT (idempotency_key) DO NOTHING, in the same
+	// transaction as the purchase order it creates (ADR 0008 section 11):
+	// the base commit's read-then-create raced two concurrent webhooks past
+	// each other into two purchase orders. A conflict answers today's 409
+	// body, and the seam's wire stays byte for byte.
 	vendorID, err := uuid.Parse(poPayload.VendorID)
 	if err != nil {
 		ar.writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid vendor_id in payload")
 		return
 	}
 
-	lines := make([]CreatePOLineInput, len(poPayload.Lines))
-	for i, l := range poPayload.Lines {
-		lines[i] = CreatePOLineInput{
-			ProductID:   l.ProductID,
-			Description: l.Description,
-			Quantity:    l.Quantity,
-			Cost:        l.Cost,
+	lines := make([]LineInput, 0, len(poPayload.Lines))
+	for _, l := range poPayload.Lines {
+		productID, perr := uuid.Parse(l.ProductID)
+		if perr != nil {
+			productID = uuid.Nil
 		}
+		quantity, qerr := floatQuantity(l.Quantity)
+		if qerr != nil {
+			ar.writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid quantity in payload")
+			return
+		}
+		cost, cerr := floatPrice(l.Cost)
+		if cerr != nil {
+			ar.writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid cost in payload")
+			return
+		}
+		line := LineInput{
+			Description: l.Description,
+			Quantity:    quantity,
+			UnitCost:    cost,
+		}
+		if productID != uuid.Nil {
+			pid := productID
+			line.ProductID = &pid
+		}
+		lines = append(lines, line)
 	}
 
 	// A2A webhooks bypass the branch middleware. Resolve brain_inbound_branch_id
 	// (falling back to default_branch_id) and inject a BranchContext so the
 	// repository CreatePO call stamps the correct branch.
 	poCtx := ar.contextWithInboundBranch(r.Context())
-	po, err := ar.service.CreateManualPOFromHandler(poCtx, vendorID, lines, SourceA2A)
+	po, duplicate, err := ar.service.CreatePOFromA2A(poCtx, idempotencyKey, &webhook, vendorID, lines)
 	if err != nil {
 		ar.logger.Error("failed to create PO from A2A webhook",
 			"error", err,
@@ -182,11 +192,9 @@ func (ar *A2AReceiver) ReceiveWebhook(w http.ResponseWriter, r *http.Request) {
 		ar.writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create purchase order")
 		return
 	}
-
-	// 9. Log the webhook for audit trail
-	if err := ar.logInboundPO(r.Context(), idempotencyKey, &webhook, po.ID); err != nil {
-		ar.logger.Error("failed to log inbound PO webhook", "error", err)
-		// Don't fail the request — PO was created successfully
+	if duplicate {
+		ar.writeError(w, http.StatusConflict, "DUPLICATE", "idempotency key already processed")
+		return
 	}
 
 	ar.logger.Info("A2A purchase order created",
@@ -219,33 +227,7 @@ func (ar *A2AReceiver) verifyJWSSignature(body []byte, jwsSig string) error {
 	return nil
 }
 
-// checkIdempotencyKey returns true if the key has already been processed.
-func (ar *A2AReceiver) checkIdempotencyKey(ctx context.Context, key string) (bool, error) {
-	var exists bool
-	err := ar.pool.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM a2a_inbound_po_log WHERE idempotency_key = $1
-		)`, key).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("checking idempotency key: %w", err)
-	}
-	return exists, nil
-}
 
-// logInboundPO records the inbound webhook for idempotency and audit.
-func (ar *A2AReceiver) logInboundPO(ctx context.Context, idempotencyKey string, webhook *InboundPOWebhook, poID uuid.UUID) error {
-	_, err := ar.pool.Exec(ctx, `
-		INSERT INTO a2a_inbound_po_log (
-			idempotency_key, event_type, payload, trace_id, created_po_id, received_at
-		) VALUES ($1, $2, $3, $4, $5, $6)`,
-		idempotencyKey, webhook.EventType, webhook.Payload,
-		webhook.TraceID, poID, time.Now().UTC(),
-	)
-	if err != nil {
-		return fmt.Errorf("logging inbound PO webhook: %w", err)
-	}
-	return nil
-}
 
 // --- HTTP response helpers ---
 

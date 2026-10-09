@@ -13,10 +13,10 @@ import (
 // new POs at runtime. Keep this test cheap and explicit.
 func TestSourceConstants(t *testing.T) {
 	cases := map[string]string{
-		"manual":        SourceManual,
-		"reorder":       SourceReorder,
-		"special_order": SourceSpecialOrder,
-		"a2a":           SourceA2A,
+		"manual":        string(SourceManual),
+		"reorder":       string(SourceReorder),
+		"special_order": string(SourceSpecialOrder),
+		"a2a":           string(SourceA2A),
 	}
 	expected := map[string]string{
 		"manual":        "MANUAL",
@@ -36,7 +36,7 @@ func TestSourceConstants(t *testing.T) {
 // string a downstream consumer (e.g. JSON serializer, repository INSERT)
 // will see. Catches accidental field renames or shadowing.
 func TestPurchaseOrderSourceFieldRoundTrips(t *testing.T) {
-	for _, src := range []string{SourceManual, SourceReorder, SourceSpecialOrder, SourceA2A} {
+	for _, src := range []string{string(SourceManual), string(SourceReorder), string(SourceSpecialOrder), string(SourceA2A)} {
 		po := &PurchaseOrder{Source: src}
 		if po.Source != src {
 			t.Errorf("Source field did not round-trip: set=%q got=%q", src, po.Source)

@@ -11,20 +11,19 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/branchctx"
-	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
 type Handler struct {
 	service *Service
-	recSvc  *RecommendationService
 	guard   BranchGuard // optional; nil leaves a payload location and a path id unchecked (unit tests)
 }
 
-func NewHandler(service *Service, recSvc *RecommendationService) *Handler {
-	return &Handler{service: service, recSvc: recSvc}
+func NewHandler(service *Service) *Handler {
+	return &Handler{service: service}
 }
 
 // BranchGuard applies the payload branch rule (ADR 0007 section 2.3) to a
@@ -48,17 +47,15 @@ func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
 // caller's branch wall (ADR 0007 section 2.3): the record's branch must be
 // one the caller may target, the same rule a branch named in a body is held
 // to. A purchase order that does not exist belongs to no branch and passes;
-// the service answers for it. A refusal is a 403 in the legacy error shape
-// every other error on these unconverted routes carries (the refusal naming
-// id goes to the module's conversion record). It reports whether the request
-// may proceed.
+// the service answers for it. A refusal is the contract's 403 error
+// envelope. It reports whether the request may proceed.
 func (h *Handler) checkPOBranch(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
 	if h.guard == nil {
 		return true
 	}
 	branch, err := h.service.GetPOBranch(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return false
 	}
 	if branch == nil {
@@ -66,10 +63,10 @@ func (h *Handler) checkPOBranch(w http.ResponseWriter, r *http.Request, id uuid.
 	}
 	if err := h.guard.CheckPayloadBranch(r.Context(), *branch); err != nil {
 		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
-			httputil.RespondError(w, r, "purchase order is outside the branches this caller may target", http.StatusForbidden, err)
+			httpx.WriteError(w, r, httpx.Forbidden("purchase order is outside the branches this caller may target"))
 			return false
 		}
-		httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return false
 	}
 	return true
@@ -87,7 +84,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	mux.HandleFunc("GET /api/v1/purchase-orders", guard(h.HandleListPOs))
 	mux.HandleFunc("POST /api/v1/purchase-orders", guard(h.HandleCreatePO))
-	mux.HandleFunc("GET /api/v1/purchase-orders/recommendations", guard(h.HandleGetRecommendations))
+	mux.HandleFunc("GET /api/v1/purchase-orders/recommendations", guard(h.HandleListRecommendations))
 	mux.HandleFunc("GET /api/v1/purchase-orders/source-summary", guard(h.HandleSourceSummary))
 	mux.HandleFunc("GET /api/v1/purchase-orders/{id}", guard(h.HandleGetPO))
 	mux.HandleFunc("POST /api/v1/purchase-orders/{id}/submit", guard(h.HandleSubmitPO))
@@ -100,177 +97,266 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/purchase-orders/{id}/freight", guard(h.HandleListFreight))
 }
 
-func (h *Handler) HandleListPOs(w http.ResponseWriter, r *http.Request) {
-	pos, err := h.service.ListPOs(r.Context())
+// parseID reads the path id into a 400 that names it.
+func parseID(r *http.Request, w http.ResponseWriter) (uuid.UUID, bool) {
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list purchase orders", http.StatusInternalServerError, err)
-		return
+		httpx.WriteError(w, r, httpx.BadRequest("id is not a UUID",
+			httpx.FieldError{Field: "id", Message: "must be a UUID in lowercase hyphenated form"}))
+		return uuid.Nil, false
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pos)
+	return id, true
 }
 
-type CreatePORequest struct {
-	VendorID string         `json:"vendor_id"`
-	Lines    []CreatePOLine `json:"lines"`
+// poOrdering is the purchase order list's cursor scope.
+const poOrdering = "purchase_orders.created_at_id_desc"
+
+// poQuery is the parsed list request.
+type poQuery struct {
+	filters    ListFilter
+	limit      int
+	wantTotal  bool
 }
 
-type CreatePOLine struct {
-	ProductID   string  `json:"product_id"`
-	Description string  `json:"description"`
-	Quantity    float64 `json:"quantity"`
-	Cost        float64 `json:"cost"`
-}
-
-func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
-	var req CreatePORequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	vendorID, err := uuid.Parse(req.VendorID)
+// parsePOQuery reads the list request: the strict guard on the route's
+// names (cursor, limit, include and the two filters), the page and the
+// cursor's keyset position.
+func parsePOQuery(r *http.Request) (poQuery, error) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "status", "vendor_id")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid vendor_id", http.StatusBadRequest, err)
-		return
+		return poQuery{}, err
 	}
-
-	lines := make([]CreatePOLineInput, len(req.Lines))
-	for i, l := range req.Lines {
-		lines[i] = CreatePOLineInput{
-			ProductID:   l.ProductID,
-			Description: l.Description,
-			Quantity:    l.Quantity,
-			Cost:        l.Cost,
+	page, err := httpx.ParseListQuery(r, poOrdering)
+	if err != nil {
+		return poQuery{}, err
+	}
+	out := poQuery{limit: page.Limit}
+	out.filters.Limit = page.Limit
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			return poQuery{}, httpx.BadRequest("cursor keyset is malformed",
+				httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			return poQuery{}, httpx.BadRequest("cursor keyset is malformed",
+				httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+		}
+		out.filters.AfterTime, out.filters.AfterID = &at, &id
+	}
+	v := &httpx.Validator{}
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			return poQuery{}, httpx.BadRequest("include parameter is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"})
+		}
+		set, ierr := httpx.ParseInclude(vals[0], httpx.IncludeTotal)
+		if ierr != nil {
+			return poQuery{}, ierr
+		}
+		out.wantTotal = set.Has(httpx.IncludeTotal)
+	}
+	if vals := q["status"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "status", "parameter is repeated")
+		} else if status, ok := ParseStatus(vals[0]); ok {
+			out.filters.Statuses = []Status{status}
+		} else {
+			v.Check(false, "status", "must be one of draft, sent, partial, received, cancelled")
 		}
 	}
+	if vals := q["vendor_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "vendor_id", "parameter is repeated")
+		} else if id, ok := v.UUID("vendor_id", &vals[0], true); ok {
+			out.filters.VendorID = &id
+		}
+	}
+	if err := v.Err(); err != nil {
+		return poQuery{}, err
+	}
+	return out, nil
+}
 
-	po, err := h.service.CreateManualPOFromHandler(r.Context(), vendorID, lines, SourceManual)
+// HandleListPOs serves GET /api/v1/purchase-orders: the list envelope,
+// filtered by status and vendor, held to the caller's branch wall by the
+// repository's three arm predicate (ADR 0008 section 11).
+func (h *Handler) HandleListPOs(w http.ResponseWriter, r *http.Request) {
+	query, err := parsePOQuery(r)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to create purchase order", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
+	pos, more, err := h.service.ListPOs(r.Context(), query.filters)
+	if err != nil {
+		slog.Error("ListPOs failed", "error", err)
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if more && len(pos) > 0 {
+		last := pos[len(pos)-1]
+		next, err = httpx.MintCursor(poOrdering,
+			httpx.FormatKeyTime(last.CreatedAt.Time), last.ID.String())
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	opts := []httpx.ListOption{}
+	if query.wantTotal {
+		total, err := h.service.CountPOs(r.Context(), query.filters)
+		if err != nil {
+			slog.Error("CountPOs failed", "error", err)
+			httpx.WriteError(w, r, err)
+			return
+		}
+		opts = append(opts, httpx.WithTotal(total))
+	}
+	httpx.WriteList(w, pos, next, query.limit, opts...)
+}
 
-	w.Header().Set("Content-Type", "application/json")
+// HandleCreatePO serves POST /api/v1/purchase-orders: the parsed and
+// validated body, the payload branch rule, one transaction, 201 with the
+// document, its ETag and Location.
+func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
+	var req CreateRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := ParseCreate(&req)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if h.guard != nil && draft.BranchID != nil {
+		if err := h.guard.CheckPayloadBranch(r.Context(), *draft.BranchID); err != nil {
+			if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+				httpx.WriteError(w, r, httpx.Forbidden("branch_id is outside the branches this caller may target"))
+				return
+			}
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	po, err := h.service.CreatePO(r.Context(), draft)
+	if err != nil {
+		slog.Error("CreatePO failed", "error", err)
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/purchase-orders/"+po.ID.String())
+	httpx.WriteRevisionETag(w, po.Revision)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(po)
 }
 
 func (h *Handler) HandleGetPO(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
+	id, ok := parseID(r, w)
+	if !ok {
 		return
 	}
 	if !h.checkPOBranch(w, r, id) {
 		return
 	}
-
 	po, err := h.service.GetPO(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to get purchase order", http.StatusNotFound, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+	httpx.WriteRevisionETag(w, po.Revision)
 	json.NewEncoder(w).Encode(po)
 }
 
+// HandleSubmitPO serves POST /api/v1/purchase-orders/{id}/submit: the
+// revision precondition beside If-Match, the status checked under the lock,
+// the sent event in the same transaction, and the document back with its
+// new revision and ETag.
 func (h *Handler) HandleSubmitPO(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
+	id, ok := parseID(r, w)
+	if !ok {
 		return
 	}
 	if !h.checkPOBranch(w, r, id) {
 		return
 	}
-
-	if err := h.service.SubmitPO(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to submit purchase order", http.StatusInternalServerError, err)
+	var req SubmitRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "submitted"})
+	revision, err := ParseRevision(req.Revision)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	po, err := h.service.SubmitPO(r.Context(), id, r.Header.Get("If-Match"), revision)
+	if err != nil {
+		slog.Error("SubmitPO failed", "error", err)
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, po.Revision)
+	json.NewEncoder(w).Encode(po)
 }
 
-type ReceiveLineRequest struct {
-	LineID      string  `json:"line_id"`
-	QtyReceived float64 `json:"qty_received"`
-	LocationID  string  `json:"location_id"`
-}
-
-type ReceivePORequest struct {
-	Lines []ReceiveLineRequest `json:"lines"`
-}
-
+// HandleReceivePO serves POST /api/v1/purchase-orders/{id}/receive: the
+// purchase order's branch held to the caller's wall by the path id, each
+// body location held by the payload rule, the over receipt cap and the
+// same branch rule inside the act, and the document back with its new
+// revision and ETag.
 func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
+	id, ok := parseID(r, w)
+	if !ok {
 		return
 	}
 	if !h.checkPOBranch(w, r, id) {
 		return
 	}
-
-	var req ReceivePORequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req ReceiveRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
+	draft, err := ParseReceive(&req)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	if h.guard != nil {
-		for _, l := range req.Lines {
-			locID, perr := uuid.Parse(l.LocationID)
-			if perr != nil {
-				continue // the service answers an unparseable location id
-			}
-			err := h.guard.CheckPayloadLocation(r.Context(), locID)
+		for _, l := range draft.Lines {
+			err := h.guard.CheckPayloadLocation(r.Context(), l.LocationID)
 			if errors.Is(err, middleware.ErrPayloadBranchRefused) {
-				httputil.RespondError(w, r, "lines[].location_id is in a branch this caller may not target", http.StatusForbidden, err)
+				httpx.WriteError(w, r, httpx.Forbidden("lines[].location_id is in a branch this caller may not target"))
 				return
 			}
 			if err != nil {
-				httputil.RespondError(w, r, "branch access lookup failed", http.StatusInternalServerError, err)
+				httpx.WriteError(w, r, err)
 				return
 			}
 		}
 	}
-
-	lines := make([]ReceiveLineInput, len(req.Lines))
-	for i, l := range req.Lines {
-		lines[i] = ReceiveLineInput{
-			LineID:      l.LineID,
-			QtyReceived: l.QtyReceived,
-			LocationID:  l.LocationID,
-		}
-	}
-
-	if err := h.service.ReceivePO(r.Context(), id, lines); err != nil {
-		httputil.RespondError(w, r, "failed to receive purchase order", http.StatusInternalServerError, err)
+	po, err := h.service.ReceivePO(r.Context(), id, r.Header.Get("If-Match"), draft.Revision, draft.Lines)
+	if err != nil {
+		slog.Error("ReceivePO failed", "error", err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "received"})
+	httpx.WriteRevisionETag(w, po.Revision)
+	json.NewEncoder(w).Encode(po)
 }
 
 func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 	count, err := h.service.CreateReorders(r.Context())
 	if err != nil {
-		httputil.RespondError(w, r, "failed to create reorder purchase orders", http.StatusInternalServerError, err)
+		slog.Error("CreateReorders failed", "error", err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"status": "success",
 		"count":  count,
 	})
@@ -279,24 +365,13 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 // HandleRefreshReorderTargets manually triggers the reorder-target recompute
 // (the same logic the scheduler runs on cron). Body: {"dry_run": bool,
 // "lookback_days": int} — both optional. Defaults to dry_run=true so the
-// curl-once-and-look workflow can't accidentally rewrite the catalog.
+// curl-once-and-look workflow can't accidentally rewrite the targets.
 //
-// Reorder targets live on the products table (reorder_point and reorder_qty
-// are per product, not per product and branch) and are shared across every
-// branch. The recompute's velocity read therefore must see every branch's
-// sales, the way the cron path does (Scheduler.runRefresh calls the same
-// service with context.Background and no branch context: the velocity read's
-// predicate arm 3 fires, every branch's data flows). The HTTP route is
-// mounted behind the branch middleware, which would otherwise populate a
-// BranchContext that scopes the velocity read to the caller (a bound
-// purchasing user with header A reads arm 1, branch A's sales only; an
-// administrator without a header still reads arm 3 today because IsAdmin
-// suppresses GrantsSubForQuery). To keep the HTTP and cron paths writing
-// the same targets, this handler strips the BranchContext the middleware
-// put on the request and marks the resulting context as a system caller,
-// the seam the cron path already is, so the velocity read sees every
-// branch's data and a bound user's refresh writes the same targets an
-// administrator's would.
+// The recompute reads every branch's sales and stock per product and branch
+// (ADR 0008 10.2), the seam the cron path always was: the handler strips the
+// BranchContext the middleware put on the request and marks the resulting
+// context a system caller, so a bound user's refresh writes the same
+// per branch targets an administrator's would.
 func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), branchctx.Key, (*branchctx.Context)(nil))
 	ctx = branchctx.WithSystem(ctx)
@@ -312,7 +387,8 @@ func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Req
 	}
 	result, err := h.service.RefreshReorderTargets(ctx, dryRun, req.LookbackDays)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to refresh reorder targets", http.StatusInternalServerError, err)
+		slog.Error("RefreshReorderTargets failed", "error", err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -320,92 +396,192 @@ func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Req
 }
 
 // HandleListReorderRuns returns the most recent reorder-cron executions
-// (refresh_targets and create_reorders) for the operator dashboard.
+// (refresh_targets and create_reorders) for the operator dashboard, in the
+// list envelope.
 func (h *Handler) HandleListReorderRuns(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r, "cursor", "limit", "include"); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	runs, err := h.service.ListReorderRuns(r.Context(), 50)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list reorder runs", http.StatusInternalServerError, err)
+		slog.Error("ListReorderRuns failed", "error", err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 	if runs == nil {
 		runs = []ReorderRun{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(runs)
+	json.NewEncoder(w).Encode(map[string]any{"items": runs, "next_cursor": nil, "limit": 50})
 }
 
 // HandleSourceSummary returns PO counts grouped by source so the purchasing
-// dashboard can render the "% replenishments automated" KPI.
+// dashboard can render the "% replenishments automated" KPI. An aggregate,
+// not a collection: it keeps its object shape.
 func (h *Handler) HandleSourceSummary(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	counts, err := h.service.GetSourceSummary(r.Context())
 	if err != nil {
-		httputil.RespondError(w, r, "failed to load PO source summary", http.StatusInternalServerError, err)
+		slog.Error("GetSourceSummary failed", "error", err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(counts)
 }
 
-// HandleGetRecommendations returns AI-driven purchasing recommendations
-// based on sales velocity, stock levels, and lead times.
-func (h *Handler) HandleGetRecommendations(w http.ResponseWriter, r *http.Request) {
-	if h.recSvc == nil {
-		httputil.RespondError(w, r, "Recommendation service not configured", http.StatusServiceUnavailable, nil)
-		return
-	}
+// recOrdering is the stored recommendations list's cursor scope.
+const recOrdering = "reorder_recommendations.created_at_id_desc"
 
-	summary, err := h.recSvc.GenerateRecommendations(r.Context())
+// HandleListRecommendations serves GET /api/v1/purchase-orders/recommendations:
+// the stored recommendations of the reorder runs in the list envelope (ADR
+// 0008 10.3), filtered by branch, vendor and status, held to the caller's
+// branch wall.
+func (h *Handler) HandleListRecommendations(w http.ResponseWriter, r *http.Request) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "branch_id", "vendor_id", "status")
 	if err != nil {
-		httputil.RespondError(w, r, "failed to generate purchase recommendations", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	page, err := httpx.ParseListQuery(r, recOrdering)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var filters RecommendationFilter
+	filters.Limit = page.Limit
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			httpx.WriteError(w, r, httpx.BadRequest("cursor keyset is malformed",
+				httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"}))
+			return
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			httpx.WriteError(w, r, httpx.BadRequest("cursor keyset is malformed",
+				httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"}))
+			return
+		}
+		filters.AfterTime, filters.AfterID = &at, &id
+	}
+	wantTotal := false
+	v := &httpx.Validator{}
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			httpx.WriteError(w, r, httpx.BadRequest("include parameter is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"}))
+			return
+		}
+		set, ierr := httpx.ParseInclude(vals[0], httpx.IncludeTotal)
+		if ierr != nil {
+			httpx.WriteError(w, r, ierr)
+			return
+		}
+		wantTotal = set.Has(httpx.IncludeTotal)
+	}
+	if vals := q["branch_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "branch_id", "parameter is repeated")
+		} else if id, ok := v.UUID("branch_id", &vals[0], true); ok {
+			filters.BranchID = &id
+		}
+	}
+	if vals := q["vendor_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "vendor_id", "parameter is repeated")
+		} else if id, ok := v.UUID("vendor_id", &vals[0], true); ok {
+			filters.VendorID = &id
+		}
+	}
+	if vals := q["status"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "status", "parameter is repeated")
+		} else {
+			switch vals[0] {
+			case "open", "ordered", "dismissed":
+				filters.Status = map[string]string{"open": "OPEN", "ordered": "ORDERED", "dismissed": "DISMISSED"}[vals[0]]
+			default:
+				v.Check(false, "status", "must be one of open, ordered, dismissed")
+			}
+		}
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	recs, more, err := h.service.repo.ListRecommendationsPage(r.Context(), filters)
+	if err != nil {
+		slog.Error("ListRecommendationsPage failed", "error", err)
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if more && len(recs) > 0 {
+		last := recs[len(recs)-1]
+		next, err = httpx.MintCursor(recOrdering,
+			httpx.FormatKeyTime(last.CreatedAt.Time), last.ID.String())
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	opts := []httpx.ListOption{}
+	if wantTotal {
+		total, err := h.service.repo.CountRecommendations(r.Context(), filters)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		opts = append(opts, httpx.WithTotal(total))
+	}
+	httpx.WriteList(w, recs, next, page.Limit, opts...)
 }
 
 // HandleUploadFreight processes a freight invoice upload for a received PO.
 func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	poID, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
+	id, ok := parseID(r, w)
+	if !ok {
 		return
 	}
-	if !h.checkPOBranch(w, r, poID) {
+	if !h.checkPOBranch(w, r, id) {
 		return
 	}
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		httputil.RespondError(w, r, "File too large or invalid form data", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("file too large or invalid form data"))
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		httputil.RespondError(w, r, "Missing 'file' field in form data", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("missing 'file' field in form data"))
 		return
 	}
 	defer file.Close()
 
 	fileBytes, err := io.ReadAll(io.LimitReader(file, 10<<20))
 	if err != nil {
-		httputil.RespondError(w, r, "Failed to read uploaded file", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 
 	contentType := http.DetectContentType(fileBytes)
 
 	slog.Info("Freight invoice upload",
-		"po_id", poID,
+		"po_id", id,
 		"filename", header.Filename,
 		"size_bytes", header.Size,
 		"content_type", contentType,
 	)
 
-	result, err := h.service.UploadFreightInvoice(r.Context(), poID, fileBytes, contentType, header.Filename)
+	result, err := h.service.UploadFreightInvoice(r.Context(), id, fileBytes, contentType, header.Filename)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to upload freight invoice", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 
@@ -415,9 +591,8 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 
 // HandleApplyFreight applies a pending freight charge to product costs.
 func (h *Handler) HandleApplyFreight(w http.ResponseWriter, r *http.Request) {
-	poID, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
+	poID, ok := parseID(r, w)
+	if !ok {
 		return
 	}
 	if !h.checkPOBranch(w, r, poID) {
@@ -426,12 +601,13 @@ func (h *Handler) HandleApplyFreight(w http.ResponseWriter, r *http.Request) {
 
 	freightID, err := uuid.Parse(r.PathValue("freightId"))
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid freight charge ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, httpx.BadRequest("freightId is not a UUID",
+			httpx.FieldError{Field: "freightId", Message: "must be a UUID in lowercase hyphenated form"}))
 		return
 	}
 
 	if err := h.service.ApplyFreightCharge(r.Context(), poID, freightID); err != nil {
-		httputil.RespondError(w, r, "failed to apply freight charge", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 
@@ -439,11 +615,11 @@ func (h *Handler) HandleApplyFreight(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "applied"})
 }
 
-// HandleListFreight returns all freight charges for a PO.
+// HandleListFreight returns all freight charges for a PO, in the list
+// envelope.
 func (h *Handler) HandleListFreight(w http.ResponseWriter, r *http.Request) {
-	poID, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
+	poID, ok := parseID(r, w)
+	if !ok {
 		return
 	}
 	if !h.checkPOBranch(w, r, poID) {
@@ -452,14 +628,9 @@ func (h *Handler) HandleListFreight(w http.ResponseWriter, r *http.Request) {
 
 	charges, err := h.service.GetFreightCharges(r.Context(), poID)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list freight charges", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 
-	if charges == nil {
-		charges = []FreightCharge{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(charges)
+	httpx.WriteList(w, charges, "", 0)
 }
