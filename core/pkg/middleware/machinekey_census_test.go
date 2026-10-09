@@ -93,6 +93,91 @@ func TestModuleVocabularyCoversEveryV1CensusRoute(t *testing.T) {
 	}
 }
 
+// draftRouteClassExpectations maps every registered draft and link route
+// shape to the class ADR 0007 section 5.1 gives it. The census test below
+// asserts each registered route resolves to its shape's class (not only its
+// module), so a route cannot drift into a wider class by moving one segment.
+var draftRouteClassExpectations = map[string]middleware.ScopeClass{
+	"GET /api/v1/drafts/quotes":                   middleware.ScopeDraftRead,
+	"POST /api/v1/drafts/quotes":                  middleware.ScopeDraftWrite,
+	"GET /api/v1/drafts/quotes/feed":              middleware.ScopeDraftRead,
+	"GET /api/v1/drafts/quotes/{id}":              middleware.ScopeDraftRead,
+	"PUT /api/v1/drafts/quotes/{id}":              middleware.ScopeDraftWrite,
+	"POST /api/v1/drafts/quotes/{id}/transitions": middleware.ScopeDraftWrite,
+	"POST /api/v1/drafts/quotes/{id}/promote":     middleware.ScopePromotion,
+	"GET /api/v1/links/quotes/{id}":               middleware.ScopeLink,
+	"GET /api/v1/links/drafts/quotes/{id}":        middleware.ScopeDraftLink,
+}
+
+// TestDraftRoutesResolveThroughScopeTarget is the census extension ADR 0007
+// section 5.2 names, both directions:
+//
+//   - every route under /api/v1/drafts/ and /api/v1/links/ must resolve
+//     through ScopeTarget to a vocabulary module, at the class its shape in
+//     the table above gives it, and its module must be a registered kind
+//     (confirm gated);
+//   - every registered kind must have its seven routes in the census;
+//   - every module the grammar allows propose and commit on must be a
+//     registered kind with those routes.
+func TestDraftRoutesResolveThroughScopeTarget(t *testing.T) {
+	carried := map[string]bool{}
+	for _, line := range readCensus(t) {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			t.Fatalf("census line is not tab separated method/pattern/...: %q", line)
+		}
+		method, pattern := fields[0], fields[1]
+		underDrafts := strings.HasPrefix(pattern, "/api/v1/drafts/")
+		underLinks := strings.HasPrefix(pattern, "/api/v1/links/")
+		if !underDrafts && !underLinks {
+			continue
+		}
+		key := method + " " + pattern
+		carried[key] = true
+		module, class, ok := middleware.ScopeTarget(method, pattern)
+		if !ok {
+			t.Errorf("%s resolves to no scope target; a route under drafts or links must be one of the policy table's shapes", key)
+			continue
+		}
+		if middleware.ModuleScopePolicyFor(module) != middleware.ModuleScopeAllowed {
+			t.Errorf("%s resolves to module %q, which the vocabulary does not allow", key, module)
+		}
+		if !middleware.IsConfirmGated(module) {
+			t.Errorf("%s resolves to module %q, which has no registered draft kind; a draft route may only exist for a confirm gated module", key, module)
+		}
+		want, listed := draftRouteClassExpectations[key]
+		if !listed {
+			t.Errorf("%s is registered under drafts or links but the class expectation table names it nowhere; give the shape a class decision", key)
+			continue
+		}
+		if class != want {
+			t.Errorf("%s resolves to class %s, want %s", key, class, want)
+		}
+	}
+
+	// Every registered kind has its seven routes, and the link routes for
+	// its entity, whatever kinds register later.
+	for _, module := range middleware.ConfirmGatedModules() {
+		seven := []string{
+			"GET /api/v1/drafts/" + module,
+			"POST /api/v1/drafts/" + module,
+			"GET /api/v1/drafts/" + module + "/feed",
+			"GET /api/v1/drafts/" + module + "/{id}",
+			"PUT /api/v1/drafts/" + module + "/{id}",
+			"POST /api/v1/drafts/" + module + "/{id}/transitions",
+			"POST /api/v1/drafts/" + module + "/{id}/promote",
+		}
+		for _, key := range seven {
+			if !carried[key] {
+				t.Errorf("confirm gated module %q is missing its route %q; every kind registers the seven draft routes", module, key)
+			}
+		}
+	}
+	if len(carried) == 0 {
+		t.Fatal("the census carries no routes under /api/v1/drafts/ or /api/v1/links/; the kinds are not registered")
+	}
+}
+
 // TestRequiredScopeSplit pins the read/write split: GET and HEAD are reads,
 // every other method is a write. The scope name is the module verbatim plus
 // the suffix, so a caller can derive the scope it needs from the URL alone.
@@ -252,10 +337,12 @@ func TestFinerAdminScopesCoverCensusRoutes(t *testing.T) {
 }
 
 // TestValidScopeGrammarHoldsTheCensus pins the grammar a minted scope may
-// carry (ADR 0009; the mint route's validation is C5-2a's): every scope a
-// census route can require is in the grammar, and the finer names replaced
-// the coarse ones they narrow, so no route requires a scope the grammar
-// cannot grant.
+// carry (ADR 0009; the mint route's validation landed with C5-2a, ADR 0007
+// section 5.3): every scope a census route can require is in the grammar,
+// the finer names replaced the coarse ones they narrow, and the propose and
+// commit verbs exist only for confirm gated modules, so no route requires a
+// scope the grammar cannot grant and no ungated module can be granted a
+// confirm verb.
 func TestValidScopeGrammarHoldsTheCensus(t *testing.T) {
 	grammar := map[string]bool{}
 	for _, scope := range middleware.ValidScopeGrammar() {
@@ -267,22 +354,31 @@ func TestValidScopeGrammarHoldsTheCensus(t *testing.T) {
 	if !grammar["users:grants"] || !grammar["admin:settings"] || !grammar["admin:staff"] || !grammar["admin:modules"] {
 		t.Errorf("grammar lacks a finer name: %v", middleware.ValidScopeGrammar())
 	}
+	if !grammar["quotes:propose"] || !grammar["quotes:commit"] {
+		t.Errorf("grammar lacks the quotes confirm verbs: %v", middleware.ValidScopeGrammar())
+	}
+	if grammar["orders:propose"] || grammar["orders:commit"] || grammar["customers:propose"] {
+		t.Error("the grammar grants a confirm verb on a module with no registered draft kind; propose and commit are gated-only (ADR 0007 5.1)")
+	}
 	for _, line := range readCensus(t) {
 		fields := strings.Split(line, "\t")
 		if len(fields) < 2 || !strings.HasPrefix(fields[1], "/api/v1/") {
 			continue
 		}
-		module, _ := middleware.ModuleForPath(fields[1])
+		method, pattern := fields[0], fields[1]
+		module, _ := middleware.ModuleForPath(pattern)
 		if middleware.ModuleScopePolicyFor(module) != middleware.ModuleScopeAllowed {
 			continue // excluded segments keep their own seam and no key scope
 		}
-		for _, method := range []string{"GET", "POST"} {
-			scope, ok := middleware.RequiredScopeForPath(method, fields[1])
-			if !ok {
-				t.Fatalf("route %s is under /api/v1 but resolves to no scope", fields[1])
-			}
+		// Every route resolves through the class table; every scope its
+		// class admits must be grantable.
+		scopeModule, class, ok := middleware.ScopeTarget(method, pattern)
+		if !ok {
+			t.Fatalf("route %s is under /api/v1 but resolves to no scope target", pattern)
+		}
+		for _, scope := range middleware.AdmittedScopes(scopeModule, class) {
 			if !grammar[scope] {
-				t.Errorf("%s %s requires %q, which the grammar cannot grant", method, fields[1], scope)
+				t.Errorf("%s %s requires %q, which the grammar cannot grant", method, pattern, scope)
 			}
 		}
 	}

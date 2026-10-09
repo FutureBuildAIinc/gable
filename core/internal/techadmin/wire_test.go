@@ -656,7 +656,7 @@ func TestWire_RoutingSettings(t *testing.T) {
 // user only; the refusal leaves an audit row naming the scope it lacked.
 func TestWire_FinerAdminScopesOnSettings(t *testing.T) {
 	f := newFixture(t)
-	raw, key, err := f.svc.GenerateKey(context.Background(), "scoped", []string{"admin:settings"})
+	raw, key, err := f.svc.GenerateKey(context.Background(), "scoped", []string{"admin:settings"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -673,7 +673,7 @@ func TestWire_FinerAdminScopesOnSettings(t *testing.T) {
 		t.Errorf("settings key on settings write = %d, want 200", r.status)
 	}
 
-	coarseRaw, coarseKey, err := f.svc.GenerateKey(context.Background(), "coarse", []string{"admin:read", "admin:write"})
+	coarseRaw, coarseKey, err := f.svc.GenerateKey(context.Background(), "coarse", []string{"admin:read", "admin:write"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

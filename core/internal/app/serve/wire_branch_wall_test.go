@@ -1026,9 +1026,9 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 
 	for _, c := range []struct {
 		name, role, sub, header string
-		wantRows                 int
-		wantA, wantB             bool
-		wantLegacy               bool
+		wantRows                int
+		wantA, wantB            bool
+		wantLegacy              bool
 	}{
 		{"warehouse, header A", "warehouse", "u-a", A, 1, true, false, false},
 		{"warehouse, no header", "warehouse", "u-a", "", 1, true, false, false},

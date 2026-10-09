@@ -414,7 +414,7 @@ func TestWire_UpdateAndTransitions(t *testing.T) {
 func TestWire_MachineKeyScope(t *testing.T) {
 	f := newFixture(t)
 	techSvc := techadmin.NewService(techadmin.NewRepository(f.db)).WithTxRunner(f.db)
-	raw, key, err := techSvc.GenerateKey(context.Background(), "gov key", []string{"governance:read"})
+	raw, key, err := techSvc.GenerateKey(context.Background(), "gov key", []string{"governance:read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestWire_TransitionsPreconditions(t *testing.T) {
 func TestWire_MachineKeyRefusalWritesAuditRow(t *testing.T) {
 	f := newFixture(t)
 	techSvc := techadmin.NewService(techadmin.NewRepository(f.db)).WithTxRunner(f.db)
-	raw, key, err := techSvc.GenerateKey(context.Background(), "gov refusal key", []string{"governance:read"})
+	raw, key, err := techSvc.GenerateKey(context.Background(), "gov refusal key", []string{"governance:read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

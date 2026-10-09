@@ -11,10 +11,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
@@ -125,12 +129,56 @@ func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) 
 	return s.tx.RunInTx(ctx, fn)
 }
 
+// ValidateGrantScopes checks the scopes of a mint against the grant grammar
+// (ADR 0007 section 5.3): every scope must be one the vocabulary can grant
+// (middleware.ValidScopeGrammar, the one source, so the mint and the auth
+// core cannot disagree), and the propose and commit verbs are grantable only
+// on a confirm gated module. A scope outside the grammar is a 400
+// validation_failed naming scopes[i]: a key could already be minted with a
+// typo that silently granted nothing, and with four verbs the typo space is
+// wider; the mint is where the operator can still fix it. No stored key
+// changes (migration 103 reports the strays, by id and prefix).
+func ValidateGrantScopes(scopes []string) error {
+	grammar := make(map[string]bool)
+	for _, scope := range middleware.ValidScopeGrammar() {
+		grammar[scope] = true
+	}
+	v := &httpx.Validator{}
+	for i, scope := range scopes {
+		path := "scopes[" + strconv.Itoa(i) + "]"
+		if !grammar[scope] {
+			if _, verb, found := strings.Cut(scope, ":"); found && (verb == "propose" || verb == "commit") {
+				v.Check(false, path, "propose and commit are grantable only on a module with a registered draft kind")
+			} else {
+				v.Check(false, path, "is not a scope the grant grammar knows: <module>:<verb>, the verb read, write, propose or commit")
+			}
+		}
+	}
+	return v.Err()
+}
+
 // GenerateKey mints a machine key, hashes it, stores the hash, and answers
-// with the raw key (the only time it is visible) beside its row. The mint
-// itself is unchanged from ADR 0002: whatever scopes it is handed are stored
-// verbatim, and grammar validation at the mint is C5-2a's (ADR 0007 section
-// 5.3). The mint, its audit row and key.created are one transaction.
-func (s *Service) GenerateKey(ctx context.Context, name string, scopes []string) (string, *APIKey, error) {
+// with the raw key (the only time it is visible) beside its row. The scopes
+// are validated against the grant grammar before anything is written
+// (ValidateGrantScopes); a granted scope still reads back as written (ADR
+// 0002). Branch, when not nil, pins the key to one branch (ADR 0007 section
+// 5.5): it is stored at mint and never edited. The mint, its audit row and
+// key.created are one transaction.
+func (s *Service) GenerateKey(ctx context.Context, name string, scopes []string, branch *uuid.UUID) (string, *APIKey, error) {
+	if err := ValidateGrantScopes(scopes); err != nil {
+		return "", nil, err
+	}
+	if branch != nil {
+		exists, err := s.repo.BranchExists(ctx, *branch)
+		if err != nil {
+			return "", nil, err
+		}
+		if !exists {
+			return "", nil, &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed,
+				Message: "branch_id names no branch",
+				Details: []httpx.FieldError{{Field: "branch_id", Message: "must be a branch location"}}}
+		}
+	}
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
 		return "", nil, err
@@ -153,6 +201,7 @@ func (s *Service) GenerateKey(ctx context.Context, name string, scopes []string)
 		KeyHash:   storedHash,
 		KeyPrefix: rawKey[:12],
 		Scopes:    scopes,
+		BranchID:  branch,
 		CreatedAt: httpx.TimestampOf(s.now().UTC()),
 	}
 
@@ -161,18 +210,24 @@ func (s *Service) GenerateKey(ctx context.Context, name string, scopes []string)
 			return err
 		}
 		if s.audit != nil {
+			changes := map[string]any{"name": name, "scopes": scopes}
+			if branch != nil {
+				changes["branch_id"] = branch.String()
+			}
 			if err := s.audit.Log(ctx, audit.Entry{
 				Action:     "key.created",
 				EntityType: "api_key",
 				EntityID:   apiKey.ID,
-				Changes:    map[string]any{"name": name, "scopes": scopes},
+				Changes:    changes,
 			}); err != nil {
 				return err
 			}
 		}
-		return s.record(ctx, "key.created", "api_key", apiKey.ID, map[string]any{
-			"name": name, "scopes": scopes, "prefix": apiKey.KeyPrefix,
-		}, 0)
+		data := map[string]any{"name": name, "scopes": scopes, "prefix": apiKey.KeyPrefix}
+		if branch != nil {
+			data["branch_id"] = branch.String()
+		}
+		return s.record(ctx, "key.created", "api_key", apiKey.ID, data, 0)
 	})
 	if err != nil {
 		return "", nil, err
