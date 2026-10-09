@@ -846,19 +846,23 @@ this record, can merge now, ahead of all of them: it changes no code.
 
 Sizes, dev hour equivalents, re argued against the code from the round 1
 review's estimate (the review's envelope was 60 to 100; the buckets below
-are its own, and their sum is stated rather than rounded):
+are its own, and their sum is stated rather than rounded). The round 3
+fixes grow items 1, 2, 5 and 7: the lines column, the default bridge and
+the down's refusal probes (1), the composite keys on lines and reversals
+and the code rename refusal (2), the key pinning and the user only
+writes (5), and the settings gate (7):
 
 | Order | Item | Size |
 |---|---|---|
-| 1 | The migration and the census test (section 10: about twenty tables, six rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
+| 1 | The migration and the census test (section 10: about twenty five tables, six rules, triggers, per company GL constraints, the step 4 default bridge, the down's refusal probes, the company row's series identity, round trip and refusal tests) | 16 to 24 |
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test) | 14 to 20 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks; C2-4's invariant test extended per `(company, currency)`, the `1020` and `2200` balances both; each step 4 default dropped with its writer) | 14 to 24 |
-| 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
+| 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
 
-Total: 66 to 106 dev hour equivalents. Item 1 lands first, on its own,
+Total: 74 to 114 dev hour equivalents. Item 1 lands first, on its own,
 behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
 and 3 land together or in that order, and item 3 drops the defaults in
 the same pull request that makes its writers set the column (items 1 to 3
@@ -885,7 +889,8 @@ merges: the company create route is item 7's.
   memo, vendor bill and bank account names its company, set by its writer
   and checked by the database where the shapes allow.
 - Gapless numbers become per company, keyed by company id: companies
-  created after the migration carry their code in the prefix, the seed
+  created after the migration carry their infix (their code at create) in
+  the prefix, the seed
   company's series and number forms change nothing, and number URLs keep
   working under widened patterns, recorded as contract changes.
 - The census test holds the split: no branch carrying table lands without
