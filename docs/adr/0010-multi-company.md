@@ -128,9 +128,9 @@ The table `company`:
 - `id UUID PRIMARY KEY`
 - `code TEXT NOT NULL UNIQUE CHECK (code ~ '^[A-Z0-9]{1,10}$')` (short,
   uppercase, letters and digits only, so it can sit inside a number
-  prefix without ambiguity; chosen by the dealer, it appears in the
-  gapless prefixes of companies created after the migration and is frozen
-  once the company has issued a gapless number, section 4)
+  prefix without ambiguity; chosen by the dealer, it is copied into
+  `number_infix` when a company is created, and the infix, never the
+  code, is what freezes, section 4; the code itself stays editable)
 - `name TEXT NOT NULL`
 - `functional_currency CHAR(3) NOT NULL` (section 5)
 - `fiscal_year_start_month SMALLINT NOT NULL DEFAULT 1` (drives the period
@@ -138,9 +138,13 @@ The table `company`:
 - `tax_company_code TEXT NULL` (the provider's company code, section 7; null
   falls back to the process setting)
 - `invoice_series TEXT NOT NULL UNIQUE`, `credit_memo_series TEXT NOT NULL
-  UNIQUE`, `number_infix TEXT NULL` (the series identity, section 4: the
-  mint reads these, so the row itself says which company keeps the bare
-  number forms; all three are set at create and never edited)
+  UNIQUE`, `number_infix TEXT NULL UNIQUE CHECK (number_infix ~
+  '^[A-Z0-9]{1,10}$')` (the series identity, section 4: the mint reads
+  these, so the row itself says which company keeps the bare number
+  forms; all three are set at create and never edited; the infix is
+  `UNIQUE` so two companies can never mint the same number, and
+  `CHECK ((number_infix IS NULL) = (invoice_series = 'invoice'))` pins
+  the bare forms to the seed company alone)
 - `created_at`, `updated_at TIMESTAMPTZ NOT NULL`
 
 No timezone column: branches already carry one (`model.go:65`) and ADR 0005
@@ -376,12 +380,20 @@ row", "code `MAIN`") decides which company keeps the bare forms:
 set at create and never edited. The seed company gets `invoice`,
 `credit_memo` and a null infix; a company created later gets
 `invoice:<its id>`, `credit_memo:<its id>` and its code as the infix,
-frozen at create. The key is the id, never the code, because the code is
+frozen at create and `UNIQUE` (section 1): a company that renames its
+code keeps its infix, and a company created later cannot take an infix a
+living company holds, so two companies can never both mint
+`IN-<infix>-000001` (the cross database `UNIQUE (number)` of
+`invoices_number_key`, `097:86`, holds the line beside it). The key is
+the id, never the code, because the code is
 dealer editable and a rename after the first number would either restart
 the series at 1 under a new key or orphan the old one, breaking the legal
-entity's unbroken series; `company.code` is frozen once the company has
-issued a gapless number, an update that would change it refused with 409
-blocker `numbers_issued` (section 1). The prefix carries the infix of
+entity's unbroken series; the code is never frozen, because numbers read
+the frozen infix alone: a rename of the code changes no number, C2-3's
+backfill (`097`) has already issued numbers for every existing
+deployment, so a freeze on the code would freeze the seed company's
+`MAIN` from the first moment and item 7's rename of the seed could never
+run. The prefix carries the infix of
 companies created after the migration, `IN-<infix>-000001` and
 `CM-<infix>-000001`. The reason gaplessness exists is the tax authority,
 and the tax authority is per legal entity (ADR 0005 section 4.1); two
@@ -753,8 +765,8 @@ census test below is the guard for tables that land later.
 Up, in order:
 
 1. Create `company` (section 1) and insert exactly one row: `code` `MAIN`
-   (a fixed code the dealer can rename on the admin screen of section 11
-   until the company issues a gapless number, then frozen, section 4),
+   (the dealer can rename it on the admin screen of section 11 at any
+   time; the infix, never the code, is what freezes, section 4),
    `name` `Main`, `functional_currency` from `system_settings`
    `currency.default` (`091:36`; `USD` when absent),
    `fiscal_year_start_month` 1, `tax_company_code` null (the operator sets
