@@ -161,7 +161,8 @@ section 10 reads:
 
 - **R1, follows its parent.** The row carries a NOT NULL parent that already
   names a company (a `branch_id` column set NOT NULL; a bank account for
-  the bank tables). A `BEFORE INSERT OR UPDATE` trigger sets `company_id`
+  the bank tables; a register for the till tables, the register itself
+  R1 through `066:13`). A `BEFORE INSERT OR UPDATE` trigger sets `company_id`
   from that parent and refuses a row whose parent moved to another
   company. Application code never writes `company_id` here. A trigger, not
   a generated column: a Postgres generated column cannot read another
@@ -205,8 +206,7 @@ row itself.
 | sales (C2-4) | `payment_refunds` | R2 | from its payment or credit memo |
 | sales (legacy) | `customer_deposits`, `customer_deposit_applications` | legacy | renamed `*_legacy` by C2-4 (ADR 0005 9.1); no reader, waiting for the drop |
 | counter | `pos_registers`, `pos_transactions` | R1 | `066:13,23` |
-| counter | `till_sessions`, `till_z_reports` | R2 | `branch_id` nullable today (`075:21`, `078:15`); the writer sets the company from the register's branch at open and close; backfilled by section 10 |
-| counter | `pos_returns` | R2 | `079:42`; from the sale it returns |
+| counter | `till_sessions`, `pos_returns`, `till_z_reports` | R1 | the parent is the register, NOT NULL on all three (`075:20`, `079:38`, `078:14`), and `pos_registers` is itself R1 (`066:13`); the trigger sets the company from the register's. A no receipt return has no sale to read (`original_transaction_id` NULL, `079:40`), so the register, not the sale, is the parent; the nullable `branch_id` columns (`075:21`, `078:15`, `079:42`) stay nullable and are not the trigger's source |
 | purchasing | `purchase_orders`, `po_receipts` | R1 | `065:7,21` |
 | purchasing | `po_freight_charges` | child | of the purchase order it belongs to |
 | AP | `vendor_invoices` | R1 | `branch_id` is added by C4-1b, backfilled from the purchase order's branch or the default branch (ADR 0008 section 12 at `0008:2021-2024`); the build sets it NOT NULL first, as for payments, then the standard trigger |
@@ -686,11 +686,12 @@ Up, in order:
    `BEFORE INSERT OR UPDATE` trigger that keeps it and refuses a parent of
    another company. Payments and credit memos are R1 from the branch cycle
    2 adds (section 2): their `branch_id` columns arrive with C2-3 and C2-4
-   and are set NOT NULL here first, then take the same trigger. The
-   nullable branch rows that stay nullable (`075:21`, `078:15`, `079:42`)
-   keep their named writer rule (section 2), their company backfilled from
-   their register or sale; `079:79` is left alone (legacy after C2-4, ADR
-   0005 9.1); `089:64` is left alone (no company column, section 2).
+   and are set NOT NULL here first, then take the same trigger. The till
+   tables (`075:21`, `078:15`, `079:42`) are R1 through their register
+   (section 2): their trigger keys on the register, not on the nullable
+   branch, and their company is backfilled from the register's;
+   `079:79` is left alone (legacy after C2-4, ADR 0005 9.1); `089:64`
+   is left alone (no company column, section 2).
 4. The R2 tables of section 2 that exist when it runs: add `company_id`,
    backfill every row to the seed company, NOT NULL, the foreign key, and
    a `DEFAULT` of the seed company's id, which the migration knows from
