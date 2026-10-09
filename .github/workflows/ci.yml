@@ -45,7 +45,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # Google's public Docker Hub mirror: Docker Hub rate limits
+        # unauthenticated pulls from shared runners. Same image, CI only.
+        image: mirror.gcr.io/library/postgres:16-alpine
         env:
           POSTGRES_USER: gable_user
           POSTGRES_PASSWORD: gable_password
@@ -351,7 +353,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # Google's public Docker Hub mirror: Docker Hub rate limits
+        # unauthenticated pulls from shared runners. Same image, CI only.
+        image: mirror.gcr.io/library/postgres:16-alpine
         env:
           POSTGRES_USER: gable_user
           POSTGRES_PASSWORD: gable_password
@@ -407,6 +411,15 @@ jobs:
         working-directory: web
         run: npx playwright install --with-deps chromium
 
+      # Docker Hub rate limits unauthenticated pulls from shared runners, so
+      # pull the nginx image from Google's public mirror under its Docker Hub
+      # name. The daemon is not restarted here: that would stop the Postgres
+      # service container. CI only; self-hosted defaults are untouched.
+      - name: Pull nginx through the Docker Hub mirror
+        run: |
+          docker pull mirror.gcr.io/library/nginx:1.27-alpine
+          docker tag mirror.gcr.io/library/nginx:1.27-alpine nginx:1.27-alpine
+
       - name: Start the stack (core serve and nginx)
         run: web/scripts/e2e-stack.sh up
 
@@ -442,6 +455,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Docker Hub rate limits unauthenticated pulls from shared runners, so
+      # point this runner's daemon at Google's public mirror, and pre-pull the
+      # images this job uses from it under their Docker Hub names (the daemon
+      # setting alone did not stop docker run and compose reaching Docker Hub).
+      # CI only; self-hosted defaults are untouched.
+      - name: Use the Docker Hub mirror
+        run: |
+          sudo mkdir -p /etc/docker
+          [ -s /etc/docker/daemon.json ] || echo '{}' | sudo tee /etc/docker/daemon.json >/dev/null
+          sudo jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new >/dev/null
+          sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info | grep -A1 'Registry Mirrors'
+          for image in postgres:16-alpine golang:1.26.9-alpine alpine:3.20 node:20-alpine nginx:1.27-alpine; do
+            docker pull "mirror.gcr.io/library/$image"
+            docker tag "mirror.gcr.io/library/$image" "$image"
+          done
+
       - name: Build and start the stack
         run: make up
 
@@ -464,6 +495,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Docker Hub rate limits unauthenticated pulls from shared runners, so
+      # point this runner's daemon at Google's public mirror, and pre-pull the
+      # images this job uses from it under their Docker Hub names (the daemon
+      # setting alone did not stop docker run and compose reaching Docker Hub).
+      # CI only; self-hosted defaults are untouched.
+      - name: Use the Docker Hub mirror
+        run: |
+          sudo mkdir -p /etc/docker
+          [ -s /etc/docker/daemon.json ] || echo '{}' | sudo tee /etc/docker/daemon.json >/dev/null
+          sudo jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new >/dev/null
+          sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info | grep -A1 'Registry Mirrors'
+          for image in golang:1.26.9-alpine alpine:3.20 node:20-alpine nginx:1.27-alpine; do
+            docker pull "mirror.gcr.io/library/$image"
+            docker tag "mirror.gcr.io/library/$image" "$image"
+          done
 
       - name: Build backend image
         run: docker build -f core/Dockerfile .
