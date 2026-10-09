@@ -6,6 +6,8 @@ package payment
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/gablelbm/gable/pkg/httputil"
@@ -101,8 +103,17 @@ func (h *Handler) ProcessCardPayment(w http.ResponseWriter, r *http.Request) {
 
 	payment, err := h.service.ProcessCardPayment(r.Context(), req.InvoiceID, req.TokenID, req.Amount, req.Notes)
 	if err != nil {
+		var notReversed *ChargeNotReversedError
+		if errors.As(err, &notReversed) {
+			// The card WAS charged and nothing gave it back: say so, with the
+			// gateway transaction id and nothing else about the card.
+			respondWithMessage(w, r, http.StatusBadGateway, "CHARGE_NOT_REVERSED", fmt.Sprintf(
+				"the card was charged and the charge could not be reversed; finance must reconcile gateway transaction %s",
+				notReversed.GatewayTxID), err)
+			return
+		}
 		if errors.Is(err, ErrInvoiceVoid) {
-			httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+			respondWithMessage(w, r, http.StatusConflict, "CONFLICT", err.Error(), err)
 			return
 		}
 		httputil.RespondError(w, r, "card payment failed", http.StatusPaymentRequired, err)
@@ -157,4 +168,21 @@ type CreatePaymentRequest struct {
 	Method    PaymentMethod `json:"method"`
 	Reference string        `json:"reference"`
 	Notes     string        `json:"notes"`
+}
+
+// respondWithMessage writes the error envelope with a message the client is
+// meant to read (RespondError writes only the generic status text). The
+// messages passed here name no internals and no card data.
+func respondWithMessage(w http.ResponseWriter, r *http.Request, status int, code, msg string, err error) {
+	reqID := w.Header().Get("X-Request-ID")
+	if reqID == "" {
+		reqID = r.Header.Get("X-Request-ID")
+	}
+	slog.Error(msg, "error", err, "status", status, "method", r.Method, "path", r.URL.Path, "request_id", reqID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(httputil.ErrorResponse{
+		Error: httputil.ErrorDetail{Code: code, Message: msg},
+		Meta:  httputil.ErrorMeta{RequestID: reqID},
+	})
 }

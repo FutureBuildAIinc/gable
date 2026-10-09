@@ -83,6 +83,39 @@ func (s *Service) GetPublicKey() string {
 // ErrInvoiceVoid is the refusal to record a payment against a void invoice.
 var ErrInvoiceVoid = errors.New("the invoice is void: it takes no payment")
 
+// ErrChargeNotReversed: the card was charged, the invoice refused the payment,
+// and neither the void nor the refund went through.
+var ErrChargeNotReversed = errors.New("the card was charged and the charge could not be reversed")
+
+// ChargeNotReversedError is the error ProcessCardPayment returns when the
+// reversal failed. It carries the gateway transaction id finance reconciles
+// and nothing else about the card; errors.Is(err, ErrChargeNotReversed) holds.
+type ChargeNotReversedError struct {
+	GatewayTxID string
+	Cause       error
+}
+
+func (e *ChargeNotReversedError) Error() string {
+	return fmt.Sprintf("%s (gateway transaction %s): %v", ErrChargeNotReversed, e.GatewayTxID, e.Cause)
+}
+
+func (e *ChargeNotReversedError) Is(target error) bool { return target == ErrChargeNotReversed }
+
+func (e *ChargeNotReversedError) Unwrap() error { return e.Cause }
+
+// reversalTimeout bounds the gateway calls and the audit write of a reversal,
+// which run detached from the request.
+const reversalTimeout = 30 * time.Second
+
+// chargeReversal is how a reversal of an approved charge ended.
+type chargeReversal string
+
+const (
+	chargeVoided   chargeReversal = "voided"
+	chargeRefunded chargeReversal = "refunded"
+	chargeFailed   chargeReversal = "failed"
+)
+
 // lockInvoice reads the invoice under its row lock (ADR 0005 section 11,
 // step 4) so a payment and an invoice void serialize: the void checks for
 // payments under the same lock, and a payment never lands on a void invoice.
@@ -208,7 +241,9 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 	// 2. Record payment in our DB within a transaction
 	var p *Payment
 	refused := false
+	began := false
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
+		began = true
 		inv, err := s.lockInvoice(ctx, invoiceID)
 		if errors.Is(err, ErrInvoiceVoid) {
 			refused = true
@@ -268,12 +303,20 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 		return nil
 	})
 
-	if err != nil && refused {
-		// The invoice refused the payment after the gateway approved the
-		// charge (a void committed during the call): give the money back
+	if err != nil && (refused || !began) {
+		// Nothing was recorded for an approved charge: the invoice refused
+		// it (a void committed during the call) or the transaction never
+		// opened (the request ended during the call). Give the money back
 		// before returning, so the customer is not charged with no document.
-		s.reverseCharge(ctx, result.TransactionID, invoiceID, amountCents)
-		return nil, fmt.Errorf("payment refused after the gateway approved the charge: %w", err)
+		// The reversal does not ride the request: a client that gave up must
+		// not leave the card charged.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reversalTimeout)
+		defer cancel()
+		outcome, cause := s.reverseCharge(rctx, result.TransactionID, invoiceID, amountCents)
+		if outcome == chargeFailed {
+			return nil, &ChargeNotReversedError{GatewayTxID: result.TransactionID, Cause: cause}
+		}
+		return nil, fmt.Errorf("payment refused after the gateway approved the charge, and the card charge was %s: %w", outcome, err)
 	}
 	if err != nil {
 		// Gateway charged but DB failed — log for manual reconciliation
@@ -291,24 +334,45 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 
 // reverseCharge undoes an approved charge that no payment record backs: the
 // same-day void first, the refund when the void is refused (a settled
-// capture). Both outcomes are logged; a reversal that fails too is logged for
+// capture). It logs the outcome and writes it to the audit log, in its own
+// write after the rolled back transaction ended, naming the invoice and the
+// gateway transaction id (no card data). On failure it returns both causes for
 // manual reconciliation.
-func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, invoiceID uuid.UUID, amountCents int64) {
-	_, voidErr := s.gateway.Void(ctx, gatewayTxID)
-	if voidErr == nil {
-		s.logger.Warn("Gateway charge voided: the invoice refused the payment",
-			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents)
-		return
+func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, invoiceID uuid.UUID, amountCents int64) (chargeReversal, error) {
+	outcome, cause := chargeVoided, error(nil)
+	if _, voidErr := s.gateway.Void(ctx, gatewayTxID); voidErr != nil {
+		s.logger.Info("Gateway void refused, refunding instead",
+			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "error", voidErr)
+		if _, refundErr := s.gateway.Refund(ctx, gatewayTxID, amountCents); refundErr != nil {
+			outcome, cause = chargeFailed, fmt.Errorf("void: %v; refund: %v", voidErr, refundErr)
+		} else {
+			outcome = chargeRefunded
+		}
 	}
-	s.logger.Info("Gateway void refused, refunding instead",
-		"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "error", voidErr)
-	if _, err := s.gateway.Refund(ctx, gatewayTxID, amountCents); err != nil {
+	switch outcome {
+	case chargeFailed:
 		s.logger.Error("CRITICAL: Gateway charged, the invoice refused it, and the reversal failed",
-			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents, "error", err)
-		return
+			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents, "error", cause)
+	default:
+		s.logger.Warn("Gateway charge reversed: the invoice refused the payment",
+			"outcome", string(outcome), "gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents)
 	}
-	s.logger.Warn("Gateway charge refunded: the invoice refused the payment",
-		"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents)
+	if s.auditLog != nil {
+		if err := s.auditLog.Log(ctx, audit.Entry{
+			Action:     "payment.charge_reversal",
+			EntityType: "invoice",
+			EntityID:   invoiceID,
+			Changes: map[string]interface{}{
+				"gateway_tx_id": gatewayTxID,
+				"amount_cents":  amountCents,
+				"outcome":       string(outcome),
+			},
+		}); err != nil {
+			s.logger.Error("CRITICAL: the charge reversal audit row was not written",
+				"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "outcome", string(outcome), "error", err)
+		}
+	}
+	return outcome, cause
 }
 
 // RefundPayment issues a full or partial refund on a completed card payment.
