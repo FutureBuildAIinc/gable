@@ -66,18 +66,17 @@ func BoardFeet(linearFeet httpx.Quantity, thicknessIn, widthIn httpx.Quantity) (
 
 // DisplayBoardFeet is the wire's board_feet: the exact board feet rounded
 // once to scale 4, half away from zero (R4.3). No arithmetic reads it;
-// 200/3 is "66.6667".
+// 200/3 is "66.6667" and -200/3 is "-66.6667".
 func DisplayBoardFeet(exact *big.Rat) httpx.Quantity {
-	scaled := new(big.Rat).Mul(exact, new(big.Rat).SetInt64(10_000))
-	i := new(big.Int).Quo(scaled.Num(), scaled.Denom())
-	frac := new(big.Rat).Sub(scaled, new(big.Rat).SetInt(i)) // in [0, 1); the sign stays on i
-	half := big.NewRat(1, 2)
 	neg := exact.Sign() < 0
-	mag := new(big.Int).Abs(i)
-	if frac.Cmp(half) >= 0 {
-		mag.Add(mag, big.NewInt(1))
+	mag := new(big.Rat).Abs(exact)
+	scaled := new(big.Rat).Mul(mag, new(big.Rat).SetInt64(10_000))
+	i := new(big.Int).Quo(scaled.Num(), scaled.Denom())
+	frac := new(big.Rat).Sub(scaled, new(big.Rat).SetInt(i)) // in [0, 1)
+	if frac.Cmp(big.NewRat(1, 2)) >= 0 {
+		i.Add(i, big.NewInt(1))
 	}
-	out := mag.Int64()
+	out := i.Int64()
 	if neg {
 		out = -out
 	}
