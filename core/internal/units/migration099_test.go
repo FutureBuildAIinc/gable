@@ -3,10 +3,10 @@
 
 package units_test
 
-// Migration 098 on rows that exist (recipe step 3, ADR 0006 section 8's
-// steps A1, A2 and A3): the schema up to 097 is built in a scratch database
+// Migration 099 on rows that exist (recipe step 3, ADR 0006 section 8's
+// steps A1, A2 and A3): the schema up to 098 is built in a scratch database
 // of its own, legacy rows are written in the shape the base commit left
-// them, then 098 is applied and each backfill is read back. The down
+// them, then 099 is applied and each backfill is read back. The down
 // refuses while a product holds a unit set row other than its stocking row
 // and, once the row is gone, reverses its own steps; the up applies again
 // after the down.
@@ -73,18 +73,18 @@ func migrationFiles(t *testing.T) (before []string, target, down string) {
 	for _, f := range all {
 		base := filepath.Base(f)
 		switch {
-		case strings.HasPrefix(base, "098_"):
+		case strings.HasPrefix(base, "099_"):
 			target = f
-		case base < "098_":
+		case base < "099_":
 			before = append(before, f)
 		}
 	}
 	if target == "" {
-		t.Fatal("migration 098 not found")
+		t.Fatal("migration 099 not found")
 	}
-	down = "../../migrations/down/098_units_catalogue_and_sets_down.sql"
+	down = "../../migrations/down/099_units_catalogue_and_sets_down.sql"
 	if _, err := os.Stat(down); err != nil {
-		t.Fatal("migration 098 down not found")
+		t.Fatal("migration 099 down not found")
 	}
 	return before, target, down
 }
@@ -147,7 +147,7 @@ func legacyRows(t *testing.T, conn *pgx.Conn) {
 	}
 }
 
-func TestMigration098_CatalogueSetsAndTallies(t *testing.T) {
+func TestMigration099_CatalogueSetsAndTallies(t *testing.T) {
 	conn := scratchDB(t)
 	before, target, downFile := migrationFiles(t)
 	for _, f := range before {
