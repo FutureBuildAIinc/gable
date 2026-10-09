@@ -486,6 +486,24 @@ naming the company scoped route. Both the new route and the old route's
 refusal are rows in `docs/refactor/CONTRACT-CHANGES.md`. Sized inside
 item 7.
 
+The kill switch: the request's company leans on the branch context, and
+the branch context is only real while `multi_branch_enabled` is on. It
+is seeded off (`059_default_branch_setting.sql:45`), and with it off
+`BranchMiddleware` marks every request admin and ignores `X-Branch-Id`
+entirely (`branch.go:150-156`), so with a second company in such a
+deployment every user would reach every company, every list would span
+all companies, and every write would resolve through
+`ResolveBranchForWrite` to the default branch (`branch.go:76-97`), so no
+document could be written for the second company at all. The same holds
+in part with `default_branch_required` off: a non admin with no header
+writes to the default branch whether or not their grants reach it. Two
+gates close this: creating a second company requires
+`multi_branch_enabled` and `default_branch_required` both true (else 409
+`conflict`, blocker `multi_branch_disabled`), and while more than one
+company exists a settings write that would turn either off is refused
+with the same blocker. Sized inside item 7, with a test for each
+refusal.
+
 Who reaches a company: a caller reaches a company exactly when their
 grants reach a branch of it, one query over `user_locations` joined to
 branch rows. Admins and owners with no grants reach every branch today
@@ -715,7 +733,7 @@ are its own, and their sum is stated rather than rounded):
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
-| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route; routes and the desk screen) | 6 to 10 |
+| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
 
 Total: 66 to 106 dev hour equivalents. Item 1 lands first and items 2 to 7
 depend on it; items 2 and 3 land together or in that order; 4 to 7 are
