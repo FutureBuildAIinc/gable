@@ -404,39 +404,39 @@ func r1bATaxGroups() []groupDef {
 }
 
 func r1bADepositGroups() []groupDef {
+	json := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
 	return []groupDef{{
-		name: "deposit_apply",
+		name: "payment_unapplied",
 		steps: []stepDef{
+			// Cash held for a customer other than the invoice's: unapplied cash
+			// for a_customer, whose application to another customer's invoice is
+			// refused, then applied nowhere and voided.
 			{
-				name:   "deposit.a.create",
+				name:   "payment.a.create",
 				method: "POST",
-				path:   "/api/v1/deposits",
+				path:   "/api/v1/payments",
 				body: map[string]any{
 					"customer_id": "{a_customer}", "branch_id": "{branch}", "amount_cents": 10000,
-					"method": "CHECK", "reference": "GOLD-DEP-A1",
+					"method": "check", "reference": "GOLD-PAY-A1",
 				},
-				extract: map[string]string{"a_deposit": "/id"},
+				extract: map[string]string{"a_payment": "/id"},
 			},
-			{name: "deposit.list", method: "GET", path: "/api/v1/deposits?customer_id={a_customer}"},
-			{name: "deposit.list.missing_customer", method: "GET", path: "/api/v1/deposits"},
-			{name: "deposit.list.bad_customer", method: "GET", path: "/api/v1/deposits?customer_id=not-a-uuid"},
-			{name: "deposit.apply.partial", method: "POST", path: "/api/v1/deposits/{a_deposit}/apply",
-				body: map[string]any{"amount_cents": 4000, "invoice_id": "{myInvoice}"}},
-			{name: "deposit.get.after_partial", method: "GET", path: "/api/v1/deposits/{a_deposit}"},
-			{name: "deposit.apply.exceeds_remaining", method: "POST", path: "/api/v1/deposits/{a_deposit}/apply",
-				body: map[string]any{"amount_cents": 7000}},
-			{name: "deposit.apply.zero_amount", method: "POST", path: "/api/v1/deposits/{a_deposit}/apply",
-				body: map[string]any{"amount_cents": 0}},
-			{name: "deposit.apply.bad_body", method: "POST", path: "/api/v1/deposits/{a_deposit}/apply", body: "not-an-object"},
-			{name: "deposit.apply.bad_id", method: "POST", path: "/api/v1/deposits/not-a-uuid/apply",
-				body: map[string]any{"amount_cents": 100}},
-			{name: "deposit.apply.not_found", method: "POST", path: "/api/v1/deposits/" + r1bAMissingID + "/apply",
-				body: map[string]any{"amount_cents": 100}},
-			{name: "deposit.apply.remainder", method: "POST", path: "/api/v1/deposits/{a_deposit}/apply",
-				body: map[string]any{"amount_cents": 6000}},
-			{name: "deposit.apply.already_applied", method: "POST", path: "/api/v1/deposits/{a_deposit}/apply",
-				body: map[string]any{"amount_cents": 100}},
-			{name: "deposit.list.after_apply", method: "GET", path: "/api/v1/deposits?customer_id={a_customer}"},
+			{name: "payment.a.list", method: "GET", path: "/api/v1/payments?customer_id={a_customer}"},
+			{name: "payment.a.list.bad_customer", method: "GET", path: "/api/v1/payments?customer_id=not-a-uuid"},
+			{name: "payment.a.apply.customer_mismatch", method: "POST", path: "/api/v1/payments/{a_payment}/applications", headers: json("1"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 100}}}},
+			{name: "payment.a.apply.unknown_invoice", method: "POST", path: "/api/v1/payments/{a_payment}/applications", headers: json("1"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "00000000-0000-0000-0000-0000000000aa", "amount_cents": 100}}}},
+			{name: "payment.a.apply.empty", method: "POST", path: "/api/v1/payments/{a_payment}/applications", headers: json("1"),
+				body: map[string]any{"applications": []map[string]any{}}},
+			{name: "payment.a.apply.bad_body", method: "POST", path: "/api/v1/payments/{a_payment}/applications", headers: json("1"), body: "not-an-object"},
+			{name: "payment.a.apply.bad_id", method: "POST", path: "/api/v1/payments/not-a-uuid/applications", headers: json("1"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 100}}}},
+			{name: "payment.a.apply.not_found", method: "POST", path: "/api/v1/payments/" + r1bAMissingID + "/applications", headers: json("1"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 100}}}},
+			{name: "payment.a.void", method: "POST", path: "/api/v1/payments/{a_payment}/transitions", headers: json("1"),
+				body: map[string]any{"to": "voided", "reason": "golden void of unapplied cash"}},
+			{name: "payment.a.list.after_void", method: "GET", path: "/api/v1/payments?customer_id={a_customer}"},
 		},
 	}}
 }
@@ -446,16 +446,15 @@ func r1bAPaymentGroups() []groupDef {
 		name: "payment_gateway",
 		steps: []stepDef{
 			// The harness configures no Run Payments gateway: a charge is
-			// refused with 402 and a refund with 500, today's behaviour of
-			// a well formed request against an unconfigured gateway.
+			// refused with 503 payment gateway not configured, and a refund of
+			// a non card payment needs no gateway.
 			{name: "payment.card.no_gateway", method: "POST", path: "/api/v1/payments/card",
-				body: map[string]any{"invoice_id": "{myInvoice}", "token_id": "tok_golden", "amount": 100}},
+				body: map[string]any{"customer_id": "{a_customer}", "token_id": "tok_golden", "amount_cents": 100}},
 			{name: "payment.card.missing_token", method: "POST", path: "/api/v1/payments/card",
-				body: map[string]any{"invoice_id": "{myInvoice}", "amount": 100}},
+				body: map[string]any{"customer_id": "{a_customer}", "amount_cents": 100}},
 			{name: "payment.card.bad_body", method: "POST", path: "/api/v1/payments/card", body: "not-an-object"},
-			{name: "payment.refund.no_gateway", method: "POST", path: "/api/v1/payments/refund",
-				body: map[string]any{"payment_id": "{myPayment}", "amount": 100, "reason": "golden refund"}},
-			{name: "payment.refund.bad_body", method: "POST", path: "/api/v1/payments/refund", body: "not-an-object"},
+			{name: "payment.legacy_refund_route_gone", method: "POST", path: "/api/v1/payments/refund",
+				body: map[string]any{"payment_id": "{myPayment}", "amount": 100}},
 		},
 	}}
 }

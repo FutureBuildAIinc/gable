@@ -1,0 +1,412 @@
+[
+  {
+    "name": "payment.a.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 10000,
+        "branch_id": "<id-1>",
+        "customer_id": "<id-2>",
+        "method": "check",
+        "reference": "GOLD-PAY-A1"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "amount_cents": 10000,
+        "applications": [],
+        "auth_code": null,
+        "branch_id": "<id-1>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-2>",
+        "customer_name": "Golden Contacts Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": null,
+        "number": "PAY-000047",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-A1",
+        "refunds": [],
+        "revision": 1,
+        "status": "posted",
+        "unapplied_cents": 10000,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "payment.a.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?customer_id=<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "amount_cents": 10000,
+            "auth_code": null,
+            "branch_id": "<id-1>",
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-2>",
+            "customer_name": "Golden Contacts Co",
+            "gateway_tx_id": null,
+            "gl_entry_id": "<id-3>",
+            "id": "<id-4>",
+            "job_id": null,
+            "method": "check",
+            "notes": null,
+            "number": "PAY-000047",
+            "order_id": null,
+            "received_on": "<day+0>",
+            "reference": "GOLD-PAY-A1",
+            "revision": 1,
+            "status": "posted",
+            "unapplied_cents": 10000,
+            "updated_at": "<ts+0d>",
+            "void_reason": null,
+            "voided_at": null,
+            "voided_by": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "payment.a.list.bad_customer",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?customer_id=not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "customer_id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.a.apply.customer_mismatch",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 100,
+            "invoice_id": "<id-6>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "customer_mismatch",
+              "message": "the payment and the invoice belong to different customers"
+            }
+          ],
+          "message": "the payment and the invoice belong to different customers"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.a.apply.unknown_invoice",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 100,
+            "invoice_id": "<id-8>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "applications[0].invoice_id",
+              "message": "no such invoice"
+            }
+          ],
+          "message": "the request is not valid"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.a.apply.empty",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "applications": []
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "applications",
+              "message": "name at least one invoice"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.a.apply.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.a.apply.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/not-a-uuid/applications",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 100,
+            "invoice_id": "<id-6>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid payment id"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.a.apply.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-8>/applications",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 100,
+            "invoice_id": "<id-6>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "payment not found"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.a.void",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "reason": "golden void of unapplied cash",
+        "to": "voided"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_cents": 10000,
+        "applications": [],
+        "auth_code": null,
+        "branch_id": "<id-1>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-2>",
+        "customer_name": "Golden Contacts Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": null,
+        "number": "PAY-000047",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-A1",
+        "refunds": [],
+        "revision": 2,
+        "status": "voided",
+        "unapplied_cents": 0,
+        "updated_at": "<ts+0d>",
+        "void_reason": "golden void of unapplied cash",
+        "voided_at": "<ts+0d>",
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "payment.a.list.after_void",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?customer_id=<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "amount_cents": 10000,
+            "auth_code": null,
+            "branch_id": "<id-1>",
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-2>",
+            "customer_name": "Golden Contacts Co",
+            "gateway_tx_id": null,
+            "gl_entry_id": "<id-3>",
+            "id": "<id-4>",
+            "job_id": null,
+            "method": "check",
+            "notes": null,
+            "number": "PAY-000047",
+            "order_id": null,
+            "received_on": "<day+0>",
+            "reference": "GOLD-PAY-A1",
+            "revision": 2,
+            "status": "voided",
+            "unapplied_cents": 0,
+            "updated_at": "<ts+0d>",
+            "void_reason": "golden void of unapplied cash",
+            "voided_at": "<ts+0d>",
+            "voided_by": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  }
+]

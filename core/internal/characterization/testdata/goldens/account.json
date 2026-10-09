@@ -9,10 +9,32 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "available_credit": 9997858,
-        "balance_due": 2142,
-        "credit_limit": 10000000,
-        "customer_id": "<id-1>"
+        "available_credit_cents": 9996858,
+        "balance_cents": 3142,
+        "credit_limit_cents": 10000000,
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "unapplied_cents": 0
+      }
+    }
+  },
+  {
+    "name": "account.summary.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/accounts/<id-2>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "account not found"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
       }
     }
   },
@@ -25,48 +47,567 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "amount": -1000,
-          "balance_after": 2142,
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-1>",
-          "description": "Payment GOLD-PAY-1",
-          "id": "<id-2>",
-          "reference_id": "<id-3>",
-          "type": "PAYMENT"
+      "body": {
+        "items": [
+          {
+            "amount_cents": 1142,
+            "balance_after_cents": 3142,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Reversal of an application to IN-000051",
+            "id": "<id-4>",
+            "reference_id": "<id-5>",
+            "source_kind": "application",
+            "type": "REVERSAL"
+          },
+          {
+            "amount_cents": 2000,
+            "balance_after_cents": 2000,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Reversal of an application to IN-000051",
+            "id": "<id-6>",
+            "reference_id": "<id-7>",
+            "source_kind": "application",
+            "type": "REVERSAL"
+          },
+          {
+            "amount_cents": -1142,
+            "balance_after_cents": 0,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Payment PAY-000045 applied to IN-000051",
+            "id": "<id-8>",
+            "reference_id": "<id-5>",
+            "source_kind": "application",
+            "type": "PAYMENT"
+          },
+          {
+            "amount_cents": -2000,
+            "balance_after_cents": 1142,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Payment PAY-000045 applied to IN-000051",
+            "id": "<id-9>",
+            "reference_id": "<id-7>",
+            "source_kind": "application",
+            "type": "PAYMENT"
+          },
+          {
+            "amount_cents": 75,
+            "balance_after_cents": 3142,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Void of credit memo CM-000003",
+            "id": "<id-10>",
+            "reference_id": "<id-11>",
+            "source_kind": "credit_memo",
+            "type": "REVERSAL"
+          },
+          {
+            "amount_cents": -75,
+            "balance_after_cents": 3067,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Credit memo CM-000003",
+            "id": "<id-12>",
+            "reference_id": "<id-11>",
+            "source_kind": "credit_memo",
+            "type": "CREDIT_MEMO"
+          },
+          {
+            "amount_cents": 3142,
+            "balance_after_cents": 3142,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Invoice IN-000051",
+            "id": "<id-13>",
+            "reference_id": "<id-14>",
+            "source_kind": "invoice",
+            "type": "INVOICE"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "account.transactions.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/accounts/<id-1>/transactions?offset=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
         },
-        {
-          "amount": 75,
-          "balance_after": 3142,
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-1>",
-          "description": "Void of credit memo CM-000003",
-          "id": "<id-4>",
-          "reference_id": "<id-5>",
-          "type": "REVERSAL"
-        },
-        {
-          "amount": -75,
-          "balance_after": 3067,
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-1>",
-          "description": "Credit memo CM-000003",
-          "id": "<id-6>",
-          "reference_id": "<id-5>",
-          "type": "CREDIT_MEMO"
-        },
-        {
-          "amount": 3142,
-          "balance_after": 3142,
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-1>",
-          "description": "Invoice IN-000051",
-          "id": "<id-7>",
-          "reference_id": "<id-8>",
-          "type": "INVOICE"
+        "meta": {
+          "request_id": "<id-15>"
         }
-      ]
+      }
+    }
+  },
+  {
+    "name": "ar.aging",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging?customer_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "currency": "USD",
+            "current_cents": 3142,
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "days_1_30_cents": 0,
+            "days_31_60_cents": 0,
+            "days_61_90_cents": 0,
+            "job_id": null,
+            "job_name": null,
+            "over_90_cents": 0,
+            "ship_to_code": null,
+            "ship_to_id": null,
+            "total_cents": 3142,
+            "unapplied_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "ar.aging.by_job",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging?customer_id=<id-1>&group_by=job"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "currency": "USD",
+            "current_cents": 3142,
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "days_1_30_cents": 0,
+            "days_31_60_cents": 0,
+            "days_61_90_cents": 0,
+            "job_id": null,
+            "job_name": null,
+            "over_90_cents": 0,
+            "ship_to_code": null,
+            "ship_to_id": null,
+            "total_cents": 3142,
+            "unapplied_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "ar.aging.by_ship_to",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging?customer_id=<id-1>&group_by=ship_to&basis=invoice_date"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "currency": "USD",
+            "current_cents": 3142,
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "days_1_30_cents": 0,
+            "days_31_60_cents": 0,
+            "days_61_90_cents": 0,
+            "job_id": null,
+            "job_name": null,
+            "over_90_cents": 0,
+            "ship_to_code": null,
+            "ship_to_id": null,
+            "total_cents": 3142,
+            "unapplied_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "ar.aging.past_date",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging?customer_id=<id-1>&as_of=<day-9778>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "ar.aging.bad_group_by",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging?group_by=region"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "group_by",
+              "message": "must be one of: customer, job, ship_to"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ar.aging.bad_date",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging?as_of=31/12/2000"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "as_of",
+              "message": "must be a date, YYYY-MM-DD"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ar.aging.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging?offset=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-18>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ar.aging.summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/aging/summary?customer_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "as_of": "<day+0>",
+        "basis": "due_date",
+        "totals": [
+          {
+            "currency": "USD",
+            "current_cents": 3142,
+            "days_1_30_cents": 0,
+            "days_31_60_cents": 0,
+            "days_61_90_cents": 0,
+            "over_90_cents": 0,
+            "total_cents": 3142,
+            "unapplied_cents": 0
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "ar.statement",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/customers/<id-1>/statement"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "currencies": [
+          {
+            "closing_balance_cents": 3142,
+            "currency": "USD",
+            "lines": [
+              {
+                "amount_cents": 3142,
+                "balance_after_cents": 3142,
+                "date": "<day+0>",
+                "description": "Invoice IN-000051",
+                "id": "<id-13>",
+                "job_id": null,
+                "reference_id": "<id-14>",
+                "source_kind": "invoice",
+                "type": "INVOICE"
+              },
+              {
+                "amount_cents": -75,
+                "balance_after_cents": 3067,
+                "date": "<day+0>",
+                "description": "Credit memo CM-000003",
+                "id": "<id-12>",
+                "job_id": null,
+                "reference_id": "<id-11>",
+                "source_kind": "credit_memo",
+                "type": "CREDIT_MEMO"
+              },
+              {
+                "amount_cents": 75,
+                "balance_after_cents": 3142,
+                "date": "<day+0>",
+                "description": "Void of credit memo CM-000003",
+                "id": "<id-10>",
+                "job_id": null,
+                "reference_id": "<id-11>",
+                "source_kind": "credit_memo",
+                "type": "REVERSAL"
+              },
+              {
+                "amount_cents": -2000,
+                "balance_after_cents": 1142,
+                "date": "<day+0>",
+                "description": "Payment PAY-000045 applied to IN-000051",
+                "id": "<id-9>",
+                "job_id": null,
+                "reference_id": "<id-7>",
+                "source_kind": "application",
+                "type": "PAYMENT"
+              },
+              {
+                "amount_cents": -1142,
+                "balance_after_cents": 0,
+                "date": "<day+0>",
+                "description": "Payment PAY-000045 applied to IN-000051",
+                "id": "<id-8>",
+                "job_id": null,
+                "reference_id": "<id-5>",
+                "source_kind": "application",
+                "type": "PAYMENT"
+              },
+              {
+                "amount_cents": 2000,
+                "balance_after_cents": 2000,
+                "date": "<day+0>",
+                "description": "Reversal of an application to IN-000051",
+                "id": "<id-6>",
+                "job_id": null,
+                "reference_id": "<id-7>",
+                "source_kind": "application",
+                "type": "REVERSAL"
+              },
+              {
+                "amount_cents": 1142,
+                "balance_after_cents": 3142,
+                "date": "<day+0>",
+                "description": "Reversal of an application to IN-000051",
+                "id": "<id-4>",
+                "job_id": null,
+                "reference_id": "<id-5>",
+                "source_kind": "application",
+                "type": "REVERSAL"
+              }
+            ],
+            "open_documents": [
+              {
+                "date": "<day+0>",
+                "due_date": "<day+30>",
+                "id": "<id-14>",
+                "job_id": null,
+                "kind": "invoice",
+                "number": "IN-000051",
+                "open_cents": 3142,
+                "total_cents": 3142
+              }
+            ],
+            "opening_balance_cents": 0
+          }
+        ],
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "from": "<day-30>",
+        "job_id": null,
+        "to": "<day+0>"
+      }
+    }
+  },
+  {
+    "name": "ar.statement.bad_range",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/customers/<id-1>/statement?from=<day+1181>&to=<day+1180>"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "from",
+              "message": "must not be after to"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ar.statement.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/customers/<id-2>/statement"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "account not found"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ar.reconciliation",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ar/reconciliation"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
+  },
+  {
+    "name": "ar.application.reverse.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ar/applications/<id-2>/reverse",
+      "body": {
+        "reason": "none"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "application not found"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ar.application.reverse.needs_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ar/applications/<id-2>/reverse",
+      "body": {}
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "reason",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
     }
   }
 ]

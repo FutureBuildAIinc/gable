@@ -10,12 +10,11 @@
       "content_type": "application/json",
       "body": {
         "by_method": {
-          "CASH": 10,
-          "CHECK": 313419.85
+          "CHECK": 313594.85
         },
         "date": "<day+0>",
-        "total_collected": 313429.85,
-        "transaction_count": 40
+        "total_collected": 313594.85,
+        "transaction_count": 42
       }
     }
   },
@@ -29,7 +28,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": -8.58,
+        "close_balance": 1.42,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+0>",
@@ -59,15 +58,39 @@
             "type": "REVERSAL"
           },
           {
-            "balance": 21.42,
-            "credit": 10,
+            "balance": 11.42,
+            "credit": 20,
             "date": "<day+0>",
             "debit": 0,
-            "description": "Payment GOLD-PAY-1",
+            "description": "Payment PAY-000045 applied to IN-000051",
             "type": "PAYMENT"
           },
           {
-            "balance": -8.58,
+            "balance": 0,
+            "credit": 11.42,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "Payment PAY-000045 applied to IN-000051",
+            "type": "PAYMENT"
+          },
+          {
+            "balance": 20,
+            "credit": 0,
+            "date": "<day+0>",
+            "debit": 20,
+            "description": "Reversal of an application to IN-000051",
+            "type": "REVERSAL"
+          },
+          {
+            "balance": 31.42,
+            "credit": 0,
+            "date": "<day+0>",
+            "debit": 11.42,
+            "description": "Reversal of an application to IN-000051",
+            "type": "REVERSAL"
+          },
+          {
+            "balance": 1.42,
             "credit": 30,
             "date": "<day+0>",
             "debit": 0,
@@ -90,12 +113,12 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": -8.58,
+        "close_balance": 1.42,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+401>",
         "lines": null,
-        "open_balance": -8.58,
+        "open_balance": 1.42,
         "start_date": "<day+400>"
       }
     }
