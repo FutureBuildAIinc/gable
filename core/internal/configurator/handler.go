@@ -6,9 +6,10 @@ package configurator
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/apps"
-	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 type Handler struct {
@@ -39,99 +40,190 @@ func (h *Handler) RegisterRoutes(mux apps.Router, roleGuard ...func(http.Handler
 	mux.HandleFunc("GET /api/v1/configurator/presets", guard(h.handleGetPresets))
 }
 
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func noQuery(r *http.Request) error {
+	_, err := httpx.StrictQuery(r)
+	return err
+}
+
 func (h *Handler) handleGetRules(w http.ResponseWriter, r *http.Request) {
-	rules, err := h.service.GetAllRules(r.Context())
-	if err != nil {
-		httputil.RespondError(w, r, "Failed to fetch configurator rules", http.StatusInternalServerError, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rules)
+	rules, err := h.service.AllRules(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rules)
+}
+
+// selectionsRequest is the body of validate and build-sku.
+type selectionsRequest struct {
+	Selections map[string]string `json:"selections"`
+}
+
+// parseSelectionsBody decodes the body strictly and requires a non-empty
+// selections map, collecting every problem into one 400.
+func parseSelectionsBody(r *http.Request, productType bool) (Selections, string, error) {
+	var req struct {
+		Selections  map[string]string `json:"selections"`
+		ProductType *string           `json:"product_type"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return nil, "", err
+	}
+	v := &httpx.Validator{}
+	v.Check(len(req.Selections) > 0, "selections", "is required")
+	pt := ""
+	if productType {
+		v.Required("product_type", deref(req.ProductType))
+		if req.ProductType != nil {
+			pt = strings.TrimSpace(*req.ProductType)
+			v.Check(pt != "", "product_type", "is required")
+		}
+	} else if req.ProductType != nil {
+		v.Check(false, "product_type", "is not a field of this route")
+	}
+	if err := v.Err(); err != nil {
+		return nil, "", err
+	}
+	return req.Selections, pt, nil
 }
 
 func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
-	var req ValidateConfigRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if len(req.Selections) == 0 {
-		httputil.RespondError(w, r, "Selections map is required", http.StatusBadRequest, nil)
-		return
-	}
-
-	resp, err := h.service.ValidateConfig(r.Context(), req)
+	selections, _, err := parseSelectionsBody(r, false)
 	if err != nil {
-		httputil.RespondError(w, r, "Internal validation error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	resp, err := h.service.ValidateConfig(r.Context(), selections)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) handleBuildSKU(w http.ResponseWriter, r *http.Request) {
-	var req BuildSKURequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if req.ProductType == "" || len(req.Selections) == 0 {
-		httputil.RespondError(w, r, "ProductType and Selections are required", http.StatusBadRequest, nil)
-		return
-	}
-
-	resp, err := h.service.BuildSKU(r.Context(), req)
+	selections, productType, err := parseSelectionsBody(r, true)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to build SKU", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
+	resp, err := h.service.BuildSKU(r.Context(), productType, selections)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+// parseSelectionsParam reads the selections query parameter: a comma
+// separated list of Type=Value pairs, URL encoded, naming the selections
+// the options read is constrained by. A malformed pair is a 400 naming the
+// parameter; this is the strict posture the base's every-unknown-name-is-a-
+// selection never had.
+func parseSelectionsParam(v *httpx.Validator, raw string) Selections {
+	if raw == "" {
+		return Selections{}
+	}
+	out := Selections{}
+	for _, pair := range strings.Split(raw, ",") {
+		eq := strings.Index(pair, "=")
+		if eq <= 0 || eq == len(pair)-1 {
+			v.Check(false, "selections", "must be a comma separated list of Type=Value pairs")
+			return nil
+		}
+		key := strings.TrimSpace(pair[:eq])
+		val := strings.TrimSpace(pair[eq+1:])
+		if key == "" || val == "" {
+			v.Check(false, "selections", "must be a comma separated list of Type=Value pairs")
+			return nil
+		}
+		out[key] = val
+	}
+	return out
 }
 
 func (h *Handler) handleGetOptions(w http.ResponseWriter, r *http.Request) {
-	attributeType := r.URL.Query().Get("attribute_type")
-	if attributeType == "" {
-		httputil.RespondError(w, r, "attribute_type query parameter is required", http.StatusBadRequest, nil)
-		return
-	}
-
-	// Parse optional selections from query params
-	selections := make(map[string]string)
-	for key, values := range r.URL.Query() {
-		if key != "attribute_type" && len(values) > 0 {
-			selections[key] = values[0]
-		}
-	}
-
-	req := AvailableOptionsRequest{
-		AttributeType: attributeType,
-		Selections:    selections,
-	}
-
-	options, err := h.service.GetAvailableOptions(r.Context(), req)
+	q, err := httpx.StrictQuery(r, "attribute_type", "selections")
 	if err != nil {
-		httputil.RespondError(w, r, "Failed to fetch options", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(options)
+	v := &httpx.Validator{}
+	attributeType := ""
+	if vals := q["attribute_type"]; len(vals) == 0 {
+		v.Check(false, "attribute_type", "is required")
+	} else if len(vals) > 1 {
+		v.Check(false, "attribute_type", "parameter is repeated")
+	} else {
+		attributeType = vals[0]
+		v.Check(strings.TrimSpace(attributeType) != "", "attribute_type", "is required")
+	}
+	var selections Selections
+	if vals := q["selections"]; len(vals) > 1 {
+		v.Check(false, "selections", "parameter is repeated")
+	} else if len(vals) == 1 {
+		selections = parseSelectionsParam(v, vals[0])
+	} else {
+		selections = Selections{}
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	options, err := h.service.GetAvailableOptions(r.Context(), attributeType, selections)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, options)
 }
 
 func (h *Handler) handleGetPresets(w http.ResponseWriter, r *http.Request) {
-	productType := r.URL.Query().Get("product_type")
-
-	presets, err := h.service.GetPresets(r.Context(), productType)
+	q, err := httpx.StrictQuery(r, "product_type")
 	if err != nil {
-		httputil.RespondError(w, r, "Failed to fetch presets", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
+	v := &httpx.Validator{}
+	productType := ""
+	if vals := q["product_type"]; len(vals) > 1 {
+		v.Check(false, "product_type", "parameter is repeated")
+	} else if len(vals) == 1 {
+		productType = vals[0]
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	presets, err := h.service.Presets(r.Context(), productType)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, presets)
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(presets)
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

@@ -389,84 +389,111 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
-  /api/v1/activities/{id}:
+  /api/v1/customers/{customerId}/activities:
     get:
-      operationId: activityGet
-      tags:
-        - activities
-      summary: Get one activity
+      operationId: activityList
+      tags: [activities]
+      summary: List a customer's activities
+      description: >-
+        The cursor list envelope, newest first on (created_at, id). activity_type and contact_id filter; total appears only under include=total. A parameter the route does not declare, an activity type outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400. A customer the caller cannot see behind the branch wall serves an empty page.
       parameters:
-        - name: id
+        - name: customerId
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/XBranchId'
+        - name: activity_type
+          in: query
+          required: false
+          description: One lowercase activity type.
+          schema:
+            type: string
+            enum: [call, meeting, email, note]
+        - name: contact_id
+          in: query
+          required: false
+          description: Only the activities of this contact.
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The activity.
+        "200":
+          description: The page of activities.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Activity'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    put:
-      operationId: activityUpdate
-      tags:
-        - activities
-      summary: Update an activity
-      description: The write replaces contact_id, activity_type, description, logged_by and activity_date; an omitted field is cleared.
+                $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: activityCreate
+      tags: [activities]
+      summary: Log an activity
+      description: >-
+        activity_type and description are required; contact_id and logged_by are optional; activity_date defaults to now. The customer is named by the path: a body customer_id is a 400, and a customer the caller cannot see behind the branch wall is a 404. Writes the audit row activity.created and the event activity.created in the same transaction, the event last.
       parameters:
-        - name: id
+        - name: customerId
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/XBranchId'
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ActivityUpdate'
+              $ref: "#/components/schemas/ActivityRequest"
       responses:
-        '200':
-          description: The activity as the request wrote it. customer_id, created_at and any field the body omitted come back as zero values, because the handler echoes the decoded body rather than re-reading the row.
+        "201":
+          description: The logged activity, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Activity'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
-    delete:
-      operationId: activityDelete
-      tags:
-        - activities
-      summary: Delete an activity
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/activities/{id}:
+    get:
+      operationId: activityGet
+      tags: [activities]
+      summary: Get one activity
+      description: The activity with its ETag. An activity behind the caller's branch wall is a 404.
       parameters:
         - name: id
           in: path
@@ -474,20 +501,114 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: '#/components/parameters/XBranchId'
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '204':
+        "200":
+          description: The activity.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: activityUpdate
+      tags: [activities]
+      summary: Update an activity
+      description: >-
+        Replaces contact_id, activity_type, description, logged_by and activity_date (an omitted activity_date keeps its stored value) on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. A body customer_id is a 400: the customer is fixed at create. The response is the stored row, not the echo of the body. Writes the audit row activity.updated and the event activity.updated in the same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityRequest"
+      responses:
+        "200":
+          description: The activity at its new revision, with its ETag.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    delete:
+      operationId: activityDelete
+      tags: [activities]
+      summary: Delete an activity
+      description: >-
+        Deletes on the client's revision, carried by If-Match alone (a DELETE has no body). Writes the audit row activity.deleted and the event activity.deleted in the same transaction, the event last.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "204":
           description: Activity deleted.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/admin/keys:
     get:
       operationId: adminListKeys
@@ -1698,7 +1819,8 @@ paths:
       operationId: configuratorListRules
       tags: [configurator]
       summary: List every configurator rule
-      description: Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+      description: >-
+        The whole rule matrix, the charge codes master shape: ordered by dependency type and value, then attribute type and value, never null. A query parameter the route does not declare is a 400 unsupported_query_parameter.
       responses:
         "200":
           description: The full rule set.
@@ -1708,22 +1830,30 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ConfiguratorRule"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "500": {$ref: "#/components/responses/InternalError"}
+        "500": {$ref: "#/components/responses/InternalErrorEither"}
   /api/v1/configurator/options:
     get:
       operationId: configuratorListOptions
       tags: [configurator]
       summary: List the allowed values of one attribute
       description: >-
-        Admin, owner or sales. Every query parameter other than attribute_type is read as a current selection (attribute type to chosen value, first value wins), for example attribute_type=Grade&Species=SYP. With no selections, or when no rule matches them, the static defaults for the attribute are answered (an empty array for an unknown attribute). Otherwise the order of the options is unspecified.
+        The values the attribute may take under the current selections, deterministically ordered by value. attribute_type is required; the selections ride as one parameter, a comma separated list of Type=Value pairs (selections=Species=SYP,Treatment=None), so the route declares exactly the two names it reads (the base consumed every unknown query name as a selection and never said so). With no selections, or when no rule matches them, the static defaults for the attribute answer (an empty array for an unknown attribute). A parameter the route does not declare, a missing attribute_type or a malformed selections value is a 400.
       parameters:
         - name: attribute_type
           in: query
           required: true
           description: The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType.
+          schema:
+            type: string
+        - name: selections
+          in: query
+          required: false
+          description: The current selections as Type=Value pairs, comma separated.
           schema:
             type: string
       responses:
@@ -1735,17 +1865,19 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ConfiguratorAvailableOption"
-        "400": {$ref: "#/components/responses/BadRequest"}
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "500": {$ref: "#/components/responses/InternalError"}
+        "500": {$ref: "#/components/responses/InternalErrorEither"}
   /api/v1/configurator/presets:
     get:
       operationId: configuratorListPresets
       tags: [configurator]
       summary: List the active presets
-      description: Admin, owner or sales. Active presets only, ordered by name. Never null.
+      description: >-
+        Active presets ordered by name, never null. product_type filters (the filter filters); a parameter the route does not declare is a 400 unsupported_query_parameter.
       parameters:
         - name: product_type
           in: query
@@ -1762,17 +1894,19 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ConfiguratorPreset"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "500": {$ref: "#/components/responses/InternalError"}
+        "500": {$ref: "#/components/responses/InternalErrorEither"}
   /api/v1/configurator/validate:
     post:
       operationId: configuratorValidate
       tags: [configurator]
       summary: Validate a set of selections against the rules
       description: >-
-        Admin, owner or sales. The body is capped at 64 KiB; an oversized or malformed body is a 400, as is an empty selections map. A rule conflict is a 200 with valid false and the conflicts listed.
+        The body is capped at 64 KiB; an oversized or malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1792,17 +1926,16 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
-        "500": {$ref: "#/components/responses/InternalError"}
+        "500": {$ref: "#/components/responses/InternalErrorEither"}
   /api/v1/configurator/build-sku:
     post:
       operationId: configuratorBuildSku
       tags: [configurator]
       summary: Build a non stock SKU from selections
       description: >-
-        Admin, owner or sales. The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict, and any other service failure including a database fault, answers 400 (never 500). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+        The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1822,9 +1955,9 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalErrorEither"}
   /api/v1/customers:
     get:
       operationId: customerList
@@ -2500,78 +2633,6 @@ paths:
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
-  /api/v1/customers/{customerId}/activities:
-    get:
-      operationId: customerListActivities
-      tags: [customer]
-      summary: List customer activities
-      description: >-
-        Returns activities for a customer, ordered by activity_date descending. The handler guarantees a bare array: an empty array, never null, when the customer has no activities.
-      parameters:
-        - name: customerId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-      responses:
-        "200":
-          description: Activities, a bare array that is empty when none exist.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "500":
-          $ref: "#/components/responses/InternalError"
-    post:
-      operationId: customerCreateActivity
-      tags: [customer]
-      summary: Create a customer activity
-      parameters:
-        - name: customerId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CustomerActivityCreate"
-      responses:
-        "201":
-          description: The created activity.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
   /api/v1/customers/{customerId}/contacts:
     get:
       operationId: customerListContacts
@@ -6520,34 +6581,40 @@ paths:
       tags: [millwork]
       summary: List the options of a category
       description: >-
-        Admin, owner or sales. Ordered by name. Not paginated. Answers null, not an empty array, when the category has no options.
+        The cursor list envelope, newest first on (created_at, id); total appears only under include=total. category is required and filters; a parameter the route does not declare, a missing or repeated category, a malformed cursor or an out of range limit is a 400.
       parameters:
         - name: category
           in: query
           required: true
-          description: Exact match on the category column. An empty or missing value is a 400.
+          description: Exact match on the category column.
           schema:
             type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: The options, or null when none match.
+          description: The page of options.
           content:
             application/json:
               schema:
-                type: [array, "null"]
-                items:
-                  $ref: "#/components/schemas/MillworkOption"
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/AppDisabled"}
-        "500": {$ref: "#/components/responses/InternalError"}
+                $ref: "#/components/schemas/MillworkOptionPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: millworkCreateOption
       tags: [millwork]
       summary: Create an option
       description: >-
-        Admin, owner or sales. No field is validated by the handler; a value the table refuses (a category over 50 characters, a name over 100) surfaces as a 500.
+        category (at most 50 characters), name (at most 100) and price_adjustment_cents are required; the adjustment may be negative (a discount option); attributes is any JSON the dealer sends, stored as sent and null when absent. Writes the audit row millwork_option.created and the event millwork_option.created in the same transaction, the event last.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -6558,19 +6625,70 @@ paths:
               $ref: "#/components/schemas/MillworkCreateOptionRequest"
       responses:
         "201":
-          description: The created option.
+          description: The created option, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MillworkOption"
-        "400": {$ref: "#/components/responses/BadRequestEither"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/AppDisabled"}
-        "409": {$ref: "#/components/responses/ConflictEither"}
-        "413": {$ref: "#/components/responses/PayloadTooLarge"}
-        "422": {$ref: "#/components/responses/UnprocessableEntity"}
-        "500": {$ref: "#/components/responses/InternalError"}
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/millwork/options/{id}:
+    get:
+      operationId: millworkGetOption
+      tags: [millwork]
+      summary: Get one option
+      description: The option with its ETag, so the create's Location resolves.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The option.
+          headers:
+            ETag:
+              description: The record's revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MillworkOption"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppDisabled"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/orders:
     get:
       operationId: orderList
@@ -11096,28 +11214,40 @@ paths:
       operationId: projectList
       tags: [project]
       summary: The customer's jobs
-      description: A bare array, newest created first, no page envelope.
+      description: >-
+        The cursor list envelope, newest first on (created_at, id). status filters (lowercase); total appears only under include=total. A parameter the route does not declare, a status outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
       security:
         - PortalSession: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: One lowercase status.
+          schema:
+            type: string
+            enum: [active, completed]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: The projects, a bare array, never null.
+          description: The page of projects.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Project"
+                $ref: "#/components/schemas/ProjectPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: projectCreate
       tags: [project]
       summary: Create a job
       description: >-
-        An empty name is a 500 today (the handler's status is fixed). The project starts Active.
+        name is required (1 to 255 characters); the project starts active and no status is accepted on create. Writes the audit row project.created and the event project.created in the same transaction, the event last.
       security:
         - PortalSession: []
       parameters:
@@ -11127,10 +11257,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProjectCreateRequest"
+              $ref: "#/components/schemas/ProjectRequest"
       responses:
         "201":
-          description: The created project.
+          description: The created project, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -11140,20 +11278,20 @@ paths:
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/portal/v1/projects/{id}:
     get:
       operationId: projectGetDashboard
       tags: [project]
       summary: One job with its orders, deliveries and invoices
       description: >-
-        The dashboard aggregate. Scoped to the caller; any failure, including another customer's project, is the handler's fixed 404.
+        The dashboard aggregate with the project's ETag. Scoped to the caller: another customer's project is a 404. Item statuses are lowercase summaries of each document's own status; totals are integer cents (null on a delivery, which carries no money).
       security:
         - PortalSession: []
       parameters:
@@ -11166,22 +11304,29 @@ paths:
       responses:
         "200":
           description: The project and its associated documents.
+          headers:
+            ETag:
+              description: The project's revision in quotes. Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProjectDashboard"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: projectUpdate
       tags: [project]
       summary: Rename a job or change its status
       description: >-
-        Partial update; absent fields keep their values. An empty name or a status outside Active and Completed is a 500 today (the handler's status is fixed), and so is a project the caller does not own.
+        Partial update on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. Absent fields keep their values; status accepts active or completed. Writes the audit row project.updated and the event project.updated (with the changed field list) in the same transaction, the event last.
       security:
         - PortalSession: []
       parameters:
@@ -11192,15 +11337,21 @@ paths:
             type: string
             format: uuid
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProjectUpdateRequest"
+              $ref: "#/components/schemas/ProjectRequest"
       responses:
         "200":
-          description: The updated project.
+          description: The updated project at its new revision, with its ETag.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -11209,14 +11360,18 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/WireConflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/purchase-orders:
     get:
       operationId: purchaseOrderList
@@ -13775,20 +13930,21 @@ components:
           items: {$ref: "#/components/schemas/ArLedgerRow"}
     ActivityType:
       type: string
-      enum:
-        - CALL
-        - MEETING
-        - EMAIL
-        - NOTE
+      description: Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
+      enum: [call, meeting, email, note]
     Activity:
       type: object
-      description: crm.Activity. contact_id and logged_by are omitted when unset. The customer routes of the customer fragment return the same schema.
+      description: >-
+        One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value.
       required:
         - id
         - customer_id
+        - contact_id
         - activity_type
         - description
+        - logged_by
         - activity_date
+        - revision
         - created_at
         - updated_at
       properties:
@@ -13799,43 +13955,69 @@ components:
           type: string
           format: uuid
         contact_id:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_type:
-          $ref: '#/components/schemas/ActivityType'
+          $ref: "#/components/schemas/ActivityType"
         description:
           type: string
+          description: 1 to 4000 characters.
         logged_by:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_date:
           type: string
           format: date-time
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-    ActivityUpdate:
+    ActivityRequest:
       type: object
-      description: The Activity decoded from the body; a missing or unknown activity_type answers 400.
-      required:
-        - activity_type
+      description: >-
+        The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused.
+      required: [activity_type, description]
       properties:
         contact_id:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_type:
-          $ref: '#/components/schemas/ActivityType'
+          $ref: "#/components/schemas/ActivityType"
         description:
           type: string
         logged_by:
-          type: string
+          type: [string, "null"]
           format: uuid
         activity_date:
           type: string
           format: date-time
+          description: Optional; defaults to now on create, keeps its stored value on update when absent.
+        revision:
+          type: integer
+          format: int64
+          description: The body revision, on update only. A create carrying one is a 400.
+    ActivityPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Activity"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
     TechAdminKey:
       type: object
       required: [id, name, prefix, scopes, created_at, last_used_at, revoked_at]
@@ -14589,9 +14771,9 @@ components:
             PUT only: the precondition, beside If-Match. On create it is a 400.
     ConfiguratorRule:
       type: object
-      required: [id, attribute_type, attribute_value, depends_on_type, depends_on_value, is_allowed, created_at, updated_at]
+      required: [id, attribute_type, attribute_value, depends_on_type, depends_on_value, is_allowed, error_message, created_at, updated_at]
       description: >-
-        Go type configurator.ConfiguratorRule. error_message is a pointer with omitempty, so it is absent when the database value is null.
+        One dependency rule. error_message is present as null when the database value is null, never omitted (ADR 0001 section 12).
       properties:
         id:
           type: string
@@ -14607,7 +14789,7 @@ components:
         is_allowed:
           type: boolean
         error_message:
-          type: string
+          type: [string, "null"]
         created_at:
           type: string
           format: date-time
@@ -14616,9 +14798,9 @@ components:
           format: date-time
     ConfiguratorPreset:
       type: object
-      required: [id, name, product_type, config, is_active, created_at, updated_at]
+      required: [id, name, description, product_type, config, is_active, created_at, updated_at]
       description: >-
-        Go type configurator.ConfiguratorPreset. config is a Go byte slice, so it serializes as a base64 string of the stored JSON text, not as a JSON object. description is a pointer with omitempty, absent when null.
+        One preset. config is the JSON the dealer stored, carried as JSON (it serialized as a base64 string before the conversion); description is present as null when the database value is null.
       properties:
         id:
           type: string
@@ -14626,13 +14808,11 @@ components:
         name:
           type: string
         description:
-          type: string
+          type: [string, "null"]
         product_type:
           type: string
         config:
-          type: [string, "null"]
-          contentEncoding: base64
-          contentMediaType: application/json
+          description: The preset's attribute selections, as stored.
         is_active:
           type: boolean
         created_at:
@@ -14643,20 +14823,20 @@ components:
           format: date-time
     ConfiguratorAvailableOption:
       type: object
-      required: [value, allowed]
-      description: Go type configurator.AvailableOption. message is omitted when empty.
+      required: [value, allowed, message]
+      description: One value with its verdict; message is present as null when no rule explained a refusal.
       properties:
         value:
           type: string
         allowed:
           type: boolean
         message:
-          type: string
+          type: [string, "null"]
           description: Why the value is disallowed.
     ConfiguratorValidateRequest:
       type: object
       required: [selections]
-      description: Go type configurator.ValidateConfigRequest. An empty map is a 400.
+      description: An empty map is a 400 naming selections.
       properties:
         selections:
           type: object
@@ -14666,7 +14846,6 @@ components:
     ConfiguratorValidationConflict:
       type: object
       required: [attribute_type, attribute_value, depends_on_type, depends_on_value, message]
-      description: Go type configurator.ValidationConflict.
       properties:
         attribute_type:
           type: string
@@ -14680,8 +14859,8 @@ components:
           type: string
     ConfiguratorValidateResponse:
       type: object
-      required: [valid]
-      description: Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none.
+      required: [valid, conflicts]
+      description: conflicts is always an array, empty when the selections are valid.
       properties:
         valid:
           type: boolean
@@ -14692,7 +14871,7 @@ components:
     ConfiguratorBuildSKURequest:
       type: object
       required: [product_type, selections]
-      description: Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400.
+      description: An empty product type or an empty selections map is a 400 naming the field.
       properties:
         product_type:
           type: string
@@ -14704,7 +14883,6 @@ components:
     ConfiguratorBuildSKUResponse:
       type: object
       required: [sku, description]
-      description: Go type configurator.BuildSKUResponse.
       properties:
         sku:
           type: string
@@ -15295,25 +15473,6 @@ components:
           type: integer
           format: int64
           description: PUT only, beside If-Match.
-    CustomerActivityCreate:
-      type: object
-      required: [activity_type]
-      description: >-
-        The Activity decoded from the body; customer_id comes from the path and created_at and updated_at are set by the server. A supplied id is kept. A missing or unknown activity_type answers 400.
-      properties:
-        contact_id:
-          type: string
-          format: uuid
-        activity_type:
-          $ref: "#/components/schemas/ActivityType"
-        description:
-          type: string
-        logged_by:
-          type: string
-          format: uuid
-        activity_date:
-          type: string
-          format: date-time
     DashboardSummary:
       type: object
       description: dashboard.DashboardSummary. Money is int64 cents.
@@ -18748,8 +18907,8 @@ components:
         exception_count: {type: integer}
     MillworkOption:
       type: object
-      required: [id, category, name, price_adjustment, attributes, created_at, updated_at]
-      description: Go type millwork.MillworkOption.
+      description: One catalog option. The price adjustment is integer cents; attributes is whatever JSON the create carried, null when it carried none.
+      required: [id, category, name, price_adjustment_cents, attributes, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -18758,11 +18917,16 @@ components:
           type: string
         name:
           type: string
-        price_adjustment:
-          type: number
-          description: Float dollars today.
+        price_adjustment_cents:
+          type: integer
+          format: int64
+          description: A positive option adds to the configured price, a negative one discounts it.
         attributes:
-          description: Any JSON value stored as sent (an object in practice); null when the create request omitted it.
+          type: [object, array, string, number, boolean, "null"]
+          description: Any JSON value stored as sent (an object in practice).
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
@@ -18771,17 +18935,38 @@ components:
           format: date-time
     MillworkCreateOptionRequest:
       type: object
-      description: Go type millwork.CreateOptionRequest.
+      required: [category, name, price_adjustment_cents]
+      description: Every field problem is collected into one 400 with a details entry per field; an unknown field is refused.
       properties:
         category:
           type: string
+          description: 1 to 50 characters.
         name:
           type: string
-        price_adjustment:
-          type: number
-          description: Float dollars today; absent means 0.
+          description: 1 to 100 characters.
+        price_adjustment_cents:
+          type: integer
+          format: int64
         attributes:
-          description: Any JSON value; stored as sent. Absent is stored as null.
+          type: [object, array, string, number, boolean]
+          description: Optional; stored as sent, null when absent.
+    MillworkOptionPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MillworkOption"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
     OrderStatus:
       type: string
       enum:
@@ -22549,7 +22734,7 @@ components:
           type: string
     Project:
       type: object
-      required: [id, customer_id, name, status, created_at, updated_at]
+      required: [id, customer_id, name, status, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -22561,13 +22746,34 @@ components:
           type: string
         status:
           type: string
-          enum: [Active, Completed]
+          description: Lowercase on the wire (ADR 0001 section 6). inactive is a storage value the 091 job merge wrote; writes accept active and completed.
+          enum: [active, completed, inactive]
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    ProjectPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
     ProjectDashboard:
       type: object
       required: [project, orders, deliveries, invoices]
@@ -22591,40 +22797,44 @@ components:
             $ref: "#/components/schemas/ProjectItem"
     ProjectItem:
       type: object
-      required: [id, type, status, created_at]
+      required: [id, type, status, total_cents, created_at, reference]
       properties:
         id:
           type: string
           format: uuid
         type:
           type: string
-          enum: [ORDER, DELIVERY, INVOICE]
+          description: Lowercase.
+          enum: [order, delivery, invoice]
         status:
           type: string
-        total_amount:
-          type: number
-          description: Float dollars; omitted when zero.
+          description: A lowercase summary of the document's own status.
+        total_cents:
+          type: [integer, "null"]
+          format: int64
+          description: Integer cents (ADR 0001 section 7); null on a delivery, which carries no money.
         created_at:
           type: string
           format: date-time
         reference:
           type: string
-          description: A human label such as "Order 1a2b3c4d"; omitted when empty.
-    ProjectCreateRequest:
+          description: A human label such as "Order 1a2b3c4d".
+    ProjectRequest:
       type: object
-      required: [name]
+      description: >-
+        The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. On create only name applies (required); on update absent fields keep their values.
+      required: []
       properties:
         name:
           type: string
-    ProjectUpdateRequest:
-      type: object
-      description: "Partial: only the fields present are applied."
-      properties:
-        name:
-          type: string
+          description: 1 to 255 characters.
         status:
           type: string
-          enum: [Active, Completed]
+          enum: [active, completed]
+        revision:
+          type: integer
+          format: int64
+          description: The body revision, on update only. A create carrying one is a 400.
     PurchaseOrder:
       type: object
       required: [id, branch_id, status, source, created_at, updated_at]
