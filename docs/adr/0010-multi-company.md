@@ -39,15 +39,15 @@ Today's tenancy, with file and line:
   deployment's org slug because "Gable today is one database per dealer with
   no org identity in the schema"; the org is not a row anywhere.
 - Branches are `locations` rows: type `BRANCH` with a null parent
-  (`core/internal/location/model.go:20`, the type list at `:17-27`). Every
+  (`core/internal/location/model.go:19`, the type list at `:18-26`). Every
   non branch row (zone, aisle, rack, shelf, bin, yard) carries a denormalized
-  `branch_id` kept by a database trigger (`model.go:47`;
+  `branch_id` kept by a database trigger (`model.go:45-46`;
   `core/migrations/057_branches_on_locations.sql:21`,
   `core/migrations/058_locations_branch_denorm_trigger.sql`). A branch
   carries the branch level tax facts: `tax_jurisdiction_code` and
-  `default_tax_rate` (`model.go:43,44`), and a timezone (`model.go:45`).
+  `default_tax_rate` (`model.go:63,64`), and a timezone (`model.go:65`).
 - Grants are rows of `user_locations`, keyed by the JWT subject; there is no
-  users table (`core/migrations/061_user_locations.sql:5,10-17`). The branch
+  users table (`core/migrations/061_user_locations.sql:5,9-16`). The branch
   middleware reads `X-Branch-Id`, checks it against those grants, honours the
   `multi_branch_enabled` kill switch and `default_branch_required`
   (`core/pkg/middleware/branch.go:105-110,168,281`), and `ResolveBranchForWrite`
@@ -60,7 +60,7 @@ Today's tenancy, with file and line:
   (`core/internal/purchase_order/handler.go:34,35,67,233`, wired in
   `core/internal/app/serve/wire_branch_wall.go:36-37`), and PR 44 ("Security:
   lists without a branch header are held to the caller's grants") added the
-  list rule (`branch.go:44-66`).
+  list rule (`branch.go:44-59`).
 - The books have no branch at all: `gl_accounts`, `gl_fiscal_periods`,
   `gl_journal_entries` and `gl_journal_lines`
   (`core/migrations/025_general_ledger.sql:8,28,42,60`), `payments`
@@ -85,7 +85,8 @@ Today's tenancy, with file and line:
   `PostEntry` at `core/internal/gl/postentry.go:67,92`).
 - One fiscal calendar: `gl_fiscal_periods` (`025:28`) with the non overlap
   exclusion and the closed period trigger of
-  `077_gl_reversal_period_hardening.sql` (`:29-33,43-60`).
+  `077_gl_reversal_period_hardening.sql` (`:24-27` the exclusion,
+  `:29-48` the closed period trigger).
 - One tax company for the provider: `AVALARA_COMPANY_CODE` is one process
   setting (`core/internal/config/config.go:36,150`), stamped on every
   provider call (`core/internal/tax/avalara.go:107`) and held by the tax
@@ -131,7 +132,7 @@ The table `company`:
   falls back to the process setting)
 - `created_at`, `updated_at TIMESTAMPTZ NOT NULL`
 
-No timezone column: branches already carry one (`model.go:45`) and ADR 0005
+No timezone column: branches already carry one (`model.go:65`) and ADR 0005
 section 8.1 dates each entry in the branch's time zone, which stays the rule.
 No country code and no reporting currency: both have no reader in v1 (no FX,
 section 9).
@@ -295,7 +296,7 @@ company by construction, because every document carries its company:
   calendar rows become the seed company's. The 077 constraints become per
   company: the non overlap exclusion over `(company_id, daterange)` and the
   closed period trigger checking periods of `NEW.company_id`
-  (`077:29-33,43-60`). A company's periods are seeded from its
+  (`077:29-48`). A company's periods are seeded from its
   `fiscal_year_start_month` when it is created. Closing a period closes it
   for that company only, which is the accounting question a calendar answers.
 - **Postings unchanged.** Every entry keeps exactly ADR 0005 section 8.2's
@@ -499,7 +500,7 @@ as every branchless write does today.
   take the company code as a parameter (`avalara.go:214,242`); their callers
   pass the document's company's code.
 - Registrations: the branch's `tax_jurisdiction_code` and `default_tax_rate`
-  (`model.go:43,44`) already follow the branch, and through it the company;
+  (`model.go:63,64`) already follow the branch, and through it the company;
   ADR 0005 section 3's resolution order (exemption, ship-to rate, branch
   rate, refusal) is unchanged. The jurisdiction is a branch fact; the
   provider registration is the company fact; neither moves.
@@ -585,7 +586,7 @@ Up, in order:
    take the seed company; every other row takes its `branch_id`'s company,
    its `branch_id` first backfilled from its ancestor chain where null
    (`057:21` allows null; `058` and `060` keep and backfill it). The
-   update trigger of step 4 refuses a later move.
+   update trigger of step 3 refuses a later move.
 3. The R1 tables of section 2 that exist when it runs: add `company_id`,
    backfill from the parent, NOT NULL, the foreign key, and the
    `BEFORE INSERT OR UPDATE` trigger that keeps it and refuses a parent of
@@ -604,7 +605,7 @@ Up, in order:
    of section 3; `charge_codes.revenue_account_code`'s FK dropped
    (`092:239`); `gl_fiscal_periods` attached to the seed company; the 077
    exclusion and trigger replaced with the per company forms
-   (`077:29-33,43-60`).
+   (`077:24-27,29-48`).
 6. Numbering groundwork only: nothing. The per company series rows of
    companies created later are the numbering item's own concern; the seed
    company's `invoice` and `credit_memo` rows are never renamed (section
@@ -617,7 +618,12 @@ Down: refuses, with `RAISE`, when more than one company exists, or when any
 row of any table the up touched points at a company other than the seed;
 otherwise it drops the triggers, the columns, the seed row and the `company`
 table, in reverse order. A down that would lose a second company's data
-loses nothing instead: it answers.
+loses nothing instead: it answers. Down ordering against the build items:
+the items after the migration add objects with downs of their own (item
+2's composite foreign keys and unique constraints, item 4's per company
+counter rows), and the migration runner runs downs in reverse order, so
+this migration's down runs only after theirs; its refusals then stand on
+what is left.
 
 Tests, in the migration item:
 
