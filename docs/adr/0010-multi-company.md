@@ -126,15 +126,21 @@ exactly one company.
 The table `company`:
 
 - `id UUID PRIMARY KEY`
-- `code TEXT NOT NULL UNIQUE` (short, uppercase, chosen by the dealer; it
-  appears in the gapless prefixes of companies created after the migration
-  and is frozen once the company has issued a gapless number, section 4)
+- `code TEXT NOT NULL UNIQUE CHECK (code ~ '^[A-Z0-9]{1,10}$')` (short,
+  uppercase, letters and digits only, so it can sit inside a number
+  prefix without ambiguity; chosen by the dealer, it appears in the
+  gapless prefixes of companies created after the migration and is frozen
+  once the company has issued a gapless number, section 4)
 - `name TEXT NOT NULL`
 - `functional_currency CHAR(3) NOT NULL` (section 5)
 - `fiscal_year_start_month SMALLINT NOT NULL DEFAULT 1` (drives the period
   rows seeded when a company is created, section 3)
 - `tax_company_code TEXT NULL` (the provider's company code, section 7; null
   falls back to the process setting)
+- `invoice_series TEXT NOT NULL UNIQUE`, `credit_memo_series TEXT NOT NULL
+  UNIQUE`, `number_infix TEXT NULL` (the series identity, section 4: the
+  mint reads these, so the row itself says which company keeps the bare
+  number forms; all three are set at create and never edited)
 - `created_at`, `updated_at TIMESTAMPTZ NOT NULL`
 
 No timezone column: branches already carry one (`model.go:65`) and ADR 0005
@@ -346,27 +352,40 @@ if a dealer ever reaches the mint's ceiling, is a series per branch with the
 branch code in the prefix.
 
 The gapless counter key becomes per company, keyed by the company's id:
-series `invoice:<company uuid>` and `credit_memo:<company uuid>`. The key
-is the id, never the code, because the code is dealer editable and a
-rename after the first number would either restart the series at 1 under a
-new key or orphan the old one, breaking the legal entity's unbroken
-series; `company.code` is frozen once the company has issued a gapless
-number, an update that would change it refused with 409 blocker
-`numbers_issued` (section 1). The prefix carries the company code of
-companies created after the migration, `IN-<code>-000001` and
-`CM-<code>-000001`. The reason gaplessness exists is the tax authority,
+series `invoice:<company uuid>` and `credit_memo:<company uuid>`. The
+company row names its own series, so no implicit marker ("the oldest
+row", "code `MAIN`") decides which company keeps the bare forms:
+`invoice_series`, `credit_memo_series` and `number_infix` (section 1),
+set at create and never edited. The seed company gets `invoice`,
+`credit_memo` and a null infix; a company created later gets
+`invoice:<its id>`, `credit_memo:<its id>` and its code as the infix,
+frozen at create. The key is the id, never the code, because the code is
+dealer editable and a rename after the first number would either restart
+the series at 1 under a new key or orphan the old one, breaking the legal
+entity's unbroken series; `company.code` is frozen once the company has
+issued a gapless number, an update that would change it refused with 409
+blocker `numbers_issued` (section 1). The prefix carries the infix of
+companies created after the migration, `IN-<infix>-000001` and
+`CM-<infix>-000001`. The reason gaplessness exists is the tax authority,
 and the tax authority is per legal entity (ADR 0005 section 4.1); two
 companies must not both issue `IN-000001`. This is the widening ADR 0005
 section 1's boundary row reserved for cycle 5 ("Multi company: none; the
 series key for numbers is the entity; cycle 5 may widen series keys").
+ADR 0005 section 4.1's named escape, one series per branch
+(`invoice:<branch code>`, `0005:388-390`), widens the same way and
+becomes per company and branch under this record, the company id first
+in the key for the same reason the counter key carries it; a later
+record taking that escape does not drop the company from the key.
 
 `number` stays `UNIQUE NOT NULL` across the database. ADR 0007 section 7
 serves record URLs by number only under that constraint, and its parser
 reads the entity's number pattern; the invoice and credit memo patterns
-widen to carry the company code (`^IN-[A-Z0-9]+-[0-9]{6,}$` shaped), which
-is a listed contract change against ADR 0007 section 7's pattern table and
-the openapi fragments. Both spellings of a company's numbers parse, so
-existing rows keep working.
+widen to carry the infix, written exactly: `^IN-(?:[A-Z0-9]{1,10}-)?[0-9]{6,}$`
+and `^CM-(?:[A-Z0-9]{1,10}-)?[0-9]{6,}$`, the optional infix group
+unambiguous because the infix and the code are letters and digits only,
+never `-`. This is a listed contract change against ADR 0007 section 7's
+pattern table and the openapi fragments. Both spellings of a company's
+numbers parse, so existing rows keep working.
 
 Backfill ruling: the seed company keeps everything it has. Its series rows
 keep the names C2-3 builds (`invoice`, `credit_memo`), its counter
@@ -375,8 +394,8 @@ its numbers keep the bare forms `IN-000001` and `CM-000001` before and
 after the item lands, so no existing deployment's next number changes
 form and an auditor reading the series sees no format change mid period.
 Nothing is renamed and no counter restarts. A company created after the
-migration starts its own series at 1 under its own key and code bearing
-prefix; no collision is possible, because the code bearing form is a
+migration starts its own series at 1 under its own key and infix bearing
+prefix; no collision is possible, because the infix bearing form is a
 different string.
 
 Gapped sequences (orders `SO`, payments `PAY`, counter sales `POS`,
@@ -675,7 +694,9 @@ Up, in order:
    `name` `Main`, `functional_currency` from `system_settings`
    `currency.default` (`091:36`; `USD` when absent),
    `fiscal_year_start_month` 1, `tax_company_code` null (the operator sets
-   it; the config fallback keeps answering, section 7).
+   it; the config fallback keeps answering, section 7),
+   `invoice_series` `invoice`, `credit_memo_series` `credit_memo`,
+   `number_infix` null (the seed keeps the bare forms, section 4).
 2. `locations.company_id UUID NOT NULL REFERENCES company(id)`: branch rows
    take the seed company; every other row takes its `branch_id`'s company,
    its `branch_id` first backfilled from its ancestor chain where null
