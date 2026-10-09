@@ -258,11 +258,11 @@ func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 	}
 	led, err := s.ex(ctx).Query(ctx, `
 		WITH ar AS (
-			SELECT e.currency, SUM(l.debit - l.credit) AS cents FROM gl_journal_lines l
+			SELECT e.currency, ROUND(SUM(l.debit - l.credit) * 100)::bigint AS cents FROM gl_journal_lines l
 			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
 			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '1020' GROUP BY e.currency
 		), dep AS (
-			SELECT e.currency, SUM(l.credit - l.debit) AS cents FROM gl_journal_lines l
+			SELECT e.currency, ROUND(SUM(l.credit - l.debit) * 100)::bigint AS cents FROM gl_journal_lines l
 			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
 			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2200' GROUP BY e.currency
 		), bal AS (

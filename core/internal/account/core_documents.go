@@ -244,13 +244,14 @@ func (s *Service) VoidCreditMemo(ctx context.Context, in VoidCreditMemoIn) (*Eff
 // return becomes a credit memo in C2-5, which retires this; until then the row
 // is written here so no code outside the core writes the subledger.
 func (s *Service) PostLegacyReturnCredit(ctx context.Context, customerID, returnID uuid.UUID, amountCents int64) error {
-	if err := s.requireTx(ctx); err != nil {
-		return err
-	}
-	var currency string
-	if err := s.ex(ctx).QueryRow(ctx, `SELECT COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
-		FROM customers c WHERE c.id = $1`, customerID).Scan(&currency); err != nil {
-		return invalidField("customer_id", "no such customer")
-	}
-	return s.subledger(ctx, &Effects{}, customerID, currency, TransactionTypeRefund, -amountCents, returnID, "pos_return", "POS return credit #"+returnID.String())
+	// The counter posts this after its own transaction committed (best effort),
+	// so the row opens its own transaction when none is open.
+	return s.db.RunInTx(ctx, func(ctx context.Context) error {
+		var currency string
+		if err := s.ex(ctx).QueryRow(ctx, `SELECT COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
+			FROM customers c WHERE c.id = $1`, customerID).Scan(&currency); err != nil {
+			return invalidField("customer_id", "no such customer")
+		}
+		return s.subledger(ctx, &Effects{}, customerID, currency, TransactionTypeRefund, -amountCents, returnID, "pos_return", "POS return credit #"+returnID.String())
+	})
 }

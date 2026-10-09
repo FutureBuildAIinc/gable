@@ -141,8 +141,8 @@ func (s *Service) subledger(ctx context.Context, fx *Effects, customerID uuid.UU
 	}
 	next := bal + amount
 	if _, err := s.ex(ctx).Exec(ctx, `
-		INSERT INTO customer_transactions (id, customer_id, type, amount, balance_after, reference_id, description, currency, source_kind)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		INSERT INTO customer_transactions (id, customer_id, type, amount, balance_after, reference_id, description, currency, source_kind, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, clock_timestamp())`,
 		uuid.New(), customerID, string(typ), amount, next, ref, description, currency, sourceKind); err != nil {
 		return fmt.Errorf("failed to write the subledger row: %w", err)
 	}
@@ -275,15 +275,16 @@ type appRow struct {
 	GLEntryID                        *uuid.UUID
 	Reversed                         bool
 	AppliedOn                        time.Time
+	CreatedAt                        time.Time
 }
 
 const appCols = `a.id, a.customer_id, a.invoice_id, a.act_id, a.currency, a.kind, a.payment_id, a.credit_memo_id,
-	ROUND(a.amount * 100)::bigint, a.gl_entry_id, a.reversed_at IS NOT NULL, a.applied_on`
+	ROUND(a.amount * 100)::bigint, a.gl_entry_id, a.reversed_at IS NOT NULL, a.applied_on, a.created_at`
 
 func scanApp(row pgx.Row, a *appRow) error {
 	var kind string
 	if err := row.Scan(&a.ID, &a.CustomerID, &a.InvoiceID, &a.ActID, &a.Currency, &kind, &a.PaymentID, &a.CreditMemoID,
-		&a.Amount, &a.GLEntryID, &a.Reversed, &a.AppliedOn); err != nil {
+		&a.Amount, &a.GLEntryID, &a.Reversed, &a.AppliedOn, &a.CreatedAt); err != nil {
 		return err
 	}
 	a.Kind = ApplicationKind(kind)
@@ -382,8 +383,8 @@ func (s *Service) setPaymentUnapplied(ctx context.Context, p *paymentRow, newUna
 func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time, actor string, reason *string, glEntry *uuid.UUID) error {
 	_, err := s.ex(ctx).Exec(ctx, `
 		INSERT INTO ar_applications (id, customer_id, currency, kind, payment_id, credit_memo_id, invoice_id, amount, reason,
-			applied_on, applied_by, act_id, gl_entry_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::bigint::numeric / 100, $9, $10::date, NULLIF($11, ''), $12, $13)`,
+			applied_on, applied_by, act_id, gl_entry_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::bigint::numeric / 100, $9, $10::date, NULLIF($11, ''), $12, $13, clock_timestamp())`,
 		a.ID, a.CustomerID, a.Currency, string(a.Kind), a.PaymentID, a.CreditMemoID, a.InvoiceID, a.Amount, reason,
 		date(on), actor, a.ActID, glEntry)
 	if err != nil {

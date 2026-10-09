@@ -97,13 +97,13 @@ func (s *Service) CreateCard(ctx context.Context, in *Input, who Caller) (*Payme
 		Description: "Payment " + in.CustomerID.String()[:8], InvoiceID: firstInvoice, CustomerID: in.CustomerID.String(),
 	})
 	if err != nil {
-		return nil, &httpx.Error{Status: http.StatusPaymentRequired, Code: httpx.CodeConflict, Message: "card payment failed: the gateway could not be reached"}
+		return nil, &httpx.Error{Status: http.StatusPaymentRequired, Code: httpx.CodePaymentRequired, Message: "card payment failed: the gateway could not be reached"}
 	}
 	if result.Status == GatewayStatusDeclined {
-		return nil, &httpx.Error{Status: http.StatusPaymentRequired, Code: httpx.CodeConflict, Message: "card declined"}
+		return nil, &httpx.Error{Status: http.StatusPaymentRequired, Code: httpx.CodePaymentRequired, Message: "card declined"}
 	}
 	if result.Status != GatewayStatusApproved {
-		return nil, &httpx.Error{Status: http.StatusPaymentRequired, Code: httpx.CodeConflict, Message: "card payment failed: unexpected gateway status " + string(result.Status)}
+		return nil, &httpx.Error{Status: http.StatusPaymentRequired, Code: httpx.CodePaymentRequired, Message: "card payment failed: unexpected gateway status " + string(result.Status)}
 	}
 
 	card := &account.CardFacts{GatewayTxID: result.TransactionID, GatewayStatus: string(result.Status), TokenID: in.TokenID,

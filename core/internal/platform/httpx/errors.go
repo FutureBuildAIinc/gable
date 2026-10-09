@@ -33,6 +33,9 @@ const (
 	CodeRateLimited               = "rate_limited"
 	CodeUnavailable               = "unavailable"
 	CodeInternalError             = "internal_error"
+	// CodePaymentRequired is the 402 of a card charge that was declined or that
+	// the gateway could not take, before anything was recorded.
+	CodePaymentRequired = "payment_required"
 	// CodeChargeNotReversed is the 502 of a card charge the gateway approved,
 	// the system refused, and nothing gave back (ADR 0005 9.4).
 	CodeChargeNotReversed = "charge_not_reversed"
