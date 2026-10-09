@@ -448,9 +448,14 @@ testable per company: the sum of a customer's `customer_transactions` in
 one company equals that company's share of the customer's open documents,
 per currency, and the sum of `customer_transactions` per
 `(company, currency)` equals that company's `1020` balance in that
-currency. The place this is checked is the invariant test C2-4 builds
+currency. The cash invariant restates the same way: the sum of
+`amount_unapplied` over a company's posted payments equals that company's
+`2200` balance, per currency (`0005:1158-1159`), because `payments.company_id`
+(R1, section 2) makes the posted payments per company testable too. The
+place both are checked is the invariant test C2-4 builds
 (ADR 0005 9.3, invariants "true after every act and tested"), extended by
-build item 3 to group by `(company, currency)`.
+build item 3 to group by `(company, currency)`, the `1020` and `2200`
+balances both.
 
 The ledger rule of ADR 0005 section 4.2 extends to the company boundary
 without change: GL reports group by currency inside a company, and the
@@ -833,7 +838,7 @@ are its own, and their sum is stated rather than rounded):
 |---|---|---|
 | 1 | The migration and the census test (section 10: about twenty tables, six rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test) | 14 to 20 |
-| 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
+| 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks; C2-4's invariant test extended per `(company, currency)`, the `1020` and `2200` balances both; each step 4 default dropped with its writer) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
