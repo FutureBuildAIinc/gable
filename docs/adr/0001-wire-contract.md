@@ -200,10 +200,10 @@ The code table:
 | 400 | `validation_failed` | one or more fields failed validation; `details` names each field |
 | 400 | `unsupported_query_parameter` | the route does not accept a query parameter the request carries; `details` names it |
 | 401 | `unauthorized` | no or invalid credentials |
+| 402 | `payment_required` | a card charge the gateway declined or could not take, before anything was recorded (`POST /api/v1/payments/card`) |
 | 403 | `forbidden` | credentials lack the scope or role the route requires |
 | 404 | `not_found` | the addressed resource does not exist (or is not visible to this caller) |
 | 405 | `method_not_allowed` | the method is not supported on the route |
-| 402 | `payment_required` | a card charge the gateway declined or could not take, before anything was recorded (`POST /api/v1/payments/card`) |
 | 409 | `stale_revision` | the write was built on a revision the document has moved past (section 11) |
 | 409 | `duplicate` | a unique value the request would create already exists; `details` may carry blockers naming it |
 | 409 | `idempotency_in_progress` | the same idempotency key is still executing its first request (section 9) |
