@@ -853,3 +853,41 @@ func TestVoidOfAKitInvoiceReturnsWholeKits(t *testing.T) {
 		}
 	}
 }
+
+// CARRIED (the C2-3 round 4 review): the void of a fulfilled order's invoice
+// brings the order back to confirmed, and that reopen writes the
+// order.reopened event of ADR 0005 section 12, from fulfilled.
+func TestInvoiceVoidOfAFulfilledOrderWritesOrderReopened(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	invID, orderID := f.invoice("10")
+	if o := f.do("GET", "/api/v1/orders/"+orderID, nil); str(t, o.body, "status") != "fulfilled" {
+		t.Fatalf("order before the void = %v, want fulfilled (billed whole)", o.body["status"])
+	}
+
+	r := f.voidInvoice(invID, rev(t, f.getInvoice(invID)), "billed in error")
+	if r.status != 200 {
+		t.Fatalf("void = %d: %s", r.status, r.raw)
+	}
+	rows, err := db.Pool.Query(context.Background(),
+		`SELECT type, COALESCE(data->>'from_status', '') FROM events_outbox WHERE entity_type = 'order' AND entity_id = $1 ORDER BY position`, orderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var ty, from string
+		if err := rows.Scan(&ty, &from); err != nil {
+			t.Fatal(err)
+		}
+		if from != "" {
+			ty += "<" + from
+		}
+		got = append(got, ty)
+	}
+	if len(got) == 0 || got[len(got)-1] != "order.reopened<fulfilled" {
+		t.Errorf("order events = %v, want order.reopened<fulfilled last", got)
+	}
+}

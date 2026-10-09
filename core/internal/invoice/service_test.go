@@ -31,7 +31,6 @@ type fakeRepo struct {
 	branchOK   bool
 	branchSeen []*uuid.UUID
 
-	openBalance int64
 	existsOrder bool
 }
 
@@ -46,12 +45,8 @@ func (f *fakeRepo) CreateInvoice(_ context.Context, inv *LegacyInvoice) error {
 	return nil
 }
 func (f *fakeRepo) GetInvoice(context.Context, uuid.UUID) (*Invoice, error) { return nil, nil }
-func (f *fakeRepo) UpdateInvoice(context.Context, *Invoice) error           { return nil }
 func (f *fakeRepo) ExistsInvoiceForOrder(context.Context, uuid.UUID) (bool, error) {
 	return f.existsOrder, nil
-}
-func (f *fakeRepo) SumOpenBalanceCents(context.Context, uuid.UUID) (int64, error) {
-	return f.openBalance, nil
 }
 func (f *fakeRepo) GetBranchTaxRate(_ context.Context, branchID *uuid.UUID) (float64, bool) {
 	f.branchSeen = append(f.branchSeen, branchID)

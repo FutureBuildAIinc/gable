@@ -358,7 +358,7 @@ func (s *Service) setInvoiceOpen(ctx context.Context, fx *Effects, inv *invoiceR
 func (s *Service) setMemoOpen(ctx context.Context, fx *Effects, m *memoRow, newOpen int64, reopen bool) error {
 	status := memoStatus(m.Total, newOpen)
 	if _, err := s.ex(ctx).Exec(ctx, `
-		UPDATE credit_memos SET amount_open = $2::bigint::numeric / 100, status = $3, applied_at = CASE WHEN $3 = 'APPLIED' THEN NOW() ELSE NULL END,
+		UPDATE credit_memos SET amount_open = $2::bigint::numeric / 100, status = $3::text, applied_at = CASE WHEN $3::text = 'APPLIED' THEN NOW() ELSE NULL END,
 			updated_at = NOW(), revision = revision + 1
 		WHERE id = $1`, m.ID, newOpen, status); err != nil {
 		return fmt.Errorf("failed to update the credit memo: %w", err)
