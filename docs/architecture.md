@@ -12,7 +12,7 @@
 - **Apps Platform (Phase 0 landed):** Modules are becoming *apps* — declared manifests, a DB-backed registry (`apps` table), per-instance enable/disable, and an Apps admin page. See the blueprint for the full model.
 
 ## 2. Technology Stack
-- **Backend:** Go 1.25+, stdlib `net/http.ServeMux` (Go 1.22+ pattern routing) — **not** Chi. Middleware lives in `pkg/middleware`.
+- **Backend:** Go 1.26+, stdlib `net/http.ServeMux` (Go 1.22+ pattern routing) — **not** Chi. Middleware lives in `pkg/middleware`.
 - **Database:** PostgreSQL 16+ via pgx v5.
     - Extensions in use: `uuid-ossp` (migration 001), `ltree` (migration 049). (`pgvector`/`postgis` are not installed; adopt only when a feature needs them.)
 - **Frontend:**
