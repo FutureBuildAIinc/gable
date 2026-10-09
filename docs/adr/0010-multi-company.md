@@ -443,25 +443,49 @@ the seed series in their `WHERE series = 'invoice'` and `'credit_memo'`
 the seed company's counter whatever company the row belongs to (the
 seed inserts credit memos through `credit_memo_next_number()` directly
 at `seed.go:1240`, and tests do the same at
-`serve/wire_branch_wall_test.go:175` and `invoice/wire_test.go:413`);
-a column DEFAULT cannot read the row's `company_id`, which the R1
-trigger stamps in any case. Item 4 replaces the DEFAULT, and the choice
-is named: a `BEFORE INSERT OR UPDATE` trigger on both tables that mints
+`serve/wire_branch_wall_test.go:175`,
+`invoice/migration097_test.go:199` (the only `invoice_next_number()`
+caller), and `invoice/wire_test.go:413`); a column DEFAULT cannot read
+the row's `company_id`, which the R1 trigger stamps in any case. Item
+4 replaces the DEFAULT and the two SQL functions together. The DEFAULT
+on `invoices.number` is dropped in the same migration that installs
+the trigger (a `DEFAULT` that calls a dropped function is a hard
+error, so the pair move together); `DROP FUNCTION
+invoice_next_number()` and `DROP FUNCTION credit_memo_next_number()`
+run in the same migration, so any raw caller that still asks for them
+errors loudly at run time, not silently at row read. Item 4's pull
+request converts every raw caller: the seed and the three tests above
+now omit `number` on insert and let the trigger mint, and the helpers
+the rest of the code path uses (`invoice/repository.go`'s posting path,
+the wire tests that go through the handler) already pass through the
+trigger. No other caller exists (`git grep 'invoice_next_number\|
+credit_memo_next_number'` lists only the four above). The choice is
+named: a `BEFORE INSERT OR UPDATE` trigger on both tables that mints
 only when `number` is null, from the row's company's `invoice_series`
 or `credit_memo_series` and its infix, through the same locked counter
 read, named to fire after the R1 company trigger because Postgres fires
 same timing triggers in name order, so the company is stamped before
 the mint reads it. Invoices mint at insert as today; credit memos mint
 at post, so the credit memo trigger fires on the update that posts the
-memo (a draft carries none), and the seed's and the tests' direct
-function calls ride the trigger instead. The Go helper widens with it:
+memo. The guard is named and not just "number is null": the trigger
+mints only when `NEW.number IS NULL` and `NEW.status` is neither
+`DRAFT` nor `VOID` (those states keep a null number, since a draft
+never had one and a voided draft never had one either, the rule of
+the existing `credit_memos_number_when_posted` constraint at
+`097:276-277`); on update the guard adds `OLD.status = 'DRAFT'`, so a
+`DRAFT` to `VOID` update does not burn a gapless number on a document
+that was never issued, and a `DRAFT` to `OPEN` or to `APPLIED` does.
+The seed's and the tests' direct function calls ride the trigger
+instead. The Go helper widens with it:
 `NextGaplessNumber` takes the company's series and infix (today it
 takes the bare series and prefix, `invoice/repository.go:511-520`), and
 its prefix rule, one to four uppercase letters
 (`core/internal/platform/httpx/docnum.go:88-98`), widens to accept the
 infix bearing prefix. Item 4's tests prove the hole closed: a raw SQL
 insert for a second company draws from that company's series and
-carries its infix, never the seed's.
+carries its infix, never the seed's; the dropped functions are tested
+absent (`\df` lists neither name); and the four raw callers insert
+with `number NULL` and let the trigger mint.
 
 ### 5. Currency
 
