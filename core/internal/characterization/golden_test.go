@@ -105,13 +105,15 @@ var volatileStringFields = map[string]string{
 }
 
 // seedFixedDateFields carry fixed calendar dates in the demo seed's vehicle
-// fixture: hardcoded calendar values, unlike every other date in the seed,
-// which is drawn relative to the seed clock. A seed-day offset for them would
-// drift by one every day the calendar advances, so they normalise to the
-// plain timestamp placeholder (the shape check still applies).
+// and driver fixtures: hardcoded calendar values, unlike every other date in
+// the seed, which is drawn relative to the seed clock. A seed-day offset for
+// them would drift by one every day the calendar advances, so they normalise
+// to the plain timestamp placeholder (the shape check still applies).
 var seedFixedDateFields = map[string]bool{
 	"insurance_expiry":  true,
 	"next_service_date": true,
+	"cdl_expiry":        true,
+	"hire_date":         true,
 }
 
 func (n *normaliser) value(v any, key string) any {
