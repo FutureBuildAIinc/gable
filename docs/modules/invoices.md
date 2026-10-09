@@ -33,15 +33,18 @@ credits more tax than the invoice charged.
 
 Every route is in `core/api/fragments/invoice.yaml` and the registered
 handles are in `core/internal/invoice/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `invoices` and
-`credit-memos` module columns.
+(`core/api/ROUTES.txt`) lists each one under the `internal/invoice`
+package (the route census has a `package` column, not a module
+column). Three of the routes below are registered under other
+packages: the email and print routes are `internal/document`, the
+invoice's payment list is `internal/payment`.
 
 | Method | Path | One line |
 |---|---|---|
 | GET | `/api/v1/invoices` | Cursor list of invoices, newest first; status, customer_id, job_id, ship_to_id, order_id, overdue filter. |
 | GET | `/api/v1/invoices/{id}` | One invoice with its lines and revision as ETag. |
 | POST | `/api/v1/invoices/{id}/transitions` | Void an invoice. |
-| POST | `/api/v1/invoices/{id}/email` | Email invoice to customer (render only; the legacy route kept). |
+| POST | `/api/v1/invoices/{id}/email` | Email invoice to customer (queued, answers 202, notification is log only; owned by `internal/document`). |
 | GET | `/api/v1/invoices/{id}/payments` | List an invoice's payments (the payment module's read). |
 | GET | `/api/v1/credit-memos` | Cursor list of credit memos, newest first; status, customer_id, invoice_id, job_id filter. |
 | POST | `/api/v1/credit-memos` | Create a draft credit memo. |
@@ -52,8 +55,8 @@ handles are in `core/internal/invoice/handler.go`. The route census
 The print routes at `/api/v1/documents/print/invoice/{id}` and
 `/api/v1/documents/print/pickticket/{id}` live in
 `core/api/fragments/documents.yaml` and are owned by the documents
-module. The email route is the legacy render, kept on its existing
-path.
+module. The email route is owned by `internal/document` (queued,
+202, log only).
 
 ## The main resource
 
@@ -131,13 +134,16 @@ plus the invoice-only fields:
 
 `CreditMemo` has its own field set (see
 `core/api/fragments/invoice.yaml` `components.schemas.CreditMemo`):
-the sales header fields without the invoice's order, date, terms,
-delivery and payment fields, plus `invoice_id`, `pos_return_id`,
-`open_cents`, `memo_date`, `reason_code` (`return`,
-`price_adjustment`, `damage`, `other`) and `reason`; each line adds
-`invoice_line_id` and `restock`. The `number` is gapless, prefix
-`CM-`, padded to six, and is null while the memo is a draft (a voided
-draft never had one).
+its own `id`, `number`, `branch_id`, `customer_id`, `customer_name`,
+`invoice_id`, `pos_return_id`, `job_id`, `ship_to_id`, `status`,
+`revision`, `currency`, `subtotal_cents`, `tax_cents`,
+`tax_rate_percent`, `total_cents`, `open_cents`, `gl_entry_id`,
+`memo_date`, `voided_at`, `voided_by`, `void_reason`, `created_at`,
+`updated_at`, plus `reason_code` (`return`, `price_adjustment`,
+`damage`, `other`) and `reason`; each line adds `invoice_line_id`
+and `restock`. The `number` is gapless, prefix `CM-`, padded to
+six, and is null while the memo is a draft (a voided draft never had
+one).
 
 ### Money and quantity conventions
 

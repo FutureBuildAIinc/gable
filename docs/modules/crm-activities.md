@@ -27,9 +27,10 @@ the office reads when a complaint comes in.
 
 Every route is in `core/api/fragments/activities.yaml` and the
 registered handles are in `core/internal/crm/handler.go`. The route
-census (`core/api/ROUTES.txt`) lists each one under the `activities`
-module column for the by-id routes and under the `customers` module
-column for the by-customer routes.
+census (`core/api/ROUTES.txt`) lists each one under the
+`internal/crm` package (the route census has a `package` column,
+not a module column; both the by-id and the by-customer routes sit
+under `internal/crm`).
 
 | Method | Path | One line |
 |---|---|---|

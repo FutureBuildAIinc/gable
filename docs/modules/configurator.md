@@ -23,8 +23,8 @@ needed no contract migration.
 A yard sells many non-stock items whose attributes drive whether
 the part can be built at all. A builder asks for a 2x6 in
 Southern Yellow Pine, pressure treated, no prime, eight foot.
-The configurator says yes, prices it, and the order writes a
-non-stock line. The rules are what make the configurator say
+The configurator says yes and builds the SKU; pricing is the
+order's. The rules are what make the configurator say
 yes or no; the presets are the out-of-the-box answers the
 sales rep picks from.
 
@@ -33,7 +33,8 @@ sales rep picks from.
 Every route is in `core/api/fragments/configurator.yaml` and the
 registered handles are in `core/internal/configurator/handler.go`.
 The route census (`core/api/ROUTES.txt`) lists each one under the
-`configurator` module column.
+`internal/configurator` package (the route census has a `package`
+column, not a module column).
 
 | Method | Path | One line |
 |---|---|---|
@@ -50,12 +51,12 @@ Every route registers under the millwork app (a 404
 ## The main resources
 
 `ConfiguratorRule` (see `core/api/fragments/configurator.yaml`
-`components.schemas.ConfiguratorRule`) carries `attribute_type`,
+`components.schemas.ConfiguratorRule`) carries `id`, `attribute_type`,
 `attribute_value`, `depends_on_type`, `depends_on_value`,
-`is_allowed` (boolean), `error_message` (nullable). A rule is
-matched by its dependency type and value; the matrix is ordered by
-dependency type and value, then attribute type and value, never
-null.
+`is_allowed` (boolean), `error_message` (nullable), plus the
+timestamps `created_at` and `updated_at`. A rule is matched by its
+dependency type and value; the matrix is ordered by dependency type
+and value, then attribute type and value, never null.
 
 `ConfiguratorPreset` carries `id`, `name`, `description` (nullable),
 `product_type`, `config` (an object), `is_active`, `created_at`,

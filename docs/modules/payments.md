@@ -41,9 +41,10 @@ original payment with its own positive amount.
 Every route is in `core/api/fragments/payment.yaml` and the
 registered handles are in `core/internal/payment/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`payments` module column. The invoice's payment list is reached
-through `/api/v1/invoices/{id}/payments`, owned by this module,
-though its path sits under `invoices`.
+`internal/payment` package (the route census has a `package`
+column, not a module column). The invoice's payment list is
+reached through `/api/v1/invoices/{id}/payments`, owned by this
+module, though its path sits under `invoices`.
 
 | Method | Path | One line |
 |---|---|---|

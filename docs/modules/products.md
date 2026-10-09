@@ -41,7 +41,9 @@ and images, then store the result on the product.
 Every route is in `core/api/fragments/product.yaml` and the registered
 handles are in `core/internal/product/handler.go` and
 `core/internal/pim/handler.go`. The route census (`core/api/ROUTES.txt`)
-lists each one under the `products` module column (PIM routes included).
+lists each one under the `internal/product` or `internal/pim`
+package (the route census has a `package` column, not a module
+column).
 
 | Method | Path | One line |
 |---|---|---|
@@ -94,22 +96,23 @@ lists each one under the `products` module column (PIM routes included).
 | `revision` | integer | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
-The PIM content (`PimContent`) carries `short_description`,
-`long_description`, `marketing_copy`, `attributes` (an object or null),
-`seo_title`, `seo_description`, `seo_keywords` (array of strings or
-null), `seo_slug`, plus the generation tracking fields
-`last_gen_model`, `last_gen_prompt`, `last_gen_at`.
+The PIM content (`PimContent`) carries `id`, `product_id`,
+`short_description`, `long_description`, `marketing_copy`,
+`attributes` (an object or null), `seo_title`, `seo_description`,
+`seo_keywords` (array of strings or null), `seo_slug`, the
+generation tracking fields `last_gen_model`, `last_gen_prompt`,
+`last_gen_at`, and the timestamps `created_at` and `updated_at`.
 
 The PIM media (`PimMedia`) carries `id`, `product_id`, `media_type`,
-`url`, `alt_text`, `sort_order`, `is_primary`, `status`, plus the
+`url`, `alt_text`, `sort_order`, `is_primary`, `status`, the
 generation tracking fields `gen_model`, `gen_prompt`, `gen_style`,
-`generated_at`.
+`generated_at`, and the timestamps `created_at` and `updated_at`.
 
 The PIM collateral (`PimCollateral`) carries `id`, `product_id`,
 `collateral_type` (`sell_sheet`, `facebook`, `instagram`,
 `linkedin`, `email_blast`), `title`, `content`, `tone`, `audience`,
-plus the generation tracking fields `gen_model`, `gen_prompt`,
-`generated_at`.
+the generation tracking fields `gen_model`, `gen_prompt`,
+`generated_at`, and the timestamps `created_at` and `updated_at`.
 
 ### Money and quantity conventions
 

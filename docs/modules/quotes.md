@@ -34,7 +34,8 @@ can ask "why did this line not hit list?" and get an answer.
 
 Every route is in `core/api/fragments/quote.yaml` and the registered
 handles are in `core/internal/quote/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `quotes` module column.
+(`core/api/ROUTES.txt`) lists each one under the `internal/quote`
+package.
 
 | Method | Path | One line |
 |---|---|---|

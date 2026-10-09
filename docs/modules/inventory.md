@@ -29,7 +29,8 @@ count or a receipt.
 Every route is in `core/api/fragments/inventory.yaml` and the
 registered handles are in `core/internal/inventory/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`inventory` module column.
+`internal/inventory` package (the route census has a `package`
+column, not a module column).
 
 | Method | Path | One line |
 |---|---|---|

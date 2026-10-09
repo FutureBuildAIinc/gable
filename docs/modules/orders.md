@@ -37,8 +37,8 @@ or bills the completed delivery.
 
 Every route is in `core/api/fragments/order.yaml` and the registered
 handles are in `core/internal/order/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `orders` module
-column.
+(`core/api/ROUTES.txt`) lists each one under the `internal/order`
+package.
 
 | Method | Path | One line |
 |---|---|---|

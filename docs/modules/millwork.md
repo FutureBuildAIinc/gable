@@ -31,7 +31,8 @@ the option (a finish color, a hardware set, a glass spec).
 Every route is in `core/api/fragments/millwork.yaml` and the
 registered handles are in `core/internal/millwork/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`millwork` module column.
+`internal/millwork` package (the route census has a `package`
+column, not a module column).
 
 | Method | Path | One line |
 |---|---|---|

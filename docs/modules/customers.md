@@ -33,8 +33,9 @@ forces the sales rep to enter a purchase order number at confirm.
 
 Every route is in `core/api/fragments/customer.yaml` and the registered
 handles are in `core/internal/customer/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `customers`,
-`ship-tos`, `contacts` and `payment-terms` module columns.
+(`core/api/ROUTES.txt`) lists each one under the `internal/customer`
+package (the route census has a `package` column, not a module
+column).
 
 | Method | Path | One line |
 |---|---|---|
