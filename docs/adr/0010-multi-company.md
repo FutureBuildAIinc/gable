@@ -207,7 +207,7 @@ row itself.
 
 | Module | Table | Rule | Source or note |
 |---|---|---|---|
-| locations | `locations` | R1 | `company_id` on every row; branch rows are the anchor, others take their branch's (`057`, `058`) |
+| locations | `locations` | R1 | `company_id` on every row; the trigger copies it onto non branch rows from their branch (`057`, `058`), and a BRANCH row is writer set, the one R1 exception (its route is item 7's, so the step 4 `DEFAULT` carries the column until that route lands, section 10) |
 | sales | `orders` | R1 | `062:7` (`branch_id` NOT NULL from `062:13`) |
 | sales | `quotes` | R1 | `063:6` |
 | sales | `invoices` | R1 | `064:7` |
@@ -552,10 +552,15 @@ branch does not exist yet. It moves under the company segment: `POST
 the body carries no `company_id`; the path names it, the create stamps
 every row of the subtree with it, and it is immutable after (section 1).
 Today's `POST /api/v1/branches` (`location/handler.go:103`, admin) keeps
-answering while exactly one company exists, defaulting to it, so every
+answering while exactly one company exists, defaulting to it through the
+step 4 `DEFAULT` on `locations.company_id` (section 10), the bridge that
+keeps every branch insert alive between item 1 and this item, so every
 single company deployment, script and golden keeps working; once a second
 company exists it refuses with 409 `conflict`, blocker `company_required`,
-naming the company scoped route. Both the new route and the old route's
+naming the company scoped route. The same pull request drops that
+`DEFAULT`: the company scoped route and the old route both stamp the
+column from then on, so no second company can inherit the seed company
+through the default. Both the new route and the old route's
 refusal are rows in `docs/refactor/CONTRACT-CHANGES.md`. Sized inside
 item 7.
 
@@ -733,7 +738,14 @@ Up, in order:
    take the seed company; every other row takes its `branch_id`'s company,
    its `branch_id` first backfilled from its ancestor chain where null
    (`057:21` allows null; `058` and `060` keep and backfill it). The
-   update trigger of step 3 refuses a later move.
+   update trigger of step 3 refuses a later move. `locations` is the one
+   R1 column that also carries the step 4 `DEFAULT`: a BRANCH row has no
+   parent the trigger could copy (`058` makes it self referencing), the
+   branch create route (`location/handler.go:103`, through
+   `location/repository.go:98`) writes no company until item 7 builds the
+   company scoped route, and without the default the seed's own branch
+   insert (`seed.go:230`) and every branch insert between this item and
+   item 7 would fail the NOT NULL.
 3. The R1 tables of section 2 that exist when it runs: add `company_id`,
    backfill from the parent, NOT NULL, the foreign key, and the
    `BEFORE INSERT OR UPDATE` trigger that keeps it and refuses a parent of
@@ -754,7 +766,11 @@ Up, in order:
    `PostEntry`, an account create, a fiscal period, an AP payment, a bank
    account, an AR transaction, a refund) would otherwise
    fail a NOT NULL violation and turn `refactor/v1` red, and no writer
-   sets the column until item 3. No trigger: item 3's writers set the
+   sets the column until item 3. `locations.company_id` (step 2) sits
+   under the same bridge for the same reason: it is the one R1 column
+   whose rows include BRANCH rows, which no trigger can source, and item 7
+   drops it in the same pull request that builds the company scoped
+   branch route and makes the old route stamp the column (section 6). No trigger: item 3's writers set the
    value from then on, and each default is dropped in the same pull
    request that makes its writer set it, the census test extended in that
    same pull request to fail while any R2 `company_id` column still
@@ -862,7 +878,7 @@ writes (5), and the settings gate (7):
 | 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
-| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
+| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route and drop the step 4 `locations` default with both branch routes stamping the column; the settings gate of section 6 with a test per refusal; routes and the desk screen) | 9 to 13 |
 
 Total: 74 to 114 dev hour equivalents. Item 1 lands first, on its own,
 behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
