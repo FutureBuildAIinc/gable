@@ -61,14 +61,19 @@ Today's tenancy, with file and line:
   `core/internal/app/serve/wire_branch_wall.go:36-37`), and PR 44 ("Security:
   lists without a branch header are held to the caller's grants") added the
   list rule (`branch.go:44-59`).
-- The books have no branch at all: `gl_accounts`, `gl_fiscal_periods`,
-  `gl_journal_entries` and `gl_journal_lines`
-  (`core/migrations/025_general_ledger.sql:8,28,42,60`), `payments`
+- The books carry no branch today: the GL tables (`gl_accounts`,
+  `gl_fiscal_periods`, `gl_journal_entries` and `gl_journal_lines`
+  (`core/migrations/025_general_ledger.sql:8,27,42,60`)), `payments`
   (`008_payments_and_till.sql:9`), `credit_memos`
-  (`018_financial_features.sql:14`), `vendor_invoices` and `ap_payments`
-  (`028_accounts_payable.sql:7,36`), `bank_accounts`,
+  (`018_financial_features.sql:14`), `ap_payments`
+  (`028_accounts_payable.sql:36`), and `bank_accounts`,
   `reconciliation_sessions` and `bank_transactions`
-  (`029_matching_and_bankrecon.sql:65,75,95`). `git grep branch_id
+  (`029_matching_and_bankrecon.sql:65,75,95`). The AP document side stops
+  being branchless in cycle 4: C4-1b adds `vendor_invoices.branch_id`
+  backfilled from the purchase order or the default branch (ADR 0008
+  section 12), and chapter 7's `vendor_returns` and `vendor_credit_memos`
+  carry one (`0008:1272,1305`); the GL, payments side and bank tables
+  stay branchless, which is the case the R2 rule of section 2 answers. `git grep branch_id
   core/migrations` finds branch columns only on the sales, stock and counter
   documents (`062_orders_branch.sql:7`, `063_quotes_branch.sql:6`,
   `064_invoices_branch.sql:7`, `065_po_branch.sql:7,21`,
@@ -174,8 +179,9 @@ section 10 reads:
   that needs a company joins that parent. Line tables are children of
   their header; a stock row's children name the stock row. This keeps the
   column count down and the company invariant in one place per parent.
-- **legacy.** Renamed `*_legacy` by a later cycle and read by nothing: no
-  column and no rule while the rows wait for their drop.
+- **legacy.** Replaced or renamed by a later cycle and read by nothing
+  live: no column and no rule while the rows wait for their drop (or, for
+  a table a later record's own down still writes back, for that down).
 - **key.** `api_keys` alone: the one table that gains a NULLABLE
   `company_id` (section 6), so it is none of the other five.
 
@@ -203,9 +209,21 @@ row itself.
 | counter | `pos_returns` | R2 | `079:42`; from the sale it returns |
 | purchasing | `purchase_orders`, `po_receipts` | R1 | `065:7,21` |
 | purchasing | `po_freight_charges` | child | of the purchase order it belongs to |
-| AP | `vendor_invoices` | R2 | no branch (`028:7`); from the purchase order it buys against, else the request's company |
-| AP | `ap_payments`, `ap_payment_applications` | R2 | `028:36`; from the invoices they pay, checked one company per act |
-| AP (C4, ADR 0008 7.2) | `vendor_credit_memos` | R2 | from the vendor return or invoice it credits |
+| AP | `vendor_invoices` | R1 | `branch_id` is added by C4-1b, backfilled from the purchase order's branch or the default branch (ADR 0008 section 12 at `0008:2021-2024`); the build sets it NOT NULL first, as for payments, then the standard trigger |
+| AP | `ap_payments` | R2 | `028:36`; from the invoices they pay, checked one company per act |
+| AP (C4, ADR 0008 7.2) | `ap_applications` | R2 | replaces `ap_payment_applications` (package E's backfill); the AP core checks the payment or credit memo and the invoice name one company, the R2 check beside the parents |
+| AP (legacy) | `ap_payment_applications` | legacy | replaced by `ap_applications` and read by nothing live; no column while ADR 0008's own down still writes it |
+| AP (C4, ADR 0008 7.2) | `vendor_credit_memos` | R1 | carries `branch_id` (`0008:1305`); the build sets it NOT NULL first, as for payments, then the standard trigger |
+| AP (C4, ADR 0008 7.1) | `vendor_returns` | R1 | carries `branch_id` (`0008:1272`); its lines and the credit memo lines are children of their headers |
+| AP (C4, package C) | `purchase_receipts` | R1 | carries `branch_id` (ADR 0008 section 4 at `0008:912`); `purchase_receipt_lines` are children of their receipt |
+| AP (C4, ADR 0008 7.3) | `ap_match_results`, `ap_match_lines` | child | children of the document they match (`document_kind`, `document_id`: a vendor invoice or vendor credit memo, each of which carries its company) |
+| stock (C4, ADR 0008 10.2) | `stock_levels` | R1 | per product and branch (`0008:1835`) |
+| stock (C4) | `reorder_runs` | R2 | `branch_id` NULL (`0008:2016`); the writer sets the company from the branch a run names, and a run with a null branch is refused once a second company exists, because it would name no company |
+| stock (C4, ADR 0008 10.3) | `reorder_recommendations` | R1 | carries `branch_id` (`0008:1889`) |
+| purchasing (C4, package D) | `purchasing_limits` | R3 | one row per user, company wide by ADR 0008 section 6's own words; shared in v1, a known limit beside the party terms |
+| purchasing (C4, package D) | `purchase_order_approvals` | child | of the purchase order it approves (append only, ADR 0008 section 6) |
+| purchasing (C4, package C) | `special_order_po_requests` | child | of the order line it fills and the draft purchase order it creates (ADR 0008 section 5) |
+| feeds (C4, ADR 0008 8.4) | `vendor_items` | R3 | the shared vendor catalog the `CATALOG` kind upserts (`0008:1600`) |
 | GL | `gl_accounts` | R2 | section 3 |
 | GL | `gl_journal_entries` | R2 | section 3; `PostEntry` sets it |
 | GL | `gl_journal_lines` | R2 | the one line table that is not a child: the row carries `company_id NOT NULL`, set by `PostEntry` with its entry's, and composite foreign keys hold it equal to its entry's company and its account's (section 3) |
@@ -679,8 +697,8 @@ Up, in order:
    step 1 and writes as a literal through `EXECUTE format(...)`. The
    default is the bridge that lets item 1 land on its own: between this
    item and item 3, every insert into an R2 table (a posting through
-   `PostEntry`, an account create, a fiscal period, a vendor bill, an AP
-   payment, a bank account, an AR transaction, a refund) would otherwise
+   `PostEntry`, an account create, a fiscal period, an AP payment, a bank
+   account, an AR transaction, a refund) would otherwise
    fail a NOT NULL violation and turn `refactor/v1` red, and no writer
    sets the column until item 3. No trigger: item 3's writers set the
    value from then on, and each default is dropped in the same pull
