@@ -104,8 +104,12 @@ func (s *Service) buildCredit(ctx context.Context, st Store, d *CreditInput, sou
 					httpx.FieldError{Field: path + ".invoice_line_id", Message: "no such line on this invoice"})
 			}
 			if src.LineType != salesdoc.LineProduct && src.LineType != salesdoc.LineCharge {
+				msg := kitCreditRefusal
+				if src.LineType == salesdoc.LineText {
+					msg = "a text line is not credited by line: send a free line with its own description and price"
+				}
 				return nil, validationFailed("one or more fields failed validation",
-					httpx.FieldError{Field: path + ".invoice_line_id", Message: "a kit, a kit component or a text line is not credited by line: credit its price as a free line"})
+					httpx.FieldError{Field: path + ".invoice_line_id", Message: msg})
 			}
 			cl, err = creditFromInvoiceLine(path, l, src, amounts.ByLine[src.ID], guard.ByLine[src.ID])
 			if err != nil {
@@ -272,7 +276,7 @@ func (s *Service) freeCreditLine(ctx context.Context, st Store, path string, d *
 			}
 			if ref.IsKit {
 				return cl, validationFailed("one or more fields failed validation",
-					httpx.FieldError{Field: path + ".product_id", Message: "a kit is credited through the invoice line that billed it"})
+					httpx.FieldError{Field: path + ".product_id", Message: kitCreditRefusal})
 			}
 			cl.ProductID = d.ProductID
 			sku := ref.SKU
@@ -314,6 +318,11 @@ func finishFree(path string, cl *CreditLine, d *CreditLineInput, uom string, pri
 	cl.LineTotal = &total
 	return *cl, nil
 }
+
+// kitCreditRefusal is the one message for every way a credit memo line can
+// name a kit: ADR 0005 6.3 does not say how a kit return explodes into
+// component quantities, costs and restock, so v1 refuses it everywhere.
+const kitCreditRefusal = "a kit cannot be returned in v1; credit its price with a free line that names no product"
 
 // creditTax is the credit memo's tax (ADR 0005 section 3): at the invoice's
 // rate on the memo's taxable base, never more than the invoice's tax less the

@@ -9,6 +9,7 @@ package invoice_test
 // restock with its entry at the original cost, and the void.
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -596,5 +597,41 @@ func TestCreditMemoWithNoInvoice(t *testing.T) {
 	}
 	if f.balance() != -1089 {
 		t.Errorf("balance = %d, want -1089 (the customer is owed)", f.balance())
+	}
+}
+
+// RULE (review P3-2): every kit refusal on a credit memo line says the same
+// one thing, and none sends the user to a path that refuses too: a kit cannot
+// be returned in v1, its price is credited with a free line naming no product.
+func TestKitRefusalsOnCreditMemoLinesAreOneMessage(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	kit, post := uuid.New(), uuid.New()
+	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, is_kit, taxable) VALUES ($1, $2, 'A fence kit', 'EA', 100.00, TRUE, TRUE)`, kit, "CK-KIT-"+uuid.NewString()[:6])
+	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, 'A fence post', 'EA', 12.50, 5.00)`, post, "CK-POST-"+uuid.NewString()[:6])
+	mustExec(t, db, `INSERT INTO product_kit_components (kit_product_id, component_product_id, quantity, position) VALUES ($1, $2, 4, 0)`, kit, post)
+	mustExec(t, db, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 9, 0)`, post, f.yardID)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoice_lines WHERE product_id IN ($1, $2)`, kit, post)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE product_id IN ($1, $2)`, kit, post)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_kit_components WHERE kit_product_id = $1`, kit)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM inventory WHERE product_id = $1`, post)
+	})
+	orderID, r := f.confirmedOrder(map[string]any{"product_id": kit.String(), "quantity": "2"})
+	invID, _ := f.fulfil(orderID, r, nil)
+	kitLine := f.firstLineID(invID)
+
+	const want = "a kit cannot be returned in v1; credit its price with a free line that names no product"
+	for name, body := range map[string]map[string]any{
+		"the invoice's kit line": f.creditBody(invID, returnLine(kitLine, "-1", false)),
+		"a free line of a kit":   f.creditBody(invID, map[string]any{"product_id": kit.String(), "quantity": "-1", "unit_price_ten_thousandths": 1000000}),
+		"a free kit line type":   f.creditBody(invID, map[string]any{"line_type": "kit", "quantity": "-1", "description": "kit"}),
+	} {
+		r := f.do("POST", "/api/v1/credit-memos", body)
+		if r.status != 400 || !strings.Contains(string(r.raw), want) {
+			t.Errorf("%s = %d %s, want a 400 saying %q", name, r.status, r.raw, want)
+		}
 	}
 }

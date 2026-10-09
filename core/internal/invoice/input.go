@@ -233,7 +233,7 @@ func (l *CreditLineRequest) parse(v *httpx.Validator, path string) (CreditLineIn
 		case "product", "charge", "text":
 			d.LineType = salesdoc.LineType(strings.ToUpper(*l.LineType))
 		case "kit", "component":
-			fail("line_type", "a kit is credited through the invoice line that billed it; send product, charge or text")
+			fail("line_type", kitCreditRefusal)
 		default:
 			fail("line_type", "must be one of: product, charge, text")
 		}
