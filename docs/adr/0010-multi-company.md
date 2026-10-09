@@ -313,7 +313,14 @@ company by construction, because every document carries its company:
   and an adjustment reason write check that the named code exists in every
   company's chart (a shared row must resolve in every company), and
   deactivating a `gl_accounts` row a charge code or an adjustment reason
-  names is refused with 409 blocker `account_in_use`.
+  names is refused with 409 blocker `account_in_use`. A change of `code`
+  is guarded the same way: `UpdateAccount` writes `code` today
+  (`core/internal/gl/repository.go:153-156`), and once the FK is dropped
+  nothing database level would refuse a rename, so an update that would
+  change the code of an account a charge code, an adjustment reason, or a
+  fixed posting code of ADR 0005 section 8.1 or ADR 0008 section 3.2
+  names is refused with the same 409 blocker `account_in_use`; a rename
+  of an unreferenced code stays allowed. Tested in item 2.
 - **The resolver.** `resolveAccountIDs(ctx, codes...)` (`service.go:53`)
   becomes `resolveAccountIDs(ctx, companyID, codes...)`: it loads one
   company's chart and fails the act when a code is missing there, as it
@@ -811,7 +818,7 @@ are its own, and their sum is stated rather than rounded):
 | Order | Item | Size |
 |---|---|---|
 | 1 | The migration and the census test (section 10: about twenty tables, six rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
-| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals) | 14 to 20 |
+| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test) | 14 to 20 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
