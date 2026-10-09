@@ -38,7 +38,7 @@ func (s *stubProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) 
 	return nil, product.ErrNotFound
 }
 func (s *stubProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []product.UnitSetRowView,
-	_, _, _ string, _ *int64, _ int64) (int64, error) {
+	_, _, _, _ string, _ *int64, _ int64) (int64, error) {
 	return 0, nil
 }
 func (s *stubProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
