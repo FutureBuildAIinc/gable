@@ -964,19 +964,23 @@ are its own, and their sum is stated rather than rounded). The round 3
 fixes grow items 1, 2, 5 and 7: the lines column, the default bridge and
 the down's refusal probes (1), the composite keys on lines and reversals
 and the code rename refusal (2), the key pinning and the user only
-writes (5), and the settings gate (7):
+writes (5), and the settings gate (7). The round 4 fixes grow items 1,
+4 and 5: the `locations` half of the default bridge, the allowlist and
+the down's inverted default probe (1), the mint trigger that replaces
+the `097` `DEFAULT`, the widened helper and the infix checks (4), and
+the AP payments wall (5):
 
 | Order | Item | Size |
 |---|---|---|
-| 1 | The migration and the census test (section 10: about twenty five tables, six rules, triggers, per company GL constraints, the step 4 default bridge, the down's refusal probes, the company row's series identity, round trip and refusal tests) | 16 to 24 |
+| 1 | The migration and the census test (section 10: about twenty five tables, six rules, triggers, per company GL constraints, the step 4 default bridge with its `locations` half, the allowlist, the down's refusal probes, the company row's series identity, round trip and refusal tests) | 17 to 25 |
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test, the entries and lines step 4 defaults dropped with `PostEntry`) | 14 to 20 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank, and the reorder run writer, whose run's `branch_id` names its company, section 2; the AR core's checks; C2-4's invariant test extended per `(company, currency)`, the `1020` and `2200` balances both; the AR, AP payment, refund and `reorder_runs` step 4 defaults dropped with their writers) | 14 to 24 |
-| 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `097` `DEFAULT` mint replaced by the per company mint trigger and the helper widened with it, the raw insert test for a second company, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
-| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, the AP payments side's company filter on the same test, `api_keys.company_id` with its header rule and `key.company_refused`, the `gl_accounts`, `bank_accounts` and `gl_fiscal_periods` step 4 defaults dropped with the reroutes) | 9 to 13 |
+| 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `097` `DEFAULT` mint replaced by the per company mint trigger and the helper widened with it, the raw insert test for a second company, the infix's uniqueness and seed tie checks, ADR 0007 section 7 patterns, contract change rows) | 8 to 12 |
+| 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, the AP payments side's company filter on the same test, `api_keys.company_id` with its header rule and `key.company_refused`, the `gl_accounts`, `bank_accounts` and `gl_fiscal_periods` step 4 defaults dropped with the reroutes) | 10 to 14 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route and drop the step 4 `locations` default with both branch routes stamping the column; the `system_settings` trigger of section 6 with its update and delete refusals tested at the database; routes and the desk screen) | 9 to 13 |
 
-Total: 74 to 114 dev hour equivalents. Item 1 lands first, on its own,
+Total: 78 to 118 dev hour equivalents. Item 1 lands first, on its own,
 behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
 and 3 land together or in that order, and each item drops its own
 tables' step 4 defaults in the pull request that converts their writers,
