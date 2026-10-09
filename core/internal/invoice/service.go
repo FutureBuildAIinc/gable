@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
@@ -326,6 +327,12 @@ func (s *Service) VoidInvoice(ctx context.Context, id uuid.UUID, pre Preconditio
 		}
 		if err := s.checkBranch(ctx, head.BranchID, "invoice"); err != nil {
 			return err
+		}
+		if strings.EqualFold(string(head.Origin), "pos") {
+			// The counter sale void (sale, payments and invoice together) is
+			// C2-5's, ADR 0005 section 11: this invoice's stock moved with the
+			// sale, so voiding the invoice alone would strand it.
+			return conflictBlocker("counter_sale", "this invoice belongs to a counter sale: void the counter sale instead")
 		}
 		if head.OrderID != nil && s.orders != nil {
 			if err := s.orders.LockForInvoiceVoid(ctx, *head.OrderID); err != nil {

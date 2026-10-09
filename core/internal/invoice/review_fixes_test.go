@@ -37,6 +37,10 @@ func TestVoidReversesTheLegacyEntryOfAnInvoiceWithNoGLEntryID(t *testing.T) {
 		t.Fatalf("legacy invoice: %v", err)
 	}
 	id := legacy.id
+	// the counter's own invoices are refused (TestVoidOfACounterInvoice...);
+	// the case here is the entry lookup, so the invoice is reclassified as an
+	// order's, as an invoice from before C2-2 would be.
+	mustExec(t, db, `UPDATE invoices SET origin = 'ORDER' WHERE id = $1`, id)
 	if n, _ := f.entryLegs(id); n != 1 {
 		t.Fatalf("%d entries for the legacy invoice, want the one SyncInvoice posted", n)
 	}
@@ -66,6 +70,40 @@ func TestVoidReversesTheLegacyEntryOfAnInvoiceWithNoGLEntryID(t *testing.T) {
 	}
 	if f.balance() != bal {
 		t.Error("a refused void moved the subledger")
+	}
+}
+
+// ADR 0005 section 11: the counter sale void (the sale, its payments and its
+// invoice together) is C2-5's. Until then an invoice of the counter (origin
+// pos) is refused 409 counter_sale, since voiding the invoice alone would leave
+// the sale's stock moves and its pos_transactions row standing.
+func TestVoidOfACounterInvoiceIsRefusedUntilTheCounterSaleVoid(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	ctx := context.Background()
+
+	var counter *legacyDoc
+	if err := db.RunInTx(ctx, func(ctx context.Context) error {
+		var err error
+		counter, err = makeLegacy(ctx, f)
+		return err
+	}); err != nil {
+		t.Fatalf("counter invoice: %v", err)
+	}
+	if got := f.getInvoice(counter.id).body["origin"]; got != "pos" {
+		t.Fatalf("origin = %v, want pos: the case is not the one under test", got)
+	}
+	bal := f.balance()
+	r := f.voidInvoice(counter.id, rev(t, f.getInvoice(counter.id)), "void the counter charge")
+	if _, blockers, _ := errorOf(t, r); r.status != 409 || fmt.Sprint(blockers) != "[counter_sale]" {
+		t.Errorf("void of a counter invoice = %d %v, want 409 counter_sale: %s", r.status, blockers, r.raw)
+	}
+	if n, _ := f.reversalLegs(counter.id); n != 0 || f.balance() != bal {
+		t.Errorf("a refused void left %d reversal entries and moved the balance %d to %d", n, bal, f.balance())
+	}
+	if str(t, f.getInvoice(counter.id).body, "status") == "void" {
+		t.Error("the refused invoice is void")
 	}
 }
 
