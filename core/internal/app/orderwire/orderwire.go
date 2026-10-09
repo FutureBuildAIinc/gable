@@ -77,7 +77,7 @@ func New(d Deps) *order.Service {
 		&auditAdapter{auditLog: auditLog}, exposureChecker, logger,
 	).WithOutbox(outbox.NewWriter(d.DB, d.Config.EventsOrg)).WithTxRunner(d.DB)
 
-	return order.NewService(order.NewRepository(d.DB)).
+	svc := order.NewService(order.NewRepository(d.DB)).
 		WithOutbox(outbox.NewWriter(d.DB, d.Config.EventsOrg)).
 		WithTxRunner(d.DB).
 		WithAuditLog(auditLog).
@@ -86,6 +86,11 @@ func New(d Deps) *order.Service {
 		WithInvoices(d.Invoices).
 		WithTaxProvider(&TaxProviderAdapter{Svc: NewTaxService(d.DB, d.Config, logger)}).
 		WithExposureGate(exposureChecker, &ExposureOverriderAdapter{Svc: exposureSvc})
+	// The invoice void reaches back into the order (its row lock, its lines,
+	// its stock and status): the invoice module cannot import this one, so the
+	// seam is wired here, in the one constructor both roles use.
+	d.Invoices.WithOrders(svc).WithStock(d.Inventory)
+	return svc
 }
 
 // NewTaxService builds the tax service both the order provider adapter and

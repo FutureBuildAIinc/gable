@@ -118,3 +118,55 @@ func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry
 	}
 	return entry, nil
 }
+
+// ReversalInput names the entry to reverse and the business date and currency
+// of the reversal (ADR 0005 section 8.2: a void reverses the document's whole
+// entry, dated the void date, in the document's currency).
+type ReversalInput struct {
+	EntryID   uuid.UUID
+	EntryDate time.Time
+	Currency  string
+	Reason    string
+	PostedBy  string
+}
+
+// ErrAlreadyReversed is the refusal to reverse an entry a reversal already
+// points at (the one-reversal-per-entry index would refuse it too).
+var ErrAlreadyReversed = errors.New("gl: the entry is already reversed")
+
+// PostReversal books the net zero reversal of a POSTED entry through the
+// caller's transaction: the same accounts, debits and credits swapped, source
+// REVERSAL, reverses_entry_id set, dated the given business date (period
+// checked like any posting). It refuses a call with no transaction open, an
+// entry that is not POSTED, and an entry already reversed.
+func (s *Service) PostReversal(ctx context.Context, in ReversalInput) (*JournalEntry, error) {
+	if !database.InTx(ctx) {
+		return nil, ErrNoTransaction
+	}
+	orig, err := s.repo.GetJournalEntry(ctx, in.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	if orig.Status != StatusPosted {
+		return nil, fmt.Errorf("gl: only a POSTED entry can be reversed (current: %s)", orig.Status)
+	}
+	if reversed, err := s.repo.IsReversed(ctx, in.EntryID); err != nil {
+		return nil, err
+	} else if reversed {
+		return nil, ErrAlreadyReversed
+	}
+	memo := fmt.Sprintf("Reversal of #%d", orig.EntryNumber)
+	if in.Reason != "" {
+		memo += ": " + in.Reason
+	}
+	legs := make([]Leg, 0, len(orig.Lines))
+	for _, l := range orig.Lines {
+		legs = append(legs, Leg{AccountCode: l.AccountCode, Description: "Reversal: " + l.Description,
+			Debit: l.Credit, Credit: l.Debit})
+	}
+	origID := orig.ID
+	return s.PostEntry(ctx, PostingInput{
+		EntryDate: in.EntryDate, Memo: memo, Source: SourceReversal, SourceRefID: &origID,
+		ReversesEntryID: &origID, Currency: in.Currency, PostedBy: in.PostedBy, Legs: legs,
+	})
+}

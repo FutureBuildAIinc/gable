@@ -137,6 +137,8 @@ type PortalLineDTO struct {
 // TODO: align with int64 cents — TotalAmount, Subtotal, TaxAmount are float64 dollars
 type PortalInvoiceDTO struct {
 	ID           uuid.UUID       `json:"id"`
+	Number       string          `json:"number"`
+	IsOverdue    bool            `json:"is_overdue"`
 	OrderID      uuid.UUID       `json:"order_id"`
 	Status       string          `json:"status"`
 	TotalAmount  float64         `json:"total_amount"`

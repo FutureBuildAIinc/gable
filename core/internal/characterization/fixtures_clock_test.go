@@ -127,9 +127,9 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 		at := stamp(inv.days)
 		mustExec(t, db, `INSERT INTO invoices (
 			id, order_id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount,
-			payment_terms, due_date, paid_at, created_at, updated_at, branch_id
+			due_date, paid_at, created_at, updated_at, branch_id
 		) VALUES ($1, NULL, $2, 'UNPAID', $3, $3, 0, 0,
-			'NET30', $4, NULL, $5, $5,
+			$4, NULL, $5, $5,
 			COALESCE(NULL::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 			inv.id, fixtureCustomer, inv.total, at, at)
 		// The shared line shape (ADR 0005 2.2): the fixture writes what the

@@ -75,10 +75,16 @@ export interface PortalLineItem {
     price_each: number;
 }
 
+export type PortalInvoiceStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'VOID' | 'WRITTEN_OFF';
+
 export interface PortalInvoice {
     id: string;
+    /** The gapless document number (IN-000123). */
+    number: string;
+    /** Computed by the server: open and past its due date. OVERDUE is not a status. */
+    is_overdue: boolean;
     order_id: string;
-    status: string;
+    status: PortalInvoiceStatus;
     total_amount: number;
     subtotal: number;
     tax_amount: number;
