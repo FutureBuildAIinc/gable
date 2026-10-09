@@ -207,12 +207,15 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 
 	// 2. Record payment in our DB within a transaction
 	var p *Payment
+	refused := false
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
 		inv, err := s.lockInvoice(ctx, invoiceID)
 		if errors.Is(err, ErrInvoiceVoid) {
+			refused = true
 			return err
 		}
 		if err != nil {
+			refused = true
 			return fmt.Errorf("invoice not found: %w", err)
 		}
 
@@ -265,6 +268,13 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 		return nil
 	})
 
+	if err != nil && refused {
+		// The invoice refused the payment after the gateway approved the
+		// charge (a void committed during the call): give the money back
+		// before returning, so the customer is not charged with no document.
+		s.reverseCharge(ctx, result.TransactionID, invoiceID, amountCents)
+		return nil, fmt.Errorf("payment refused after the gateway approved the charge: %w", err)
+	}
 	if err != nil {
 		// Gateway charged but DB failed — log for manual reconciliation
 		s.logger.Error("CRITICAL: Gateway charged but DB commit failed",
@@ -277,6 +287,28 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 	}
 
 	return p, nil
+}
+
+// reverseCharge undoes an approved charge that no payment record backs: the
+// same-day void first, the refund when the void is refused (a settled
+// capture). Both outcomes are logged; a reversal that fails too is logged for
+// manual reconciliation.
+func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, invoiceID uuid.UUID, amountCents int64) {
+	_, voidErr := s.gateway.Void(ctx, gatewayTxID)
+	if voidErr == nil {
+		s.logger.Warn("Gateway charge voided: the invoice refused the payment",
+			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents)
+		return
+	}
+	s.logger.Info("Gateway void refused, refunding instead",
+		"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "error", voidErr)
+	if _, err := s.gateway.Refund(ctx, gatewayTxID, amountCents); err != nil {
+		s.logger.Error("CRITICAL: Gateway charged, the invoice refused it, and the reversal failed",
+			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents, "error", err)
+		return
+	}
+	s.logger.Warn("Gateway charge refunded: the invoice refused the payment",
+		"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents)
 }
 
 // RefundPayment issues a full or partial refund on a completed card payment.
