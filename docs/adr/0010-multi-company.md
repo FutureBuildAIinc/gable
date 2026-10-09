@@ -177,8 +177,10 @@ section 10 reads:
   company. Application code never writes `company_id` here. A trigger, not
   a generated column: a Postgres generated column cannot read another
   table.
-- **R2, set by the single writer and checked.** The books carry no branch
-  (`025`, `028`, `029`, above), so no trigger can reach them. The owning
+- **R2, set by the single writer and checked.** The tables no trigger can
+  reach: the GL and bank books (`025`, `029`), the payments side and AP's
+  payment table (`028:36`), above, which carry no branch even after
+  cycle 4. The owning
   service sets `company_id` explicitly inside the act's transaction, from
   the document's company, with the foreign key to `company(id)` and a
   database check that the row's company equals its source document's
