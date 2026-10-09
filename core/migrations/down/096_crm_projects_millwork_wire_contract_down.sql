@@ -11,12 +11,12 @@
 -- restored without inventing times), and a description backfilled from NULL
 -- to the empty string stays empty (which NULL was is not recorded).
 
-DROP INDEX IF EXISTS idx_millwork_options_created_at_id_desc;
+DROP INDEX IF EXISTS idx_millwork_options_category_created_at_id_desc;
 ALTER TABLE millwork_options DROP COLUMN IF EXISTS revision;
 
-DROP INDEX IF EXISTS idx_projects_created_at_id_desc;
+DROP INDEX IF EXISTS idx_projects_customer_created_at_id_desc;
 ALTER TABLE projects DROP COLUMN IF EXISTS revision;
 
-DROP INDEX IF EXISTS idx_crm_activities_created_at_id_desc;
+DROP INDEX IF EXISTS idx_crm_activities_customer_created_at_id_desc;
 ALTER TABLE crm_activities DROP COLUMN IF EXISTS revision;
 ALTER TABLE crm_activities ALTER COLUMN description DROP NOT NULL;

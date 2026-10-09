@@ -140,8 +140,11 @@ func TestMigration096_BackfillsRowsThatExist(t *testing.T) {
 	if null := scalar096[*string](t, conn, `SELECT description FROM crm_activities WHERE id = '00000000-0000-0000-0000-00000000a002'`); null == nil || *null != "" {
 		t.Errorf("a legacy NULL description = %v, want the empty string", null)
 	}
-	if n := scalar096[int](t, conn, `SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_crm_activities_created_at_id_desc'`); n != 1 {
+	if n := scalar096[int](t, conn, `SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_crm_activities_customer_created_at_id_desc'`); n != 1 {
 		t.Error("the crm_activities keyset index is missing")
+	}
+	if def := scalar096[string](t, conn, `SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_crm_activities_customer_created_at_id_desc'`); !strings.Contains(def, "(customer_id, created_at DESC, id DESC)") {
+		t.Errorf("the crm_activities keyset index does not lead with the scope column: %s", def)
 	}
 
 	// projects: the data 091 moved stays intact (ids, statuses, counts).
@@ -151,16 +154,22 @@ func TestMigration096_BackfillsRowsThatExist(t *testing.T) {
 	if got := scalar096[string](t, conn, `SELECT status FROM projects WHERE id = '00000000-0000-0000-0000-00000000b001'`); got != "Active" {
 		t.Errorf("the migrated job's status = %s, want Active (091's data stays as it is)", got)
 	}
-	if n := scalar096[int](t, conn, `SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_projects_created_at_id_desc'`); n != 1 {
+	if n := scalar096[int](t, conn, `SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_projects_customer_created_at_id_desc'`); n != 1 {
 		t.Error("the projects keyset index is missing")
+	}
+	if def := scalar096[string](t, conn, `SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_projects_customer_created_at_id_desc'`); !strings.Contains(def, "(customer_id, created_at DESC, id DESC)") {
+		t.Errorf("the projects keyset index does not lead with the scope column: %s", def)
 	}
 
 	// millwork_options: same three rules.
 	if n := scalar096[int](t, conn, `SELECT count(*) FROM millwork_options WHERE created_at IS NULL OR revision <> 1`); n != 0 {
 		t.Errorf("%d millwork options with a NULL created_at or a revision other than 1", n)
 	}
-	if n := scalar096[int](t, conn, `SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_millwork_options_created_at_id_desc'`); n != 1 {
+	if n := scalar096[int](t, conn, `SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_millwork_options_category_created_at_id_desc'`); n != 1 {
 		t.Error("the millwork_options keyset index is missing")
+	}
+	if def := scalar096[string](t, conn, `SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_millwork_options_category_created_at_id_desc'`); !strings.Contains(def, "(category, created_at DESC, id DESC)") {
+		t.Errorf("the millwork_options keyset index does not lead with the scope column: %s", def)
 	}
 
 	// A NULL created_at was filled from a stated fallback, never the epoch.
