@@ -754,22 +754,32 @@ Up, in order:
 
 Down: refuses, with `RAISE`, when more than one company exists, or when any
 row of any table the up touched points at a company other than the seed;
-otherwise it drops the triggers, the columns, the seed row and the `company`
-table, in reverse order. A down that would lose a second company's data
-loses nothing instead: it answers. Down ordering against the build items:
-the items after the migration add objects with downs of their own (item
-2's composite foreign keys and unique constraints, item 4's per company
-counter rows), and the migration runner runs downs in reverse order, so
-this migration's down runs only after theirs; its refusals then stand on
-what is left.
+and it refuses while any later item's objects still exist: a
+`document_counters` series other than `invoice` or `credit_memo` (item
+4's per company rows), a composite foreign key on `gl_journal_lines`,
+`gl_journal_entries` or `bank_accounts` (item 2's), or a `company_id`
+column that still carries a DEFAULT (item 3's drop has not run). Each
+refusal names what it found. Otherwise it drops the triggers, the
+columns, the seed row and the `company` table, in reverse order. A down
+that would lose a second company's data loses nothing instead: it
+answers. Down ordering against the build items: the runner applies no
+down at all, it skips every `*_down.sql` file and the downs live in
+`migrations/down/`, applied by hand
+(`core/internal/app/migrate/migrate.go:61-73`), so the rule is the C5-3
+downs are applied by hand in reverse number order, the items' downs
+before the migration's own; the refusals above make this migration's
+down refuse rather than guess if that order is not kept, so its refusals
+stand on what is left.
 
 Tests, in the migration item:
 
 - Up, down, up, on the repository's seed data and on a database with the
   cycle 2 to 4 tables present (the migration test shape the recipe's step 3
   names), proving idempotency and the round trip.
-- The refusal paths of the down: one extra company row, and one row pointed
-  at a made up company, each making the down raise.
+- The refusal paths of the down: one extra company row, one row pointed
+  at a made up company, and each later item's object (a per company
+  counter row, a composite foreign key of section 3, a remaining
+  `company_id` default), each making the down raise.
 - **The census test**: it reads the census list that lives beside the
   migration, one line per table, so the test reads as the table of
   section 2 does. It fails when a table with a `branch_id` column (minus
