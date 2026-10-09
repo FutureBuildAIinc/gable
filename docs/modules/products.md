@@ -31,8 +31,8 @@ and the components priced at zero.
 
 The PIM (product information management) is the long form: a marketing
 description, SEO text, media (photos, videos), and collateral
-(datasheets, spec sheets, install guides). The PIM content is what
-the customer's portal renders on the product page; the marketing
+(sell sheets and social posts). The PIM content is what the
+customer's portal renders on the product page; the marketing
 generation routes call the AI to draft new collateral, descriptions
 and images, then store the result on the product.
 
@@ -41,7 +41,7 @@ and images, then store the result on the product.
 Every route is in `core/api/fragments/product.yaml` and the registered
 handles are in `core/internal/product/handler.go` and
 `core/internal/pim/handler.go`. The route census (`core/api/ROUTES.txt`)
-lists each one under the `product` or `pim` module column.
+lists each one under the `products` module column (PIM routes included).
 
 | Method | Path | One line |
 |---|---|---|
@@ -78,8 +78,8 @@ lists each one under the `product` or `pim` module column.
 | `sku` | text | The unique stock keeping unit. |
 | `description` | text | The short description. |
 | `stock_uom` | text | The stocking unit (`PCS`, `EA`, `LF`, `BF`, `MBF`, etc.). |
-| `base_price_ten_thousandths` | int64 | The list price per stocking unit at scale 4. |
-| `average_unit_cost_ten_thousandths` | int64 | The cost per stocking unit at scale 4, average across receipts. |
+| `base_price_ten_thousandths` | integer | The list price per stocking unit at scale 4. |
+| `average_unit_cost_ten_thousandths` | integer | The cost per stocking unit at scale 4, average across receipts. |
 | `target_margin` | number | The target margin the pricing engine tries to hit. |
 | `commission_rate` | number | The salesperson commission rate. |
 | `vendor`, `vendor_id` | text, UUID, nullable | The default vendor. |
@@ -91,16 +91,25 @@ lists each one under the `product` or `pim` module column.
 | `lead_time_days` | integer, nullable | The published lead time. |
 | `reorder_point`, `reorder_qty` | decimal string | The reorder point and quantity, in the stocking unit, scale 4. |
 | `on_hand`, `allocated`, `available` | decimal string | The stock totals in the stocking unit; `available` is `on_hand - allocated`. |
-| `revision` | int64 | Starts at 1; returned as ETag. |
+| `revision` | integer | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
-The PIM content is a separate object: `long_description`, `seo_title`,
-`seo_description`, `seo_keywords` (an array of strings), `specs`
-(key-value), and a `taxable` flag. The PIM media is an array of
-objects with `id`, `kind` (`image`, `video`), `url`, `alt_text`,
-`position`, `is_primary`. The PIM collateral is an array of objects
-with `id`, `kind` (`datasheet`, `spec_sheet`, `install_guide`),
-`title`, `url`, `position`.
+The PIM content (`PimContent`) carries `short_description`,
+`long_description`, `marketing_copy`, `attributes` (an object or null),
+`seo_title`, `seo_description`, `seo_keywords` (array of strings or
+null), `seo_slug`, plus the generation tracking fields
+`last_gen_model`, `last_gen_prompt`, `last_gen_at`.
+
+The PIM media (`PimMedia`) carries `id`, `product_id`, `media_type`,
+`url`, `alt_text`, `sort_order`, `is_primary`, `status`, plus the
+generation tracking fields `gen_model`, `gen_prompt`, `gen_style`,
+`generated_at`.
+
+The PIM collateral (`PimCollateral`) carries `id`, `product_id`,
+`collateral_type` (`sell_sheet`, `facebook`, `instagram`,
+`linkedin`, `email_blast`), `title`, `content`, `tone`, `audience`,
+plus the generation tracking fields `gen_model`, `gen_prompt`,
+`generated_at`.
 
 ### Money and quantity conventions
 
@@ -131,19 +140,20 @@ admin-overridable (see `core/internal/app/serve/serve.go` near the
 
 Product writes today do not write outbox events; the module's events
 are PIM-side and ride the CRM and portal feeds. The PIM generation
-routes write `audit_log` rows for every AI call.
+routes do not write `audit_log` rows.
 
 ## Scopes, roles and keys
 
-A machine key reaching the product routes needs `product:read` for
-`GET` and `HEAD`, and `product:write` for every other method
-(ADR 0002). The user guard at the serve layer is the standard sales
-and inventory wall; the exact guard is composed in
-`core/internal/app/serve/serve.go` at `wall.products(mux,
-productHandler)`. The PIM routes are guarded `admin, owner` (see
-`pimHandler.RegisterRoutes(mux, scoped("admin", "owner"))`).
-A key without the scope is `403 forbidden`; the audit row carries
-the refused scope.
+A machine key reaching the product routes needs `products:read` for
+`GET` and `HEAD`, and `products:write` for every other method (ADR
+0002; the segment is the first path segment under `/api/v1/`; the
+PIM routes share the same segment). The user guard at the serve
+layer is `admin`, `owner`, `sales`, `warehouse` for the catalog and
+`admin`, `owner` for the PIM routes; the exact guards are composed in
+`core/internal/app/serve/wire_branch_wall.go` at `wall.products` and
+in `core/internal/app/serve/serve.go` at the
+`pimHandler.RegisterRoutes` line. A key without the scope is `403
+forbidden`; the audit row carries the refused scope.
 
 ## ADRs that govern this module
 

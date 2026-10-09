@@ -27,8 +27,9 @@ the office reads when a complaint comes in.
 
 Every route is in `core/api/fragments/activities.yaml` and the
 registered handles are in `core/internal/crm/handler.go`. The route
-census (`core/api/ROUTES.txt`) lists each one under the `crm` module
-column.
+census (`core/api/ROUTES.txt`) lists each one under the `activities`
+module column for the by-id routes and under the `customers` module
+column for the by-customer routes.
 
 | Method | Path | One line |
 |---|---|---|
@@ -37,6 +38,11 @@ column.
 | GET | `/api/v1/activities/{id}` | Get one activity. |
 | PUT | `/api/v1/activities/{id}` | Update an activity, on the client's revision. |
 | DELETE | `/api/v1/activities/{id}` | Delete an activity, writes `activity.deleted`. |
+
+The by-customer routes carry the `customers` scope segment
+(`customers:read` for the list, `customers:write` for the create);
+the by-id routes carry the `activities` scope segment
+(`activities:read`, `activities:write`).
 
 ## The main resource
 
@@ -52,7 +58,7 @@ column.
 | `description` | text | 1 to 4000 characters, free text. |
 | `logged_by` | UUID, nullable | The user (or machine key) who logged the activity. |
 | `activity_date` | timestamp | When the activity happened, RFC 3339 UTC. |
-| `revision` | int64 | Starts at 1; returned as ETag. |
+| `revision` | integer | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
 The `ActivityType` enum is the four values above; the database keeps
@@ -84,13 +90,15 @@ row the module writes for every change.
 
 ## Scopes, roles and keys
 
-A machine key reaching the activities routes needs `crm:read` for
-`GET` and `HEAD`, and `crm:write` for every other method (ADR 0002).
-The user guard at the serve layer is the standard sales wall; the
-exact guard is composed in `core/internal/app/serve/serve.go` at
-`wall.crm(mux, crm.NewService(crm.NewRepository(db)).WithAudit(...))`.
-Every route carries the branch wall through the activity's customer:
-a second branch's request is a 404. A key without the scope is `403
+A machine key reaching the by-id activities routes needs
+`activities:read` for `GET` and `HEAD`, and `activities:write` for
+every other method (ADR 0002; the segment is the first path segment
+under `/api/v1/`). The by-customer routes need `customers:read` and
+`customers:write`. The user guard at the serve layer is the standard
+sales wall; the exact guard is composed in
+`core/internal/app/serve/wire_branch_wall.go` at `wall.crm`. Every
+route carries the branch wall through the activity's customer: a
+second branch's request is a 404. A key without the scope is `403
 forbidden`; the audit row carries the refused scope.
 
 ## ADRs that govern this module

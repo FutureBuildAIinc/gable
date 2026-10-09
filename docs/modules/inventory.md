@@ -69,26 +69,28 @@ fragments name the legacy shapes they keep until C4-1.
 
 ## Events the module writes
 
-The write routes write the product and location rows directly and
-emit a `audit_log` row. The outbox event is not part of the inventory
+The write routes write the product and location rows directly. No
+outbox events and no `audit_log` rows are written by the inventory
 module today; the read side does not write events.
 
 ## Scopes, roles and keys
 
 A machine key reaching the inventory routes needs `inventory:read`
 for `GET` and `HEAD`, and `inventory:write` for every other method
-(ADR 0002). The user guard at the serve layer is the standard
-inventory and sales wall; the exact guard is composed in
-`core/internal/app/serve/serve.go` at
+(ADR 0002; the segment is the first path segment under `/api/v1/`).
+The user guard at the serve layer is `admin`, `owner`, `warehouse`;
+the exact guard is composed in
+`core/internal/app/serve/wire_branch_wall.go` at
 `wall.inventory(mux, inventorySvc)`. The list is held to the branch
 wall: a context branch (X-Branch-Id) lists its own rows; with no
 context branch a bound non-admin user lists the branches granted to
 the user, none granted listing none; an administrator without a
 header, an unbound key, the single-branch switch and callers with no
 branch context at all list every branch's. A legacy row with no
-location_id has no branch on its joined location and stays visible
+`location_id` has no branch on its joined location and stays visible
 to an administrator without a header and to callers with no branch
-context only.
+context only. A key without the scope is `403 forbidden`; the audit
+row carries the refused scope.
 
 ## ADRs that govern this module
 
