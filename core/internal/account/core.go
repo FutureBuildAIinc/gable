@@ -41,6 +41,7 @@ type Service struct {
 	now      func() time.Time
 	auditLog *audit.Logger
 	events   EventRecorder
+	tx       TxRunner
 }
 
 // NewService builds the AR core. glSvc may be nil in a unit test that posts no
