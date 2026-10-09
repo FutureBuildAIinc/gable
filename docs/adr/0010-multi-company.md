@@ -58,7 +58,7 @@ Today's tenancy, with file and line:
   PR 39 ("Security: the branch wall on path ids (PO receive, location reads)")
   extended the same guard to path ids
   (`core/internal/purchase_order/handler.go:67,233`, wired in
-  `core/internal/app/serve/wire_branch_wall.go:36-37`), and PR 44 ("Security:
+  `core/internal/app/serve/wire_branch_wall.go:37-38`), and PR 44 ("Security:
   lists without a branch header are held to the caller's grants") added the
   list rule (`branch.go:44-59`).
 - The books carry no branch today: the GL tables (`gl_accounts`,
@@ -96,7 +96,7 @@ Today's tenancy, with file and line:
   setting (`core/internal/config/config.go:36,150`), stamped on every
   provider call (`core/internal/tax/avalara.go:107`) and held by the tax
   service at construction (`core/internal/tax/service.go:36,43,111`; wired at
-  `core/internal/app/serve/serve.go:483`).
+  `core/internal/app/serve/serve.go:486`).
 - One dealer default currency: `system_settings` key `currency.default`,
   seeded `USD` (`core/migrations/091_customers_wire_contract.sql:36`), inside
   ADR 0005 section 4.2's chain (customer override, else this default).
@@ -443,7 +443,7 @@ the seed series in their `WHERE series = 'invoice'` and `'credit_memo'`
 the seed company's counter whatever company the row belongs to (the
 seed inserts credit memos through `credit_memo_next_number()` directly
 at `seed.go:1240`, and tests do the same at
-`serve/wire_branch_wall_test.go:170` and `invoice/wire_test.go:413`);
+`serve/wire_branch_wall_test.go:175` and `invoice/wire_test.go:413`);
 a column DEFAULT cannot read the row's `company_id`, which the R1
 trigger stamps in any case. Item 4 replaces the DEFAULT, and the choice
 is named: a `BEFORE INSERT OR UPDATE` trigger on both tables that mints
@@ -558,7 +558,7 @@ build lands, the same breakage this record refuses for unbound keys. AP
    invoices do not name one company; the aging report is scoped through
    `vendor_invoices.branch_id`, the table it already reads. All three
    routes are wired with `RequireRole("admin", "owner", "finance")` only
-   today (`serve.go:555`), no branch middleware, so this filter is their
+   today (`serve.go:558`), no branch middleware, so this filter is their
    wall, and item 5's `wire_company_wall_test.go` covers them. The
    consolidated report is a GL read under the same segment (section 8).
 
@@ -700,7 +700,7 @@ as every branchless write does today.
   `AvalaraClient.CalculateTax`, `avalara.go:107`), and the tax service
   holds the same value at construction (`tax/service.go:36,43`, used at
   `:111`; the service is built by `orderwire.NewTaxService`, called at
-  `serve.go:483`). The build moves the stamp to the document's company
+  `serve.go:486`). The build moves the stamp to the document's company
   at call time: the tax service takes the company code per call and
   passes it into `CalculateTax`, whose request must carry it instead of
   the client's configured value; a company
