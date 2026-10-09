@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -203,5 +204,87 @@ func TestMigration095_BackfillsRowsThatExist(t *testing.T) {
 	applyMigration(t, conn, target)
 	if got := scalar095[string](t, conn, `SELECT number FROM rfcs WHERE id = '00000000-0000-0000-0000-0000000000a1'`); got != "RFC-000001" {
 		t.Errorf("after down then up the first RFC is %s, want RFC-000001 again", got)
+	}
+}
+
+// Migration 095 step 1b: a database seeded before this PR holds rfcs.status
+// values outside the contract's enum (the base seed wrote 'published', and a
+// raw insert could land any string). The migration maps every out of enum
+// value to 'approved' (the same meaning as 'published') and pins the enum
+// with a CHECK constraint, so a database seeded before this PR holds
+// 'approved' for that row after the migration and a later write cannot
+// re-introduce an out of enum value. The test is the red then green proof:
+// before step 1b the 'published' row is 'published' and a new insert with
+// 'published' lands; after the step the legacy row is 'approved' and the
+// same insert fails with the CHECK constraint.
+func TestMigration095_RemapsLegacyRfcStatusAndPinsTheEnum(t *testing.T) {
+	conn, _ := scratchDB(t)
+	before, target := migrationFiles(t)
+	for _, f := range before {
+		applyMigration(t, conn, f)
+	}
+	ctx := context.Background()
+
+	// Legacy rows in the seed's pre-PR shape: the demo seed wrote
+	// status='published' (a value no route can produce), and a raw insert
+	// could land any string. Insert one of each to prove both kinds are
+	// mapped.
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO rfcs (id, title, status, problem_statement, proposed_solution, created_at, updated_at) VALUES
+		 ('00000000-0000-0000-0000-0000000000d1','Legacy published','published','p','s', now(), now()),
+		 ('00000000-0000-0000-0000-0000000000d2','Legacy odd','archived','p','s', now(), now());`); err != nil {
+		t.Fatalf("legacy rfcs rows: %v", err)
+	}
+
+	// Sanity: a new insert with status='published' lands on a base database
+	// with no CHECK constraint. This is the pre-step condition the step
+	// removes.
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO rfcs (title, status, problem_statement, proposed_solution) VALUES ('Pre-step published','published','p','s')`); err != nil {
+		t.Fatalf("a 'published' insert on a base database should land (no CHECK), got %v", err)
+	}
+
+	applyMigration(t, conn, target)
+
+	// Step 1b: every out of enum value mapped to 'approved' (the same
+	// meaning as 'published', inside the contract vocabulary).
+	for _, id := range []string{
+		"00000000-0000-0000-0000-0000000000d1",
+		"00000000-0000-0000-0000-0000000000d2",
+	} {
+		if got := scalar095[string](t, conn, `SELECT status FROM rfcs WHERE id = $1`, id); got != "approved" {
+			t.Errorf("legacy rfc %s mapped to %q, want approved", id, got)
+		}
+	}
+
+	// The CHECK constraint holds: a new insert with status='published' now
+	// fails with a CHECK violation (Postgres SQLSTATE 23514).
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO rfcs (title, status, problem_statement, proposed_solution) VALUES ('Post-step published','published','p','s')`); err == nil {
+		t.Fatal("a 'published' insert after 095 must fail (CHECK constraint), got nil")
+	} else {
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Errorf("a 'published' insert after 095: error = %v, want SQLSTATE 23514 (check_violation)", err)
+		}
+	}
+
+	// The four enum values all land: the constraint admits the vocabulary.
+	for _, status := range []string{"draft", "review", "approved", "rejected"} {
+		if _, err := conn.Exec(ctx,
+			`INSERT INTO rfcs (title, status, problem_statement, proposed_solution) VALUES ($1, $2, 'p', 's')`,
+			"Enum "+status, status); err != nil {
+			t.Errorf("a %q insert after 095 must land, got %v", status, err)
+		}
+	}
+
+	// Idempotence: a second apply does not remap (every row is already in
+	// the enum) and the constraint is left in place.
+	applyMigration(t, conn, target)
+	if n := scalar095[int](t, conn, `SELECT count(*) FROM rfcs WHERE status NOT IN ('draft','review','approved','rejected')`); n != 0 {
+		t.Errorf("a second apply left %d rfcs with a status outside the enum", n)
+	}
+	if n := scalar095[int](t, conn, `SELECT count(*) FROM pg_constraint WHERE conname = 'rfcs_status_check'`); n != 1 {
+		t.Errorf("a second apply dropped the CHECK constraint (%d rows in pg_constraint named rfcs_status_check)", n)
 	}
 }

@@ -2,10 +2,12 @@
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 -- 095: the admin group onto the wire contract (item C5-1a: techadmin,
--- governance and staff; docs/adr/0001-wire-contract.md). Six steps:
+-- governance and staff; docs/adr/0001-wire-contract.md). Seven steps:
 --
 --   1  rfcs.created_at and updated_at filled and NOT NULL (the list orders on
 --      created_at), and rfcs.revision for the If-Match precondition.
+--   1b rfcs.status backfilled to the contract enum (legacy 'published' and
+--      any other value maps to 'approved') and pinned by a CHECK constraint.
 --   2  rfc_number_seq, rfc_next_number() and rfcs.number (RFC-000001): the
 --      quote migration's shape, backfilled in (created_at, id) order; the
 --      DEFAULT keeps the seed's raw INSERTs numbered.
@@ -28,6 +30,18 @@ UPDATE rfcs SET updated_at = created_at WHERE updated_at IS NULL;
 ALTER TABLE rfcs ALTER COLUMN created_at SET NOT NULL;
 ALTER TABLE rfcs ALTER COLUMN updated_at SET NOT NULL;
 ALTER TABLE rfcs ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;
+
+-- 1b. rfcs.status: a database seeded before this PR holds rows outside the
+-- contract's status enum (the base seed wrote 'published', which no route
+-- produces). Map every non enum value to 'approved' (the same meaning, inside
+-- the vocabulary) and pin the enum with a CHECK constraint, guarded like the
+-- number constraint below so a second apply stays a no-op.
+UPDATE rfcs SET status = 'approved' WHERE status NOT IN ('draft','review','approved','rejected');
+DO $$ BEGIN
+    ALTER TABLE rfcs ADD CONSTRAINT rfcs_status_check
+        CHECK (status IN ('draft','review','approved','rejected'));
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
 
 -- 2. Document numbers: RFC- from a sequence, the quote migration's shape.
 CREATE SEQUENCE IF NOT EXISTS rfc_number_seq;
