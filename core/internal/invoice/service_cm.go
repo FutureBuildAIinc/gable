@@ -541,6 +541,12 @@ func (s *Service) voidCredit(ctx context.Context, id uuid.UUID, pre Precondition
 		if err := s.checkBranch(ctx, cm.BranchID, "credit memo"); err != nil {
 			return err
 		}
+		if head.Status == CreditDraft && cm.Status != CreditDraft {
+			// A post committed between the read and the lock: the finance role
+			// check and the credit serialization (step 1a) were skipped on the
+			// strength of a draft. Take them on the retry.
+			return conflictBlocker("credit_memo_changed", "the credit memo was posted while it was being voided: reload it and retry")
+		}
 		if err := pre.check(cm.Revision); err != nil {
 			return err
 		}
