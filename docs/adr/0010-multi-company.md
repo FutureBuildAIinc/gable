@@ -1008,14 +1008,17 @@ default" shape the bridged columns use; the trigger alone cannot keep
 the seed's invoices numbering after item 4 drops the default, and PL/pgSQL
 records no dependency on a table its body reads, so without the probe
 the down would drop `company` while the trigger stayed installed), or
-a `system_settings` row trigger of item 7's name (the gate on
-`multi_branch_enabled` and `default_branch_required`); the trigger is
-the one piece that fires against the still installed writers
-(`ai/keystore.go:64`, `payment/keystore.go:138`,
+a `system_settings` row and statement trigger of item 7's name (the
+gate on `multi_branch_enabled` and `default_branch_required` and the
+statement level `BEFORE TRUNCATE` trigger paired with it); these
+triggers are the pieces that fire against the still installed
+writers (`ai/keystore.go:64`, `payment/keystore.go:138`,
 `staff/repository.go:213`, all `INSERT ... ON CONFLICT DO UPDATE`)
 the first time any keystore writes a row, and a missing probe would
 let the down answer and leave that first fire to fail against the
-already dropped `company` table. The probe runs that way round because
+already dropped `company` table (the row probe catches the row path in
+practice; the statement level probe is named so a partial hand
+unwind cannot pass the down by removing only the row trigger). The probe runs that way round because
 the defaults are what this down expects to find: they are present right
 after this up, and present again once each dropping item's down has
 restored the default it dropped, which is exactly the state this down
@@ -1048,8 +1051,8 @@ Tests, in the migration item:
   `company_id` column whose DEFAULT a dropping item removed and whose
   restoring down has not run, an `invoices` or `credit_memos` row
   trigger of item 4's name or `invoices.number` lacking its `097:84`
-  `DEFAULT`, and a `system_settings` row trigger of item 7's name),
-  each making the down raise.
+  `DEFAULT`, and a `system_settings` row or statement (TRUNCATE)
+  trigger of item 7's name), each making the down raise.
 - **The census test**: it reads the census list that lives beside the
   migration, one line per table, so the test reads as the table of
   section 2 does. It fails when a table with a `branch_id` column (minus
