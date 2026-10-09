@@ -7,7 +7,7 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 A quote is the priced offer a sales rep sends to a customer before a sale.
 It carries the line items, the prices, the units, the total and the
-expiration date, and it is the first place a price override or a discount
+expiration, and it is the first place a price override or a discount
 appears. The customer accepts or rejects the offer through the portal or
 the integration seam; an accepted quote becomes an order through
 `POST /api/v1/quotes/{id}/convert`. The lifecycle spans draft, sent,
@@ -34,7 +34,7 @@ an answer.
 
 Every route is in `core/api/fragments/quote.yaml` and the registered
 handles are in `core/internal/quote/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `quote` module column.
+(`core/api/ROUTES.txt`) lists each one under the `quotes` module column.
 
 | Method | Path | One line |
 |---|---|---|
@@ -48,9 +48,9 @@ handles are in `core/internal/quote/handler.go`. The route census
 | GET | `/api/v1/quotes/{id}/file` | Download the original parsed file. |
 
 The exposure routes at `/api/v1/quotes/exposure` and
-`/api/v1/quotes/{id}/exposure/...` are the pricing module's and live in
-`core/api/fragments/quote.yaml` for the time being, marked there as the
-pending, unconverted shapes.
+`/api/v1/quotes/{id}/exposure/...` are owned by the pricing module and
+register under `internal/order` in the route census, even though their
+paths sit under `quotes`.
 
 ## The main resource
 
@@ -61,28 +61,53 @@ pending, unconverted shapes.
 | `id` | UUID | The document id. |
 | `number` | text | The document number, minted from a sequence, prefix `Q-`, padded to six (`Q-000123`). |
 | `status` | lowercase enum | `draft`, `sent`, `accepted`, `rejected`, `expired`. The wire name is `status`; the database column is `state`. |
-| `customer_id` | UUID | The customer the quote is for. |
+| `revision` | integer | Starts at 1, increments on every write. Returned as ETag. |
 | `branch_id` | UUID | The branch the quote belongs to. |
-| `salesperson_id` | UUID, nullable | The owner of the book. |
-| `subtotal_cents` | int64 | Sum of `line_total_cents` over non text lines. |
-| `tax_cents` | int64 | The order's tax, computed once at the rate of the day. |
-| `total_cents` | int64 | The customer's total, in minor units of the customer's currency. |
-| `currency` | ISO 4217 | The customer's effective currency at create; never sent by the client. |
-| `tax_rate_percent` | decimal string | The rate at the time of compute, four fraction digits at most. |
-| `tax_exempt` | boolean | The customer is exempt, so the tax is zero. |
-| `tax_source` | lowercase enum | `exempt`, `provider`, `ship_to_rate`, `branch_rate`, `legacy`. |
-| `expires_at` | date | The day the quote stops being valid. |
-| `notes` | text, nullable | A free text note. |
-| `lines` | array of `QuoteLine` | The priced lines, in position order. |
-| `revision` | int64 | Starts at 1, increments on every write. Returned as ETag. |
+| `customer_id` | UUID | The customer the quote is for. |
+| `customer_name` | text | Snapshot of the customer name. |
+| `job_id` | UUID, nullable | The project (job) this quote is for. |
+| `total_cents` | integer | The customer's total, in minor units of the customer's currency. |
+| `freight_cents` | integer | The freight amount. |
+| `margin_total_cents` | integer | The computed margin across all lines. |
+| `delivery_type` | lowercase enum | `pickup`, `delivery`. |
+| `vehicle_id` | UUID, nullable | The vehicle that will deliver, when known. |
+| `vehicle_name` | text, nullable | The vehicle display name. |
+| `source` | text | `manual`, `ai`, or `portal`. |
+| `expires_at` | timestamp, nullable | When the quote stops being valid, RFC 3339 UTC. |
+| `sent_at` | timestamp, nullable | When the quote was sent. |
+| `accepted_at` | timestamp, nullable | When the quote was accepted. |
+| `rejected_at` | timestamp, nullable | When the quote was rejected. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC, microsecond precision. |
+| `original_filename` | text, nullable | The name of the original parsed file, when AI sourced. |
+| `original_content_type` | text, nullable | The MIME type of the original parsed file. |
+| `parse_map` | array, nullable | The AI parse mapping data. |
+| `exposure_state` | lowercase enum | The pricing module's worst exposure rollup (`ok`, `warn`, `breach`, etc.). |
+| `exposure_cents` | integer | The exposure dollar value at the rollup. |
+| `exposure_last_checked_at` | timestamp, nullable | When the exposure scanner last looked at this quote. |
+| `lines` | array of `QuoteLine` | The priced lines, in position order. |
 
-A `QuoteLine` carries `line_type` (`product`, `charge`, `text`),
-`product_id`, `description`, `quantity` (decimal string, scale 4), `uom`,
-`unit_price_ten_thousandths`, `price_uom`, `uom_qty`, `price_uom_qty`,
-`line_total_cents`, `discount_percent` (decimal string, 0 to 100), or
-`discount_cents`, and `discount_reason`. The conversion pair is
-mandatory; when the units agree, the pair is 1 and 1.
+A `QuoteLine` carries:
+
+| Field | Wire form | Note |
+|---|---|---|
+| `id` | UUID | The line id. |
+| `quote_id` | UUID | The parent quote. |
+| `product_id` | UUID, nullable | The product, null for a special order line the dealer does not stock. |
+| `sku` | text | Snapshot of the product SKU. |
+| `description` | text | Snapshot of the description. |
+| `customer_note` | text, nullable | The customer's free text note on the line. |
+| `quantity` | decimal string | Scale 4. |
+| `uom` | lowercase enum | The sale unit. |
+| `price_uom` | text | The price unit. |
+| `uom_qty` | decimal string | Scale 4. |
+| `price_uom_qty` | decimal string | Scale 4. |
+| `unit_price_ten_thousandths` | integer | The price per `price_uom`. |
+| `line_total_cents` | integer | The extension, rounded once. |
+| `unit_cost_ten_thousandths` | integer | The cost per stocking unit, read by margin-aware roles. |
+| `created_at` | timestamp | RFC 3339 UTC. |
+
+The conversion pair (`uom_qty`, `price_uom_qty`) is mandatory; when
+the units agree, the pair is 1 and 1.
 
 ### Money and quantity conventions
 
@@ -95,15 +120,20 @@ sections 7 and 7a.
 ## Lifecycle and transitions
 
 The wire vocabulary is lowercase; the database keeps its uppercase CHECK.
-The transitions are:
+The transitions (`core/internal/quote/service.go` `validateStateTransition`)
+are:
 
 | From | To | Event |
 |---|---|---|
 | `draft` | `sent` | `quote.sent` |
+| `draft` | `accepted` | `quote.accepted` |
+| `draft` | `rejected` | `quote.rejected` |
+| `draft` | `expired` | `quote.expired` |
 | `sent` | `accepted` | `quote.accepted` |
 | `sent` | `rejected` | `quote.rejected` |
 | `sent` | `expired` | `quote.expired` |
-| `rejected`, `expired` | `draft` | `quote.reopened` |
+| `rejected` | `draft` | `quote.reopened` |
+| `expired` | `draft` | `quote.reopened` |
 
 `accepted` is terminal. A transition the lifecycle does not allow is
 `409 invalid_state_transition`. The body is `{"to": "sent", "revision":
@@ -124,12 +154,13 @@ notifier among them) read by type.
 ## Scopes, roles and keys
 
 A machine key reaching the module needs `quotes:read` for `GET` and
-`HEAD`, and `quotes:write` for every other method (ADR 0002). The user
-guard is registered at the serve layer as `admin`, `owner`, `sales` (see
-`core/internal/app/serve/serve.go` at the `wall.quotes(mux, ...)` line,
-the quote module being the wire template the recipe names). A key
-without the scope is `403 forbidden`; the route names the path segment
-of the scope so the audit row carries it.
+`HEAD`, and `quotes:write` for every other method (ADR 0002; the
+segment is the first path segment under `/api/v1/`). The user guard
+is registered at the serve layer as `admin`, `owner`, `sales` (see
+`core/internal/app/serve/wire_branch_wall.go` at the `wall.quotes(mux,
+...)` line, the quote module being the wire template the recipe names).
+A key without the scope is `403 forbidden`; the route names the path
+segment of the scope so the audit row carries it.
 
 ## ADRs that govern this module
 

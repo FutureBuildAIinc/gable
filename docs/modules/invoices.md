@@ -6,12 +6,12 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 # Invoices and credit memos
 
 An invoice is the bill a yard sends to a customer. It is a header (the
-customer, the ship-to, the order, the job, the salesperson) and a list
-of priced lines (product, kit, component, charge and text). The invoice
-is the document that posts the general ledger, moves the AR subledger,
-and is paid through a payment. A credit memo credits an invoice in
-part or in full, posting the general ledger the same way an invoice
-does, and moving the AR subledger in the opposite direction.
+customer, the ship-to, the order, the job) and a list of priced lines
+(product, kit, component, charge and text). The invoice is the document
+that posts the general ledger, moves the AR subledger, and is paid
+through a payment. A credit memo credits an invoice in part or in full,
+posting the general ledger the same way an invoice does and moving the
+AR subledger in the opposite direction.
 
 The Go code for invoices is in `core/internal/invoice/`. The credit
 memos are in `core/internal/invoice/service_cm.go` and
@@ -33,8 +33,8 @@ credits more tax than the invoice charged.
 
 Every route is in `core/api/fragments/invoice.yaml` and the registered
 handles are in `core/internal/invoice/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `invoice` module
-column.
+(`core/api/ROUTES.txt`) lists each one under the `invoices` and
+`credit-memos` module columns.
 
 | Method | Path | One line |
 |---|---|---|
@@ -42,7 +42,7 @@ column.
 | GET | `/api/v1/invoices/{id}` | One invoice with its lines and revision as ETag. |
 | POST | `/api/v1/invoices/{id}/transitions` | Void an invoice. |
 | POST | `/api/v1/invoices/{id}/email` | Email invoice to customer (render only; the legacy route kept). |
-| GET | `/api/v1/invoices/{id}/payments` | List an invoice's payments (the payment module's). |
+| GET | `/api/v1/invoices/{id}/payments` | List an invoice's payments (the payment module's read). |
 | GET | `/api/v1/credit-memos` | Cursor list of credit memos, newest first; status, customer_id filter. |
 | POST | `/api/v1/credit-memos` | Create a draft credit memo. |
 | GET | `/api/v1/credit-memos/{id}` | One credit memo with its lines and revision as ETag. |
@@ -50,9 +50,10 @@ column.
 | POST | `/api/v1/credit-memos/{id}/transitions` | Post or void a credit memo. |
 
 The print routes at `/api/v1/documents/print/invoice/{id}` and
-`/api/v1/documents/print/pickticket/{id}` are the documents module's
-and live in the same fragment for the time being. The email route is
-the legacy render, kept on its existing path.
+`api/v1/documents/print/pickticket/{id}` live in
+`core/api/fragments/documents.yaml` and are owned by the documents
+module. The email route is the legacy render, kept on its existing
+path.
 
 ## The main resource
 
@@ -63,30 +64,38 @@ the legacy render, kept on its existing path.
 |---|---|---|
 | `id` | UUID | The invoice id. |
 | `number` | text | The invoice number, gapless, prefix `IN-`, padded to six. |
-| `status` | lowercase enum | `unpaid`, `partial`, `paid`, `void`, `written_off`. The wire name is `status`; the database column is `state`. `overdue` is a derived flag, not a status. |
-| `is_overdue` | boolean | Computed: open amount greater than zero and due date past. |
+| `status` | lowercase enum | `unpaid`, `partial`, `paid`, `void`, `written_off`. The wire name is `status`; the database column is `state`. |
+| `is_overdue` | boolean | Computed from `status` being `unpaid` or `partial` (`core/internal/invoice/repository.go` `isOverdue`). |
 | `branch_id` | UUID | The branch the invoice belongs to. |
 | `customer_id` | UUID | The customer the invoice is for. |
 | `customer_name` | text | Snapshot of the customer name. |
 | `order_id` | UUID, nullable | The order this invoice came from. |
 | `job_id` | UUID, nullable | The project (job) this invoice is for. |
 | `ship_to_id`, `ship_to` | UUID, object, nullable | The delivery address and its snapshot. |
-| `salesperson_id` | UUID, nullable | The book owner. |
+| `revision` | integer | Starts at 1; returned as ETag. |
+| `currency` | ISO 4217 | The customer's effective currency. |
+| `origin` | text | The invoice origin (e.g. `order`, `pos`). |
+| `delivery_type` | lowercase enum | `delivery`, `pickup`. |
+| `picked_up_by` | text, nullable | Set on a pickup invoice. |
+| `delivery_id` | UUID, nullable | The delivery this invoice is for. |
 | `invoice_date` | date | The day the invoice is dated. |
-| `due_date` | date | The day the invoice is due, from the customer's payment terms. |
-| `subtotal_cents` | int64 | Sum of `line_total_cents` over non text lines. |
-| `taxable_cents` | int64 | Sum of `line_total_cents` over lines with `taxable` true. |
-| `tax_cents` | int64 | `round_half_away(taxable_cents x tax_rate)`, once per document. |
+| `due_date` | date, nullable | The day the invoice is due, from the customer's payment terms. |
+| `payment_terms_id` | UUID | The payment terms applied. |
+| `discount_due_date` | date, nullable | The early payment discount window's end. |
+| `discount_percent` | decimal string, nullable | The early payment discount percent. |
+| `subtotal_cents` | integer | Sum of `line_total_cents` over non text lines. |
+| `tax_cents` | integer | The invoice's tax, computed once at the rate of the day. |
 | `tax_rate_percent` | decimal string, nullable | The rate used. |
 | `tax_exempt` | boolean | Whether the customer is exempt. |
 | `tax_source` | lowercase enum | `exempt`, `provider`, `ship_to_rate`, `branch_rate`, `legacy`. |
-| `total_cents` | int64 | The customer's total. |
-| `amount_paid_cents` | int64 | The sum of payments applied, read only. |
-| `amount_open_cents` | int64 | `total_cents - amount_paid_cents - credited_cents`, read only. |
-| `credited_cents` | int64 | The sum of credit memos not void, read only. |
-| `currency` | ISO 4217 | The customer's effective currency. |
+| `total_cents` | integer | The customer's total. |
+| `open_cents` | integer | The amount still open, read only. |
+| `paid_at` | timestamp, nullable | When the invoice was fully paid, nullable. |
+| `gl_entry_id` | UUID, nullable | The general ledger entry, set on post. |
+| `voided_at` | timestamp, nullable | When the invoice was voided. |
+| `voided_by` | text, nullable | The actor that voided it. |
+| `void_reason` | text, nullable | The reason the void carried. |
 | `lines` | array of `InvoiceLine` | The priced lines, in position order. |
-| `revision` | int64 | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
 `InvoiceLine` carries the shared sales line shape of ADR 0005 section 2
@@ -97,23 +106,33 @@ plus the invoice-only fields:
 | `line_type` | lowercase enum | `product`, `kit`, `component`, `charge`, `text`. |
 | `parent_line_id` | UUID, nullable | Set on `component` only. |
 | `product_id`, `charge_code_id` | UUID, nullable | The product or charge code. |
+| `charge_code` | text, nullable | Snapshotted at create. |
 | `sku`, `description` | text | Snapshot of the product. |
 | `quantity`, `uom` | decimal string, text | The sale unit, scale 4. |
 | `price_uom`, `uom_qty`, `price_uom_qty` | text, decimal string, decimal string | The price unit and the conversion pair. |
-| `unit_price_ten_thousandths` | int64 | The price per `price_uom`. |
-| `unit_cost_ten_thousandths` | int64 | The cost per stocking unit, read by margin-aware roles. |
-| `cost_cents` | int64 | The cost of the billed quantity, read by margin-aware roles. |
-| `line_total_cents` | int64 | The extension, rounded once. |
-| `taxable` | boolean | From the product. |
-| `revenue_account_code` | text, nullable | Snapshotted at create. |
-| `is_special_order`, `vendor_id`, `special_order_unit_cost_ten_thousandths` | boolean, UUID, int64 | A stocked special order line. |
+| `unit_price_ten_thousandths` | integer, nullable | The price per `price_uom`. |
+| `priced_unit_price_ten_thousandths` | integer, nullable | What the pricing engine resolved, read only. |
+| `price_source` | lowercase enum | `price_list`, `quote`, `override`, `manual`, `none`. |
+| `override_reason` | text, nullable | Required when `price_source` is `override`. |
+| `discount_percent` | decimal string, nullable | 0 to 100. |
+| `discount_cents` | integer, nullable | Positive. |
+| `discount_reason` | text, nullable | Required with either discount. |
+| `price_adjusted_by` | text, nullable | The actor id of the last override or discount. |
+| `line_total_cents` | integer, nullable | The extension, rounded once. |
+| `taxable` | boolean | From the product (or the request for a non stock line). |
+| `revenue_account_code` | text, nullable | The charge code's account, snapshotted at create. |
+| `is_special_order`, `vendor_id`, `special_order_unit_cost_ten_thousandths` | boolean, UUID, integer | A stocked special order line. |
 | `order_line_id` | UUID, nullable | The order line this came from. |
+| `unit_cost_ten_thousandths` | integer, nullable | The cost per stocking unit, read by margin-aware roles. |
+| `cost_cents` | integer | The cost of the billed quantity, read by margin-aware roles. |
 | `created_at` | timestamp | RFC 3339 UTC. |
 
-`CreditMemo` carries the same fields and adds `restock` on each line
-(boolean, whether the return restocks). The `number` is gapless, prefix
-`CM-`, padded to six. The wire shape is `CreditMemo` in the same
-fragment.
+`CreditMemo` carries the same fields (minus `delivery_type`,
+`picked_up_by`, `delivery_id`, `payment_terms_id`, `discount_*`,
+`origin`) and adds `memo_date`, `reason_code`, `reason`,
+`restock` (boolean on each line) and `invoice_line_id`. The `number`
+is gapless, prefix `CM-`, padded to six. The wire shape is
+`CreditMemo` in the same fragment.
 
 ### Money and quantity conventions
 
@@ -132,16 +151,22 @@ The wire vocabulary is lowercase. The transitions are:
 
 | Entity | From | To | Event |
 |---|---|---|---|
-| Invoice | any open status | `void` | `invoice.voided` |
-| Credit memo | `draft` | `posted` | `credit_memo.posted` (mints the number) |
-| Credit memo | `draft`, `posted` | `void` | `credit_memo.voided` |
+| Invoice | `unpaid` with no payments and no applied memos and no live memos and not a counter sale | `void` | `invoice.voided` |
+| Credit memo | `draft` | `open` | `credit_memo.posted` (mints the number) |
+| Credit memo | `draft` | `void` | `credit_memo.voided` |
+| Credit memo | `open` | `void` | `credit_memo.voided` (reason required) |
 
+`invoice.voided` is refused with `409 has_applications` when the
+invoice has any payment or any applied credit memo, with
+`409 has_credit_memos` when any live (not voided) credit memo names
+it, and with `409 counter_sale` when the invoice belongs to a counter
+sale (`core/internal/invoice/service.go` `voidInvoice` block). The
+statuses past `open` on a credit memo (`partial`, `applied`) are not
+reachable from a client; they arrive with applications and refunds.
 A void keeps its number; nothing deletes an invoice or credit memo.
-Other invoice statuses (`unpaid`, `partial`, `paid`, `written_off`) are
-derived from payments and credit memos, not transitioned through the
-wire. The body of a transition is `{"to": "posted", "revision": n}`
-with the `If-Match` header carrying the same number, and the
-idempotency key on every mutating request.
+The body of a transition is `{"to": "open", "revision": n}` with the
+`If-Match` header carrying the same number, and the idempotency key
+on every mutating request.
 
 A credit memo names an invoice, and the credit memo credits tax at
 that invoice's rate, `round_half_away(taxable_cents x rate)`, but never
@@ -159,11 +184,16 @@ The events are the constants in `core/internal/invoice/model.go`
 ## Posting and the subledger
 
 When an invoice is posted, the general ledger receives one journal
-entry: a debit to the customer's AR (account `1200`), a credit to
-revenue (`4010` for products, the charge code's account for charges),
-and a credit to sales tax payable (`2200`). The cost of the billed
-quantity is debited to cost of goods sold (`5010`) and credited to
-inventory (`1300`) on the lines that move stock. The AR subledger
+entry. On the invoice (`core/internal/gl/postentry.go`,
+`fulfilments` description in `core/api/fragments/order.yaml`), the
+entry debits the customer's AR (`AccountCodeAR = "1020"`), credits
+each line's revenue account (the product's `4010` for products, the
+charge code's account for charges, `AccountCodeDeliveryRev = "4020"`
+for delivery), credits sales tax payable (`AccountCodeSalesTax =
+"2020"`), debits cost of goods sold (`AccountCodeCOGS = "5010"`) and
+credits inventory (`AccountCodeInventory = "1030"`) on the lines that
+move stock. Account `2200` is Customer Deposits (`AccountCodeCustomerDeposit`),
+not sales tax payable. The AR subledger
 (`account.PostTransaction` with `TransactionTypeInvoice`, see
 `core/internal/invoice/fulfilment.go`) is updated in the same
 transaction. A credit memo posts the same way in the opposite
@@ -174,19 +204,22 @@ direction. A void reverses the journal entry with its own
 
 Every mutation writes the event as the last statement of its
 transaction ([ADR 0003](../adr/0003-events-outbox.md)). The
-fulfilment call from the order module also writes `invoice.created` as
-its second event after `order.fulfilled` (see `core/internal/order/fulfil.go`
-`EventInvoiceCreated`).
+fulfilment call from the order module writes `invoice.created` first,
+then the order's `order.fulfilled` or `order.partially_fulfilled`
+(`core/internal/order/fulfil.go`).
 
 ## Scopes, roles and keys
 
-A machine key reaching the invoice routes needs `invoice:read` for
-`GET` and `HEAD`, and `invoice:write` for every other method (ADR
-0002). The user guard at the serve layer is the standard sales and
-finance wall; the exact guard is composed in
-`core/internal/app/serve/serve.go` at
-`wall.invoices(mux, invoiceSvc)`. A key without the scope is `403
-forbidden`; the audit row carries the refused scope.
+A machine key reaching the invoice routes needs `invoices:read` for
+`GET` and `HEAD`, and `invoices:write` for every other method (ADR
+0002; the segment is the first path segment under `/api/v1/`). The
+credit memo routes need `credit-memos:read` and `credit-memos:write`.
+`/api/v1/invoices/{id}/payments` is an `invoices:read` call on the
+invoices segment. The user guard at the serve layer is
+`admin`, `owner`, `sales`, `finance`; the exact guard is composed in
+`core/internal/app/serve/wire_branch_wall.go` at `wall.invoices`. A
+key without the scope is `403 forbidden`; the audit row carries the
+refused scope.
 
 ## ADRs that govern this module
 
