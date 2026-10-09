@@ -47,7 +47,7 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 ## Tech Stack
 
 ### Backend
-- **Language:** Go 1.25 (`core/go.mod`)
+- **Language:** Go 1.26 (`core/go.mod`)
 - **Router:** Go 1.22+ stdlib `net/http.ServeMux` — **not** Chi. Modules expose `RegisterRoutes(mux, mw)` to attach handlers
 - **Database:** PostgreSQL 16+ via pgx v5 (`pkg/database` wraps a `*pgxpool.Pool`)
 - **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL` is required (fail-closed)
