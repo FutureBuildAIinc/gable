@@ -10,6 +10,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
@@ -78,6 +79,14 @@ func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
 	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"),
 		w.scoped("admin", "owner", "finance", "warehouse"))
+}
+
+// invoices mounts the invoice and credit memo routes: the credit memo create
+// takes branch_id from its body and the writes address a document by path id,
+// so the service holds both to the caller's branch context (ADR 0007 section
+// 2.3) beside the wall every read already carries.
+func (w *branchWall) invoices(mux *http.ServeMux, svc *invoice.Service) {
+	invoice.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

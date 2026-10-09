@@ -168,8 +168,9 @@ func TestOrderConfirmTaxQuoteStale(t *testing.T) {
 	}
 }
 
-// RULE (ADR 0005 5.3): an OVERDUE invoice counts in the credit exposure,
-// beside UNPAID and PARTIAL; a PAID one does not.
+// RULE (ADR 0005 5.3): an overdue invoice (unpaid, past its due date; OVERDUE is
+// no longer a stored status) counts in the credit exposure like any open one;
+// a PAID one does not, and neither does a VOID one.
 func TestOrderCreditExposureCountsOverdueInvoices(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
@@ -181,9 +182,10 @@ func TestOrderCreditExposureCountsOverdueInvoices(t *testing.T) {
 	}
 	seedInvoice := func(status string, total float64) {
 		t.Helper()
-		_, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_amount, due_date, payment_terms)
+		_, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_amount, due_date, voided_at)
 			VALUES (gen_random_uuid(), (SELECT id FROM orders WHERE customer_id = $1 LIMIT 1), $1,
-			        (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), $2, $3, $3, 0, CURRENT_DATE - 40, 'NET30')`,
+			        (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), $2, $3, $3, 0, CURRENT_DATE - 40,
+			        CASE WHEN $2 = 'VOID' THEN NOW() END)`,
 			f.customerID, status, total)
 		if err != nil {
 			t.Fatal(err)
@@ -198,10 +200,11 @@ func TestOrderCreditExposureCountsOverdueInvoices(t *testing.T) {
 	}
 
 	seedInvoice("PAID", 500)
+	seedInvoice("VOID", 500)
 	r := f.create()
 	r = f.do("POST", "/api/v1/orders/"+str(t, r.body, "id")+"/transitions", map[string]any{"to": "confirmed", "revision": 1})
 	if r.status != 200 || str(t, r.body, "status") != "confirmed" {
-		t.Fatalf("confirm beside a PAID invoice = %d %q, want confirmed: %s", r.status, r.body["status"], r.raw)
+		t.Fatalf("confirm beside a PAID and a VOID invoice = %d %q, want confirmed: %s", r.status, r.body["status"], r.raw)
 	}
 	// Cancel it: a live order's unbilled remainder counts in the exposure too,
 	// and this test isolates the invoice.
@@ -210,11 +213,11 @@ func TestOrderCreditExposureCountsOverdueInvoices(t *testing.T) {
 		t.Fatalf("cancel = %d: %s", r.status, r.raw)
 	}
 
-	seedInvoice("OVERDUE", 60)
+	seedInvoice("UNPAID", 60) // due 40 days ago: overdue
 	r = f.create()
 	r = f.do("POST", "/api/v1/orders/"+str(t, r.body, "id")+"/transitions", map[string]any{"to": "confirmed", "revision": 1})
 	if r.status != 200 || str(t, r.body, "status") != "on_hold" {
-		t.Fatalf("confirm beside an OVERDUE invoice = %d %q, want on_hold (60 open plus 59.88 is over 100): %s", r.status, r.body["status"], r.raw)
+		t.Fatalf("confirm beside an overdue invoice = %d %q, want on_hold (60 open plus 59.88 is over 100): %s", r.status, r.body["status"], r.raw)
 	}
 	if reason := str(t, r.body, "hold_reason"); reason != "credit_limit" {
 		t.Errorf("hold_reason = %q, want credit_limit", reason)

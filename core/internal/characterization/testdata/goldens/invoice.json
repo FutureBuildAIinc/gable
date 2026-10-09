@@ -436,28 +436,47 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "data": [
+        "items": [
           {
             "branch_id": "<id-2>",
             "created_at": "<ts+0d>",
+            "currency": "USD",
             "customer_id": "<id-3>",
             "customer_name": "Golden Harness Co",
-            "due_date": "<ts+30d>",
+            "delivery_id": null,
+            "delivery_type": "delivery",
+            "discount_due_date": null,
+            "discount_percent": null,
+            "due_date": "<day+30>",
+            "gl_entry_id": "<id-15>",
             "id": "<id-6>",
+            "invoice_date": "<day+0>",
+            "is_overdue": false,
+            "job_id": null,
+            "number": "IN-000051",
+            "open_cents": 3142,
             "order_id": "<id-1>",
+            "origin": "order",
             "paid_at": null,
-            "payment_terms": "NET30",
-            "status": "UNPAID",
-            "subtotal": 2805,
-            "tax_amount": 337,
-            "tax_rate": 0.12,
-            "total_amount": 3142,
-            "updated_at": "<ts+0d>"
+            "payment_terms_id": "<id-16>",
+            "picked_up_by": null,
+            "revision": 1,
+            "ship_to_id": null,
+            "status": "unpaid",
+            "subtotal_cents": 2805,
+            "tax_cents": 337,
+            "tax_exempt": false,
+            "tax_rate_percent": "12",
+            "tax_source": "branch_rate",
+            "total_cents": 3142,
+            "updated_at": "<ts+0d>",
+            "void_reason": null,
+            "voided_at": null,
+            "voided_by": null
           }
         ],
         "limit": 1,
-        "offset": 0,
-        "total": 51
+        "next_cursor": "<cursor>"
       }
     }
   },
@@ -473,80 +492,77 @@
       "body": {
         "branch_id": "<id-2>",
         "created_at": "<ts+0d>",
+        "currency": "USD",
         "customer_id": "<id-3>",
         "customer_name": "Golden Harness Co",
-        "due_date": "<ts+30d>",
+        "delivery_id": null,
+        "delivery_type": "delivery",
+        "discount_due_date": null,
+        "discount_percent": null,
+        "due_date": "<day+30>",
+        "gl_entry_id": "<id-15>",
         "id": "<id-6>",
+        "invoice_date": "<day+0>",
+        "is_overdue": false,
+        "job_id": null,
         "lines": [
           {
+            "charge_code": null,
+            "charge_code_id": null,
+            "cost_cents": 2100,
             "created_at": "<ts+0d>",
-            "id": "<id-15>",
-            "invoice_id": "<id-6>",
-            "price_each": 468,
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-17>",
+            "is_special_order": false,
+            "line_total_cents": 2805,
+            "line_type": "product",
+            "order_line_id": "<id-4>",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
             "product_id": "<id-5>",
-            "product_name": "2x4x8 SPF Premium",
-            "product_sku": "LUM-248-PREM",
-            "quantity": 6
+            "quantity": "6",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_cost_ten_thousandths": 35000,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
+        "number": "IN-000051",
+        "open_cents": 3142,
         "order_id": "<id-1>",
+        "origin": "order",
         "paid_at": null,
-        "payment_terms": "NET30",
-        "status": "UNPAID",
-        "subtotal": 2805,
-        "tax_amount": 337,
-        "tax_rate": 0.12,
-        "total_amount": 3142,
-        "updated_at": "<ts+0d>"
+        "payment_terms_id": "<id-16>",
+        "picked_up_by": null,
+        "revision": 1,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "unpaid",
+        "subtotal_cents": 2805,
+        "tax_cents": 337,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 3142,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
       }
-    }
-  },
-  {
-    "name": "invoice.credit_memo.create",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/invoices/<id-6>/credit-memo",
-      "body": {
-        "amount_cents": 500,
-        "reason": "golden characterisation"
-      }
-    },
-    "response": {
-      "status": 201,
-      "content_type": "application/json",
-      "body": {
-        "amount": 500,
-        "applied_at": "<ts+0d>",
-        "created_at": "<ts+0d>",
-        "customer_id": "<id-3>",
-        "id": "<id-16>",
-        "invoice_id": "<id-6>",
-        "reason": "golden characterisation",
-        "status": "APPLIED"
-      }
-    }
-  },
-  {
-    "name": "invoice.credit_memo.list",
-    "request": {
-      "method": "GET",
-      "path": "/api/v1/credit-memos/<id-3>"
-    },
-    "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": [
-        {
-          "amount": 500,
-          "applied_at": "<ts+0d>",
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-3>",
-          "id": "<id-16>",
-          "invoice_id": "<id-6>",
-          "reason": "golden characterisation",
-          "status": "APPLIED"
-        }
-      ]
     }
   },
   {
@@ -560,12 +576,1033 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "invoice not found"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-18>"
         }
+      }
+    }
+  },
+  {
+    "name": "invoice.list.open_not_overdue",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices?status=unpaid&overdue=false&limit=1&include=total"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
+  },
+  {
+    "name": "invoice.list.overdue_status_gone",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices?status=overdue"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "status",
+              "message": "must be a comma separated list of: unpaid, partial, paid, void, written_off"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-19>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.list.bad_overdue",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices?overdue=maybe"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "overdue",
+              "message": "must be true or false"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-20>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices?offset=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.transition.derived_status",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/invoices/<id-6>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "to": "paid"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "an invoice is moved to paid by its payments and credit memos, not by a transition; the only transition is void"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.transition.void_needs_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/invoices/<id-6>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "to": "void"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "reason",
+              "message": "is required to void an invoice"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-23>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.transition.void_stale",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/invoices/<id-6>/transitions",
+      "headers": {
+        "If-Match": "\"99\""
+      },
+      "body": {
+        "reason": "stale",
+        "to": "void"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-24>"
+        }
+      }
+    }
+  },
+  {
+    "name": "credit_memo.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/credit-memos",
+      "body": {
+        "invoice_id": "<id-6>",
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "description": "Price adjustment",
+            "line_type": "charge",
+            "quantity": "-1",
+            "unit_price_ten_thousandths": 5000
+          }
+        ],
+        "reason": "golden characterisation",
+        "reason_code": "price_adjustment"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-3>",
+        "customer_name": "Golden Harness Co",
+        "gl_entry_id": null,
+        "id": "<id-25>",
+        "invoice_id": "<id-6>",
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "charge_code_id": "<id-26>",
+            "cost_cents": 0,
+            "created_at": "<ts+0d>",
+            "description": "Price adjustment",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-27>",
+            "invoice_line_id": null,
+            "is_special_order": false,
+            "line_total_cents": -50,
+            "line_type": "charge",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "manual",
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": null,
+            "product_id": null,
+            "quantity": "-1",
+            "restock": false,
+            "revenue_account_code": "4010",
+            "sku": null,
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": false,
+            "unit_cost_ten_thousandths": null,
+            "unit_price_ten_thousandths": 5000,
+            "uom": "EA",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "memo_date": "<day+0>",
+        "number": null,
+        "open_cents": 0,
+        "pos_return_id": null,
+        "reason": "golden characterisation",
+        "reason_code": "price_adjustment",
+        "revision": 1,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": -50,
+        "tax_cents": 0,
+        "tax_rate_percent": "12",
+        "total_cents": -50,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "credit_memo.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/credit-memos/<id-25>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-3>",
+        "customer_name": "Golden Harness Co",
+        "gl_entry_id": null,
+        "id": "<id-25>",
+        "invoice_id": "<id-6>",
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "charge_code_id": "<id-26>",
+            "cost_cents": 0,
+            "created_at": "<ts+0d>",
+            "description": "Price adjustment",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-27>",
+            "invoice_line_id": null,
+            "is_special_order": false,
+            "line_total_cents": -50,
+            "line_type": "charge",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "manual",
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": null,
+            "product_id": null,
+            "quantity": "-1",
+            "restock": false,
+            "revenue_account_code": "4010",
+            "sku": null,
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": false,
+            "unit_cost_ten_thousandths": null,
+            "unit_price_ten_thousandths": 5000,
+            "uom": "EA",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "memo_date": "<day+0>",
+        "number": null,
+        "open_cents": 0,
+        "pos_return_id": null,
+        "reason": "golden characterisation",
+        "reason_code": "price_adjustment",
+        "revision": 1,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": -50,
+        "tax_cents": 0,
+        "tax_rate_percent": "12",
+        "total_cents": -50,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "credit_memo.create.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/credit-memos",
+      "body": {
+        "invoice_id": "<id-6>",
+        "lines": [
+          {
+            "quantity": "1"
+          }
+        ],
+        "reason_code": "refund"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "reason_code",
+              "message": "must be one of: return, price_adjustment, damage, other"
+            },
+            {
+              "field": "reason",
+              "message": "is required"
+            },
+            {
+              "field": "lines[0].description",
+              "message": "is required when the line names no product"
+            },
+            {
+              "field": "lines[0].quantity",
+              "message": "must be negative on a credit memo line: it is the quantity credited"
+            },
+            {
+              "field": "lines[0].uom",
+              "message": "is required when the line names no product"
+            },
+            {
+              "field": "lines[0].unit_price_ten_thousandths",
+              "message": "is required on a free product line: the credit memo prices what it gives back"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-28>"
+        }
+      }
+    }
+  },
+  {
+    "name": "credit_memo.update.stale",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/credit-memos/<id-25>",
+      "headers": {
+        "If-Match": "\"9\""
+      },
+      "body": {
+        "invoice_id": "<id-6>",
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "line_type": "charge",
+            "quantity": "-1",
+            "unit_price_ten_thousandths": 5000
+          }
+        ],
+        "reason": "edited",
+        "reason_code": "price_adjustment"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-29>"
+        }
+      }
+    }
+  },
+  {
+    "name": "credit_memo.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/credit-memos/<id-25>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "invoice_id": "<id-6>",
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "description": "Price adjustment",
+            "line_type": "charge",
+            "quantity": "-1",
+            "unit_price_ten_thousandths": 7500
+          }
+        ],
+        "reason": "edited",
+        "reason_code": "price_adjustment"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-3>",
+        "customer_name": "Golden Harness Co",
+        "gl_entry_id": null,
+        "id": "<id-25>",
+        "invoice_id": "<id-6>",
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "charge_code_id": "<id-26>",
+            "cost_cents": 0,
+            "created_at": "<ts+0d>",
+            "description": "Price adjustment",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-30>",
+            "invoice_line_id": null,
+            "is_special_order": false,
+            "line_total_cents": -75,
+            "line_type": "charge",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "manual",
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": null,
+            "product_id": null,
+            "quantity": "-1",
+            "restock": false,
+            "revenue_account_code": "4010",
+            "sku": null,
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": false,
+            "unit_cost_ten_thousandths": null,
+            "unit_price_ten_thousandths": 7500,
+            "uom": "EA",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "memo_date": "<day+0>",
+        "number": null,
+        "open_cents": 0,
+        "pos_return_id": null,
+        "reason": "edited",
+        "reason_code": "price_adjustment",
+        "revision": 2,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": -75,
+        "tax_cents": 0,
+        "tax_rate_percent": "12",
+        "total_cents": -75,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "credit_memo.post",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/credit-memos/<id-25>/transitions",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "to": "open"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-3>",
+        "customer_name": "Golden Harness Co",
+        "gl_entry_id": "<id-31>",
+        "id": "<id-25>",
+        "invoice_id": "<id-6>",
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "charge_code_id": "<id-26>",
+            "cost_cents": 0,
+            "created_at": "<ts+0d>",
+            "description": "Price adjustment",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-30>",
+            "invoice_line_id": null,
+            "is_special_order": false,
+            "line_total_cents": -75,
+            "line_type": "charge",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "manual",
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": null,
+            "product_id": null,
+            "quantity": "-1",
+            "restock": false,
+            "revenue_account_code": "4010",
+            "sku": null,
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": false,
+            "unit_cost_ten_thousandths": null,
+            "unit_price_ten_thousandths": 7500,
+            "uom": "EA",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "memo_date": "<day+0>",
+        "number": "CM-000003",
+        "open_cents": -75,
+        "pos_return_id": null,
+        "reason": "edited",
+        "reason_code": "price_adjustment",
+        "revision": 3,
+        "ship_to_id": null,
+        "status": "open",
+        "subtotal_cents": -75,
+        "tax_cents": 0,
+        "tax_rate_percent": "12",
+        "total_cents": -75,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "credit_memo.post.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/credit-memos/<id-25>/transitions",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "to": "open"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "only a draft credit memo can be posted: it is open"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
+      }
+    }
+  },
+  {
+    "name": "credit_memo.update.not_draft",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/credit-memos/<id-25>",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "invoice_id": "<id-6>",
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "line_type": "charge",
+            "quantity": "-1",
+            "unit_price_ten_thousandths": 5000
+          }
+        ],
+        "reason": "late",
+        "reason_code": "price_adjustment"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "credit_memo_not_draft",
+              "message": "only a draft credit memo can be edited: it is open"
+            }
+          ],
+          "message": "only a draft credit memo can be edited: it is open"
+        },
+        "meta": {
+          "request_id": "<id-33>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.transition.void_refused_credit_memo",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/invoices/<id-6>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "reason": "has a credit memo",
+        "to": "void"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "has_credit_memos",
+              "message": "a credit memo names the invoice: void the credit memos first"
+            }
+          ],
+          "message": "a credit memo names the invoice: void the credit memos first"
+        },
+        "meta": {
+          "request_id": "<id-34>"
+        }
+      }
+    }
+  },
+  {
+    "name": "credit_memo.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/credit-memos?invoice_id=<id-6>&status=open"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-2>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-3>",
+            "customer_name": "Golden Harness Co",
+            "gl_entry_id": "<id-31>",
+            "id": "<id-25>",
+            "invoice_id": "<id-6>",
+            "job_id": null,
+            "memo_date": "<day+0>",
+            "number": "CM-000003",
+            "open_cents": -75,
+            "pos_return_id": null,
+            "reason": "edited",
+            "reason_code": "price_adjustment",
+            "revision": 3,
+            "ship_to_id": null,
+            "status": "open",
+            "subtotal_cents": -75,
+            "tax_cents": 0,
+            "tax_rate_percent": "12",
+            "total_cents": -75,
+            "updated_at": "<ts+0d>",
+            "void_reason": null,
+            "voided_at": null,
+            "voided_by": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "credit_memo.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/credit-memos?customer=none"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "customer",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-35>"
+        }
+      }
+    }
+  },
+  {
+    "name": "credit_memo.void",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/credit-memos/<id-25>/transitions",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "reason": "golden void",
+        "to": "void"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-3>",
+        "customer_name": "Golden Harness Co",
+        "gl_entry_id": "<id-31>",
+        "id": "<id-25>",
+        "invoice_id": "<id-6>",
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": "ADJUST",
+            "charge_code_id": "<id-26>",
+            "cost_cents": 0,
+            "created_at": "<ts+0d>",
+            "description": "Price adjustment",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-30>",
+            "invoice_line_id": null,
+            "is_special_order": false,
+            "line_total_cents": -75,
+            "line_type": "charge",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "manual",
+            "price_uom": "EA",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": null,
+            "product_id": null,
+            "quantity": "-1",
+            "restock": false,
+            "revenue_account_code": "4010",
+            "sku": null,
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": false,
+            "unit_cost_ten_thousandths": null,
+            "unit_price_ten_thousandths": 7500,
+            "uom": "EA",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "memo_date": "<day+0>",
+        "number": "CM-000003",
+        "open_cents": 0,
+        "pos_return_id": null,
+        "reason": "edited",
+        "reason_code": "price_adjustment",
+        "revision": 4,
+        "ship_to_id": null,
+        "status": "void",
+        "subtotal_cents": -75,
+        "tax_cents": 0,
+        "tax_rate_percent": "12",
+        "total_cents": -75,
+        "updated_at": "<ts+0d>",
+        "void_reason": "golden void",
+        "voided_at": "<ts+0d>",
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "credit_memo.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/credit-memos/<id-13>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "credit memo not found"
+        },
+        "meta": {
+          "request_id": "<id-36>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.events",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=invoice.created,invoice.voided&limit=1"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-3>",
+              "delivery_id": null,
+              "number": "IN-000051",
+              "order_id": "<id-1>",
+              "status": "unpaid",
+              "subtotal_cents": 2805,
+              "tax_cents": 337,
+              "total_cents": 3142
+            },
+            "entity": {
+              "id": "<id-6>",
+              "kind": "invoice"
+            },
+            "event_id": "<id-37>",
+            "org": "default",
+            "type": "invoice.created"
+          }
+        ],
+        "limit": 1,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "credit_memo.events",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=credit_memo.created,credit_memo.updated,credit_memo.posted,credit_memo.voided&limit=10"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-3>",
+              "invoice_id": "<id-6>",
+              "number": null,
+              "revision": 1,
+              "status": "draft",
+              "total_cents": -50
+            },
+            "entity": {
+              "id": "<id-25>",
+              "kind": "credit_memo"
+            },
+            "event_id": "<id-38>",
+            "org": "default",
+            "type": "credit_memo.created"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-3>",
+              "invoice_id": "<id-6>",
+              "number": null,
+              "revision": 2,
+              "status": "draft",
+              "total_cents": -75
+            },
+            "entity": {
+              "id": "<id-25>",
+              "kind": "credit_memo"
+            },
+            "event_id": "<id-39>",
+            "org": "default",
+            "type": "credit_memo.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-3>",
+              "from_status": "draft",
+              "invoice_id": "<id-6>",
+              "number": "CM-000003",
+              "revision": 3,
+              "status": "open",
+              "total_cents": -75
+            },
+            "entity": {
+              "id": "<id-25>",
+              "kind": "credit_memo"
+            },
+            "event_id": "<id-40>",
+            "org": "default",
+            "type": "credit_memo.posted"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-3>",
+              "from_status": "open",
+              "invoice_id": "<id-6>",
+              "number": "CM-000003",
+              "revision": 4,
+              "status": "void",
+              "total_cents": -75
+            },
+            "entity": {
+              "id": "<id-25>",
+              "kind": "credit_memo"
+            },
+            "event_id": "<id-41>",
+            "org": "default",
+            "type": "credit_memo.voided"
+          }
+        ],
+        "limit": 10,
+        "next_cursor": "<cursor>"
       }
     }
   }

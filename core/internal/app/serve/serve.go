@@ -338,9 +338,10 @@ func Run() {
 	// Invoice Module
 	invoiceRepo := invoice.NewRepository(db)
 	invoiceSvc := invoice.NewService(invoiceRepo, glSvc, accountSvc, db)
-	invoiceSvc.WithAuditLog(auditLog)
-	invoiceHandler := invoice.NewHandler(invoiceSvc)
-	invoiceHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"))
+	invoiceSvc.WithAuditLog(auditLog).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithStock(inventorySvc)
+	wall.invoices(mux, invoiceSvc)
 
 	// Deposit Module (customer prepayments held as 2200 liability, applied to AR)
 	depositRepo := deposit.NewRepository(db)

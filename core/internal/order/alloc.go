@@ -24,6 +24,8 @@ type Inventory interface {
 	AllocateQty(ctx context.Context, productID, branchID uuid.UUID, want httpx.Quantity) (httpx.Quantity, error)
 	ReleaseQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 	FulfillQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
+	// RestockQty returns a voided invoice's billed quantity to on hand.
+	RestockQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 }
 
 // Event types of the stock side of the lifecycle (ADR 0005 section 12).
@@ -117,7 +119,7 @@ func (s *Service) allocateLines(ctx context.Context, cur *Order) (backordered bo
 				continue
 			}
 			kitDone[kitID] = true
-			planKit(cur.Lines, kitIdx[kitID], kitOf[kitID], avail, take)
+			planKit(cur.Lines, kitIdx[kitID], kitOf[kitID], avail, take, nil)
 			continue
 		}
 		need := unallocated(l)
@@ -166,7 +168,7 @@ func (s *Service) allocateLines(ctx context.Context, cur *Order) (backordered bo
 // n = the most whole kits that are still unallocated and that every
 // component's available stock covers, each component taking n times its
 // per kit quantity (the component line's quantity over the kit line's).
-func planKit(lines []OrderLine, kitAt int, comps []int, avail map[uuid.UUID]int64, take map[int]int64) {
+func planKit(lines []OrderLine, kitAt int, comps []int, avail map[uuid.UUID]int64, take map[int]int64, limit *big.Int) {
 	kit := &lines[kitAt]
 	if kit.Quantity == nil || *kit.Quantity <= 0 {
 		return
@@ -190,6 +192,9 @@ func planKit(lines []OrderLine, kitAt int, comps []int, avail map[uuid.UUID]int6
 		if best == nil || n.Cmp(best) < 0 {
 			best = n
 		}
+	}
+	if best != nil && limit != nil && limit.Cmp(best) < 0 {
+		best = limit // an invoice void gives back only the kits it returned
 	}
 	if best == nil || best.Sign() <= 0 {
 		return

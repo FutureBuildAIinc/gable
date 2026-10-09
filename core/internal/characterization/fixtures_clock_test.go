@@ -10,6 +10,27 @@ import (
 	"time"
 )
 
+// pinBranchZonesToUTC puts every branch on Etc/UTC, so the one place the
+// server derives a business date in a branch's zone (order.BranchLocalDate,
+// the invoice date and everything posted on it) agrees with the harness's UTC
+// seed day at every hour. The seed leaves its branches in America/Vancouver and
+// the schema defaults the rest to America/New_York; between UTC midnight and the
+// zone's own midnight the branch's date is a day behind the seed day, which
+// moved invoice due dates, the GL entry dates and their order by a day. The
+// zone is data, not behaviour: the product still derives the date from whatever
+// zone the branch holds, and TestBranchLocalDate pins that arithmetic at the
+// instants the window opens and closes. Run before the fixtures and the
+// scenarios so every group sees the same zones.
+func pinBranchZonesToUTC(t *testing.T, dbURL string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dbURL)
+	if err != nil {
+		t.Fatalf("open zone db: %v", err)
+	}
+	defer db.Close()
+	mustExec(t, db, `UPDATE locations SET timezone = 'Etc/UTC' WHERE timezone <> 'Etc/UTC'`)
+}
+
 // seedClockWindowFixtures inserts, through the harness's own SQL on the fresh
 // database, the rows that put data on both sides of every clock window the
 // clock group pins. The demo seed dates every payment and invoice it writes on
@@ -106,9 +127,9 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 		at := stamp(inv.days)
 		mustExec(t, db, `INSERT INTO invoices (
 			id, order_id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount,
-			payment_terms, due_date, paid_at, created_at, updated_at, branch_id
+			due_date, paid_at, created_at, updated_at, branch_id
 		) VALUES ($1, NULL, $2, 'UNPAID', $3, $3, 0, 0,
-			'NET30', $4, NULL, $5, $5,
+			$4, NULL, $5, $5,
 			COALESCE(NULL::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 			inv.id, fixtureCustomer, inv.total, at, at)
 		// The shared line shape (ADR 0005 2.2): the fixture writes what the

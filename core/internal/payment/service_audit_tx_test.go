@@ -51,10 +51,10 @@ func TestProcessPaymentAuditRollsBackWithFailedMutation(t *testing.T) {
 		t.Fatalf("insert product: %v", err)
 	}
 
-	inv := &invoice.Invoice{
+	inv := &invoice.LegacyInvoice{
 		ID:         uuid.New(),
 		CustomerID: custID,
-		Lines:      []invoice.InvoiceLine{{ProductID: productID, Quantity: 2, PriceEach: 5000}},
+		Lines:      []invoice.LegacyLine{{ProductID: productID, Quantity: 2, PriceEach: 5000}},
 	}
 	if err := invoiceSvc.CreateInvoice(ctx, inv); err != nil {
 		t.Fatalf("create invoice: %v", err)
@@ -122,7 +122,7 @@ func (approvingGateway) Refund(_ context.Context, _ string, _ int64) (*payment.G
 // cardPaymentFixture stands up the real invoice/account/payment stack with an
 // approving gateway and one unpaid invoice, the shared setup of the card-path
 // audit tests.
-func cardPaymentFixture(t *testing.T) (*payment.Service, *invoice.Invoice, *database.DB) {
+func cardPaymentFixture(t *testing.T) (*payment.Service, *invoice.LegacyInvoice, *database.DB) {
 	t.Helper()
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
@@ -152,10 +152,10 @@ func cardPaymentFixture(t *testing.T) (*payment.Service, *invoice.Invoice, *data
 	// The invoice is created through its own service so its GL and account
 	// side effects exist exactly as in production.
 	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db)
-	inv := &invoice.Invoice{
+	inv := &invoice.LegacyInvoice{
 		ID:         uuid.New(),
 		CustomerID: custID,
-		Lines:      []invoice.InvoiceLine{{ProductID: productID, Quantity: 2, PriceEach: 5000}},
+		Lines:      []invoice.LegacyLine{{ProductID: productID, Quantity: 2, PriceEach: 5000}},
 	}
 	if err := invoiceSvc.CreateInvoice(ctx, inv); err != nil {
 		t.Fatalf("create invoice: %v", err)
