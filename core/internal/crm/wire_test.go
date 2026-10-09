@@ -222,7 +222,14 @@ func TestCreate_FieldValidation(t *testing.T) {
 	res = f.do(t, http.MethodPost, "/api/v1/customers/"+f.customer.String()+"/activities",
 		`{"activity_type":"call","description":"x","smoke":"signal"}`, nil)
 	if res.status != http.StatusBadRequest {
-		t.Errorf("an unknown body field = %d %s, want 400", res.status, res.raw)
+		t.Errorf("an unknown body field = %d, want 400", res.status)
+	}
+	// The description bound is characters, not bytes: 4000 multi-byte
+	// letters pass.
+	res = f.do(t, http.MethodPost, "/api/v1/customers/"+f.customer.String()+"/activities",
+		`{"activity_type":"call","description":"`+strings.Repeat("é", 4000)+`"}`, nil)
+	if res.status != http.StatusCreated {
+		t.Errorf("a 4000 character description of multi-byte letters = %d %s, want 201", res.status, res.raw)
 	}
 }
 

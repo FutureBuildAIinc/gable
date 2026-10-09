@@ -6,6 +6,7 @@ package crm
 import (
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -61,7 +62,9 @@ func (req *Request) Parse(update bool) (*Draft, error) {
 	if req.Description != nil {
 		desc := strings.TrimSpace(*req.Description)
 		v.Check(len(desc) > 0, "description", "is required")
-		v.Check(len(desc) <= maxDescription, "description", "must be at most 4000 characters")
+		// The bound is characters a person writes, not bytes: a description
+		// of multi-byte letters up to the limit is valid prose.
+		v.Check(utf8.RuneCountInString(desc) <= maxDescription, "description", "must be at most 4000 characters")
 		d.Description = desc
 	}
 	if req.LoggedBy != nil {

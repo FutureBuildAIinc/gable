@@ -6,6 +6,7 @@ package project
 import (
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 )
@@ -33,7 +34,9 @@ func (req *Request) Parse(update bool) (*Draft, error) {
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		v.Check(len(name) > 0, "name", "is required")
-		v.Check(len(name) <= maxName, "name", "must be at most 255 characters")
+		// The column is varchar(255) in characters, so the bound is runes,
+		// not bytes: a 255 letter name of multi-byte letters is valid.
+		v.Check(utf8.RuneCountInString(name) <= maxName, "name", "must be at most 255 characters")
 		d.Name = &name
 	}
 	if !update {
