@@ -448,10 +448,16 @@ the seed series in their `WHERE series = 'invoice'` and `'credit_memo'`
 (`097:55-65`), so a raw SQL insert that relies on the default draws from
 the seed company's counter whatever company the row belongs to (the
 seed inserts credit memos through `credit_memo_next_number()` directly
-at `seed.go:1240`, and tests do the same at
+at `seed.go:1240`, and three tests do the same:
 `serve/wire_branch_wall_test.go:175`,
-`invoice/migration097_test.go:199` (the only `invoice_next_number()`
-caller), and `invoice/wire_test.go:413`); a column DEFAULT cannot read
+`invoice/wire_test.go:413`, and
+`invoice/migration097_test.go:199` (the only
+`invoice_next_number()` caller); the third test rides a scratch
+schema whose `files097` (`invoice/migration097_test.go:76-96`) applies
+every migration before `097_` then `097` itself, so C5-3's
+migration never runs in that test and `invoice_next_number()` still
+exists there, and the test is not a conversion target (the other
+three are); a column DEFAULT cannot read
 the row's `company_id`, which the R1 trigger stamps in any case. Item
 4 replaces the DEFAULT and the two SQL functions together. The DEFAULT
 on `invoices.number` is dropped in the same migration that installs
@@ -460,8 +466,10 @@ error, so the pair move together); `DROP FUNCTION
 invoice_next_number()` and `DROP FUNCTION credit_memo_next_number()`
 run in the same migration, so any raw caller that still asks for them
 errors loudly at run time, not silently at row read. Item 4's pull
-request converts every raw caller: the seed and the three tests above
-now omit `number` on insert and let the trigger mint, and the helpers
+request converts the three raw callers that ride the production
+schema: `seed.go:1240`, `serve/wire_branch_wall_test.go:175`, and
+`invoice/wire_test.go:413` now omit `number` on insert and let the
+trigger mint; the migration's own test stays as is, and the helpers
 the rest of the code path uses (`invoice/repository.go`'s posting path,
 the wire tests that go through the handler) already pass through the
 trigger. No other caller exists (`git grep 'invoice_next_number\|
@@ -490,8 +498,11 @@ its prefix rule, one to four uppercase letters
 infix bearing prefix. Item 4's tests prove the hole closed: a raw SQL
 insert for a second company draws from that company's series and
 carries its infix, never the seed's; the dropped functions are tested
-absent (`\df` lists neither name); and the four raw callers insert
-with `number NULL` and let the trigger mint.
+absent (`\df` lists neither name); and the three converted
+callers (the seed and the two tests outside `migration097_test.go`)
+insert with `number NULL` and let the trigger mint, while the
+migration's own test exercises the dropped functions through its
+separate `files097` schema.
 
 ### 5. Currency
 
@@ -1103,7 +1114,7 @@ gate and the create's `infix_taken` 409 (7):
 | 1 | The migration and the census test (section 10: about twenty five tables, six rules, triggers, per company GL constraints, the step 4 default bridge with its `locations` half, the allowlist, the down's refusal probes including item 4's mint trigger and item 7's settings trigger, the company row's series identity, round trip and refusal tests) | 18 to 26 |
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals, the code rename refusal and its test, the entries and lines step 4 defaults dropped with `PostEntry`) | 14 to 20 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank, and the reorder run writer, whose run's `branch_id` names its company, section 2; the AR core's checks; C2-4's invariant test extended per `(company, currency)`, the `1020` and `2200` balances both; the `customer_transactions`, `ar_applications` (C2-4, ADR 0005 9.2), `ap_payments`, `ap_applications`, `payment_refunds` and `reorder_runs` step 4 defaults dropped with their writers) | 14 to 24 |
-| 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `097` `DEFAULT` mint replaced by the per company mint trigger and the helper widened with it, the raw insert test for a second company, the infix's uniqueness and seed tie checks, the memo trigger's status guard, the `invoice_next_number()` and `credit_memo_next_number()` SQL functions dropped alongside the `097:84` `DEFAULT` with the four raw callers converted, ADR 0007 section 7 patterns, contract change rows) | 9 to 13 |
+| 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `097` `DEFAULT` mint replaced by the per company mint trigger and the helper widened with it, the raw insert test for a second company, the infix's uniqueness and seed tie checks, the memo trigger's status guard, the `invoice_next_number()` and `credit_memo_next_number()` SQL functions dropped alongside the `097:84` `DEFAULT` with the three raw callers converted (the migration's own test stays as is), ADR 0007 section 7 patterns, contract change rows) | 9 to 13 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, the AP payments side's company filter on the same test, `api_keys.company_id` with its header rule and `key.company_refused`, the `gl_accounts`, `bank_accounts` and `gl_fiscal_periods` step 4 defaults dropped with the reroutes) | 10 to 14 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
 | 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route, convert `POST /api/v1/branches` and `POST /api/v1/locations` (with `type` `branch`) to stamp the column with one company and refuse with 409 `company_required` once a second company exists, convert the seed's raw branch insert and the twenty test fixtures to read the seed company id, drop the step 4 `locations` default with the company scoped route, the two old routes, the seed and the fixtures all in the same pull request; the `system_settings` row and statement (TRUNCATE) triggers of section 6 with their update, delete and truncate refusals tested at the database; the create's `infix_taken` 409 against `number_infix`'s `UNIQUE`; routes and the desk screen) | 14 to 19 |
