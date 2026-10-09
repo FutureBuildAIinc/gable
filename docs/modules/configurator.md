@@ -1,0 +1,124 @@
+<!--
+SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+-->
+
+# Configurator
+
+The product configurator is the rule engine that decides what a
+non-stock product is, given a set of customer selections. The
+configurator's rules say which attributes depend on which other
+attributes, what values are allowed under a given selection, and
+which presets are available out of the box. The rules are seeded
+master data, the engine is read only, and the wire is a small set
+of read routes plus one build route that turns selections into a
+SKU.
+
+The Go code is in `core/internal/configurator/`. The migration that
+brought the routes onto the contract is part of
+`core/migrations/096_crm_projects_millwork_wire_contract.sql`.
+
+## What it does in a yard
+
+A yard sells many non-stock items whose attributes drive whether
+the part can be built at all. A builder asks for a 2x6 in
+Southern Yellow Pine, pressure treated, no prime, eight foot.
+The configurator says yes, prices it, and the order writes a
+non-stock line. The rules are what make the configurator say
+yes or no; the presets are the out-of-the-box answers the
+sales rep picks from.
+
+## Routes
+
+Every route is in `core/api/fragments/configurator.yaml` and the
+registered handles are in `core/internal/configurator/handler.go`.
+The route census (`core/api/ROUTES.txt`) lists each one under the
+`configurator` module column.
+
+| Method | Path | One line |
+|---|---|---|
+| GET | `/api/v1/configurator/rules` | List every configurator rule. |
+| GET | `/api/v1/configurator/options` | List the allowed values of one attribute, given the current selections. |
+| GET | `/api/v1/configurator/presets` | List the active presets. |
+| POST | `/api/v1/configurator/validate` | Validate a set of selections against the rules. |
+| POST | `/api/v1/configurator/build-sku` | Build a non-stock SKU from selections. |
+
+Every route registers under the millwork app (a 404
+`app_disabled` when the millwork app is off) and the `admin`,
+`owner` or `sales` guard.
+
+## The main resources
+
+`ConfiguratorRule` (see `core/api/fragments/configurator.yaml`
+`components.schemas.ConfiguratorRule`) carries the dependency
+type and value, the attribute type and value, and the action
+(`allow`, `deny`, `require`). The matrix is ordered by
+dependency type and value, then attribute type and value, never
+null.
+
+`ConfiguratorPreset` carries a name, a category, a description
+and a `config` object whose shape is the JSON the dealer
+stored, not a base64 string.
+
+`ConfiguratorOptions` is the response of the options route: a
+list of allowed values for the named attribute under the given
+selections, deterministically ordered by value.
+
+### Money and quantity conventions
+
+The configurator carries no money. The build route returns a SKU
+string. The validate route returns a 200 with the validated
+selections, or a 400 with one `details` entry per failing rule
+naming the rule's dependency and attribute.
+
+## Lifecycle and transitions
+
+The configurator has no lifecycle of its own. The rules and the
+presets are master data; the module owns no write, no audit row
+and no event. The build route is idempotent through the platform
+`Idempotency-Key` header.
+
+## Events the module writes
+
+The configurator writes no outbox events. The build and validate
+routes may write `audit_log` rows when called by a machine key
+through the integration seam, but the routes are read-shaped.
+
+## Scopes, roles and keys
+
+A machine key reaching the configurator routes needs
+`configurator:read` for `GET` and `configurator:write` for
+`POST /api/v1/configurator/validate` and
+`POST /api/v1/configurator/build-sku` (ADR 0002). The user
+guard at the serve layer is `admin`, `owner`, or `sales`. A
+key without the scope is `403 forbidden`; the audit row carries
+the refused scope.
+
+## ADRs that govern this module
+
+- [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 3, 5, 6, 9.
+- [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2.
+
+## How to try it locally
+
+The repository's own seed and the local make targets are the only
+way to exercise the module end to end. From the repository root:
+
+```
+make stack-up
+make migrate
+make seed
+make serve
+```
+
+Then, with a sales role bearer:
+
+```
+curl -X GET 'http://localhost:8080/api/v1/configurator/rules' \
+  -H 'Authorization: Bearer <token>'
+```
+
+The wire tests in `core/internal/configurator/wire_test.go` pin
+the platform and HTTP behaviour; the goldens under
+`core/internal/characterization/testdata` pin the wire shapes
+for the configurator's scenarios.
