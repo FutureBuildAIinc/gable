@@ -446,6 +446,36 @@ func TestMutation_AuditRowAndEvent(t *testing.T) {
 	}
 }
 
+// A name-only PUT leaves a stored status the wire does not vocabulary alone:
+// projects.status is a free VARCHAR, and a legacy row can hold a value the
+// update's storage map does not know ('On Hold '). The write touches the
+// status only when the body names it, so a rename never blanks or renames
+// what it did not name, and the stored spelling survives byte identical.
+func TestUpdate_NameOnlyKeepsOddStoredStatus(t *testing.T) {
+	f, _ := newBothFixtures(t)
+	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"before"}`, nil)
+	id := created.body["id"].(string)
+	ctx := context.Background()
+	if _, err := f.db.Pool.Exec(ctx, `UPDATE projects SET status = 'On Hold ' WHERE id = $1`, id); err != nil {
+		t.Fatalf("seed an odd stored status: %v", err)
+	}
+
+	res := do(t, f.srv, http.MethodPut, "/api/portal/v1/projects/"+id, `{"name":"after"}`, map[string]string{"If-Match": `"1"`})
+	if res.status != http.StatusOK {
+		t.Fatalf("name-only update = %d %s, want 200", res.status, res.raw)
+	}
+	if res.body["name"] != "after" {
+		t.Errorf("name after the update = %v, want after", res.body["name"])
+	}
+	var stored string
+	if err := f.db.Pool.QueryRow(ctx, `SELECT status FROM projects WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "On Hold " {
+		t.Errorf("stored status after a name-only update = %q, want \"On Hold \" untouched", stored)
+	}
+}
+
 // Idempotency through the portal layer: the same create twice with one key
 // returns the first response and makes one row; the same key with another
 // body is 422.

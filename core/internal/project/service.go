@@ -152,8 +152,13 @@ func (s *Service) Update(ctx context.Context, projectID, customerID uuid.UUID, d
 			next.Name = *d.Name
 			changed = append(changed, "name")
 		}
+		// The status reaches the row only when the body names it: a NULL
+		// keeps the stored spelling, whatever it is (the column is a free
+		// VARCHAR and the storage map knows three values).
+		var statusSet *string
 		if d.Status != "" && d.Status != cur.Status {
-			next.Status = d.Status
+			storage := storageOf[d.Status]
+			statusSet = &storage
 			changed = append(changed, "status")
 		}
 		// A body that names nothing to change is not a write: the row answers
@@ -162,7 +167,7 @@ func (s *Service) Update(ctx context.Context, projectID, customerID uuid.UUID, d
 			out = cur
 			return nil
 		}
-		if err := s.repo.Update(ctx, &next); err != nil {
+		if err := s.repo.Update(ctx, &next, statusSet); err != nil {
 			return err
 		}
 		if out, err = s.repo.Get(ctx, projectID, customerID); err != nil {

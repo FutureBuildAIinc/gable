@@ -65,13 +65,19 @@ func (f *fakeRepo) Lock(_ context.Context, id, customerID uuid.UUID) error {
 	}
 	return nil
 }
-func (f *fakeRepo) Update(_ context.Context, p *Project) error {
+func (f *fakeRepo) Update(_ context.Context, p *Project, status *string) error {
 	f.note("update")
 	cur, ok := f.stored[p.ID]
 	if !ok || cur.CustomerID != p.CustomerID {
 		return ErrNotFound
 	}
 	cp := *p
+	// A NULL status keeps the stored spelling, as the SQL COALESCE does.
+	if status != nil {
+		cp.Status = fromStorage(*status)
+	} else {
+		cp.Status = cur.Status
+	}
 	cp.Revision = cur.Revision + 1
 	f.stored[p.ID] = &cp
 	return nil

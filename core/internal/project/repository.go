@@ -34,7 +34,7 @@ type Repository interface {
 	Get(ctx context.Context, id, customerID uuid.UUID) (*Project, error)
 	Create(ctx context.Context, p *Project) error
 	Lock(ctx context.Context, id, customerID uuid.UUID) error
-	Update(ctx context.Context, p *Project) error
+	Update(ctx context.Context, p *Project, status *string) error
 	Entities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error)
 }
 
@@ -154,12 +154,16 @@ func (r *PostgresRepository) Lock(ctx context.Context, id, customerID uuid.UUID)
 	return nil
 }
 
-func (r *PostgresRepository) Update(ctx context.Context, p *Project) error {
+// Update writes the row with the status the body named, or none: a NULL
+// status keeps the stored spelling (SQL COALESCE), so a name-only update
+// cannot blank or rename a legacy value the storage map does not know (the
+// column is a free VARCHAR; 'On Hold ' and friends stay byte identical).
+func (r *PostgresRepository) Update(ctx context.Context, p *Project, status *string) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		UPDATE projects
-		SET name = $2, status = $3, revision = revision + 1, updated_at = NOW()
+		SET name = $2, status = COALESCE($3, status), revision = revision + 1, updated_at = NOW()
 		WHERE id = $1`,
-		p.ID, p.Name, storageOf[p.Status])
+		p.ID, p.Name, status)
 	if err != nil {
 		return fmt.Errorf("failed to update project: %w", err)
 	}
