@@ -385,8 +385,14 @@ frozen at create and `UNIQUE` (section 1): a company that renames its
 code keeps its infix, and a company created later cannot take an infix a
 living company holds, so two companies can never both mint
 `IN-<infix>-000001` (the cross database `UNIQUE (number)` of
-`invoices_number_key`, `097:86`, holds the line beside it). The key is
-the id, never the code, because the code is
+`invoices_number_key`, `097:86`, holds the line beside it). The create
+route translates the infix clash into the wire's own shape rather than
+the raw unique violation: a 409 `conflict` whose body names blocker
+`infix_taken` and the code the new company asked for, so an operator
+that asks for code `ACME` while a living company already holds
+`number_infix` `ACME` sees the same 409 a code clash would carry
+elsewhere and never a raw `pgx` constraint error; tested at item 7. The
+key is the id, never the code, because the code is
 dealer editable and a rename after the first number would either restart
 the series at 1 under a new key or orphan the old one, breaking the legal
 entity's unbroken series; the code is never frozen, because numbers read
