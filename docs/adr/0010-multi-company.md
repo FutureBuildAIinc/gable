@@ -232,11 +232,18 @@ company by construction, because every document carries its company:
 
 - **Chart.** `gl_accounts` gains `company_id UUID NOT NULL`; `UNIQUE (code)`
   (`025:10`) becomes `UNIQUE (company_id, code)`. The standard chart seeded
-  once (`025:76`) becomes the seed company's chart, and every company
-  created later gets the same standard chart seeded in its creation
-  transaction (the same INSERT list, `company_id` bound), so `resolveAccountIDs`
-  never fails on a fresh company. `gl_accounts.parent_id` (`025:14`) must
-  stay inside one company, checked in the account write.
+  once (`025:76`) becomes the seed company's chart. A company created later
+  gets a copy of a named template company's whole live chart in its
+  creation transaction (the seed company by default), not a replay of the
+  025 INSERT list: 025 seeds only the original chart, later records add
+  codes to it (`4030` by C2-2, `4050` and `5040` by C2-4, ADR 0008 3.2's
+  accounts by the C4 packages), and dealers add accounts their charge codes
+  name, all of which the INSERT list would miss, so `resolveAccountIDs`
+  would fail a fresh company on the first restocking fee, write off or
+  coded adjustment. The copy carries dealer accounts with the standard
+  ones, so `resolveAccountIDs` never fails on a fresh company.
+  `gl_accounts.parent_id` (`025:14`) must stay inside one company, checked
+  in the account write.
 - **Foreign keys that name accounts.** `gl_journal_lines.account_id`
   (`025:63`) and `bank_accounts.gl_account_id` (`029:70`) become composite
   foreign keys: `UNIQUE (company_id, id)` is added to `gl_accounts`, and the
@@ -248,7 +255,12 @@ company by construction, because every document carries its company:
   table cannot hold a foreign key into every company's chart. Both are
   stable code references, resolved at posting through the document's
   company's chart, exactly as ADR 0005 section 8.1 resolves posting codes
-  and section 2.5 snapshots the code on the line.
+  and section 2.5 snapshots the code on the line. With the database FK
+  gone, the write paths hold the reference instead: a charge code write
+  and an adjustment reason write check that the named code exists in every
+  company's chart (a shared row must resolve in every company), and
+  deactivating a `gl_accounts` row a charge code or an adjustment reason
+  names is refused with 409 blocker `account_in_use`.
 - **The resolver.** `resolveAccountIDs(ctx, codes...)` (`service.go:53`)
   becomes `resolveAccountIDs(ctx, companyID, codes...)`: it loads one
   company's chart and fails the act when a code is missing there, as it
@@ -587,7 +599,7 @@ are its own, and their sum is stated rather than rounded):
 | 4 | Numbering and URLs (section 4: series per company, the code bearing prefix, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the `companies` routes and vocabulary entry, `api_keys.company_id`, `key.company_refused`) | 8 to 12 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
-| 7 | Company admin (create a company with its chart and periods seeded, rename the seed, set its tax code; routes and the desk screen) | 6 to 10 |
+| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code; routes and the desk screen) | 6 to 10 |
 
 Total: 66 to 106 dev hour equivalents. Item 1 lands first and items 2 to 7
 depend on it; items 2 and 3 land together or in that order; 4 to 7 are
