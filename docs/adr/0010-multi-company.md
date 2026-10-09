@@ -147,30 +147,38 @@ row's company is refused (section 9).
 Every table gets exactly one named rule, stated against the schema as it
 stands when the build runs (after C2-5 and C4-2), not as it stands today;
 where a column the rule leans on is not present yet, the row names the
-cycle that adds it. The rules:
+cycle that adds it. Six rules, a closed vocabulary the census test of
+section 10 reads:
 
 - **R1, follows its parent.** The row carries a NOT NULL parent that already
-  names a company (today always `branch_id`; a bank account for the bank
-  tables). A `BEFORE INSERT OR UPDATE` trigger sets `company_id` from that
-  parent and refuses a row whose parent moved to another company.
-  Application code never writes `company_id` here. A trigger, not a
-  generated column: a Postgres generated column cannot read another table.
+  names a company (a `branch_id` column set NOT NULL; a bank account for
+  the bank tables). A `BEFORE INSERT OR UPDATE` trigger sets `company_id`
+  from that parent and refuses a row whose parent moved to another
+  company. Application code never writes `company_id` here. A trigger, not
+  a generated column: a Postgres generated column cannot read another
+  table.
 - **R2, set by the single writer and checked.** The books carry no branch
-  (`025`, `008`, `018`, `028`, `029`, above), so no trigger can reach them.
-  The owning service sets `company_id` explicitly inside the act's
-  transaction, from the document's company, with the foreign key to
-  `company(id)` and a database check that the row's company equals its
-  source document's company (a composite foreign key where the shapes allow
-  it, section 3; a checked read where they do not). A row whose source
-  document is in another company is never written.
+  (`025`, `028`, `029`, above), so no trigger can reach them. The owning
+  service sets `company_id` explicitly inside the act's transaction, from
+  the document's company, with the foreign key to `company(id)` and a
+  database check that the row's company equals its source document's
+  company (a composite foreign key where the shapes allow it, section 3; a
+  checked read where they do not). A row whose source document is in
+  another company is never written.
 - **R3, shared.** No `company_id` column at all.
+- **child.** No column: a named parent row is the boundary, and every read
+  that needs a company joins that parent. Line tables are children of
+  their header; a stock row's children name the stock row. This keeps the
+  column count down and the company invariant in one place per parent.
+- **legacy.** Renamed `*_legacy` by a later cycle and read by nothing: no
+  column and no rule while the rows wait for their drop.
+- **key.** `api_keys` alone: the one table that gains a NULLABLE
+  `company_id` (section 6), so it is none of the other five.
 
 Child line tables (`order_lines`, `invoice_lines`, `credit_memo_lines`,
 `pos_line_items`, `pos_tenders`, `vendor_invoice_lines`, `gl_journal_lines`,
-a transfer's, adjustment's or count's lines, draft payloads) take no
-column: their header is the boundary, and every read that needs a company
-joins the header. This keeps the column count down and the invariant in one
-place per document.
+a transfer's, adjustment's or count's lines, draft payloads) are children
+of their headers.
 
 | Module | Table | Rule | Source or note |
 |---|---|---|---|
@@ -183,12 +191,12 @@ place per document.
 | sales (C2-4, ADR 0005 9.2) | `ar_applications` | R2 | child rows of a payment or credit memo and an invoice; the AR core checks both sides name one company and refuses the act when they do not, the R2 check beside the two R1 parents |
 | sales (C2-4, ADR 0005 9.3) | `customer_transactions` | R2 | the AR subledger row; from its invoice, credit memo or payment; the balance invariant of ADR 0005 9.3 holds per company |
 | sales (C2-4) | `payment_refunds` | R2 | from its payment or credit memo |
-| sales (legacy) | `customer_deposits`, `customer_deposit_applications` | left alone | renamed `*_legacy` by C2-4 (ADR 0005 9.1); no rule, no reader |
+| sales (legacy) | `customer_deposits`, `customer_deposit_applications` | legacy | renamed `*_legacy` by C2-4 (ADR 0005 9.1); no reader, waiting for the drop |
 | counter | `pos_registers`, `pos_transactions` | R1 | `066:13,23` |
 | counter | `till_sessions`, `till_z_reports` | R2 | `branch_id` nullable today (`075:21`, `078:15`); the writer sets the company from the register's branch at open and close; backfilled by section 10 |
 | counter | `pos_returns` | R2 | `079:42`; from the sale it returns |
 | purchasing | `purchase_orders`, `po_receipts` | R1 | `065:7,21` |
-| purchasing | `po_freight_charges` | none | child of the purchase order |
+| purchasing | `po_freight_charges` | child | of the purchase order it belongs to |
 | AP | `vendor_invoices` | R2 | no branch (`028:7`); from the purchase order it buys against, else the request's company |
 | AP | `ap_payments`, `ap_payment_applications` | R2 | `028:36`; from the invoices they pay, checked one company per act |
 | AP (C4, ADR 0008 7.2) | `vendor_credit_memos` | R2 | from the vendor return or invoice it credits |
@@ -202,14 +210,18 @@ place per document.
 | catalog | `products`, `product_kit_components`, `product_categories`, PIM tables | R3 | shared |
 | catalog | `charge_codes` | R3 | `092:235`; the code FK question is settled in section 3 |
 | pricing (ADR 0006) | `product_units`, `price_levels`, `pricing_rules`, `category_pricing_rules`, `vendor_price_levels`, `vendor_product_costs` | R3 | shared masters (ADR 0006 sections 3 and 5); a row that names a branch (ADR 0006's branch specific prices) follows that branch's company, read through the join, no column |
-| stock (ADR 0008) | `inventory` rows, tallies, lots, serials, bundles | R1 | stock sits at a location (`002_add_locations.sql:27-30`; the branch is derived through `locations.branch_id`, `068_inventory_branch_helper.sql:5-9`); inventory value is therefore per company, because stock sits at branch locations |
-| stock (ADR 0008) | `stock_moves`, `stock_transfers`, `stock_adjustments`, `stock_counts`, `stock_allocations` | R1 | each carries `branch_id` (ADR 0008 2.6, 2.8, 3.3, 2.9) |
+| stock (ADR 0008 2.5) | `inventory` | child | no column, the one deliberate departure from "NOT NULL branch means R1": the boundary is its location, which is R1, and `branch_id` is NOT NULL on the row from C4-2 (ADR 0008 2.5), so the company is one indexed join away (`locations.company_id`, as `002_add_locations.sql:27-30` places stock at a location). A column and trigger on the hottest table would tax every stock write for a fact no reader needs stored (stock reads scope by branch, and value per company joins locations anyway); the census file carries this departure with this reason |
+| stock (ADR 0008 2.3, 2.4) | `stock_lots`, `stock_bundles` | R3 | product keyed identity masters with no location (`UNIQUE (product_id, kind, code)`, a unique tag; ADR 0008 2.3 and 2.4); a lot's or bundle's stock sits in `inventory` rows, which carry the company through their location |
+| stock (ADR 0008 2.4) | `inventory_tally` | child | of its stock row (`inventory_id`, ADR 0008 2.4) |
+| stock (ADR 0008 2.6, 2.8, 3.3, 2.9) | `stock_moves`, `stock_transfers`, `stock_adjustments`, `stock_counts` | R1 | each carries `branch_id` (ADR 0008 2.6, 2.8, 3.3, 2.9) |
+| stock (ADR 0008 2.7) | `stock_allocations` | child | keyed by its stock row and its order line (ADR 0008 2.7 at `0008:463`); the stock row carries the company through its location |
 | stock (ADR 0008) | `adjustment_reasons` | R3 | shared master naming an account code (ADR 0008 3.1); resolved at posting, section 3 |
-| feeds (ADR 0008) | feed run and outbox tables | R1 or R2 | a feed run lands stock at branches; it follows the branch it feeds when it names one, else the writer sets it (ADR 0008 8.2) |
-| delivery | `deliveries`, routes, stops | none | children of orders and trucks; no book of their own; a delivery's company is its order's |
+| feeds (ADR 0008 8.1 to 8.4) | `vendor_feeds`, `vendor_feed_runs`, `vendor_feed_files`, `vendor_feed_run_rows` | R3 | no feed kind writes a company owned table: none creates a product or changes the dealer's stock (ADR 0008 8.4); they write the shared vendor catalog, cost and availability tables, and the run is the audit of that |
+| feeds (ADR 0008 8.6) | `vendor_document_outbox` | child | the boundary is the document it sends: `document_kind` and `document_id` name the purchase order or vendor return, each of which carries its company |
+| delivery | `deliveries`, routes, stops | child | of the orders and trucks they serve; a delivery's company is its order's |
 | users | `user_locations` | R3 | the grant table stays exactly as it is (`061:10-17`); a user's companies are derived: a user reaches a company exactly when a granted branch is of it. No `company_id` column and no new index |
 | users | `module_grants` | R3 | shared |
-| keys | `api_keys` | | gains nullable `company_id`, section 6 |
+| keys | `api_keys` | key | gains a nullable `company_id`, section 6; the one nullable case in the schema |
 | drafts (ADR 0007) | `drafts` | R1 | the branch is fixed at create (ADR 0007 2.3), so the draft follows it when C5-2a builds the table |
 | events | `events_outbox` | R3 | no company column in v1; consumers derive it from `branch_id` (ADR 0003 section 1), which every branch carrying act stamps; a null `branch_id` event (`089:64`) names no company, and a consumer that needs one reads the entity. Stated as a known limit |
 | settings | `system_settings` | R3 | one row set per database stays. What varies per legal entity moves to the company row: `functional_currency` (section 5) and `tax_company_code` (section 7). Settings that name one branch (`default_branch_id`, `brain_inbound_branch_id`, `pos.walk_in_customer_id`) or gate the process (`multi_branch_enabled`, `default_branch_required`, `currency.enabled`) stay database level, each listed here so the ruling is on the record |
@@ -606,10 +618,12 @@ Tests, in the migration item:
   rule is R1 but the trigger is missing; when a line's rule is R2 but the
   `company_id` column is missing; when a table's `branch_id` is NOT NULL
   and its rule is not R1, because a NOT NULL branch is always a parent
-  the trigger can follow; and when a table named in section 2's per
-  company list lacks `company_id`. Every later item that adds a branch
-  carrying table extends the census in the same pull request, so a table
-  cannot land without its rule.
+  the trigger can follow (the one recorded departure is `inventory`,
+  section 2, whose census line names its parent and the reason, and the
+  test fails if that line is removed); and when a table named in
+  section 2's per company list lacks `company_id`. Every later item that
+  adds a branch carrying table extends the census in the same pull
+  request, so a table cannot land without its rule.
 
 ### 11. Items, order and sizes
 
@@ -641,7 +655,7 @@ are its own, and their sum is stated rather than rounded):
 
 | Order | Item | Size |
 |---|---|---|
-| 1 | The migration and the census test (section 10: about twenty tables, three rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
+| 1 | The migration and the census test (section 10: about twenty tables, six rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
 | 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart seed per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
@@ -686,7 +700,7 @@ branch (section 6).
 **One trigger for every table** (the first draft): a `company_id` copied
 from `branch_id` cannot reach the books, which carry no branch
 (`025`, `008`, `018`, `028`, `029`), and several `branch_id` columns are
-nullable, so a NOT NULL copy fails on real rows. Replaced by the three
+nullable, so a NOT NULL copy fails on real rows. Replaced by the six
 rules of section 2.
 
 **A shared chart with a company column on balances only**: every posting
