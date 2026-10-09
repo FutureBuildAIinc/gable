@@ -250,7 +250,7 @@ func (s *Service) ReplaceUnitSet(ctx context.Context, id uuid.UUID, req *PutUnit
 		if err != nil {
 			return err
 		}
-		newRevision, err := s.repo.ReplaceUnitSet(ctx, id, rows,
+		newRevision, err := s.repo.ReplaceUnitSet(ctx, id, rows, req.StockUOM,
 			req.SaleUOM, req.PriceUOM, req.PurchaseUOM, req.BasePriceTenThousandths, cur.Revision)
 		if err != nil {
 			return resolveRevision(err)
@@ -334,6 +334,30 @@ func (s *Service) resolveUnitSet(ctx context.Context, id uuid.UUID, cur *UnitSet
 	if cur.RandomLength && req.StockUOM != "LF" {
 		return nil, nil, httpx.BadRequest("one or more fields failed validation",
 			httpx.FieldError{Field: "stock_uom", Message: "a random length product is stocked in LF: its tallies bill by the linear foot"})
+	}
+	// The stocking unit comes from stock_uom, never from row order (rule 1
+	// of section 3.1): the set carries the stock_uom row, and its pair,
+	// when sent, is (1, 1). A second (1, 1) row is harmless once the
+	// stocking unit is explicit (EA beside PCS, the natural fastener set).
+	stockRowSent := false
+	for _, r := range req.Units {
+		if r.UOM != req.StockUOM {
+			continue
+		}
+		stockRowSent = true
+		if r.UnitQty == "" {
+			continue
+		}
+		unitQty, errA := httpx.ParseQuantity(r.UnitQty)
+		stockQty, errB := httpx.ParseQuantity(r.StockQty)
+		if errA == nil && errB == nil && !(unitQty == 10_000 && stockQty == 10_000) {
+			return nil, nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "stock_uom", Message: "the stocking unit's own row is 1 and 1; send no pair for it"})
+		}
+	}
+	if !stockRowSent {
+		return nil, nil, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "stock_uom", Message: req.StockUOM + " must be a row of the set: the stocking unit comes from stock_uom"})
 	}
 
 	// The stocking unit holds of 3.2, each a 409 conflict with its blocker.
@@ -631,11 +655,11 @@ func (r *PostgresRepository) LockProductForUnitSet(ctx context.Context, id uuid.
 // ReplaceUnitSet clears the set, inserts the new rows, moves the product's
 // four unit columns and bumps its revision, all through the caller's
 // executor: inside the service's transaction they are one database act. The
-// deferred constraints (the composite foreign keys, the stocking row
-// invariant, the hold) settle at the commit the service's checks already
-// proved.
+// stocking unit is the caller's stock_uom, never row order. The deferred
+// constraints (the composite foreign keys, the stocking row invariant, the
+// hold) settle at the commit the service's checks already proved.
 func (r *PostgresRepository) ReplaceUnitSet(ctx context.Context, id uuid.UUID, rows []UnitSetRowView,
-	saleUOM, priceUOM, purchaseUOM string, basePrice *int64, revision int64) (int64, error) {
+	stockUOM, saleUOM, priceUOM, purchaseUOM string, basePrice *int64, revision int64) (int64, error) {
 	exec := r.db.GetExecutor(ctx)
 	if _, err := exec.Exec(ctx, `DELETE FROM product_units WHERE product_id = $1`, id); err != nil {
 		return 0, fmt.Errorf("failed to clear the unit set: %w", err)
@@ -657,7 +681,7 @@ func (r *PostgresRepository) ReplaceUnitSet(ctx context.Context, id uuid.UUID, r
 	if basePrice != nil {
 		baseArg = *basePrice
 	}
-	args := []any{id, rowsStockUOM(rows), saleUOM, priceUOM, purchaseUOM, baseArg}
+	args := []any{id, stockUOM, saleUOM, priceUOM, purchaseUOM, baseArg}
 	var newRevision int64
 	err := exec.QueryRow(ctx, `
 		UPDATE products SET `+sets+`, revision = revision + 1, updated_at = NOW()
@@ -674,18 +698,6 @@ func (r *PostgresRepository) ReplaceUnitSet(ctx context.Context, id uuid.UUID, r
 		return 0, fmt.Errorf("failed to move the product's unit columns: %w", err)
 	}
 	return newRevision, nil
-}
-
-// rowsStockUOM finds the set's stocking row: the row the service proved to
-// carry the pair (1, 1).
-func rowsStockUOM(rows []UnitSetRowView) string {
-	one := httpx.Quantity(10_000)
-	for _, row := range rows {
-		if row.UnitQty == one && row.StockQty == one {
-			return row.UOM
-		}
-	}
-	return ""
 }
 
 // CatalogueUnits reads the catalogue rows for the given codes: the slice of

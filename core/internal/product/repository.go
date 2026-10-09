@@ -44,7 +44,7 @@ type Repository interface {
 	GetUnitSetRows(ctx context.Context, productID uuid.UUID) ([]UnitSetRowView, error)
 	LockProductForUnitSet(ctx context.Context, id uuid.UUID) (*UnitSetProduct, error)
 	ReplaceUnitSet(ctx context.Context, id uuid.UUID, rows []UnitSetRowView,
-		saleUOM, priceUOM, purchaseUOM string, basePrice *int64, revision int64) (int64, error)
+		stockUOM, saleUOM, priceUOM, purchaseUOM string, basePrice *int64, revision int64) (int64, error)
 	CatalogueUnits(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error)
 	ProductStockUnitInUse(ctx context.Context, id uuid.UUID) (bool, error)
 	ProductPriceHeld(ctx context.Context, id uuid.UUID) (bool, string, error)
