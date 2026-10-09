@@ -180,9 +180,11 @@ section 10 reads:
   `company_id` (section 6), so it is none of the other five.
 
 Child line tables (`order_lines`, `invoice_lines`, `credit_memo_lines`,
-`pos_line_items`, `pos_tenders`, `vendor_invoice_lines`, `gl_journal_lines`,
-a transfer's, adjustment's or count's lines, draft payloads) are children
-of their headers.
+`pos_line_items`, `pos_tenders`, `vendor_invoice_lines`, a transfer's,
+adjustment's or count's lines, draft payloads) are children of their
+headers. `gl_journal_lines` is the one line table that is not a child: it
+is R2, because the database guard of section 3 needs the column on the
+row itself.
 
 | Module | Table | Rule | Source or note |
 |---|---|---|---|
@@ -206,6 +208,7 @@ of their headers.
 | AP (C4, ADR 0008 7.2) | `vendor_credit_memos` | R2 | from the vendor return or invoice it credits |
 | GL | `gl_accounts` | R2 | section 3 |
 | GL | `gl_journal_entries` | R2 | section 3; `PostEntry` sets it |
+| GL | `gl_journal_lines` | R2 | the one line table that is not a child: the row carries `company_id NOT NULL`, set by `PostEntry` with its entry's, and composite foreign keys hold it equal to its entry's company and its account's (section 3) |
 | GL | `gl_fiscal_periods` | R2 | section 3; per company calendar |
 | bank | `bank_accounts` | R2 | created naming its company; its `gl_account_id` must be of the same company (`029:70`, section 3) |
 | bank | `reconciliation_sessions`, `bank_transactions` | R1 | parent is the bank account (`029:75,95`); trigger from `bank_accounts.company_id` |
@@ -261,12 +264,21 @@ company by construction, because every document carries its company:
   ones, so `resolveAccountIDs` never fails on a fresh company.
   `gl_accounts.parent_id` (`025:14`) must stay inside one company, checked
   in the account write.
-- **Foreign keys that name accounts.** `gl_journal_lines.account_id`
-  (`025:63`) and `bank_accounts.gl_account_id` (`029:70`) become composite
-  foreign keys: `UNIQUE (company_id, id)` is added to `gl_accounts`, and the
-  two reference `(company_id, account_id)` and `(company_id,
-  gl_account_id)`, so the database itself refuses a line or a bank account
-  pointing into another company's chart. `charge_codes.revenue_account_code`
+- **Foreign keys that name accounts and entries.** `UNIQUE (company_id,
+  id)` is added to `gl_accounts` and to `gl_journal_entries`.
+  `gl_journal_lines` gains `company_id UUID NOT NULL`, set by `PostEntry`
+  with its entry's company, and holds two composite foreign keys:
+  `(company_id, journal_entry_id)` references `gl_journal_entries
+  (company_id, id)`, and `(company_id, account_id)` references
+  `gl_accounts (company_id, id)`, so the database itself refuses a line
+  whose entry or whose account is of another company.
+  `bank_accounts.gl_account_id` (`029:70`) becomes the composite
+  `(company_id, gl_account_id)` reference into `gl_accounts
+  (company_id, id)`, so the database refuses a bank account pointing into
+  another company's chart. `gl_journal_entries.reverses_entry_id`
+  (`077:20`) becomes composite the same way: `(company_id,
+  reverses_entry_id)` references `gl_journal_entries (company_id, id)`,
+  so a reversal stays in its company. `charge_codes.revenue_account_code`
   (`092:239`) and, when it lands, `adjustment_reasons.gl_account_code`
   (ADR 0008 3.1) lose their database FK to `gl_accounts(code)`: a shared
   table cannot hold a foreign key into every company's chart. Both are
@@ -288,7 +300,9 @@ company by construction, because every document carries its company:
   of one company by construction, because the resolver takes one company id
   per entry.
 - **Entries.** `gl_journal_entries.company_id NOT NULL`, set by `PostEntry`,
-  never by raw SQL (the AR core gate of ADR 0005 9.3 covers the writers).
+  never by raw SQL (the AR core gate of ADR 0005 9.3 covers the writers),
+  and every line of the entry carries the same company, set in the same
+  act, held by the composite keys above.
   `entry_number` stays one `SERIAL` across the database (`025:43`): it is an
   internal ordering key with no legal reader, cross database uniqueness
   holds, and per company numbering of entries would buy nothing. Stated.
@@ -663,8 +677,12 @@ Up, in order:
    backfill every row to the seed company, NOT NULL, the foreign key. No
    trigger: the writers of section 11's third item set it from then on.
 5. GL: `UNIQUE (code)` dropped and `UNIQUE (company_id, code)` added
-   (`025:10`); `UNIQUE (company_id, id)` added; the composite foreign keys
-   of section 3; `charge_codes.revenue_account_code`'s FK dropped
+   (`025:10`); `UNIQUE (company_id, id)` added to `gl_accounts` and
+   `gl_journal_entries`; `gl_journal_lines.company_id` added and
+   backfilled from each line's entry, then NOT NULL, with the composite
+   foreign keys of section 3 (to the entry and to the account), and
+   `gl_journal_entries.reverses_entry_id` made composite
+   (`077:20`); `charge_codes.revenue_account_code`'s FK dropped
    (`092:239`); `gl_fiscal_periods` attached to the seed company; the 077
    exclusion and trigger replaced with the per company forms
    (`077:24-27,29-48`).
@@ -742,7 +760,7 @@ are its own, and their sum is stated rather than rounded):
 | Order | Item | Size |
 |---|---|---|
 | 1 | The migration and the census test (section 10: about twenty tables, six rules, triggers, per company GL constraints, round trip and refusal tests) | 14 to 22 |
-| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys) | 12 to 18 |
+| 2 | GL per company (section 3: resolver signature through the `Sync*` family and `PostEntry`, chart copy per company, periods, the 077 forms, composite foreign keys on the lines, the entries and reversals) | 14 to 20 |
 | 3 | Posting writers set the company (invoice, credit memo, payment, deposit, counter, AP `SyncVendorInvoice` and `SyncVendorPayment`, bank; the AR core's checks) | 14 to 24 |
 | 4 | Numbering and URLs (section 4: series per company keyed by id, the code bearing prefix for companies created later, the `numbers_issued` freeze on the code, ADR 0007 section 7 patterns, contract change rows) | 6 to 10 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, `api_keys.company_id` with its header rule and `key.company_refused`) | 9 to 13 |
