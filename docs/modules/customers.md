@@ -120,9 +120,10 @@ balance is read only on the wire; the AR core is the writer.
 A customer has no lifecycle of its own. It is enabled or disabled by
 `is_active` and locked on `currency` change while it has open
 documents. The currency override is refused with `409 conflict` and
-blocker `open_documents` when the customer has any order not fulfilled
-or cancelled, any invoice or credit memo with an open amount, or any
-payment with an unapplied amount.
+blocker `open_documents` when the customer has an order in `draft`,
+`confirmed` or `on_hold`, an invoice that is `unpaid` or `partial`,
+a credit memo in `draft`, `open` or `partial`, or a deposit with an
+unapplied amount.
 
 A `ShipTo` and a `Contact` are versioned through `revision` but have no
 lifecycle. A `Contact` may be deleted; a `ShipTo` may not be deleted

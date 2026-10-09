@@ -69,9 +69,11 @@ fragments name the legacy shapes they keep until C4-1.
 
 ## Events the module writes
 
-The write routes write the product and location rows directly. No
-outbox events and no `audit_log` rows are written by the inventory
-module today; the read side does not write events.
+The write routes write the `inventory` rows directly (see
+`core/internal/inventory/repository.go` lines 82-98 for the insert
+and lines 199-327 for the updates). No outbox events and no
+`audit_log` rows are written by the inventory module today; the read
+side does not write events.
 
 ## Scopes, roles and keys
 
@@ -111,7 +113,7 @@ make seed
 make serve
 ```
 
-Then, with an inventory role bearer and the seeded branch:
+Then, with a `warehouse` role bearer and the seeded branch:
 
 ```
 curl -X GET 'http://localhost:8080/api/v1/inventory?include=total&include=product' \

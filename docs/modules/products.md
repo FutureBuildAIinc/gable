@@ -131,16 +131,16 @@ explosion is done once, at the line's create or edit on a sales
 document, so a later change of the kit definition does not touch
 existing documents.
 
-The PIM generation routes are read by the desk; the AI generation is
-done by the worker role. The base URL and per-task model slugs are
-admin-overridable (see `core/internal/app/serve/serve.go` near the
-`pimHandler.RegisterRoutes` call).
+The base URL and per-task model slugs are admin-overridable (see
+`core/internal/app/serve/serve.go` near the `pimHandler.RegisterRoutes`
+call).
 
 ## Events the module writes
 
-Product writes today do not write outbox events; the module's events
-are PIM-side and ride the CRM and portal feeds. The PIM generation
-routes do not write `audit_log` rows.
+Product writes write `product.created` (on create) and `product.updated`
+(on average cost, margins, reorder targets, lead time, dimensions, and
+kit components) through the outbox in the mutation's transaction, with
+an `audit_log` row. The PIM routes write neither.
 
 ## Scopes, roles and keys
 
@@ -175,7 +175,7 @@ make seed
 make serve
 ```
 
-Then, with an inventory role bearer:
+Then, with a `warehouse` role bearer:
 
 ```
 curl -X GET 'http://localhost:8080/api/v1/products?include=total' \
