@@ -20,7 +20,7 @@
 --      the void columns (voided_on included).
 --   5  credit_memos: the columns of 6.3, with the backfill (PENDING to DRAFT;
 --      APPLIED stays APPLIED when it names an invoice, else OPEN; total =
---      -amount; one ADJUST charge line each; numbers through the counter for
+--      -ABS(amount); one ADJUST charge line each; numbers through the counter for
 --      every memo not in DRAFT).
 --   6  credit_memo_lines; keyset indexes on both tables.
 --
@@ -231,7 +231,9 @@ SET currency = COALESCE((SELECT i.currency FROM invoices i WHERE i.id = m.invoic
                         'USD')
 WHERE m.currency IS NULL;
 UPDATE credit_memos SET reason_code = 'OTHER' WHERE reason_code IS NULL;
-UPDATE credit_memos SET subtotal = -amount, tax_amount = 0, total_amount = -amount WHERE total_amount IS NULL;
+-- ABS: a legacy amount is a positive credit; a negative one (raw SQL only, the
+-- old handler refused them) is read as the same credit, never aborting the CHECK.
+UPDATE credit_memos SET subtotal = -ABS(amount), tax_amount = 0, total_amount = -ABS(amount) WHERE total_amount IS NULL;
 UPDATE credit_memos m
 SET memo_date = (m.created_at AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l WHERE l.id = m.branch_id), 'UTC'))::date
 WHERE m.memo_date IS NULL;
@@ -340,7 +342,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_memo_lines_invoice_line ON credit_memo_lin
 -- One ADJUST charge line per migrated memo (quantity -1 EA, unit price the amount, untaxed).
 INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, charge_code_id, description, quantity, uom, price_uom,
                                uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, revenue_account_code)
-SELECT m.id, 0, 'CHARGE', cc.id, LEFT(m.reason, 500), -1, 'EA', 'EA', 1, 1, m.amount, 'MANUAL', -m.amount, FALSE,
+SELECT m.id, 0, 'CHARGE', cc.id, LEFT(m.reason, 500), -1, 'EA', 'EA', 1, 1, ABS(m.amount), 'MANUAL', -ABS(m.amount), FALSE,
        cc.revenue_account_code
 FROM credit_memos m
 CROSS JOIN LATERAL (SELECT id, revenue_account_code FROM charge_codes WHERE code = 'ADJUST') cc

@@ -311,3 +311,29 @@ func TestMigration097_BackfillsRowsThatExist(t *testing.T) {
 		t.Errorf("after down and up again %d invoices are numbered, want 6", got)
 	}
 }
+
+// A legacy credit memo whose amount is negative (the base handler refused
+// them, so only raw SQL could have written one) maps to the same negative
+// total as its absolute value, and the migration still applies: the
+// nonpositive CHECK must not abort the whole file on one such row.
+func TestMigration097_NegativeLegacyCreditMemoAmount(t *testing.T) {
+	conn, _ := scratch097(t)
+	before, target := files097(t)
+	for _, f := range before {
+		apply097(t, conn, f)
+	}
+	seed097(t, conn)
+	const neg = "00000000-0000-0000-0000-0000000097f5"
+	if _, err := conn.Exec(context.Background(), `INSERT INTO credit_memos (id, invoice_id, customer_id, amount, reason, status, created_at)
+		VALUES ($1, NULL, $2, -7.25, 'negative legacy memo', 'PENDING', now())`, neg, m97Cust); err != nil {
+		t.Fatal(err)
+	}
+	apply097(t, conn, target)
+
+	if got := scalar[string](t, conn, `SELECT subtotal::text || '|' || total_amount::text FROM credit_memos WHERE id = $1`, neg); got != "-7.25|-7.25" {
+		t.Errorf("negative legacy memo subtotal|total = %q, want -7.25|-7.25", got)
+	}
+	if got := scalar[string](t, conn, `SELECT l.unit_price::text || '|' || l.line_total::text FROM credit_memo_lines l WHERE l.credit_memo_id = $1`, neg); got != "7.2500|-7.25" {
+		t.Errorf("negative legacy memo line unit|total = %q, want 7.2500|-7.25", got)
+	}
+}
