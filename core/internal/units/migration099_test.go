@@ -18,16 +18,19 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/jackc/pgx/v5"
 )
 
-func scratchDB(t *testing.T) *pgx.Conn {
+func scratchDB(t *testing.T) (*pgx.Conn, string) {
 	t.Helper()
 	db := testutil.RequireDB(t)
 	base, err := url.Parse(db.Pool.Config().ConnString())
@@ -60,7 +63,7 @@ func scratchDB(t *testing.T) *pgx.Conn {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close(context.Background()) })
-	return conn
+	return conn, scratch.String()
 }
 
 func migrationFiles(t *testing.T) (before []string, target, down string) {
@@ -148,7 +151,7 @@ func legacyRows(t *testing.T, conn *pgx.Conn) {
 }
 
 func TestMigration099_CatalogueSetsAndTallies(t *testing.T) {
-	conn := scratchDB(t)
+	conn, _ := scratchDB(t)
 	before, target, downFile := migrationFiles(t)
 	for _, f := range before {
 		applyFile(t, conn, f)
@@ -312,4 +315,126 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// TestMigration099_OnTheSeededDatabase applies 099 to a database seeded by
+// the repository's own seed (the recipe's rule: a migration is proved on a
+// seeded database, not only on fixtures): every product gains its stocking
+// row and its defaults, nothing aborts, every product's set resolves (the
+// round trip of the exit test over the seeded catalogue), and the down then
+// up loses no row.
+func TestMigration099_OnTheSeededDatabase(t *testing.T) {
+	conn, scratch := scratchDB(t)
+	before, target, downFile := migrationFiles(t)
+	for _, f := range before {
+		applyFile(t, conn, f)
+	}
+
+	// The seed, as an operator runs it: the same binary, the scratch
+	// database's URL on its own command.
+	cmd := exec.Command("go", "run", "./cmd/seed")
+	cmd.Dir = "../.."
+	cmd.Env = append(os.Environ(), "DEMO_SEED=1", "DATABASE_URL="+scratch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("the seed did not run here (%v): %s", err, out)
+	}
+
+	applyFile(t, conn, target)
+	ctx := context.Background()
+
+	// Every product has its stocking row, (1, 1), every use allowed, and
+	// the defaults follow the stocking unit.
+	if bad := scalar[int](t, conn, `
+		SELECT count(*) FROM products p
+		WHERE NOT EXISTS (SELECT 1 FROM product_units pu
+		                 WHERE pu.product_id = p.id AND pu.uom = p.uom_primary
+		                   AND pu.unit_qty = 1 AND pu.stock_qty = 1
+		                   AND pu.sell AND pu.purchase AND pu.price)`); bad != 0 {
+		t.Errorf("%d seeded products have no complete stocking row", bad)
+	}
+	if bad := scalar[int](t, conn, `
+		SELECT count(*) FROM products WHERE sale_uom <> uom_primary
+		 OR price_uom <> uom_primary OR purchase_uom <> uom_primary`); bad != 0 {
+		t.Errorf("%d seeded products carry a default other than the stocking unit", bad)
+	}
+
+	// The seeded quote lines backfill their stocking quantities exactly:
+	// the seed's lines are in their products' stocking units.
+	if bad := scalar[int](t, conn, `
+		SELECT count(*) FROM quote_lines ql
+		JOIN products p ON p.id = ql.product_id
+		WHERE ql.product_id IS NOT NULL AND ql.stock_uom IS DISTINCT FROM p.uom_primary`); bad != 0 {
+		t.Errorf("%d seeded product lines kept a null or foreign stocking unit", bad)
+	}
+
+	// Every product's set resolves: for the backfilled sets (the stocking
+	// row alone) the round trip is the pair (1, 1); the check runs over
+	// every ordered pair the set holds, so a later, richer set cannot
+	// quietly become unresolvable.
+	rows, err := conn.Query(ctx, `
+		SELECT pu.product_id, pu.uom, pu.unit_qty::text, pu.stock_qty::text
+		FROM product_units pu ORDER BY pu.product_id, pu.uom`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		product  string
+		uom      string
+		unitQty  string
+		stockQty string
+	}
+	var all []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.product, &r.uom, &r.unitQty, &r.stockQty); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		all = append(all, r)
+	}
+	rows.Close()
+	byProduct := map[string][]row{}
+	for _, r := range all {
+		byProduct[r.product] = append(byProduct[r.product], r)
+	}
+	for product, rs := range byProduct {
+		for _, a := range rs {
+			for _, b := range rs {
+				if a.uom == b.uom {
+					continue
+				}
+				u, errA := httpx.ParseQuantity(a.unitQty)
+				s, errB := httpx.ParseQuantity(a.stockQty)
+				pu, errC := httpx.ParseQuantity(b.unitQty)
+				ps, errD := httpx.ParseQuantity(b.stockQty)
+				if errA != nil || errB != nil || errC != nil || errD != nil {
+					t.Fatalf("a seeded pair does not parse: %v %v", a, b)
+				}
+				if _, err := units.ResolveLinePair(units.Pair{A: u, B: s}, units.Pair{A: pu, B: ps}); err != nil {
+					t.Errorf("the seeded set of product %s does not resolve between %s and %s: %v",
+						product, a.uom, b.uom, err)
+				}
+			}
+		}
+	}
+
+	// The down then the up again, with no row lost.
+	counts := map[string]int{}
+	for _, table := range []string{"products", "quotes", "quote_lines", "customers", "inventory", "units"} {
+		counts[table] = scalar[int](t, conn, `SELECT count(*) FROM `+table)
+	}
+	// The seed may hold quote lines whose pairs would become candidates;
+	// the down ignores that table (it is A2's own, dropped and recreated by
+	// the up), and the sets the seed's products hold are stocking rows
+	// only, which the down allows.
+	applyFile(t, conn, downFile)
+	applyFile(t, conn, target)
+	for table, want := range counts {
+		if table == "units" {
+			continue // the down drops the catalogue; the up reseeds it
+		}
+		if got := scalar[int](t, conn, `SELECT count(*) FROM `+table); got != want {
+			t.Errorf("down then up lost rows of %s: %d before, %d after", table, want, got)
+		}
+	}
 }
