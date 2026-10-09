@@ -470,10 +470,14 @@ request converts the three raw callers that ride the production
 schema: `seed.go:1240`, `serve/wire_branch_wall_test.go:175`, and
 `invoice/wire_test.go:413` now omit `number` on insert and let the
 trigger mint; the migration's own test stays as is, and the helpers
-the rest of the code path uses (`invoice/repository.go`'s posting path,
-the wire tests that go through the handler) already pass through the
-trigger. No other caller exists (`git grep 'invoice_next_number\|
-credit_memo_next_number'` lists only the four above). The choice is
+the rest of the code path uses (`invoice/repository.go`'s posting
+path, `NextGaplessNumber` at `invoice/repository.go:511-520`) set
+`number` themselves through the widened helper, so the trigger's
+null guard skips them rather than re minting; the wire tests that go
+through the handler ride the same widened helper. No other caller
+exists (`git grep 'invoice_next_number\|credit_memo_next_number'`
+lists only the four above; three are converted, the fourth is the
+migration's own test inside its separate `files097` schema). The choice is
 named: a `BEFORE INSERT OR UPDATE` trigger on both tables that mints
 only when `number` is null, from the row's company's `invoice_series`
 or `credit_memo_series` and its infix, through the same locked counter
