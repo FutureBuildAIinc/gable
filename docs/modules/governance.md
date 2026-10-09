@@ -108,8 +108,8 @@ the transitions route is the only path that moves `status`. `PUT
 /api/v1/governance/rfcs/{id}` carrying a `status` field is a 400
 naming the field and pointing at the transitions route. `revision`
 on the create is refused on the same grounds (`content` and `status`
-are too). Every write takes `If-Match` or the body `revision` (`428
-precondition_required` without, `409 stale_revision`).
+are too). Every update and transition takes `If-Match` or the body
+`revision` (`428 precondition_required` without, `409 stale_revision`).
 
 The events are the constants in `core/internal/governance/service.go`
 (`EventCreated` `rfc.created`, `EventUpdated` `rfc.updated`,
