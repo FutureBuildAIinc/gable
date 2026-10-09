@@ -1,0 +1,291 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The unit catalogue on the wire contract (item C3-2A-units, ADR 0006
+# section 2 and ADR 0001): one row per unit the dealer uses, seeded with the
+# standard sizes of section 2.2 and locked on the seeded rows, extended by
+# the dealer. Codes are immutable and units are never deleted: the routes
+# offer deactivation only. The `units` module scope admits machine keys
+# (units:read, units:write).
+paths:
+  /api/v1/units:
+    get:
+      operationId: unitList
+      tags: [units]
+      summary: List units
+      description: >-
+        The keyset envelope of ADR 0001 section 1, ordered units.code, with
+        the dimension and is_active filters.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/Include'
+        - name: dimension
+          in: query
+          description: >-
+            The dimension filter, lowercase (count, length, area, volume,
+            weight, board_measure).
+          schema:
+            type: string
+            enum: [count, length, area, volume, weight, board_measure]
+        - name: is_active
+          in: query
+          description: The active filter, true or false.
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        '200':
+          description: The page of units.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: unitCreate
+      tags: [units]
+      summary: Create a unit
+      description: >-
+        A dealer unit. The code is immutable and must match ^[A-Z]{1,6}$; the
+        dimension and the standard size are immutable once any product unit
+        set or line names the unit. Seeded rows cannot be created again: a
+        duplicate code is a 409.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnitCreate'
+      responses:
+        '201':
+          description: The created unit, revision 1, with its ETag and Location.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/units/{code}:
+    get:
+      operationId: unitGet
+      tags: [units]
+      summary: Read a unit
+      description: The unit row with its standard size in canonical form.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z]{1,6}$'
+      responses:
+        '200':
+          description: The unit.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: unitUpdate
+      tags: [units]
+      summary: Update a unit
+      description: >-
+        name and is_active always; the dimension and the standard size only
+        while the unit is neither a system row nor named by any product unit
+        set row or line. Deactivation is the only removal: a field the PUT
+        cannot change (code, is_system) is a 400 naming it.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z]{1,6}$'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          description: The revision precondition, beside the body revision.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnitUpdate'
+      responses:
+        '200':
+          description: The updated unit with its new revision and ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WireConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  schemas:
+    Unit:
+      type: object
+      description: >-
+        One unit of the catalogue. The standard size is the pair
+        std_unit_qty of this unit = std_ref_qty of its dimension's reference
+        unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576
+        = 77 CF); both fields are null for a unit whose size is per product
+        (a box, a bundle).
+      required: [code, name, dimension, std_unit_qty, std_ref_qty, is_system, is_active, revision, created_at, updated_at]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z]{1,6}$'
+          description: Immutable; the value every unit column holds.
+        name:
+          type: string
+        dimension:
+          type: string
+          enum: [count, length, area, volume, weight, board_measure]
+        std_unit_qty:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        std_ref_qty:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        is_system:
+          type: boolean
+          description: "True on seeded rows: their code, dimension and standard size cannot change."
+        is_active:
+          type: boolean
+          description: "An inactive unit cannot enter a new unit set row or a new line; existing rows keep it."
+        revision:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    UnitCreate:
+      type: object
+      required: [code, name]
+      description: >-
+        The create body. The dimension defaults to count; the standard size
+        is both halves or neither. is_system and revision are never accepted.
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z]{1,6}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        dimension:
+          type: string
+          enum: [count, length, area, volume, weight, board_measure]
+        std_unit_qty:
+          $ref: '#/components/schemas/Quantity'
+        std_ref_qty:
+          $ref: '#/components/schemas/Quantity'
+    UnitUpdate:
+      type: object
+      description: >-
+        The update body at the unit's revision: If-Match or revision. A
+        field the PUT cannot change is a 400 naming it.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        is_active:
+          type: boolean
+        dimension:
+          type: string
+          enum: [count, length, area, volume, weight, board_measure]
+        std_unit_qty:
+          $ref: '#/components/schemas/Quantity'
+        std_ref_qty:
+          $ref: '#/components/schemas/Quantity'
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+    UnitPage:
+      type: object
+      description: The list envelope of ADR 0001 section 1 over units.
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Unit'
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Present only under include=total.
