@@ -23,6 +23,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/gl"
@@ -38,6 +39,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/internal/vendor"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -70,17 +72,19 @@ func asRole(next http.Handler) http.Handler {
 }
 
 type wallFixture struct {
-	srv              *httptest.Server
-	branchA, branchB uuid.UUID
-	yardA, yardB     uuid.UUID
-	productID        uuid.UUID
-	vendorID         uuid.UUID
-	poA, poB         uuid.UUID
-	poLineA, poLineB uuid.UUID
-	docCust          uuid.UUID
-	orderA, orderB   uuid.UUID
-	invA, invB       uuid.UUID
-	db               *database.DB
+	srv                *httptest.Server
+	branchA, branchB   uuid.UUID
+	yardA, yardB       uuid.UUID
+	productID          uuid.UUID
+	vendorID           uuid.UUID
+	poA, poB           uuid.UUID
+	poLineA, poLineB   uuid.UUID
+	docCust            uuid.UUID
+	orderA, orderB     uuid.UUID
+	invA, invB         uuid.UUID
+	crmCustA, crmCustB uuid.UUID
+	actA, actB         uuid.UUID
+	db                 *database.DB
 }
 
 func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixture {
@@ -94,7 +98,8 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	ctx := context.Background()
 	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New(),
 		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
-		docCust: uuid.New(), orderA: uuid.New(), orderB: uuid.New(), invA: uuid.New(), invB: uuid.New()}
+		docCust: uuid.New(), orderA: uuid.New(), orderB: uuid.New(), invA: uuid.New(), invB: uuid.New(),
+		crmCustA: uuid.New(), crmCustB: uuid.New(), actA: uuid.New(), actB: uuid.New()}
 	for _, r := range []struct {
 		id     uuid.UUID
 		typ    string
@@ -162,7 +167,29 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 			t.Fatalf("seed grant: %v", err)
 		}
 	}
+	// One customer and one logged activity per branch, so the crm routes act
+	// on real records of each branch.
+	for _, r := range []struct{ cust, act, branch uuid.UUID }{
+		{f.crmCustA, f.actA, f.branchA}, {f.crmCustB, f.actB, f.branchB},
+	} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
+			VALUES ($1, 'wall crm cust', $2, $3)`, r.cust, "WLCRM-"+r.cust.String()[:8], r.branch); err != nil {
+			t.Fatalf("seed crm customer: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, r.cust, r.branch); err != nil {
+			t.Fatalf("seed crm customer branch: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO crm_activities (id, customer_id, activity_type, description, activity_date)
+			VALUES ($1, $2, 'CALL', 'wall', now())`, r.act, r.cust); err != nil {
+			t.Fatalf("seed activity: %v", err)
+		}
+	}
 	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'activity' AND entity_id IN (SELECT id FROM crm_activities WHERE customer_id IN ($1, $2))`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'activity' AND entity_id IN (SELECT id FROM crm_activities WHERE customer_id IN ($1, $2))`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM crm_activities WHERE customer_id IN ($1, $2)`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN ($1, $2)`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2)`, f.crmCustA, f.crmCustB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'u-a'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoices WHERE id IN ($1, $2)`, f.invA, f.invB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id IN ($1, $2)`, f.orderA, f.orderB)
@@ -189,6 +216,11 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
+	// The crm mount, driven here as serve wires it: the activity routes
+	// behind the branch middleware, their writes one transaction with the
+	// audit row and the activity.* event.
+	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)))
 	// The recommendation service is wired as serve wires it (serve.go), so
 	// the recommendations route answers from the real stock and velocity
 	// reads instead of 503: the route is behind the branch middleware and
@@ -271,6 +303,14 @@ func (f *wallFixture) call(t *testing.T, method, path, body, role, sub, branchHe
 // response body, for cases that read an id or a revision back.
 func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, branchHeader string) (int, []byte) {
 	t.Helper()
+	status, buf := f.callHdr(t, method, path, body, role, sub, branchHeader, nil)
+	return status, buf
+}
+
+// callHdr sends one request as role/sub with extra request headers, for the
+// routes whose writes carry their revision as If-Match.
+func (f *wallFixture) callHdr(t *testing.T, method, path, body, role, sub, branchHeader string, hdr map[string]string) (int, []byte) {
+	t.Helper()
 	req, err := http.NewRequest(method, f.srv.URL+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +320,9 @@ func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, bran
 	req.Header.Set("X-Test-Sub", sub)
 	if branchHeader != "" {
 		req.Header.Set("X-Branch-Id", branchHeader)
+	}
+	for k, v := range hdr {
+		req.Header.Set(k, v)
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -291,6 +334,13 @@ func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, bran
 		t.Fatal(err)
 	}
 	return res.StatusCode, buf
+}
+
+// callHdrStatus sends one request as callHdr and returns only the status.
+func (f *wallFixture) callHdrStatus(t *testing.T, method, path, body, role, sub, branchHeader string, hdr map[string]string) int {
+	t.Helper()
+	status, _ := f.callHdr(t, method, path, body, role, sub, branchHeader, hdr)
+	return status
 }
 
 func TestBranchWall_ServeWiring(t *testing.T) {
@@ -618,6 +668,62 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 	_, poBody := f.callBody(t, "GET", "/api/v1/purchase-orders/"+f.poB.String(), "", "purchasing", "u-a", "")
 	if !strings.Contains(string(poBody), `"code":"FORBIDDEN"`) {
 		t.Errorf("foreign po 403 body is not the legacy shape: %s", poBody)
+	}
+}
+
+// The crm mount behind the real branch middleware: every route addresses a
+// customer by path or an activity of one, and the repository holds each read
+// and write to the customer's branches, so a caller held to branch A works its
+// own branch's records and finds branch B's activity a 404 on the reads and
+// the writes, its create on branch B's customer a 404, and that customer's
+// list an empty page.
+func TestBranchWall_CrmRoutes(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	match := map[string]string{"If-Match": `"1"`}
+
+	// The caller's own branch: every route answers.
+	if got := f.call(t, "GET", "/api/v1/activities/"+f.actA.String(), "", "sales", "u-a", A); got != http.StatusOK {
+		t.Errorf("own activity read: %d, want 200", got)
+	}
+	if got := f.callHdrStatus(t, "PUT", "/api/v1/activities/"+f.actA.String(),
+		`{"activity_type":"note","description":"own"}`, "sales", "u-a", A, match); got != http.StatusOK {
+		t.Errorf("own activity update: %d, want 200", got)
+	}
+	if got := f.callHdrStatus(t, "DELETE", "/api/v1/activities/"+f.actA.String(), "", "sales", "u-a", A,
+		map[string]string{"If-Match": `"2"`}); got != http.StatusNoContent {
+		t.Errorf("own activity delete: %d, want 204", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/customers/"+f.crmCustA.String()+"/activities",
+		`{"activity_type":"call","description":"own branch"}`, "sales", "u-a", A); got != http.StatusCreated {
+		t.Errorf("create on the caller's customer: %d, want 201", got)
+	}
+
+	// The second branch: the path-id routes are 404s, the create on the
+	// invisible customer is a 404, and its list is an empty page.
+	for _, c := range []struct {
+		name, method, path, body string
+		hdr                      map[string]string
+		want                     int
+	}{
+		{"read foreign activity", "GET", "/api/v1/activities/" + f.actB.String(), "", nil, http.StatusNotFound},
+		{"update foreign activity", "PUT", "/api/v1/activities/" + f.actB.String(),
+			`{"activity_type":"note","description":"no"}`, match, http.StatusNotFound},
+		{"delete foreign activity", "DELETE", "/api/v1/activities/" + f.actB.String(), "", match, http.StatusNotFound},
+	} {
+		if got := f.callHdrStatus(t, c.method, c.path, c.body, "sales", "u-a", A, c.hdr); got != c.want {
+			t.Errorf("crm %s: %d, want %d", c.name, got, c.want)
+		}
+	}
+	if got := f.call(t, "POST", "/api/v1/customers/"+f.crmCustB.String()+"/activities",
+		`{"activity_type":"call","description":"no"}`, "sales", "u-a", A); got != http.StatusNotFound {
+		t.Errorf("crm create on the foreign customer: %d, want 404", got)
+	}
+	status, body := f.callBody(t, "GET", "/api/v1/customers/"+f.crmCustB.String()+"/activities", "", "sales", "u-a", A)
+	if status != http.StatusOK || !strings.Contains(string(body), `"items":[]`) {
+		t.Errorf("crm list of the foreign customer = %d %s, want 200 with an empty page", status, body)
 	}
 }
 
