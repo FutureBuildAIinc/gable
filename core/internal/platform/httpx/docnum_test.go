@@ -187,3 +187,121 @@ func TestNextDocumentNumberConcurrent(t *testing.T) {
 		t.Errorf("%d distinct numbers minted, want %d", len(seen), workers*each)
 	}
 }
+
+// createTestCounter makes a throwaway gapless series (the table is the
+// migration's document_counters; created here when absent so the platform
+// package tests stand alone).
+func createTestCounter(t *testing.T, db *database.DB, series string, next int64) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.Pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS document_counters (series TEXT PRIMARY KEY, next_value BIGINT NOT NULL)`); err != nil {
+		t.Fatalf("counter table: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO document_counters (series, next_value) VALUES ($1, $2)
+		ON CONFLICT (series) DO UPDATE SET next_value = EXCLUDED.next_value`, series, next); err != nil {
+		t.Fatalf("seed counter: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DELETE FROM document_counters WHERE series = $1`, series) })
+}
+
+// RULE (ADR 0005 4.1): a gapless number is the counter's next value through
+// the caller's transaction; a rollback gives the number back, so the next mint
+// takes it (the whole difference from a sequence).
+func TestNextGaplessNumberRollbackGivesTheNumberBack(t *testing.T) {
+	db := testutil.RequireDB(t)
+	createTestCounter(t, db, "gapless_rollback", 5)
+	ctx := context.Background()
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := NextGaplessNumber(ctx, tx, "gapless_rollback", "IN", 6)
+	if err != nil || got != "IN-000005" {
+		t.Fatalf("in tx = %q, %v, want IN-000005", got, err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again, err := NextGaplessNumber(ctx, db.Pool, "gapless_rollback", "IN", 6)
+	if err != nil || again != "IN-000005" {
+		t.Fatalf("after rollback = %q, %v, want IN-000005 again (no gap)", again, err)
+	}
+	next, err := NextGaplessNumber(ctx, db.Pool, "gapless_rollback", "IN", 6)
+	if err != nil || next != "IN-000006" {
+		t.Fatalf("next = %q, %v, want IN-000006", next, err)
+	}
+}
+
+// RULE: contenders mint distinct, consecutive numbers: the counter row
+// serializes them.
+func TestNextGaplessNumberConcurrentConsecutive(t *testing.T) {
+	db := testutil.RequireDB(t)
+	createTestCounter(t, db, "gapless_concurrent", 1)
+	const workers = 8
+	nums := make(chan string, workers)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx := context.Background()
+			tx, err := db.Pool.Begin(ctx)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			n, err := NextGaplessNumber(ctx, tx, "gapless_concurrent", "IN", 6)
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				t.Error(err)
+				return
+			}
+			if err := tx.Commit(ctx); err != nil {
+				t.Error(err)
+				return
+			}
+			nums <- n
+		}()
+	}
+	wg.Wait()
+	close(nums)
+	seen := map[string]bool{}
+	for n := range nums {
+		if seen[n] {
+			t.Fatalf("number %s minted twice", n)
+		}
+		seen[n] = true
+	}
+	for i := 1; i <= workers; i++ {
+		if want := fmt.Sprintf("IN-%06d", i); !seen[want] {
+			t.Errorf("number %s was not minted: the series has a gap", want)
+		}
+	}
+}
+
+// RULE: a series with no counter row, a bad series name, prefix, width or no
+// querier are refusals, never a number.
+func TestNextGaplessNumberRefusals(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	createTestCounter(t, db, "gapless_anchor", 1) // makes sure the table exists
+	if _, err := NextGaplessNumber(ctx, db.Pool, "gapless_missing", "IN", 6); err == nil {
+		t.Error("missing series succeeded, want an error")
+	}
+	bad := []struct {
+		series, prefix string
+		width          int
+	}{{"", "IN", 6}, {"bad name", "IN", 6}, {"1x", "IN", 6}, {"invoice", "", 6}, {"invoice", "in", 6}, {"invoice", "INVOI", 6}, {"invoice", "IN", 0}}
+	for _, tc := range bad {
+		if _, err := NextGaplessNumber(ctx, nil, tc.series, tc.prefix, tc.width); err == nil {
+			t.Errorf("NextGaplessNumber(%q, %q, %d) succeeded, want a refusal", tc.series, tc.prefix, tc.width)
+		}
+	}
+	if _, err := NextGaplessNumber(ctx, nil, "invoice", "IN", 6); err == nil {
+		t.Error("nil querier succeeded")
+	}
+	if got, err := NextGaplessNumber(ctx, db.Pool, "gapless_anchor", "IN", 3); err != nil || got != "IN-001" {
+		t.Errorf("got %q, %v, want IN-001", got, err)
+	}
+}

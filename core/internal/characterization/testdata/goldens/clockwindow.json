@@ -139,7 +139,7 @@
         "invoice_count": 11,
         "outstanding_ar": 23324.76,
         "start_date": "<day-30>",
-        "total_collected": 308657,
+        "total_collected": 315854.09,
         "total_invoiced": 76391.14
       }
     }
@@ -158,8 +158,8 @@
         "outstanding_ar": 9984277,
         "outstanding_ar_count": 15,
         "pending_dispatch": 28,
-        "today_revenue": 30623276,
-        "today_revenue_change": 303070.7355707356
+        "today_revenue": 31342985,
+        "today_revenue_change": 310195.8617958618
       }
     }
   },
@@ -187,7 +187,7 @@
         },
         {
           "date": "<day+0>",
-          "revenue": 30623276
+          "revenue": 31342985
         }
       ]
     }
@@ -352,8 +352,8 @@
           "account_id": "<id-13>",
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
-          "credit": 0,
-          "debit": 3142
+          "credit": 75,
+          "debit": 3217
         },
         {
           "account_code": "1030",
@@ -384,8 +384,8 @@
           "account_id": "<id-17>",
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
-          "credit": 12805,
-          "debit": 0
+          "credit": 12880,
+          "debit": 75
         },
         {
           "account_code": "5010",

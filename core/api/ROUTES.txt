@@ -131,7 +131,11 @@ POST	/api/v1/configurator/validate	internal/configurator	h.handleValidate
 DELETE	/api/v1/contacts/{id}	internal/customer	h.HandleDeleteContact
 GET	/api/v1/contacts/{id}	internal/customer	h.HandleGetContact
 PUT	/api/v1/contacts/{id}	internal/customer	h.HandleUpdateContact
-GET	/api/v1/credit-memos/{customerId}	internal/invoice	h.HandleListCreditMemos
+GET	/api/v1/credit-memos	internal/invoice	h.HandleListCreditMemos
+POST	/api/v1/credit-memos	internal/invoice	h.HandleCreateCreditMemo
+GET	/api/v1/credit-memos/{id}	internal/invoice	h.HandleGetCreditMemo
+PUT	/api/v1/credit-memos/{id}	internal/invoice	h.HandleUpdateCreditMemo
+POST	/api/v1/credit-memos/{id}/transitions	internal/invoice	h.HandleCreditTransition
 GET	/api/v1/customers	internal/customer	h.HandleListCustomers
 POST	/api/v1/customers	internal/customer	h.HandleCreateCustomer
 GET	/api/v1/customers/{customerId}/activities	internal/crm	h.HandleListActivities
@@ -213,9 +217,9 @@ POST	/api/v1/inventory/adjust	internal/inventory	h.AdjustStock
 POST	/api/v1/inventory/transfer	internal/inventory	h.MoveStock
 GET	/api/v1/invoices	internal/invoice	h.HandleList
 GET	/api/v1/invoices/{id}	internal/invoice	h.HandleGet
-POST	/api/v1/invoices/{id}/credit-memo	internal/invoice	h.HandleCreateCreditMemo
 POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
 GET	/api/v1/invoices/{id}/payments	internal/payment	h.GetPaymentHistory
+POST	/api/v1/invoices/{id}/transitions	internal/invoice	h.HandleTransition
 GET	/api/v1/locations	internal/location	list
 POST	/api/v1/locations	internal/location	create
 DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation

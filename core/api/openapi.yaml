@@ -25,6 +25,7 @@ tags:
   - name: bankrecon
   - name: charge-codes
   - name: configurator
+  - name: credit-memo
   - name: customer
   - name: dashboard
   - name: delivery
@@ -5254,30 +5255,80 @@ paths:
   /api/v1/invoices:
     get:
       operationId: invoiceList
-      tags: [invoice]
+      tags:
+        - invoice
       summary: List invoices
+      description: The cursor list envelope, newest first (created_at, then id). status filters on the lowercase lifecycle vocabulary (a comma separated list); customer_id, job_id, ship_to_id and order_id filter on their document; overdue=true lists the open invoices past their due date and overdue=false the rest. total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary (overdue is not one), a malformed cursor or an out of range limit is a 400.
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/XBranchId"
+        - name: status
+          in: query
+          required: false
+          description: Comma separated lowercase statuses (unpaid, partial, paid, void, written_off).
+          schema:
+            type: string
+        - name: customer_id
+          in: query
+          required: false
+          description: Filter on the customer.
+          schema:
+            type: string
+            format: uuid
+        - name: job_id
+          in: query
+          required: false
+          description: Filter on the job (project).
+          schema:
+            type: string
+            format: uuid
+        - name: ship_to_id
+          in: query
+          required: false
+          description: Filter on the ship-to.
+          schema:
+            type: string
+            format: uuid
+        - name: order_id
+          in: query
+          required: false
+          description: Filter on the order.
+          schema:
+            type: string
+            format: uuid
+        - name: overdue
+          in: query
+          required: false
+          description: 'true: open and past due; false: everything else.'
+          schema:
+            type: string
+            enum:
+              - 'true'
+              - 'false'
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The page of invoices.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InvoicePage"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/InvoicePage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': &id002
+          $ref: '#/components/responses/Unauthorized'
+        '403': &id003
+          $ref: '#/components/responses/ForbiddenEither'
+        '500': &id004
+          $ref: '#/components/responses/InternalError'
   /api/v1/invoices/{id}:
     get:
       operationId: invoiceGet
-      tags: [invoice]
+      tags:
+        - invoice
       summary: Get one invoice with lines
+      description: The invoice with every line (id, description, quantity, unit price, line total, cost), its status and open amount, and its ETag.
       parameters:
         - name: id
           in: path
@@ -5285,27 +5336,34 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
+        '200':
           description: The invoice.
+          headers: &id001
+            ETag: &id005
+              description: The document's revision.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Invoice"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "404":
-          $ref: "#/components/responses/NotFound"
-  /api/v1/invoices/{id}/credit-memo:
+                $ref: '#/components/schemas/Invoice'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+  /api/v1/invoices/{id}/transitions:
     post:
-      operationId: invoiceCreateCreditMemo
-      tags: [invoice]
-      summary: Create and apply a credit memo against an invoice
+      operationId: invoiceTransition
+      tags:
+        - invoice
+      summary: Void an invoice
+      description: 'The only client transition is void (roles admin, owner, finance; a reason is required). unpaid, partial, paid and written_off are derived by payments and credit memos, so asking for one is 409 invalid_state_transition. A void is refused with the blocker has_applications while a payment is recorded against the invoice or an applied credit memo names it, and with has_credit_memos while a credit memo that is not void names it. It runs in one transaction: it locks the invoice''s order row first, reverses the invoice''s whole journal entry (dated the void date), returns its billed stock to on hand, reduces the order lines'' fulfilled quantities, re-runs allocation for those quantities and derives the order status; the subledger is credited back. The number is kept; nothing deletes an invoice. Writes invoice.voided (and order.backordered when the order cannot re-allocate) last.'
       parameters:
         - name: id
           in: path
@@ -5313,44 +5371,45 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreditMemoCreateRequest"
+              $ref: '#/components/schemas/InvoiceTransitionRequest'
       responses:
-        "201":
-          description: The created credit memo.
+        '200':
+          description: The voided invoice.
+          headers: *id001
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreditMemo"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Invoice'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500': *id004
   /api/v1/invoices/{id}/email:
     post:
       operationId: invoiceEmail
-      tags: [invoice]
+      tags:
+        - invoice
       summary: Email invoice to customer
-      description: >-
-        Queues an email to the customer with the invoice PDF attached. Returns 202 Accepted immediately; the email is dispatched asynchronously. Fails if the customer has no email address on file.
+      description: Queues an email to the customer with the invoice PDF attached. Returns 202 Accepted immediately; the email is dispatched asynchronously. Fails if the customer has no email address on file.
       parameters:
         - name: id
           in: path
@@ -5358,66 +5417,249 @@ paths:
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "202":
+        '202':
           description: Email queued.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InvoiceEmailResponse"
-        "400":
-          description: >-
-            Customer has no email address on file (the standard error envelope), or the Idempotency-Key header is malformed (the ADR 0001 envelope).
+                $ref: '#/components/schemas/InvoiceEmailResponse'
+        '400':
+          description: Customer has no email address on file (the standard error envelope), or the Idempotency-Key header is malformed (the ADR 0001 envelope).
           content:
             application/json:
               schema:
                 oneOf:
-                  - $ref: "#/components/schemas/Error"
-                  - $ref: "#/components/schemas/WireError"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /api/v1/credit-memos/{customerId}:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/WireError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/credit-memos:
     get:
-      operationId: invoiceListCreditMemos
-      tags: [invoice]
-      summary: List a customer's credit memos
+      operationId: creditMemoList
+      tags:
+        - credit-memo
+      summary: List credit memos
+      description: The cursor list envelope, newest first. status filters on the lowercase vocabulary (draft, open, partial, applied, void; a comma separated list); customer_id, invoice_id and job_id filter on their document. total appears only under include=total.
       parameters:
-        - name: customerId
+        - name: status
+          in: query
+          required: false
+          description: Comma separated lowercase statuses.
+          schema:
+            type: string
+        - name: customer_id
+          in: query
+          required: false
+          description: Filter on the customer.
+          schema:
+            type: string
+            format: uuid
+        - name: invoice_id
+          in: query
+          required: false
+          description: Filter on the invoice credited.
+          schema:
+            type: string
+            format: uuid
+        - name: job_id
+          in: query
+          required: false
+          description: Filter on the job.
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The page of credit memos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditMemoPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '500': *id004
+    post:
+      operationId: creditMemoCreate
+      tags:
+        - credit-memo
+      summary: Create a draft credit memo
+      description: 'Creates the credit memo in draft: no number (it is minted at post, so a voided draft consumes none), lines built and totalled, tax at the invoice''s rate and never more than the invoice charged less what earlier credit memos credited. A line that names an invoice line cannot credit more than it billed less what earlier credit memos returned (409 exceeds_billed). The branch is held to the caller''s branch (403 naming branch_id). Writes credit_memo.created.'
+      parameters:
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditMemoRequest'
+      responses:
+        '201':
+          description: The draft credit memo.
+          headers:
+            ETag: *id005
+            Location:
+              description: The path of the created document.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditMemo'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500': *id004
+  /api/v1/credit-memos/{id}:
+    get:
+      operationId: creditMemoGet
+      tags:
+        - credit-memo
+      summary: Get one credit memo with lines
+      description: The credit memo with every line and its ETag.
+      parameters:
+        - name: id
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/XBranchId"
+        - $ref: '#/components/parameters/XBranchId'
       responses:
-        "200":
-          description: The credit memos, a bare array that is null when the customer has none.
+        '200':
+          description: The credit memo.
+          headers: *id001
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreditMemoList"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/CreditMemo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+    put:
+      operationId: creditMemoUpdate
+      tags:
+        - credit-memo
+      summary: Replace a draft credit memo
+      description: 'Replaces the header fields and the lines, in draft only: in any other status it is 409 with the blocker credit_memo_not_draft. The customer and the invoice are fixed at create. The revision precondition applies (If-Match or the body revision). Writes credit_memo.updated.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditMemoRequest'
+      responses:
+        '200':
+          description: The edited credit memo.
+          headers: *id001
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditMemo'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500': *id004
+  /api/v1/credit-memos/{id}/transitions:
+    post:
+      operationId: creditMemoTransition
+      tags:
+        - credit-memo
+      summary: Post or void a credit memo
+      description: 'draft to open posts the credit memo (roles admin, owner, finance): it locks the invoice it names (409 invoice_void when that invoice is void), recomputes its lines against what was posted, restocks the lines that restock, mints the gapless CM- number, posts the balanced entry (revenue and tax back, receivable down, and for a restocked line the cost back to inventory and out of cost of goods sold at the original cost) and the subledger credit, and writes credit_memo.posted last. draft to void ends a draft and consumes no number; open to void (roles admin, owner, finance; a reason is required) reverses the entry and the restock and puts the credit back on the receivable. The statuses past open (partial, applied) arrive with the payment and AR item and are not reachable here (409 invalid_state_transition). Writes credit_memo.posted or credit_memo.voided.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditMemoTransitionRequest'
+      responses:
+        '200':
+          description: The credit memo after the transition.
+          headers: *id001
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditMemo'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500': *id004
   /api/v1/locations:
     get:
       operationId: locationList
@@ -13096,6 +13338,8 @@ components:
             - PAYMENT
             - ADJUSTMENT
             - REFUND
+            - CREDIT_MEMO
+            - REVERSAL
         amount:
           type: integer
           format: int64
@@ -15817,7 +16061,7 @@ components:
           type: string
         source:
           type: string
-          description: MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN or DEPOSIT.
+          description: MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN, DEPOSIT, CREDIT_MEMO or WRITE_OFF.
         source_ref_id:
           type: string
           format: uuid
@@ -16645,21 +16889,69 @@ components:
             - ok
     InvoiceStatus:
       type: string
-      enum: [UNPAID, PARTIAL, PAID, VOID, OVERDUE]
-    PaymentTerms:
+      enum:
+        - unpaid
+        - partial
+        - paid
+        - void
+        - written_off
+      description: 'The lifecycle, lowercase on the wire (ADR 0001 section 6; ADR 0005 section 6.2). overdue is not a status: it is the is_overdue flag and the overdue list filter.'
+    CreditMemoStatus:
       type: string
-      enum: [COD, DUE_ON_RECEIPT, NET30, NET60, NET90]
-    Invoice:
+      enum:
+        - draft
+        - open
+        - partial
+        - applied
+        - void
+      description: The credit memo lifecycle, lowercase on the wire (ADR 0005 section 6.3).
+    InvoiceSummary:
       type: object
-      required: [id, branch_id, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount, payment_terms, due_date, paid_at, created_at, updated_at]
+      description: An invoice header, used as a list item and as the head of the full document.
+      required:
+        - id
+        - number
+        - branch_id
+        - customer_id
+        - customer_name
+        - order_id
+        - job_id
+        - ship_to_id
+        - status
+        - revision
+        - currency
+        - origin
+        - delivery_type
+        - picked_up_by
+        - delivery_id
+        - invoice_date
+        - due_date
+        - payment_terms_id
+        - discount_due_date
+        - discount_percent
+        - subtotal_cents
+        - tax_cents
+        - tax_rate_percent
+        - tax_exempt
+        - tax_source
+        - total_cents
+        - open_cents
+        - is_overdue
+        - paid_at
+        - gl_entry_id
+        - voided_at
+        - voided_by
+        - void_reason
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
           format: uuid
-        branch_id:
+        number:
           type: string
-          format: uuid
-        order_id:
+          description: The gapless IN- number, minted when the invoice is created (ADR 0005 4.1). A void invoice keeps it.
+        branch_id:
           type: string
           format: uuid
         customer_id:
@@ -16667,33 +16959,851 @@ components:
           format: uuid
         customer_name:
           type: string
+        order_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The order this invoice bills; null on a counter account charge.
+        job_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The job (project) the invoice carries, from its order (ADR 0005 7.1).
+        ship_to_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
         status:
-          $ref: "#/components/schemas/InvoiceStatus"
-        subtotal:
+          $ref: '#/components/schemas/InvoiceStatus'
+        revision:
           type: integer
           format: int64
-          description: Cents.
-        tax_rate:
-          type: number
-          description: "A fraction such as 0.0825 for 8.25 percent."
-        tax_amount:
-          type: integer
-          format: int64
-          description: Cents.
-        total_amount:
-          type: integer
-          format: int64
-          description: Cents, subtotal plus tax.
-        payment_terms:
-          $ref: "#/components/schemas/PaymentTerms"
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: ISO 4217, copied from the order, never sent.
+        origin:
+          type: string
+          enum:
+            - order
+            - pos
+        delivery_type:
+          type: string
+          enum:
+            - pickup
+            - delivery
+        picked_up_by:
+          type:
+            - string
+            - 'null'
+          description: Who collected a will-call order.
+        delivery_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        invoice_date:
+          type: string
+          format: date
+          description: The business date in the branch's local calendar.
         due_date:
-          type: [string, "null"]
-          format: date-time
-          description: Null while the terms set no date.
+          type:
+            - string
+            - 'null'
+          format: date
+          description: From the customer's payment terms at create.
+        payment_terms_id:
+          type: string
+          format: uuid
+        discount_due_date:
+          type:
+            - string
+            - 'null'
+          format: date
+          description: The last day the early payment discount applies; null when the terms carry none.
+        discount_percent:
+          type:
+            - string
+            - 'null'
+          description: The early payment discount percent at scale 4 as a decimal string.
+        subtotal_cents:
+          type: integer
+          format: int64
+        tax_cents:
+          type: integer
+          format: int64
+        tax_rate_percent:
+          type:
+            - string
+            - 'null'
+          description: A percent with at most 4 fraction digits ("8.875"); null when the tax provider answered.
+        tax_exempt:
+          type: boolean
+        tax_source:
+          $ref: '#/components/schemas/OrderTaxSource'
+        total_cents:
+          type: integer
+          format: int64
+        open_cents:
+          type: integer
+          format: int64
+          description: 'What is still owed: the total less the payments recorded against the invoice while it is unpaid or partial, 0 when paid, written off or void.'
+        is_overdue:
+          type: boolean
+          description: 'Computed: open and its due_date is before the branch''s today. OVERDUE is not a status.'
         paid_at:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           format: date-time
-          description: Null until a payment completes the invoice.
+        gl_entry_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The invoice entry in the general ledger.
+        voided_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        voided_by:
+          type:
+            - string
+            - 'null'
+        void_reason:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Invoice:
+      type: object
+      description: The full invoice document with its lines (IN-1.8).
+      required:
+        - id
+        - number
+        - branch_id
+        - customer_id
+        - customer_name
+        - order_id
+        - job_id
+        - ship_to_id
+        - status
+        - revision
+        - currency
+        - origin
+        - delivery_type
+        - picked_up_by
+        - delivery_id
+        - invoice_date
+        - due_date
+        - payment_terms_id
+        - discount_due_date
+        - discount_percent
+        - subtotal_cents
+        - tax_cents
+        - tax_rate_percent
+        - tax_exempt
+        - tax_source
+        - total_cents
+        - open_cents
+        - is_overdue
+        - paid_at
+        - gl_entry_id
+        - voided_at
+        - voided_by
+        - void_reason
+        - created_at
+        - updated_at
+        - ship_to
+        - lines
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: The gapless IN- number, minted when the invoice is created (ADR 0005 4.1). A void invoice keeps it.
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        order_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The order this invoice bills; null on a counter account charge.
+        job_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The job (project) the invoice carries, from its order (ADR 0005 7.1).
+        ship_to_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        status:
+          $ref: '#/components/schemas/InvoiceStatus'
+        revision:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: ISO 4217, copied from the order, never sent.
+        origin:
+          type: string
+          enum:
+            - order
+            - pos
+        delivery_type:
+          type: string
+          enum:
+            - pickup
+            - delivery
+        picked_up_by:
+          type:
+            - string
+            - 'null'
+          description: Who collected a will-call order.
+        delivery_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        invoice_date:
+          type: string
+          format: date
+          description: The business date in the branch's local calendar.
+        due_date:
+          type:
+            - string
+            - 'null'
+          format: date
+          description: From the customer's payment terms at create.
+        payment_terms_id:
+          type: string
+          format: uuid
+        discount_due_date:
+          type:
+            - string
+            - 'null'
+          format: date
+          description: The last day the early payment discount applies; null when the terms carry none.
+        discount_percent:
+          type:
+            - string
+            - 'null'
+          description: The early payment discount percent at scale 4 as a decimal string.
+        subtotal_cents:
+          type: integer
+          format: int64
+        tax_cents:
+          type: integer
+          format: int64
+        tax_rate_percent:
+          type:
+            - string
+            - 'null'
+          description: A percent with at most 4 fraction digits ("8.875"); null when the tax provider answered.
+        tax_exempt:
+          type: boolean
+        tax_source:
+          $ref: '#/components/schemas/OrderTaxSource'
+        total_cents:
+          type: integer
+          format: int64
+        open_cents:
+          type: integer
+          format: int64
+          description: 'What is still owed: the total less the payments recorded against the invoice while it is unpaid or partial, 0 when paid, written off or void.'
+        is_overdue:
+          type: boolean
+          description: 'Computed: open and its due_date is before the branch''s today. OVERDUE is not a status.'
+        paid_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        gl_entry_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The invoice entry in the general ledger.
+        voided_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        voided_by:
+          type:
+            - string
+            - 'null'
+        void_reason:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        ship_to:
+          type:
+            - object
+            - 'null'
+          description: The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one.
+          properties:
+            id:
+              type: string
+              format: uuid
+            code:
+              type: string
+            name:
+              type: string
+            line1:
+              type: string
+            line2:
+              type:
+                - string
+                - 'null'
+            city:
+              type: string
+            region:
+              type: string
+            postal_code:
+              type: string
+            country:
+              type:
+                - string
+                - 'null'
+            phone:
+              type:
+                - string
+                - 'null'
+            delivery_instructions:
+              type:
+                - string
+                - 'null'
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceLine'
+    InvoiceLine:
+      type: object
+      description: 'A sales line on an invoice: the shared shape of ADR 0005 section 2.2 for the quantity billed, with the order line it bills and the cost that left.'
+      required:
+        - id
+        - position
+        - line_type
+        - parent_line_id
+        - product_id
+        - charge_code_id
+        - charge_code
+        - sku
+        - description
+        - quantity
+        - uom
+        - price_uom
+        - uom_qty
+        - price_uom_qty
+        - unit_price_ten_thousandths
+        - priced_unit_price_ten_thousandths
+        - price_source
+        - override_reason
+        - discount_percent
+        - discount_cents
+        - discount_reason
+        - price_adjusted_by
+        - line_total_cents
+        - taxable
+        - revenue_account_code
+        - is_special_order
+        - vendor_id
+        - special_order_unit_cost_ten_thousandths
+        - created_at
+        - order_line_id
+        - unit_cost_ten_thousandths
+        - cost_cents
+      properties:
+        id:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          description: The line's place on the document; a kit's components follow it.
+        line_type:
+          $ref: '#/components/schemas/SalesLineType'
+        parent_line_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a component line only, naming its kit line.
+        product_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Required on kit and component lines, optional on a product line (null is a non stock item), null on charge and text lines.
+        charge_code_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a charge line only.
+        charge_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's code text, read.
+        sku:
+          type:
+            - string
+            - 'null'
+          description: A snapshot of the product's SKU.
+        description:
+          type: string
+          description: A snapshot; required on every line.
+        quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity as a decimal string with its unit; null only on a text line.
+        uom:
+          type:
+            - string
+            - 'null'
+          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+        price_uom:
+          type:
+            - string
+            - 'null'
+          description: The unit the price is per; equals uom unless the pair says otherwise.
+        uom_qty:
+          type:
+            - string
+            - 'null'
+          description: One side of the conversion pair; 1 and 1 when the units agree (any other pair on equal units is a 400).
+        price_uom_qty:
+          type:
+            - string
+            - 'null'
+          description: The other side of the conversion pair.
+        unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: The price charged per price unit, after any override, before any discount.
+        priced_unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
+        price_source:
+          $ref: '#/components/schemas/SalesPriceSource'
+        override_reason:
+          type:
+            - string
+            - 'null'
+          description: Required when price_source is override.
+        discount_percent:
+          type:
+            - string
+            - 'null'
+          description: A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents.
+        discount_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A discount amount in cents, positive; never with discount_percent.
+        discount_reason:
+          type:
+            - string
+            - 'null'
+          description: Required with either discount.
+        price_adjusted_by:
+          type:
+            - string
+            - 'null'
+          description: The actor of the last override or discount; the audit row carries the rest.
+        line_total_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: The extension, rounded once (ADR 0005 section 2.4); null only on a text line.
+        taxable:
+          type: boolean
+        revenue_account_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's account, snapshotted at create; null on every other line type.
+        is_special_order:
+          type: boolean
+        vendor_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        special_order_unit_cost_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A unit cost at scale 4.
+        created_at:
+          type: string
+          format: date-time
+        order_line_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The order line this invoice line bills; null on a note and on a counter charge.
+        unit_cost_ten_thousandths: &id006
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: 'The cost that left (ADR 0005 8.4) at scale 4, shown to the roles that see margin (admin, owner, finance, sales: the roles that reach these routes). Null when the line carries no cost.'
+        cost_cents:
+          type: integer
+          format: int64
+          description: The cost of goods relieved from inventory for this line, in cents (ADR 0005 8.4); 0 when none.
+    InvoicePage:
+      type: object
+      required:
+        - items
+        - next_cursor
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceSummary'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Only under include=total.
+    InvoiceTransitionRequest:
+      type: object
+      required:
+        - to
+      description: 'The body of POST /invoices/{id}/transitions: to void, the revision and the reason.'
+      properties:
+        to:
+          $ref: '#/components/schemas/InvoiceStatus'
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
+        reason:
+          type: string
+          maxLength: 500
+          description: Required by a void.
+    InvoiceEmailResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - queued
+    CreditMemoSummary:
+      type: object
+      description: A credit memo header, used as a list item and as the head of the full document.
+      required:
+        - id
+        - number
+        - branch_id
+        - customer_id
+        - customer_name
+        - invoice_id
+        - pos_return_id
+        - job_id
+        - ship_to_id
+        - status
+        - revision
+        - currency
+        - reason_code
+        - reason
+        - subtotal_cents
+        - tax_cents
+        - tax_rate_percent
+        - total_cents
+        - open_cents
+        - gl_entry_id
+        - memo_date
+        - voided_at
+        - voided_by
+        - void_reason
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type:
+            - string
+            - 'null'
+          description: 'The gapless CM- number, minted when the memo is posted: null while it is a draft, and a voided draft never had one.'
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        invoice_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The invoice it credits, optional.
+        pos_return_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set by a counter return (C2-5).
+        job_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        ship_to_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        status:
+          $ref: '#/components/schemas/CreditMemoStatus'
+        revision:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: The invoice's, else the customer's effective currency; copied, never sent.
+        reason_code:
+          type: string
+          enum:
+            - return
+            - price_adjustment
+            - damage
+            - other
+        reason:
+          type: string
+        subtotal_cents:
+          type: integer
+          format: int64
+          description: 'NEGATIVE: lines, totals and the open amount are negative (ADR 0001 section 7a).'
+        tax_cents:
+          type: integer
+          format: int64
+          description: NEGATIVE; never more than the invoice charged less the tax earlier credit memos credited.
+        tax_rate_percent:
+          type:
+            - string
+            - 'null'
+          description: The invoice's rate (or the resolved one); null when the invoice's tax came from the provider.
+        total_cents:
+          type: integer
+          format: int64
+          description: 'NEGATIVE: subtotal plus tax.'
+        open_cents:
+          type: integer
+          format: int64
+          description: 'The credit not yet used: the total while the memo is open, 0 for a draft or a void memo. NEGATIVE like the total.'
+        gl_entry_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        memo_date:
+          type: string
+          format: date
+          description: The business date in the branch's local calendar; set again at post.
+        voided_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        voided_by:
+          type:
+            - string
+            - 'null'
+        void_reason:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreditMemo:
+      type: object
+      description: The full credit memo document with its lines.
+      required:
+        - id
+        - number
+        - branch_id
+        - customer_id
+        - customer_name
+        - invoice_id
+        - pos_return_id
+        - job_id
+        - ship_to_id
+        - status
+        - revision
+        - currency
+        - reason_code
+        - reason
+        - subtotal_cents
+        - tax_cents
+        - tax_rate_percent
+        - total_cents
+        - open_cents
+        - gl_entry_id
+        - memo_date
+        - voided_at
+        - voided_by
+        - void_reason
+        - created_at
+        - updated_at
+        - lines
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type:
+            - string
+            - 'null'
+          description: 'The gapless CM- number, minted when the memo is posted: null while it is a draft, and a voided draft never had one.'
+        branch_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        invoice_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The invoice it credits, optional.
+        pos_return_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set by a counter return (C2-5).
+        job_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        ship_to_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        status:
+          $ref: '#/components/schemas/CreditMemoStatus'
+        revision:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: The invoice's, else the customer's effective currency; copied, never sent.
+        reason_code:
+          type: string
+          enum:
+            - return
+            - price_adjustment
+            - damage
+            - other
+        reason:
+          type: string
+        subtotal_cents:
+          type: integer
+          format: int64
+          description: 'NEGATIVE: lines, totals and the open amount are negative (ADR 0001 section 7a).'
+        tax_cents:
+          type: integer
+          format: int64
+          description: NEGATIVE; never more than the invoice charged less the tax earlier credit memos credited.
+        tax_rate_percent:
+          type:
+            - string
+            - 'null'
+          description: The invoice's rate (or the resolved one); null when the invoice's tax came from the provider.
+        total_cents:
+          type: integer
+          format: int64
+          description: 'NEGATIVE: subtotal plus tax.'
+        open_cents:
+          type: integer
+          format: int64
+          description: 'The credit not yet used: the total while the memo is open, 0 for a draft or a void memo. NEGATIVE like the total.'
+        gl_entry_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        memo_date:
+          type: string
+          format: date
+          description: The business date in the branch's local calendar; set again at post.
+        voided_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        voided_by:
+          type:
+            - string
+            - 'null'
+        void_reason:
+          type:
+            - string
+            - 'null'
         created_at:
           type: string
           format: date-time
@@ -16703,96 +17813,308 @@ components:
         lines:
           type: array
           items:
-            $ref: "#/components/schemas/InvoiceLine"
-    InvoiceLine:
+            $ref: '#/components/schemas/CreditMemoLine'
+    CreditMemoLine:
       type: object
-      required: [id, invoice_id, product_id, quantity, price_each, created_at]
+      description: 'A line on a credit memo: the shared shape with a NEGATIVE quantity and line total (ADR 0001 section 7a; a plain sum is the AR effect), the invoice line it returns and whether it restocks.'
+      required:
+        - id
+        - position
+        - line_type
+        - parent_line_id
+        - product_id
+        - charge_code_id
+        - charge_code
+        - sku
+        - description
+        - quantity
+        - uom
+        - price_uom
+        - uom_qty
+        - price_uom_qty
+        - unit_price_ten_thousandths
+        - priced_unit_price_ten_thousandths
+        - price_source
+        - override_reason
+        - discount_percent
+        - discount_cents
+        - discount_reason
+        - price_adjusted_by
+        - line_total_cents
+        - taxable
+        - revenue_account_code
+        - is_special_order
+        - vendor_id
+        - special_order_unit_cost_ten_thousandths
+        - created_at
+        - invoice_line_id
+        - restock
+        - unit_cost_ten_thousandths
+        - cost_cents
       properties:
         id:
           type: string
           format: uuid
-        invoice_id:
-          type: string
-          format: uuid
-        product_id:
-          type: string
-          format: uuid
-        product_sku:
-          type: string
-        product_name:
-          type: string
-        quantity:
-          type: number
-        price_each:
+        position:
           type: integer
+          description: The line's place on the document; a kit's components follow it.
+        line_type:
+          $ref: '#/components/schemas/SalesLineType'
+        parent_line_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a component line only, naming its kit line.
+        product_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Required on kit and component lines, optional on a product line (null is a non stock item), null on charge and text lines.
+        charge_code_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Set on a charge line only.
+        charge_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's code text, read.
+        sku:
+          type:
+            - string
+            - 'null'
+          description: A snapshot of the product's SKU.
+        description:
+          type: string
+          description: A snapshot; required on every line.
+        quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity as a decimal string with its unit; null only on a text line.
+        uom:
+          type:
+            - string
+            - 'null'
+          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+        price_uom:
+          type:
+            - string
+            - 'null'
+          description: The unit the price is per; equals uom unless the pair says otherwise.
+        uom_qty:
+          type:
+            - string
+            - 'null'
+          description: One side of the conversion pair; 1 and 1 when the units agree (any other pair on equal units is a 400).
+        price_uom_qty:
+          type:
+            - string
+            - 'null'
+          description: The other side of the conversion pair.
+        unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
           format: int64
-          description: Cents.
+          description: The price charged per price unit, after any override, before any discount.
+        priced_unit_price_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
+        price_source:
+          $ref: '#/components/schemas/SalesPriceSource'
+        override_reason:
+          type:
+            - string
+            - 'null'
+          description: Required when price_source is override.
+        discount_percent:
+          type:
+            - string
+            - 'null'
+          description: A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents.
+        discount_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A discount amount in cents, positive; never with discount_percent.
+        discount_reason:
+          type:
+            - string
+            - 'null'
+          description: Required with either discount.
+        price_adjusted_by:
+          type:
+            - string
+            - 'null'
+          description: The actor of the last override or discount; the audit row carries the rest.
+        line_total_cents:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: The extension, rounded once (ADR 0005 section 2.4); null only on a text line.
+        taxable:
+          type: boolean
+        revenue_account_code:
+          type:
+            - string
+            - 'null'
+          description: The charge code's account, snapshotted at create; null on every other line type.
+        is_special_order:
+          type: boolean
+        vendor_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        special_order_unit_cost_ten_thousandths:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: A unit cost at scale 4.
         created_at:
           type: string
           format: date-time
-    InvoicePage:
+        invoice_line_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The invoice line this credit line returns; null on a free line (a price adjustment, a fee given back, a note).
+        restock:
+          type: boolean
+          description: Whether the goods go back on hand when the credit memo is posted.
+        unit_cost_ten_thousandths: *id006
+        cost_cents:
+          type: integer
+          format: int64
+          description: 'The cost that comes back to inventory, in cents and NEGATIVE like the line (ADR 0005 8.4): COGS reverses at the original cost; 0 on a line that does not restock.'
+    CreditMemoLineRequest:
       type: object
-      required: [data, total, limit, offset]
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/Invoice"
-        total:
-          type: integer
-        limit:
-          type: integer
-        offset:
-          type: integer
-    CreditMemo:
-      type: object
-      required: [id, customer_id, amount, reason, status, created_at]
+      description: 'One credit memo line. A line that names an invoice line (invoice_line_id) sends only the negative quantity credited, restock and optionally a description: its price, pair and discount come from the invoice line, and it cannot credit more than that line billed less what earlier credit memos returned (409 exceeds_billed). A free line names a product, a charge code or only a description and sends its own price; quantities are negative.'
       properties:
         id:
           type: string
           format: uuid
-        invoice_id:
+          description: Keeps a line across edits.
+        invoice_line_id:
+          type: string
+          format: uuid
+        line_type:
+          type: string
+          enum:
+            - product
+            - charge
+            - text
+        product_id:
+          type: string
+          format: uuid
+        charge_code:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: string
+          description: 'A NEGATIVE decimal string: the quantity returned or credited.'
+        uom:
+          type: string
+        unit_price_ten_thousandths:
+          type: integer
+          format: int64
+          description: Free lines only; never negative.
+        taxable:
+          type: boolean
+        restock:
+          type: boolean
+          description: Return the goods to stock at post (a stocked product line).
+    CreditMemoRequest:
+      type: object
+      description: The body of POST /credit-memos and PUT /credit-memos/{id}. A create names an invoice (the customer, branch, currency, job and ship-to follow it) or a customer. branch_id, if sent, is held to the caller's branch like every payload branch. currency is never sent.
+      required:
+        - reason_code
+        - reason
+        - lines
+      properties:
+        branch_id:
           type: string
           format: uuid
         customer_id:
           type: string
           format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
+        invoice_id:
+          type: string
+          format: uuid
+        job_id:
+          type: string
+          format: uuid
+        ship_to_id:
+          type: string
+          format: uuid
+        reason_code:
+          type: string
+          enum:
+            - return
+            - price_adjustment
+            - damage
+            - other
         reason:
           type: string
-        status:
-          type: string
-          enum: [PENDING, APPLIED, VOID]
-        created_at:
-          type: string
-          format: date-time
-        applied_at:
-          type: string
-          format: date-time
-    CreditMemoCreateRequest:
-      type: object
-      required: [amount_cents, reason]
-      properties:
-        amount_cents:
+          minLength: 1
+          maxLength: 500
+        revision:
           type: integer
           format: int64
-          description: Cents; must be positive.
+          description: The precondition on a PUT, beside If-Match.
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditMemoLineRequest'
+    CreditMemoPage:
+      type: object
+      required:
+        - items
+        - next_cursor
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditMemoSummary'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Only under include=total.
+    CreditMemoTransitionRequest:
+      type: object
+      required:
+        - to
+      description: 'The body of POST /credit-memos/{id}/transitions: to open (post) or void, the revision and the reason.'
+      properties:
+        to:
+          $ref: '#/components/schemas/CreditMemoStatus'
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
         reason:
           type: string
-    CreditMemoList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/CreditMemo"
-    InvoiceEmailResponse:
-      type: object
-      required: [status]
-      properties:
-        status:
-          type: string
-          enum: [queued]
+          maxLength: 500
+          description: Required by a void.
     LocationType:
       type: string
       enum: [branch, zone, aisle, rack, shelf, bin, yard]
@@ -18544,16 +19866,23 @@ components:
           description: Float dollars.
     PortalInvoice:
       type: object
-      required: [id, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at, lines]
+      required: [id, number, is_overdue, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at, lines]
       properties:
         id:
           type: string
           format: uuid
+        number:
+          type: string
+          description: The invoice's gapless IN- number (C2-3).
+        is_overdue:
+          type: boolean
+          description: Computed, open and past its due date; overdue is no longer a status (C2-3).
         order_id:
           type: string
           format: uuid
         status:
           type: string
+          description: The stored status, uppercase (UNPAID, PARTIAL, PAID, VOID, WRITTEN_OFF); the portal keeps its legacy vocabulary.
         total_amount:
           type: number
           description: Float dollars.

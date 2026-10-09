@@ -533,8 +533,8 @@ func (r *PostgresRepository) OpenDocuments(ctx context.Context, customerID uuid.
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT
 			EXISTS (SELECT 1 FROM orders WHERE customer_id = $1 AND status IN ('DRAFT', 'CONFIRMED', 'ON_HOLD')),
-			EXISTS (SELECT 1 FROM invoices WHERE customer_id = $1 AND status IN ('UNPAID', 'PARTIAL', 'OVERDUE')),
-			EXISTS (SELECT 1 FROM credit_memos WHERE customer_id = $1 AND status = 'PENDING'),
+			EXISTS (SELECT 1 FROM invoices WHERE customer_id = $1 AND status IN ('UNPAID', 'PARTIAL')),
+			EXISTS (SELECT 1 FROM credit_memos WHERE customer_id = $1 AND status IN ('DRAFT', 'OPEN', 'PARTIAL')),
 			EXISTS (SELECT 1 FROM customer_deposits WHERE customer_id = $1 AND status = 'OPEN' AND amount > applied_amount)`,
 		customerID).Scan(&orders, &invoices, &memos, &deposits)
 	if err != nil {

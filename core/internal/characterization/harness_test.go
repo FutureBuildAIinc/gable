@@ -253,6 +253,8 @@ func newHarness(t *testing.T, freshURL string) *harness {
 		"TZ":           "Etc/UTC",
 	}), buildDir+"/core", "", "seed")
 
+	pinBranchZonesToUTC(t, freshURL)
+
 	seedClockWindowFixtures(t, freshURL)
 
 	vars := seedVars(t, freshURL)
