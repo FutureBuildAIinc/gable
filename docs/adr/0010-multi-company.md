@@ -634,33 +634,43 @@ the body carries no `company_id`; the path names it, the create stamps
 every row of the subtree with it, and it is immutable after (section 1).
 Three writers accept `type` `BRANCH` rows today, and item 7 converts
 each:
-- `POST /api/v1/branches` (`location/handler.go:103`, adminGuard) keeps
-  answering while exactly one company exists, defaulting to it through
-  the step 4 `DEFAULT` on `locations.company_id` (section 10), the
-  bridge that keeps every branch insert alive between item 1 and this
-  item.
-- `POST /api/v1/locations` with `type` `branch`
-  (`location/handler.go:95`, guard) goes through the same
-  `Service.CreateLocation`, which accepts `type` `branch` and requires
-  only no parent and a name (`location/service.go:124-135`); the same
-  rule applies and it sits behind `guard`, not `adminGuard`, so the
-  409 falls on any caller, not just an admin.
+- `POST /api/v1/branches` (`location/handler.go:103`, adminGuard) and
+  `POST /api/v1/locations` with `type` `branch`
+  (`location/handler.go:95`, guard) reach the same
+  `Service.CreateLocation` (`location/service.go:112`), which accepts
+  `type` `branch` and requires only no parent and a name
+  (`location/service.go:124-135`). The company is resolved in
+  `Service.CreateLocation`: with exactly one company in the database
+  it stamps that company on the `BRANCH` row, so the old `branches`
+  route keeps answering in a single company deployment through item
+  7's company scoped route stamping the column from the path; with
+  more than one, it refuses with 409 `conflict`, blocker
+  `company_required`, naming the company scoped route. Both old
+  routes then behave the same, and the branch create check at
+  `location/handler.go:226` answers 403 to any non admin caller
+  first, so the 409 reaches only admins, owners, and unbound callers
+  (the test at `serve/wire_branch_wall_test.go:471` keeps passing).
+  Item 7 adds the same 409 to both old routes beside it.
 - Raw `INSERT INTO locations ... 'BRANCH'` lines: the seed's at
   `core/internal/app/seed/seed.go:230` (every `make seed`) and the
-  seventeen test fixtures that hold up the cycle 2 to 4 wire tests
+  twenty test fixtures that hold up the cycle 2 to 4 wire tests
   (`git grep -l "INSERT INTO locations" -- '*.go'` intersected with
-  `'BRANCH'`, minus `seed.go` and `location/repository.go`):
+  `'BRANCH'`, plus `git grep -l '"BRANCH"' -- '*_test.go'` to catch a
+  bound `"BRANCH"`, minus `seed.go` and `location/repository.go`):
+  `core/internal/app/serve/wire_branch_wall_test.go`,
   `core/internal/crm/repository_pg_test.go`,
   `core/internal/crm/wire_test.go`,
   `core/internal/customer/wire_test.go`,
   `core/internal/dashboard/repository_pg_test.go`,
   `core/internal/integrations/accept_convert_test.go`,
+  `core/internal/inventory/branch_payload_test.go`,
   `core/internal/inventory/qty_test.go`,
   `core/internal/inventory/wire_test.go`,
   `core/internal/order/branch_date_test.go`,
   `core/internal/order/invoice_date_test.go`,
   `core/internal/order/migration094_test.go`,
   `core/internal/product/migration_test.go`,
+  `core/internal/purchase_order/branch_payload_test.go`,
   `core/internal/purchase_order/receive_event_test.go`,
   `core/internal/quote/branch_payload_test.go`,
   `core/internal/quote/convert_branch_test.go`,
@@ -668,19 +678,20 @@ each:
   `core/internal/quote/repository_scoping_test.go`, and
   `core/pkg/middleware/branch_payload_test.go`.
 
-Once a second company exists both routes refuse with 409 `conflict`,
-blocker `company_required`, naming the company scoped route. The same
-pull request drops the `DEFAULT`: the company scoped route stamps the
-column from the path, the two old routes stamp it (the old `branches`
-route) or refuse (the old `locations` route, since the guard path
-cannot reach `Service.CreateLocation`'s company header), and the seed
-plus the seventeen fixtures set it from the seed company row their
-test reads (each fixture selects `id` from `company` and binds the
-result). No second company can inherit the seed company through the
-default once item 7 lands. Each refusal, the seed conversion and the
-fixture conversion are rows in `docs/refactor/CONTRACT-CHANGES.md`.
-Sized inside item 7; the seventeen fixture changes alone set its lower
-bound above the round 4 estimate.
+The pull request drops the `DEFAULT` on `locations.company_id` with
+every BRANCH writer converted: the company scoped route stamps the
+column from the path, the two old routes stamp the column with one
+company and refuse with 409 `company_required` once two companies
+exist (the rule above), and the seed plus the twenty fixtures read
+the seed company row their test reads (the row whose
+`number_infix IS NULL`, or the seed `code`, never the bare
+`SELECT id FROM company`, because item 7's own two company tests
+share the database with every other package's tests under
+`go test ./...`) and bind the result. No second company can inherit
+the seed company through the default once item 7 lands. Each refusal,
+the seed conversion and the fixture conversion are rows in
+`docs/refactor/CONTRACT-CHANGES.md`. Sized inside item 7; the twenty
+fixture changes alone set its lower bound above the round 4 estimate.
 
 The kill switch: the request's company leans on the branch context, and
 the branch context is only real while `multi_branch_enabled` is on. It
@@ -913,9 +924,11 @@ Up, in order:
    which no trigger can source, and item 7 drops it in the same pull
    request that converts every BRANCH writer (section 6): the company
    scoped route stamps the column from the path, the two old routes
-   refuse with 409 `company_required` once two companies exist, the seed
-   sets the column from the seed company row that step 1 inserts, and
-   the seventeen test fixtures that `INSERT INTO locations ... 'BRANCH'`
+   stamp the column with one company through the rule of section 6
+   and refuse with 409 `company_required` once two companies exist,
+   the seed sets the column from the seed company row that step 1
+   inserts, and the twenty test fixtures that `INSERT INTO locations
+   ... 'BRANCH'` (or bind `"BRANCH"` as a parameter)
    set it from the same source. No trigger: the converting items'
    writers set the value from then on. The defaults are not dropped in
    one place, because the writers convert at different items:
@@ -938,8 +951,12 @@ Up, in order:
    those writers; item 5 `gl_accounts`, `bank_accounts` and
    `gl_fiscal_periods`'; item 7 `locations`' with the conversion of
    `POST /api/v1/branches`, `POST /api/v1/locations` (with `type`
-   `branch`), the seed's raw insert, and the seventeen test fixtures
-   in the same pull request. The
+   `branch`), the seed's raw insert, and the twenty test fixtures
+   (seventeen with `'BRANCH'` literals plus three with `"BRANCH"` as
+   a parameter: `core/internal/app/serve/wire_branch_wall_test.go`,
+   `core/internal/inventory/branch_payload_test.go`, and
+   `core/internal/purchase_order/branch_payload_test.go`) in the same
+   pull request. The
    census test carries an allowlist of bridged tables whose default may
    remain, and each dropping item shrinks it in the same pull request.
    No second company can be created while an entry remains: the company
@@ -1078,7 +1095,7 @@ two new down probes added to the rejection list (item 4's per company
 mint trigger and item 7's `system_settings` gate, 1), the fate of the
 two `097` SQL functions named and the memo trigger's status guard
 named (4), and the conversion of every BRANCH writer named with the
-seed and the seventeen fixtures plus the `system_settings` TRUNCATE
+seed and the twenty fixtures plus the `system_settings` TRUNCATE
 gate and the create's `infix_taken` 409 (7):
 
 | Order | Item | Size |
@@ -1089,7 +1106,7 @@ gate and the create's `infix_taken` 409 (7):
 | 4 | Numbering and URLs (section 4: series per company keyed by id and named by the company row, the infix bearing prefix for companies created later, the `097` `DEFAULT` mint replaced by the per company mint trigger and the helper widened with it, the raw insert test for a second company, the infix's uniqueness and seed tie checks, the memo trigger's status guard, the `invoice_next_number()` and `credit_memo_next_number()` SQL functions dropped alongside the `097:84` `DEFAULT` with the four raw callers converted, ADR 0007 section 7 patterns, contract change rows) | 9 to 13 |
 | 5 | The request's company (section 6: derivation from the branch context, the path id wall's one lookup, the GL and bankrecon reroutes under their own modules, the `companies` routes with user only writes, the record rule with `wire_company_wall_test.go`, the AP payments side's company filter on the same test, `api_keys.company_id` with its header rule and `key.company_refused`, the `gl_accounts`, `bank_accounts` and `gl_fiscal_periods` step 4 defaults dropped with the reroutes) | 10 to 14 |
 | 6 | Reports and consolidation (section 8: per company trial balance and statements, `GetTrialBalanceConsolidated`, the currency grouping) | 6 to 10 |
-| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route, convert `POST /api/v1/branches` to stamp the column and `POST /api/v1/locations` (with `type` `branch`) to refuse with 409 `company_required` once a second company exists, convert the seed's raw branch insert and the seventeen test fixtures to read the seed company id, drop the step 4 `locations` default with the company scoped route, the two old routes, the seed and the fixtures all in the same pull request; the `system_settings` row and statement (TRUNCATE) triggers of section 6 with their update, delete and truncate refusals tested at the database; the create's `infix_taken` 409 against `number_infix`'s `UNIQUE`; routes and the desk screen) | 14 to 19 |
+| 7 | Company admin (create a company with its chart copied from the template company and its periods seeded, rename the seed, set its tax code, create a company's first branches through the company scoped route, convert `POST /api/v1/branches` and `POST /api/v1/locations` (with `type` `branch`) to stamp the column with one company and refuse with 409 `company_required` once a second company exists, convert the seed's raw branch insert and the twenty test fixtures to read the seed company id, drop the step 4 `locations` default with the company scoped route, the two old routes, the seed and the fixtures all in the same pull request; the `system_settings` row and statement (TRUNCATE) triggers of section 6 with their update, delete and truncate refusals tested at the database; the create's `infix_taken` 409 against `number_infix`'s `UNIQUE`; routes and the desk screen) | 14 to 19 |
 
 Total: 85 to 126 dev hour equivalents. Item 1 lands first, on its own,
 behind the step 4 default bridge, and items 2 to 7 depend on it; items 2
@@ -1108,7 +1125,7 @@ under the segment, the scopes and the wall of item 5. It also carries the
 last step 4 default (`locations`), and in the same pull request
 converts every other BRANCH writer named in section 6: `POST
 /api/v1/branches`, `POST /api/v1/locations` (with `type` `branch`), the
-seed's raw insert and the seventeen test fixtures. No second company
+seed's raw insert and the twenty test fixtures. No second company
 can exist until item 7 merges: the company create route is item 7's.
 
 ## Consequences
