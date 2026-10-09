@@ -256,3 +256,64 @@ func TestMigration096_NormalisesActivityType(t *testing.T) {
 		t.Error("the activity_type CHECK accepts a lowercase spelling")
 	}
 }
+
+// Migration 096 fills the two nullable columns the wire reads into
+// non-nullable Go values (a NULL failed the scan and 500ed the whole list):
+// crm_activities.activity_date (nullable with a default) takes created_at,
+// the anchor the row itself carries once created_at is backfilled, never the
+// migration's clock; millwork_options.price_adjustment takes 0, the identity
+// of an adjustment and the column's own default. Both come back NOT NULL, so
+// a later raw insert cannot reintroduce the 500.
+func TestMigration096_BackfillsNullScanColumns(t *testing.T) {
+	conn := scratchDB(t)
+	before, target := migration096Files(t)
+	for _, f := range before {
+		apply096(t, conn, f)
+	}
+	ctx := context.Background()
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ('00000000-0000-0000-0000-00000000e003', 'Mig Null Dates', 'MIG-CRM-3',
+			(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'));
+		INSERT INTO crm_activities (id, customer_id, activity_type, description, activity_date, created_at, updated_at)
+		VALUES
+		 -- a NULL activity_date with a created_at of its own: the date takes it
+		 ('00000000-0000-0000-0000-00000000a201','00000000-0000-0000-0000-00000000e003','CALL','dated by create',NULL, now() - interval '3 days', now() - interval '3 days'),
+		 -- a NULL activity_date and a NULL created_at: created_at lands on updated_at first, the date follows it
+		 ('00000000-0000-0000-0000-00000000a202','00000000-0000-0000-0000-00000000e003','CALL','dated by update',NULL,NULL, now() - interval '2 days');
+		INSERT INTO millwork_options (id, category, name, price_adjustment, created_at, updated_at)
+		VALUES ('00000000-0000-0000-0000-00000000c201','door_type','Null Priced',NULL,now(),now())`); err != nil {
+		t.Fatalf("legacy rows: %v", err)
+	}
+
+	apply096(t, conn, target)
+
+	// activity_date is NOT NULL and equals the row's created_at (itself
+	// backfilled first), never NOW() at migration time.
+	for _, id := range []string{"00000000-0000-0000-0000-00000000a201", "00000000-0000-0000-0000-00000000a202"} {
+		if !scalar096[bool](t, conn, `SELECT activity_date = created_at FROM crm_activities WHERE id = $1`, id) {
+			t.Errorf("activity %s: activity_date does not equal created_at", id[len(id)-4:])
+		}
+	}
+	if !scalar096[bool](t, conn, `SELECT activity_date < now() - interval '1 day' FROM crm_activities WHERE id = '00000000-0000-0000-0000-00000000a202'`) {
+		t.Error("a NULL activity_date was filled with the migration's clock, not the row's own time")
+	}
+	for _, c := range []struct{ table, col string }{
+		{"crm_activities", "activity_date"}, {"millwork_options", "price_adjustment"},
+	} {
+		if v := scalar096[string](t, conn, `SELECT is_nullable FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`, c.table, c.col); v != "NO" {
+			t.Errorf("%s.%s is still nullable", c.table, c.col)
+		}
+	}
+	// price_adjustment NULL took 0, the column's own default.
+	if got := scalar096[string](t, conn, `SELECT price_adjustment::text FROM millwork_options WHERE id = '00000000-0000-0000-0000-00000000c201'`); got != "0.00" {
+		t.Errorf("a NULL price_adjustment = %s, want 0.00", got)
+	}
+	// Neither column takes a NULL again.
+	if _, err := conn.Exec(ctx, `UPDATE crm_activities SET activity_date = NULL WHERE id = '00000000-0000-0000-0000-00000000a201'`); err == nil {
+		t.Error("activity_date still accepts a NULL")
+	}
+	if _, err := conn.Exec(ctx, `UPDATE millwork_options SET price_adjustment = NULL WHERE id = '00000000-0000-0000-0000-00000000c201'`); err == nil {
+		t.Error("price_adjustment still accepts a NULL")
+	}
+}

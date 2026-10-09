@@ -41,6 +41,14 @@
 -- 1. crm_activities.
 UPDATE crm_activities SET created_at = COALESCE(activity_date, updated_at, NOW()) WHERE created_at IS NULL;
 ALTER TABLE crm_activities ALTER COLUMN created_at SET NOT NULL;
+-- activity_date is read into a non-nullable Go value; a NULL failed the
+-- scan and took the customer's whole activity feed down. A NULL takes
+-- created_at, which the line above has just backfilled from the row's own
+-- times (activity_date first, then updated_at, then NOW()), so a legacy row
+-- without a date lands on its own recorded time, never on the migration's
+-- clock.
+UPDATE crm_activities SET activity_date = COALESCE(activity_date, created_at) WHERE activity_date IS NULL;
+ALTER TABLE crm_activities ALTER COLUMN activity_date SET NOT NULL;
 UPDATE crm_activities SET description = '' WHERE description IS NULL;
 ALTER TABLE crm_activities ALTER COLUMN description SET NOT NULL;
 UPDATE crm_activities SET activity_type = upper(btrim(activity_type));
@@ -63,6 +71,12 @@ CREATE INDEX IF NOT EXISTS idx_projects_customer_created_at_id_desc
 -- 3. millwork_options.
 UPDATE millwork_options SET created_at = COALESCE(updated_at, NOW()) WHERE created_at IS NULL;
 ALTER TABLE millwork_options ALTER COLUMN created_at SET NOT NULL;
+-- price_adjustment is read into a non-nullable Go value (scaled to cents in
+-- SQL); a NULL failed the scan and 500ed the whole category's list. A NULL
+-- takes 0, the identity of an adjustment (no price change) and the column's
+-- own default; nothing but a direct insert naming NULL can have written one.
+UPDATE millwork_options SET price_adjustment = 0 WHERE price_adjustment IS NULL;
+ALTER TABLE millwork_options ALTER COLUMN price_adjustment SET NOT NULL;
 ALTER TABLE millwork_options ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_millwork_options_category_created_at_id_desc
     ON millwork_options (category, created_at DESC, id DESC);
