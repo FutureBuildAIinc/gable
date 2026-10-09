@@ -117,8 +117,10 @@ plus the generation tracking fields `gen_model`, `gen_prompt`,
 are integer prices at scale 4. The stock totals
 (`on_hand`, `allocated`, `available`, `reorder_point`, `reorder_qty`)
 are decimal strings with at most four fraction digits. The wire form
-`UOM` is the standard codes (`PCS`, `EA`, `LF`, `BF`, `MBF`); the
-product is uppercase on the wire (ADR 0001 section 6).
+`UOM` is the standard codes (`PCS`, `EA`, `LF`, `SF`, `BF`, `MBF`,
+`SQ`, `BOX`, `CTN`, `RL`, `GAL`, `LBS`, `BAG`, `BUNDLE`, `PAIR`,
+`SET`; see `components.schemas.UOM` in `product.yaml`); the product
+is uppercase on the wire (ADR 0001 section 6).
 
 ## Lifecycle and transitions
 

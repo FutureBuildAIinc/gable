@@ -207,11 +207,11 @@ The fulfillment call is `POST /api/v1/orders/{id}/fulfillments` with
 `delivery_id`. A pickup order must send `picked_up_by`; a delivery
 order must not. The call is not a will-call queue; it is the act that
 issues the invoice, posts the general ledger and moves the AR
-subledger in the same transaction. Completed
-deliveries leave parked fulfillment requests
-(`order.fulfillment_parked`) in `core/internal/order/fulfil_queue.go`,
-which `POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry`
-re-runs.
+subledger in the same transaction. A completed
+delivery queues a fulfillment request; one that keeps failing is
+parked after the attempt limit and writes
+`order.fulfillment_parked`; `POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry`
+re-runs it.
 
 ## Events the module writes
 

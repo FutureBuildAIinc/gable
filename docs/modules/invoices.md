@@ -156,9 +156,9 @@ The wire vocabulary is lowercase. The transitions are:
 
 | Entity | From | To | Event |
 |---|---|---|---|
-| Invoice | `unpaid` with no payments and no applied memos and no live memos and not a counter sale | `void` | `invoice.voided` |
+| Invoice | `unpaid` with no payments and no applied memos and no live memos and not a counter sale | `void` | `invoice.voided` (reason required) |
 | Credit memo | `draft` | `open` | `credit_memo.posted` (mints the number) |
-| Credit memo | `draft` | `void` | `credit_memo.voided` |
+| Credit memo | `draft` | `void` | `credit_memo.voided` (reason required) |
 | Credit memo | `open` | `void` | `credit_memo.voided` (reason required) |
 
 `invoice.voided` is refused with `409 has_applications` when the
@@ -169,9 +169,12 @@ sale (`core/internal/invoice/service.go` `voidInvoice` block). The
 statuses past `open` on a credit memo (`partial`, `applied`) are not
 reachable from a client; they arrive with applications and refunds.
 A void keeps its number; nothing deletes an invoice or credit memo.
-The body of a transition is `{"to": "open", "revision": n}` with the
-`If-Match` header carrying the same number, and the idempotency key
-on every mutating request.
+The body of a transition is `{"to": "<status>", "revision": n,
+"reason": "..."}` for voids (the `reason` is required and is 1 to
+500 characters), and `{"to": "<status>", "revision": n}` for the
+credit memo's `draft` to `open` post; the `If-Match` header carries
+the same number, and the idempotency key is on every mutating
+request.
 
 A credit memo names an invoice, and the credit memo credits tax at
 that invoice's rate, `round_half_away(taxable_cents x rate)`, but never
