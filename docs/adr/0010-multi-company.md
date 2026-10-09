@@ -575,22 +575,22 @@ ADR 0007 5.3's mint check accepts any `<vocabulary module>:<verb>`), so
 every agent and integration that posts a journal entry, pays a bill or
 imports a bank file through a key would lose the ability the day the
 build lands, the same breakage this record refuses for unbound keys. AP
-   needs no branchless route at all: C4-1b gives `vendor_invoices` a
-   `branch_id` (ADR 0008 section 12), so AP's routes stay where they are
-   (`core/internal/ap/handler.go:38-48`) and the branch wall reaches their
-   documents like every branch document. AP's payments side needs its own
-   rule, because `ap_payments` is R2 and carries no branch (`028:36`,
-   section 2): the payment list filters `ap_payments.company_id` to the
-   companies the caller reaches (the reach rule below; a company bound
-   key's one company) where today it reads `FROM ap_payments p` with no
-   scope at all (`ap/repository.go:240`); `PayVendor` refuses an invoice
-   outside the caller's reach, and the R2 check refuses a payment whose
-   invoices do not name one company; the aging report is scoped through
-   `vendor_invoices.branch_id`, the table it already reads. All three
-   routes are wired with `RequireRole("admin", "owner", "finance")` only
-   today (`serve.go:558`), no branch middleware, so this filter is their
-   wall, and item 5's `wire_company_wall_test.go` covers them. The
-   consolidated report is a GL read under the same segment (section 8).
+needs no branchless route at all: C4-1b gives `vendor_invoices` a
+`branch_id` (ADR 0008 section 12), so AP's routes stay where they are
+(`core/internal/ap/handler.go:38-48`) and the branch wall reaches their
+documents like every branch document. AP's payments side needs its own
+rule, because `ap_payments` is R2 and carries no branch (`028:36`,
+section 2): the payment list filters `ap_payments.company_id` to the
+companies the caller reaches (the reach rule below; a company bound
+key's one company) where today it reads `FROM ap_payments p` with no
+scope at all (`ap/repository.go:240`); `PayVendor` refuses an invoice
+outside the caller's reach, and the R2 check refuses a payment whose
+invoices do not name one company; the aging report is scoped through
+`vendor_invoices.branch_id`, the table it already reads. All three
+routes are wired with `RequireRole("admin", "owner", "finance")` only
+today (`serve.go:558`), no branch middleware, so this filter is their
+wall, and item 5's `wire_company_wall_test.go` covers them. The
+consolidated report is a GL read under the same segment (section 8).
 
 The `companies` segment holds the company resource alone: the company
 list, create, rename, the tax code write, and
