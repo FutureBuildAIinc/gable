@@ -196,6 +196,12 @@ var writeScopeOverrides = map[string]string{
 // area scope for every method, and a module with a write override needs the
 // override's name for every non read. ok is false wherever ModuleForPath
 // refuses; the caller checks the module policy separately.
+//
+// An empty second segment under /api/v1/admin (the path is /api/v1/admin with
+// nothing after, or // appears after it) is refused: the coarse admin:read or
+// admin:write fallback would be too wide for a path the request does not
+// name, and the "coarse scopes reach only routes no area declares" guarantee
+// (ADR 0009 section 5) must not depend on the router cleaning the path.
 func RequiredScopeForPath(method string, path string) (string, bool) {
 	module, ok := ModuleForPath(path)
 	if !ok {
@@ -204,6 +210,9 @@ func RequiredScopeForPath(method string, path string) (string, bool) {
 	if module == "admin" {
 		rest, _ := strings.CutPrefix(path, "/api/v1/admin")
 		segment, _, _ := strings.Cut(strings.TrimPrefix(rest, "/"), "/")
+		if segment == "" {
+			return "", false
+		}
 		if area, ok := adminAreaScopes[segment]; ok {
 			return area, true
 		}

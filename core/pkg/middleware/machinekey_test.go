@@ -335,6 +335,32 @@ func TestMachineKeyFinerAdminScopes(t *testing.T) {
 	if len(aud.calls) != 1 || aud.calls[0].scope != "admin:settings" {
 		t.Fatalf("audit calls = %+v, want one refusing admin:settings", aud.calls)
 	}
+
+	// An empty second segment under /api/v1/admin (the path is /api/v1/admin
+	// with nothing after, or // appears after it) is refused, the most
+	// restrictive answer: the coarse admin:read or admin:write fallback is
+	// too wide for a path the request does not name, so no scope suffices.
+	// The guarantee "coarse scopes reach only routes no area declares" must
+	// not depend on the router cleaning the path.
+	for _, tc := range []struct {
+		name, method, path string
+		scopes             []string
+	}{
+		{"admin:read refused on /api/v1/admin//settings/ai", "GET", "/api/v1/admin//settings/ai", []string{"admin:read"}},
+		{"admin:write refused on /api/v1/admin//settings/ai", "PUT", "/api/v1/admin//settings/ai", []string{"admin:write"}},
+		{"admin:read refused on /api/v1/admin (no segment)", "GET", "/api/v1/admin", []string{"admin:read"}},
+		{"admin:write refused on /api/v1/admin (no segment)", "PUT", "/api/v1/admin", []string{"admin:write"}},
+		{"admin:read refused on /api/v1/admin/ (trailing slash)", "GET", "/api/v1/admin/", []string{"admin:read"}},
+		{"admin:read+admin:settings refused on /api/v1/admin//settings/ai", "GET", "/api/v1/admin//settings/ai", []string{"admin:read", "admin:settings"}},
+		{"admin:read+admin:write refused on /api/v1/admin//settings/ai", "GET", "/api/v1/admin//settings/ai", []string{"admin:read", "admin:write"}},
+	} {
+		_, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %s %s = %d, want 403; body: %s", tc.name, tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
 }
 
 // The users module's write scope is named for what it grants (ADR 0009):
