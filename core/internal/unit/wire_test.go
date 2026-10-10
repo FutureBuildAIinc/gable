@@ -232,7 +232,18 @@ func TestUnitCatalogueUpdateRules(t *testing.T) {
 	// deletes; the name is the dealer's label).
 	renamed := f.do("PUT", "/api/v1/units/MBF", map[string]any{"name": "Thousand board feet, custom label", "revision": 1})
 	if renamed.status != http.StatusOK || renamed.body["name"] != "Thousand board feet, custom label" {
-		f.t.Errorf("a system unit's name edits, got %d: %s", renamed.status, renamed.raw)
+		t.Errorf("a system unit's name edits, got %d: %s", renamed.status, renamed.raw)
+	}
+
+	// A system unit PUT whole, carrying the stored standard size unchanged,
+	// is served: only a change is refused, like the dimension branch beside
+	// it, which compares first.
+	whole := f.do("PUT", "/api/v1/units/MBF", map[string]any{
+		"name": "Thousand board feet", "std_unit_qty": "1", "std_ref_qty": "1000", "revision": 2,
+	})
+	if whole.status != http.StatusOK || whole.body["name"] != "Thousand board feet" ||
+		whole.body["std_unit_qty"] != "1" || whole.body["std_ref_qty"] != "1000" {
+		t.Errorf("a system unit PUT with the stored standard size is served, got %d: %s", whole.status, whole.raw)
 	}
 
 	// A body carrying code is refused naming it, and an unknown unit is a

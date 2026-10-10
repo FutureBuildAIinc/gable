@@ -154,26 +154,27 @@ func (s *Service) Update(ctx context.Context, code string, draft *Draft, ifMatch
 			}
 			row.Dimension = *draft.Dimension
 		}
-		if draft.HasStdSize {
+		// The standard size: a PUT that sends the stored size back whole
+		// changes nothing and is served (the dimension branch beside it
+		// compares first too); only a change meets the refusals.
+		if draft.HasStdSize && !draft.SameStdSize(cur.StdUnitQty, cur.StdRefQty) {
 			if cur.IsSystem {
 				return immutable("std_unit_qty", "a system unit's standard size cannot change")
 			}
-			if !draft.SameStdSize(cur.StdUnitQty, cur.StdRefQty) {
-				referenced, err := s.repo.UnitReferenced(ctx, code)
-				if err != nil {
-					return err
-				}
-				if referenced {
-					return immutable("std_unit_qty",
-						"the standard size is immutable once any product unit set or line names the unit")
-				}
-				// A standard size is stored canonical (R2).
-				pair, err := units.StandardSizePair(*draft.StdUnitQty, *draft.StdRefQty)
-				if err != nil {
-					return immutable("std_unit_qty", err.Error())
-				}
-				row.StdUnitQty, row.StdRefQty = &pair.A, &pair.B
+			referenced, err := s.repo.UnitReferenced(ctx, code)
+			if err != nil {
+				return err
 			}
+			if referenced {
+				return immutable("std_unit_qty",
+					"the standard size is immutable once any product unit set or line names the unit")
+			}
+			// A standard size is stored canonical (R2).
+			pair, err := units.StandardSizePair(*draft.StdUnitQty, *draft.StdRefQty)
+			if err != nil {
+				return immutable("std_unit_qty", err.Error())
+			}
+			row.StdUnitQty, row.StdRefQty = &pair.A, &pair.B
 		}
 		if err := s.repo.UpdateUnit(ctx, row, cur.Revision); err != nil {
 			var stale *StaleRevisionError
