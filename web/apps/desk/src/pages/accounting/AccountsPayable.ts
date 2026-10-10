@@ -4,7 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
-import { formatCents } from '../../lib/utils';
+import { formatCents, formatPrice4 } from '../../lib/utils';
 import { ToastService } from '../../lib/toast-service.ts';
 import { APService } from '../../services/APService.ts';
 import { VendorService } from '../../services/VendorService.ts';
@@ -15,6 +15,50 @@ import type { GLAccount } from '../../types/gl';
 import {
     CheckCircle2, PlusCircle, Trash2, Receipt, Info
 } from 'lucide';
+
+/**
+ * One line's extension in cents, exact: the decimal strings are read as
+ * scaled integers (quantity and price at scale 4 each), multiplied, and
+ * rounded once to cents, half away from zero, the way the server's
+ * httpx.Extend prices the line. Never parseFloat: 1.005 is not representable
+ * and a float preview can disagree with the exact bill that is filed.
+ */
+function exactLineCents(qty: string, price: string): number {
+    const scaled = (raw: string): bigint => {
+        const t = raw.trim();
+        if (t === '') return 0n;
+        const neg = t.startsWith('-');
+        const body = neg ? t.slice(1) : t;
+        const [int = '0', frac = ''] = body.split('.');
+        const frac4 = (frac + '0000').slice(0, 4);
+        const v = BigInt(int || '0') * 10000n + BigInt(frac4 || '0');
+        return neg ? -v : v;
+    };
+    const product = scaled(qty) * scaled(price); // scale 8
+    const neg = product < 0n;
+    const abs = neg ? -product : product;
+    const cents = (abs + 500_000n) / 1_000_000n; // one rounding, half away from zero
+    return Number(neg ? -cents : cents);
+}
+
+/** The decimal string with trailing fraction zeros dropped, the wire's form. */
+function trimDecimal(raw: string): string {
+    const t = raw.trim();
+    if (!t.includes('.')) return t;
+    return t.replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/** A decimal string read as the scaled integer the wire carries (scale 4). */
+function scaledTenThousandths(raw: string): bigint {
+    const t = raw.trim();
+    if (t === '') return 0n;
+    const neg = t.startsWith('-');
+    const body = neg ? t.slice(1) : t;
+    const [int = '0', frac = ''] = body.split('.');
+    const frac4 = (frac + '0000').slice(0, 4);
+    const v = BigInt(int || '0') * 10000n + BigInt(frac4 || '0');
+    return neg ? -v : v;
+}
 
 @customElement('gable-accounts-payable')
 export class AccountsPayable extends LitElement {
@@ -89,35 +133,33 @@ export class AccountsPayable extends LitElement {
     }
 
     /**
-     * Draft-invoice total in cents, for the "Estimated Total" preview.
+     * Draft-bill total in cents, for the "Estimated Total" preview.
      *
-     * The bill form is denominated in DOLLARS because that is what
-     * POST /api/v1/ap/invoices takes (ap/model.go:100,109 — `TaxAmount` and
-     * `UnitPrice` are float64 dollars). The preview is computed here the same
-     * way the server computes the stored figure — rounding each line to a cent
-     * individually and adding tax separately (ap/service.go:53,56) — rather
-     * than summing floats and formatting at the end. Summing first can leave
-     * the preview a cent away from the invoice that is actually saved.
+     * The form is denominated in dollars for the clerk; the route takes a
+     * decimal string quantity and ten thousandths (C4-1b, ADR 0008 7.4) and
+     * the server prices each line exactly with one rounding to cents, half
+     * away from zero (httpx.Extend). The preview does the same arithmetic in
+     * integers, so it never lands a cent away from the bill that is saved.
      */
     private get _estimatedTotalCents(): number {
         const lines = this.billLines.reduce(
-            (sum, l) => sum + Math.round(Number(l.quantity) * Number(l.unit_price) * 100),
+            (sum, l) => sum + exactLineCents(String(l.quantity), String(l.unit_price)),
             0,
         );
-        return lines + Math.round(Number(this.billTaxAmount) * 100);
+        return lines + exactLineCents('1', String(this.billTaxAmount));
     }
 
     private _statusBadgeClass(status: string): string {
         switch (status) {
-            case 'PENDING':
+            case 'pending':
                 return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
-            case 'APPROVED':
+            case 'approved':
                 return 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
-            case 'PARTIAL':
+            case 'partial':
                 return 'bg-purple-500/10 text-purple-400 border border-purple-500/20';
-            case 'PAID':
+            case 'paid':
                 return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-            case 'VOIDED':
+            case 'voided':
                 return 'bg-zinc-800 text-zinc-500 border border-zinc-700';
             default:
                 return 'bg-zinc-800 text-zinc-400';
@@ -173,16 +215,16 @@ export class AccountsPayable extends LitElement {
         try {
             const req = {
                 vendor_id: this.billVendorId,
-                invoice_number: this.billInvoiceNumber.trim(),
+                vendor_invoice_number: this.billInvoiceNumber.trim(),
                 invoice_date: this.billInvoiceDate,
                 due_date: this.billDueDate,
-                tax_amount: Number(this.billTaxAmount),
+                tax_cents: exactLineCents('1', String(this.billTaxAmount)),
                 notes: this.billNotes.trim(),
                 lines: this.billLines.map(l => ({
                     description: l.description.trim(),
-                    quantity: Number(l.quantity),
-                    unit_price: Number(l.unit_price),
-                    gl_account_id: l.gl_account_id || undefined
+                    quantity: trimDecimal(String(l.quantity)),
+                    unit_price_ten_thousandths: Number(scaledTenThousandths(String(l.unit_price))),
+                    gl_account_id: l.gl_account_id
                 }))
             };
 
@@ -213,9 +255,9 @@ export class AccountsPayable extends LitElement {
             this.vendorOutstandingInvoices = [];
             return;
         }
-        // Invoices that are APPROVED or PARTIAL are outstanding
+        // Invoices that are approved or partial are outstanding
         this.vendorOutstandingInvoices = this.invoices.filter(
-            inv => inv.vendor_id === this.payVendorId && (inv.status === 'APPROVED' || inv.status === 'PARTIAL')
+            inv => inv.vendor_id === this.payVendorId && (inv.status === 'approved' || inv.status === 'partial')
         );
     }
 
@@ -231,7 +273,7 @@ export class AccountsPayable extends LitElement {
         for (const invId of this.paySelectedInvoiceIds) {
             const inv = this.invoices.find(i => i.id === invId);
             if (inv) {
-                sum += (inv.total - inv.amount_paid);
+                sum += inv.amount_open_cents;
             }
         }
         this.payAmount = Number((sum / 100).toFixed(2));
@@ -270,9 +312,9 @@ export class AccountsPayable extends LitElement {
         }
     }
 
-    private async _handleApproveInvoice(invoiceId: string) {
+    private async _handleApproveInvoice(invoice: VendorInvoice) {
         try {
-            await APService.approveVendorInvoice(invoiceId);
+            await APService.transitionVendorInvoice(invoice.id, { to: 'approved', revision: invoice.revision });
             ToastService.show('Vendor invoice approved and posted to General Ledger', 'success');
             if (this.selectedInvoice && this.selectedInvoice.id === invoiceId) {
                 this.selectedInvoice = await APService.getVendorInvoice(invoiceId);
@@ -307,14 +349,14 @@ export class AccountsPayable extends LitElement {
 
         // Summary Statistics
         const totalOutstanding = this.invoices
-            .filter(i => i.status === 'APPROVED' || i.status === 'PARTIAL')
-            .reduce((sum, i) => sum + (i.total - i.amount_paid), 0);
+            .filter(i => i.status === 'approved' || i.status === 'partial')
+            .reduce((sum, i) => sum + i.amount_open_cents, 0);
 
         const pendingApproval = this.invoices
-            .filter(i => i.status === 'PENDING')
-            .reduce((sum, i) => sum + i.total, 0);
+            .filter(i => i.status === 'pending')
+            .reduce((sum, i) => sum + i.total_cents, 0);
 
-        const pendingApprovalCount = this.invoices.filter(i => i.status === 'PENDING').length;
+        const pendingApprovalCount = this.invoices.filter(i => i.status === 'pending').length;
 
         // Paid Month-To-Date
         const currentMonth = new Date().getMonth();
@@ -477,23 +519,23 @@ export class AccountsPayable extends LitElement {
                                         <tr class="hover:bg-white/[0.02] transition-colors">
                                             <td class="px-4 py-3 font-semibold text-white">
                                                 <button @click=${() => this._viewInvoiceDetails(inv.id)} class="hover:underline hover:text-emerald-400 text-left font-mono">
-                                                    ${inv.invoice_number}
+                                                    ${inv.vendor_invoice_number}
                                                 </button>
                                             </td>
                                             <td class="px-4 py-3 text-white">${inv.vendor_name || 'Seeded Vendor'}</td>
                                             <td class="px-4 py-3 text-zinc-400 text-xs">${new Date(inv.invoice_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</td>
                                             <td class="px-4 py-3 text-zinc-400 text-xs">${new Date(inv.due_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</td>
-                                            <td class="px-4 py-3 text-right font-mono text-zinc-200">${formatCents(inv.total)}</td>
-                                            <td class="px-4 py-3 text-right font-mono text-zinc-400">${formatCents(inv.amount_paid)}</td>
+                                            <td class="px-4 py-3 text-right font-mono text-zinc-200">${formatCents(inv.total_cents)}</td>
+                                            <td class="px-4 py-3 text-right font-mono text-zinc-400">${formatCents(inv.amount_paid_cents)}</td>
                                             <td class="px-4 py-3 text-center">
                                                 <span class="px-2.5 py-0.5 rounded text-[10px] font-semibold tracking-wider ${this._statusBadgeClass(inv.status)}">
                                                     ${inv.status}
                                                 </span>
                                             </td>
                                             <td class="px-4 py-3 text-right space-x-1">
-                                                ${inv.status === 'PENDING' ? html`
+                                                ${inv.status === 'pending' ? html`
                                                     <button
-                                                        @click=${() => this._handleApproveInvoice(inv.id)}
+                                                        @click=${() => this._handleApproveInvoice(inv)}
                                                         class="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 rounded text-xs transition-colors"
                                                     >
                                                         Approve
@@ -903,13 +945,13 @@ export class AccountsPayable extends LitElement {
                                                         }}
                                                     />
                                                     <div>
-                                                        <span class="text-sm font-semibold text-white font-mono">${inv.invoice_number}</span>
+                                                        <span class="text-sm font-semibold text-white font-mono">${inv.vendor_invoice_number}</span>
                                                         <span class="text-[10px] text-zinc-500 ml-2">Due ${new Date(inv.due_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</span>
                                                     </div>
                                                 </div>
                                                 <div class="text-right">
-                                                    <span class="text-xs font-mono text-zinc-400 block">Balance: ${formatCents(inv.total - inv.amount_paid)}</span>
-                                                    <span class="text-[10px] text-zinc-500 font-mono block">Total bill: ${formatCents(inv.total)}</span>
+                                                    <span class="text-xs font-mono text-zinc-400 block">Balance: ${formatCents(inv.amount_open_cents)}</span>
+                                                    <span class="text-[10px] text-zinc-500 font-mono block">Total bill: ${formatCents(inv.total_cents)}</span>
                                                 </div>
                                             </div>
                                         `)}
@@ -943,7 +985,7 @@ export class AccountsPayable extends LitElement {
                         <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full shadow-2xl animate-in zoom-in-95 duration-200">
                             <div class="flex justify-between items-center p-4 border-b border-white/5 bg-zinc-950/40">
                                 <h3 class="text-base font-semibold text-white flex items-center gap-2">
-                                    ${icon(Info, 18, 'text-emerald-400')} Invoice Details: ${this.selectedInvoice.invoice_number}
+                                    ${icon(Info, 18, 'text-emerald-400')} Invoice Details: ${this.selectedInvoice.vendor_invoice_number}
                                 </h3>
                                 <button
                                     @click=${() => { this.showDetailInvoiceModal = false; }}
@@ -975,19 +1017,19 @@ export class AccountsPayable extends LitElement {
                                     </div>
                                     <div>
                                         <span class="text-xs text-zinc-500 block">Subtotal</span>
-                                        <span class="text-zinc-300 font-mono">${formatCents(this.selectedInvoice.subtotal)}</span>
+                                        <span class="text-zinc-300 font-mono">${formatCents(this.selectedInvoice.subtotal_cents)}</span>
                                     </div>
                                     <div>
                                         <span class="text-xs text-zinc-500 block">Tax Amount</span>
-                                        <span class="text-zinc-300 font-mono">${formatCents(this.selectedInvoice.tax_amount)}</span>
+                                        <span class="text-zinc-300 font-mono">${formatCents(this.selectedInvoice.tax_cents)}</span>
                                     </div>
                                     <div>
                                         <span class="text-xs text-zinc-500 block">Total Amount</span>
-                                        <span class="text-white font-bold font-mono">${formatCents(this.selectedInvoice.total)}</span>
+                                        <span class="text-white font-bold font-mono">${formatCents(this.selectedInvoice.total_cents)}</span>
                                     </div>
                                     <div>
                                         <span class="text-xs text-zinc-500 block">Amount Paid</span>
-                                        <span class="text-emerald-400 font-bold font-mono">${formatCents(this.selectedInvoice.amount_paid)}</span>
+                                        <span class="text-emerald-400 font-bold font-mono">${formatCents(this.selectedInvoice.amount_paid_cents)}</span>
                                     </div>
                                     ${this.selectedInvoice.approved_at ? html`
                                         <div class="col-span-2 border-t border-white/5 pt-2 mt-2">
@@ -1027,8 +1069,8 @@ export class AccountsPayable extends LitElement {
                                                     <tr class="hover:bg-white/[0.02] transition-colors text-zinc-300">
                                                         <td class="px-3 py-2 font-medium">${line.description}</td>
                                                         <td class="px-3 py-2 text-right font-mono">${line.quantity}</td>
-                                                        <td class="px-3 py-2 text-right font-mono">${formatCents(line.unit_price)}</td>
-                                                        <td class="px-3 py-2 text-right font-mono text-zinc-100">${formatCents(line.line_total)}</td>
+                                                        <td class="px-3 py-2 text-right font-mono">${formatPrice4(line.unit_price_ten_thousandths)}</td>
+                                                        <td class="px-3 py-2 text-right font-mono text-zinc-100">${formatCents(line.line_total_cents)}</td>
                                                     </tr>
                                                 `)}
                                             </tbody>
@@ -1038,9 +1080,9 @@ export class AccountsPayable extends LitElement {
 
                                 <!-- Actions Footer -->
                                 <div class="flex justify-end gap-3 border-t border-white/5 pt-4">
-                                    ${this.selectedInvoice.status === 'PENDING' ? html`
+                                    ${this.selectedInvoice.status === 'pending' ? html`
                                         <button
-                                            @click=${() => this._handleApproveInvoice(this.selectedInvoice!.id)}
+                                            @click=${() => this._handleApproveInvoice(this.selectedInvoice!)}
                                             class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold transition-colors"
                                         >
                                             Approve & Post to GL
