@@ -22,11 +22,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/events"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/reporting"
+	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
+	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -58,10 +65,13 @@ type keyPinFixture struct {
 }
 
 // pinKeyScopes opens every route under test: the location writes, the branch
-// directory, the user grants and the exposure surface.
+// directory, the user grants, the exposure surface and the dealer wide reads.
 var pinKeyScopes = []string{
 	"locations:write", "branches:read", "branches:write",
 	"users:read", "users:grants", "quotes:read", "quotes:write", "admin:write",
+	"reports:read", "reporting:read", "reporting:write", "events:read",
+	"gl:read", "gl:write", "ap:read", "bankrecon:read", "sales-team:read",
+	"market-indices:write",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -122,7 +132,8 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)),
 		location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
 
-	// The exposure surface exactly as wireExposure registers it.
+	// The exposure surface exactly as wireExposure registers it (the index
+	// admin surface with the market index refresh comes with it).
 	escRepo := pricing.NewEscalatorRepository(db)
 	exposureRepo := pricing.NewExposureRepository(db)
 	quoteRepo := quote.NewRepository(db)
@@ -139,6 +150,23 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 		Logger:     slog.Default(),
 		AuditLog:   audit.NewLogger(db),
 	})
+
+	// The dealer wide modules exactly as serve registers them: the reporting
+	// surface in its three registrations, the events feed, the GL, AP and bank
+	// reconciliation books and the sales team reads.
+	reportingHandler := reporting.NewHandler(reporting.NewService(reporting.NewRepository(db)))
+	reportingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	wireReportSchedules(mux, reportingHandler, nil)
+	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
+	events.NewHandler(db).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
+	gl.NewHandler(glSvc).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	ap.NewHandler(ap.NewService(db, ap.NewRepository(db), glSvc, slog.Default())).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	bankrecon.NewHandler(bankrecon.NewService(db, bankrecon.NewRepository(db), glSvc, slog.Default())).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	salesteam.NewHandler(salesteam.NewRepository(db)).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	mint := func(name string, branch *uuid.UUID) string {
@@ -289,6 +317,18 @@ func (f *keyPinFixture) allow(t *testing.T, who, method, path, body string, hdr 
 		t.Errorf("%s %s %s: %d %s, want %d", who, method, path, status, buf, want)
 	}
 	return buf
+}
+
+// parity asserts the unbound key and the user keep the same answer on a
+// route: the reach they hold wherever the wall refuses the bound key.
+func (f *keyPinFixture) parity(t *testing.T, method, path, body string) int {
+	t.Helper()
+	sk, _ := f.key(t, f.unbound, method, path, body, nil)
+	su, _ := f.user(t, method, path, body, nil)
+	if sk != su {
+		t.Errorf("unbound key %s %s: %d, user: %d, want the same answer", method, path, sk, su)
+	}
+	return sk
 }
 
 // locState reads a location row's revision, name and active flag.
@@ -593,5 +633,78 @@ func TestKeyBranchPin_ExposureRoutes(t *testing.T) {
 		map[string]string{"X-Branch-Id": f.branchB.String()})
 	if status != http.StatusForbidden {
 		t.Errorf("bound key with foreign X-Branch-Id: %d %s, want 403", status, buf)
+	}
+}
+
+// TestKeyBranchPin_DealerWideReads holds the pin on the dealer wide surface:
+// every reporting route, the events feed, the two exposure lists, the GL, AP,
+// bank reconciliation and sales team reads, the known users list and the
+// market index refresh refuse a branch bound key outright with their audit
+// row, while the unbound key and the user keep the same answer as each other
+// on every route, and the GL writes (no branch fact, outside the ruling) keep
+// their reach for every principal alike.
+func TestKeyBranchPin_DealerWideReads(t *testing.T) {
+	f := newKeyPinFixture(t)
+	preview := `{"entity_type":"invoices","definition":{}}`
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/api/v1/reports/sales-summary", ""},
+		{"GET", "/api/v1/reports/daily-till", ""},
+		{"GET", "/api/v1/reports/ar-aging", ""},
+		{"GET", "/api/v1/reports/customer-statement/" + f.custID.String(), ""},
+		{"GET", "/api/v1/reporting/export/invoices", ""},
+		{"POST", "/api/v1/reporting/builder/preview", preview},
+		{"POST", "/api/v1/reporting/builder/export", preview},
+		{"GET", "/api/v1/reporting/saved", ""},
+		{"POST", "/api/v1/reporting/saved/" + uuid.NewString() + "/run", ""},
+		{"GET", "/api/v1/reporting/schedules", ""},
+		{"POST", "/api/v1/reporting/schedules", `{"name":"pin"}`},
+		{"GET", "/api/v1/events", ""},
+		{"GET", "/api/v1/quotes/exposure", ""},
+		{"GET", "/api/v1/reports/exposure", ""},
+		{"GET", "/api/v1/gl/accounts", ""},
+		{"GET", "/api/v1/gl/journal-entries", ""},
+		{"GET", "/api/v1/gl/journal-entries/" + uuid.NewString(), ""},
+		{"GET", "/api/v1/gl/trial-balance", ""},
+		{"GET", "/api/v1/gl/profit-and-loss", ""},
+		{"GET", "/api/v1/gl/balance-sheet", ""},
+		{"GET", "/api/v1/gl/fiscal-periods", ""},
+		{"GET", "/api/v1/ap/invoices", ""},
+		{"GET", "/api/v1/ap/payments", ""},
+		{"GET", "/api/v1/ap/aging", ""},
+		{"GET", "/api/v1/bankrecon/accounts", ""},
+		{"GET", "/api/v1/bankrecon/sessions", ""},
+		{"GET", "/api/v1/sales-team", ""},
+		{"GET", "/api/v1/sales-team/" + uuid.NewString(), ""},
+		{"GET", "/api/v1/users", ""},
+		{"POST", "/api/v1/market-indices/" + uuid.NewString() + "/refresh", ""},
+	} {
+		f.refuseForeign(t, c.method, c.path, c.body, nil)
+		f.parity(t, c.method, c.path, c.body)
+	}
+
+	// The reads that answer data keep answering it to the unbound key: the
+	// summaries and lists the second review read branch B rows through.
+	for _, path := range []string{
+		"/api/v1/reports/sales-summary", "/api/v1/reports/ar-aging",
+		"/api/v1/reports/customer-statement/" + f.custID.String(),
+		"/api/v1/events", "/api/v1/quotes/exposure", "/api/v1/gl/accounts",
+		"/api/v1/ap/invoices", "/api/v1/sales-team", "/api/v1/users",
+	} {
+		if sk := f.parity(t, "GET", path, ""); sk != http.StatusOK {
+			t.Errorf("unbound key GET %s: %d, want 200", path, sk)
+		}
+	}
+
+	// The GL writes carry no branch fact and are outside the ruling: every
+	// principal meets the same module answer, none a wall refusal.
+	body := `{"name":"pin wall probe"}`
+	sk, _ := f.key(t, f.unbound, "POST", "/api/v1/gl/accounts", body, nil)
+	su, _ := f.user(t, "POST", "/api/v1/gl/accounts", body, nil)
+	sb, bb := f.key(t, f.bound, "POST", "/api/v1/gl/accounts", body, nil)
+	if sk != su || sb != sk {
+		t.Errorf("POST /api/v1/gl/accounts: unbound %d, user %d, bound %d (%s), want one answer", sk, su, sb, bb)
+	}
+	if sb == http.StatusForbidden && strings.Contains(string(bb), "branch bound key") {
+		t.Errorf("POST /api/v1/gl/accounts: the GL writes are outside the ruling and must not hit the wall: %s", bb)
 	}
 }
