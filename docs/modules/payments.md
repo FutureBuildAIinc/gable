@@ -64,8 +64,9 @@ Every route below is in `core/api/fragments/payment.yaml`,
 `core/internal/payment/handler.go`,
 `core/internal/account/handler.go` and
 `core/internal/invoice/handler.go`, and the route census
-(`core/api/ROUTES.txt`) lists each one under the package named in
-the `package` column.
+(`core/api/ROUTES.txt`) lists each one under the module named in
+the `module` column (the column carries the registering package
+directory).
 
 | Method | Path | One line |
 |---|---|---|
