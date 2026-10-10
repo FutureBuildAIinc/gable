@@ -152,6 +152,21 @@ func (f *fixture) countEvents(t *testing.T, entity uuid.UUID, typ string) int {
 	return n
 }
 
+// countEventsForEntities reads the events_outbox row count for two
+// entities combined, regardless of type. Used by the exposure
+// refusal test to assert the refused attempt writes no event of any
+// type (PR 80 review round 1 P3-2: the previous check asserted
+// delivery.assigned only and a non-named event would slip past).
+func (f *fixture) countEventsForEntities(t *testing.T, a, b uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM events_outbox WHERE entity_id IN ($1, $2)`, a, b).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 // countAudit reads the audit_log row count for one entity.
 func (f *fixture) countAudit(t *testing.T, entity uuid.UUID) int {
 	t.Helper()
@@ -194,6 +209,13 @@ func (f *fixture) detailsByFieldAndCode(t *testing.T, r resp) []map[string]strin
 func TestAssign_ExposureGateRefusalAnswers409(t *testing.T) {
 	f := newDefectFixture(t)
 	route, order := f.seedUnresolvedExposureOrder(t)
+
+	// PR 80 review round 1 P3-2: take a baseline of every event row
+	// for these entities, then assert the post-call delta is zero.
+	// The previous check only watched one named type
+	// (delivery.assigned) and would have missed a stray event of
+	// any other type that the refused attempt wrote.
+	beforeEvents := f.countEventsForEntities(t, route, order)
 
 	res := f.assignOrder(t, route, order, nil)
 	if res.status != http.StatusConflict {
@@ -238,9 +260,9 @@ func TestAssign_ExposureGateRefusalAnswers409(t *testing.T) {
 	if got := f.countStops(t, route); got != 0 {
 		t.Errorf("%d stops written despite a 409 refusal", got)
 	}
-	if got := f.countEvents(t, route, "delivery.assigned") +
-		f.countEvents(t, order, "delivery.assigned"); got != 0 {
-		t.Errorf("delivery.assigned events = %d, want 0", got)
+	// The total events_outbox delta over (route, order) is zero.
+	if got := f.countEventsForEntities(t, route, order) - beforeEvents; got != 0 {
+		t.Errorf("events_outbox delta = %d, want 0 (a refused assign must not write any event of any type)", got)
 	}
 	if got := f.countAudit(t, route) + f.countAudit(t, order); got != 0 {
 		t.Errorf("audit rows = %d, want 0", got)
