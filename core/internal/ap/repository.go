@@ -426,7 +426,9 @@ func (r *Repository) CreatePaymentApplication(ctx context.Context, app *APPaymen
 // ListPayments lists a vendor's payments, newest first. The branch wall rides
 // it through the bills a payment applies to: a payment only the caller's wall
 // cannot see (every bill it touched is another branch's) is not the caller's
-// to read.
+// to read. A caller with no wall (an administrator without a header, an
+// unbound key, a single branch install) reads every payment, one with no
+// application rows included (the base wrote those for an on account payment).
 func (r *Repository) ListPayments(ctx context.Context, vendorID *uuid.UUID) ([]APPayment, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT p.id, p.vendor_id, COALESCE(v.name, '') as vendor_name,
@@ -435,9 +437,10 @@ func (r *Repository) ListPayments(ctx context.Context, vendorID *uuid.UUID) ([]A
 		FROM ap_payments p
 		LEFT JOIN vendors v ON v.id = p.vendor_id
 		WHERE ($1::uuid IS NULL OR p.vendor_id = $1)
-		  AND EXISTS (SELECT 1 FROM ap_payment_applications a
+		  AND (($2::uuid IS NULL AND $3::text IS NULL)
+		       OR EXISTS (SELECT 1 FROM ap_payment_applications a
 		              JOIN vendor_invoices vi ON vi.id = a.invoice_id
-		              WHERE a.payment_id = p.id AND `+wall("vi", 2, 3)+`)
+		              WHERE a.payment_id = p.id AND `+wall("vi", 2, 3)+`))
 		ORDER BY p.created_at DESC, p.id DESC`,
 		vendorID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {

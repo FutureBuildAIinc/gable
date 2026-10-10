@@ -908,6 +908,14 @@ func TestWire_BranchWall(t *testing.T) {
 	if pa := f.pay(400, id); pa.status != http.StatusCreated {
 		t.Fatalf("the administrator's payment on the foreign bill = %d: %s", pa.status, pa.raw)
 	}
+	// A legacy payment with no application rows (the base wrote one whenever
+	// invoice_ids was empty, and left the rest of an amount unapplied): the
+	// wall filters a payment only through the bills it applied to, so a walled
+	// caller cannot see it, but an unwalled caller must (an administrator with
+	// no header, an unbound key, and every caller while the single branch
+	// switch is off).
+	mustExec(t, f.db, `INSERT INTO ap_payments (id, vendor_id, amount, method, payment_date, status, created_at)
+		VALUES ($1, $2, 1.23, 'CHECK', '2026-01-14', 'COMPLETE', NOW())`, uuid.New(), f.vendor)
 	if got, want := f.controlBalance(), f.openSum(); got != want {
 		t.Fatalf("after the payment on the foreign bill: control %d, open %d", got, want)
 	}
@@ -952,12 +960,14 @@ func TestWire_BranchWall(t *testing.T) {
 			t.Errorf("a payment on another branch's bill for %s = %d, want 400", name, pr.status)
 		}
 	}
-	// Unwalled, both reads carry the other branch's bill and its payment.
+	// Unwalled, both reads carry the other branch's bill and its payment, and
+	// the payments list carries the applicationless legacy payment too: an
+	// open wall lists every payment.
 	if got := agingTotal(); got != 1610 {
 		t.Errorf("the unwalled aging total = %d, want every branch's 1610 cents", got)
 	}
-	if pl := f.do("GET", "/api/v1/ap/payments?vendor_id="+f.vendor.String(), nil); strings.Count(string(pl.raw), `"id"`) != 1 {
-		t.Errorf("the unwalled payments list = %s, want the one payment", pl.raw)
+	if pl := f.do("GET", "/api/v1/ap/payments?vendor_id="+f.vendor.String(), nil); strings.Count(string(pl.raw), `"id"`) != 2 {
+		t.Errorf("the unwalled payments list = %s, want the applied payment and the applicationless legacy one", pl.raw)
 	}
 }
 
