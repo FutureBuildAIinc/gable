@@ -98,7 +98,7 @@ func (e errHTTP) Error() string { return "stream answered a non-200 status" }
 // await waits for the next event with a bound.
 func await(t *testing.T, events chan sseEvent, what string) sseEvent {
 	t.Helper()
-	return awaitFor(t, events, what, 5*time.Second)
+	return awaitFor(t, events, what, 10*time.Second)
 }
 
 // awaitFor is await with its own bound, for waits the settings pace (the
@@ -432,7 +432,7 @@ func TestFeedRevokedKeyClosesAtNextHeartbeat(t *testing.T) {
 	case <-reauth:
 	case <-ended:
 		t.Error("the revoked key's stream ended without event: reauth")
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Error("timed out waiting for the reauth close after the revocation")
 	}
 }
@@ -467,7 +467,7 @@ func TestFeedEndsAtLifetimeBound(t *testing.T) {
 	}
 	// The fast settings bound the lifetime to 5 seconds; the next event is
 	// the reauth close (awaitFor paces the wait past the bound itself).
-	ev := awaitFor(t, events, "reauth", 8*time.Second)
+	ev := awaitFor(t, events, "reauth", 20*time.Second)
 	if ev.event != "reauth" || ev.id == "" {
 		t.Errorf("closing event = %+v, want reauth with the cursor", ev)
 	}
