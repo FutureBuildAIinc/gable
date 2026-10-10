@@ -15,6 +15,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -134,13 +135,39 @@ type Guards struct {
 // link routes exist (the same reasoning as the drafts kinds' literal
 // routes). Each route sits behind its module's own read guard.
 func RegisterAll(mux *http.ServeMux, h *Handler, g Guards) {
-	mux.HandleFunc("GET /api/v1/links/quotes/{id}", Guarded(g.Quotes, h.resolveFor("quotes", false)))
-	mux.HandleFunc("GET /api/v1/links/orders/{id}", Guarded(g.Orders, h.resolveFor("orders", false)))
-	mux.HandleFunc("GET /api/v1/links/invoices/{id}", Guarded(g.Invoices, h.resolveFor("invoices", false)))
-	mux.HandleFunc("GET /api/v1/links/customers/{id}", Guarded(g.Customers, h.resolveFor("customers", false)))
-	mux.HandleFunc("GET /api/v1/links/products/{id}", Guarded(g.Products, h.resolveFor("products", false)))
-	mux.HandleFunc("GET /api/v1/links/drafts/quotes/{id}", Guarded(g.DraftQuotes, h.resolveFor("quotes", true)))
-	mux.HandleFunc("GET /api/v1/links/drafts/orders/{id}", Guarded(g.DraftOrders, h.resolveFor("orders", true)))
+	RegisterOne(mux, h, "quotes", false, g.Quotes)
+	RegisterOne(mux, h, "orders", false, g.Orders)
+	RegisterOne(mux, h, "invoices", false, g.Invoices)
+	RegisterOne(mux, h, "customers", false, g.Customers)
+	RegisterOne(mux, h, "products", false, g.Products)
+	RegisterOne(mux, h, "quotes", true, g.DraftQuotes)
+	RegisterOne(mux, h, "orders", true, g.DraftOrders)
+}
+
+// RegisterOne registers one module's link route behind the given guard:
+// /api/v1/links/<module>/{id} for an entity, and
+// /api/v1/links/drafts/<module>/{id} for a draft kind. The patterns are
+// literal, one per module, so the census resolves them wherever this is
+// called from.
+func RegisterOne(mux *http.ServeMux, h *Handler, module string, draft bool, guard func(http.Handler) http.Handler) {
+	switch module + "/" + strconv.FormatBool(draft) {
+	case "quotes/false":
+		mux.HandleFunc("GET /api/v1/links/quotes/{id}", Guarded(guard, h.resolveFor("quotes", false)))
+	case "orders/false":
+		mux.HandleFunc("GET /api/v1/links/orders/{id}", Guarded(guard, h.resolveFor("orders", false)))
+	case "invoices/false":
+		mux.HandleFunc("GET /api/v1/links/invoices/{id}", Guarded(guard, h.resolveFor("invoices", false)))
+	case "customers/false":
+		mux.HandleFunc("GET /api/v1/links/customers/{id}", Guarded(guard, h.resolveFor("customers", false)))
+	case "products/false":
+		mux.HandleFunc("GET /api/v1/links/products/{id}", Guarded(guard, h.resolveFor("products", false)))
+	case "quotes/true":
+		mux.HandleFunc("GET /api/v1/links/drafts/quotes/{id}", Guarded(guard, h.resolveFor("quotes", true)))
+	case "orders/true":
+		mux.HandleFunc("GET /api/v1/links/drafts/orders/{id}", Guarded(guard, h.resolveFor("orders", true)))
+	default:
+		panic("links: no link route for " + module)
+	}
 }
 
 // resolveFor answers the named entity's link route, from the bound list.
