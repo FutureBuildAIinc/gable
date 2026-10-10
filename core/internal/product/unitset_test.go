@@ -508,6 +508,42 @@ func TestUnitSetStockingUnitChangeKeepsTheNamedDefaults(t *testing.T) {
 	}
 }
 
+// TestUnitSetPutAnswerCarriesTheBoardMeasureFacts proves the PUT's answer is
+// the same document the GET serves: the board measure facts (thickness,
+// width, length, random_length) read from the product row the write locked,
+// not the zero values the answer literal left them at.
+func TestUnitSetPutAnswerCarriesTheBoardMeasureFacts(t *testing.T) {
+	f := newSetFixture(t)
+	fixed, rev := f.createBoard(map[string]any{
+		"board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
+	})
+	res := f.putUnits(fixed, unitsBody(rev, "PCS", "PCS", "PCS", "PCS", []any{
+		unitRow("PCS", true, true, true),
+		unitRow("LF", true, false, false),
+	}))
+	if res.status != http.StatusOK {
+		t.Fatalf("the 2x4x8 PUT = %d: %s", res.status, res.raw)
+	}
+	if res.body["board_thickness_in"] != "2" || res.body["board_width_in"] != "4" ||
+		res.body["board_length_ft"] != "8" || res.body["random_length"] != false {
+		t.Errorf("the PUT answer carries the board measure facts, got %s", res.raw)
+	}
+	// A random length product's answer carries its facts too.
+	random, rrev := f.createBoard(map[string]any{
+		"stock_uom": "LF", "board_thickness_in": "2", "board_width_in": "4", "random_length": true,
+	})
+	res = f.putUnits(random, unitsBody(rrev, "LF", "LF", "LF", "LF", []any{
+		unitRow("LF", true, true, true),
+	}))
+	if res.status != http.StatusOK {
+		t.Fatalf("the random length PUT = %d: %s", res.status, res.raw)
+	}
+	if res.body["board_thickness_in"] != "2" || res.body["board_width_in"] != "4" ||
+		res.body["board_length_ft"] != nil || res.body["random_length"] != true {
+		t.Errorf("the random length PUT answer carries its facts, got %s", res.raw)
+	}
+}
+
 // TestUnitSetStockingUnitComesFromStockUOM proves the stocking unit the PUT
 // stores is the request's stock_uom, never the first (1, 1) row of the set:
 // a set carrying two (1, 1) rows (EA and PCS, the natural fastener set)

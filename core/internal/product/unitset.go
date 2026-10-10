@@ -281,10 +281,14 @@ func (s *Service) ReplaceUnitSet(ctx context.Context, id uuid.UUID, req *PutUnit
 		if err := s.recordEvent(ctx, id, cur.SKU, newRevision, EventProductUpdated, "units"); err != nil {
 			return err
 		}
+		// The answer is the same document the GET serves: the facts the
+		// write read under its lock come back beside the replaced set.
 		out = &UnitSetDoc{
 			ProductID: id, StockUOM: req.StockUOM,
 			SaleUOM: req.SaleUOM, PriceUOM: req.PriceUOM, PurchaseUOM: req.PurchaseUOM,
-			BasePrice: cur.BasePrice, Units: rows, Revision: newRevision,
+			BasePrice:        cur.BasePrice,
+			BoardThicknessIn: cur.BoardThick, BoardWidthIn: cur.BoardWidth, BoardLengthFT: cur.BoardLength,
+			RandomLength: cur.RandomLength, Units: rows, Revision: newRevision,
 		}
 		if warnings == nil {
 			warnings = []units.Warning{}
