@@ -54,9 +54,9 @@ export class GableRouteListComponent extends LitElement {
     }
   }
 
-  private _selectRoute(routeId: string, vehicleId?: string, routeStatus?: RouteStatus) {
+  private _selectRoute(routeId: string, vehicleId?: string, routeStatus?: RouteStatus, routeRevision?: number) {
     this.dispatchEvent(new CustomEvent('select-route', {
-      detail: { routeId, vehicleId, routeStatus },
+      detail: { routeId, vehicleId, routeStatus, routeRevision },
       bubbles: true,
       composed: true,
     }));
@@ -84,7 +84,7 @@ export class GableRouteListComponent extends LitElement {
             const isSelected = this.selectedRouteId === route.id;
             return html`
               <div
-                @click=${() => this._selectRoute(route.id, route.vehicle_id, route.status)}
+                @click=${() => this._selectRoute(route.id, route.vehicle_id, route.status, route.revision)}
                 class="p-4 rounded-lg border transition-all duration-200 cursor-pointer group relative overflow-hidden ${isSelected
                   ? 'bg-gable-green/10 border-gable-green/50 shadow-[0_0_15px_rgba(0,255,163,0.1)]'
                   : 'bg-[#161821] border-white/5 hover:border-white/20 hover:bg-white/5'

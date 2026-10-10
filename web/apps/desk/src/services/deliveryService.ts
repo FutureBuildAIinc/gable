@@ -61,18 +61,17 @@ export const deliveryService = {
     getVehicle: async (id: string): Promise<Vehicle> =>
         (await call<Vehicle>(`/api/v1/delivery/vehicles/${id}`)).body,
 
-    /** The write sends the vehicle's current revision as If-Match; a stale one throws and the caller reloads. */
-    updateVehicle: async (id: string, req: UpdateVehicleRequest): Promise<Vehicle> => {
-        const current = await deliveryService.getVehicle(id);
+    /** The write sends the revision the edit form loaded; a stale one throws and the caller reloads.
+     *  A fresh re-read here would defeat the revision the user was editing on. */
+    updateVehicle: async (id: string, req: UpdateVehicleRequest, currentRevision: number): Promise<Vehicle> => {
         return (await call<Vehicle>(`/api/v1/delivery/vehicles/${id}`,
-            jsonInit('PUT', req, { 'If-Match': `"${current.revision}"` }))).body;
+            jsonInit('PUT', { ...req, revision: currentRevision }))).body;
     },
 
-    deleteVehicle: async (id: string): Promise<void> => {
-        const current = await deliveryService.getVehicle(id);
+    deleteVehicle: async (id: string, currentRevision: number): Promise<void> => {
         await call<void>(`/api/v1/delivery/vehicles/${id}`, {
             method: 'DELETE',
-            headers: { 'If-Match': `"${current.revision}"` },
+            headers: { 'If-Match': `"${currentRevision}"` },
         });
     },
 
@@ -93,17 +92,15 @@ export const deliveryService = {
     getDriver: async (id: string): Promise<Driver> =>
         (await call<Driver>(`/api/v1/delivery/drivers/${id}`)).body,
 
-    updateDriver: async (id: string, req: UpdateDriverRequest): Promise<Driver> => {
-        const current = await deliveryService.getDriver(id);
+    updateDriver: async (id: string, req: UpdateDriverRequest, currentRevision: number): Promise<Driver> => {
         return (await call<Driver>(`/api/v1/delivery/drivers/${id}`,
-            jsonInit('PUT', req, { 'If-Match': `"${current.revision}"` }))).body;
+            jsonInit('PUT', { ...req, revision: currentRevision }))).body;
     },
 
-    deleteDriver: async (id: string): Promise<void> => {
-        const current = await deliveryService.getDriver(id);
+    deleteDriver: async (id: string, currentRevision: number): Promise<void> => {
         await call<void>(`/api/v1/delivery/drivers/${id}`, {
             method: 'DELETE',
-            headers: { 'If-Match': `"${current.revision}"` },
+            headers: { 'If-Match': `"${currentRevision}"` },
         });
     },
 
@@ -133,28 +130,27 @@ export const deliveryService = {
     getRoute: async (id: string): Promise<Route> =>
         (await call<Route>(`/api/v1/delivery/routes/${id}`)).body,
 
-    /** A route transition (dispatch or complete) on the route's current revision. */
-    transitionRoute: async (id: string, to: 'in_transit' | 'completed'): Promise<Route> => {
-        const current = await deliveryService.getRoute(id);
+    /** A route transition (dispatch or complete) on the revision the caller loaded. */
+    transitionRoute: async (id: string, to: 'in_transit' | 'completed', currentRevision: number): Promise<Route> => {
         return (await call<Route>(`/api/v1/delivery/routes/${id}/transitions`,
-            jsonInit('POST', { to, revision: current.revision }))).body;
+            jsonInit('POST', { to, revision: currentRevision }))).body;
     },
 
-    dispatchRoute: async (id: string): Promise<Route> => deliveryService.transitionRoute(id, 'in_transit'),
+    dispatchRoute: async (id: string, currentRevision: number): Promise<Route> =>
+        deliveryService.transitionRoute(id, 'in_transit', currentRevision),
 
-    completeRoute: async (id: string): Promise<Route> => deliveryService.transitionRoute(id, 'completed'),
+    completeRoute: async (id: string, currentRevision: number): Promise<Route> =>
+        deliveryService.transitionRoute(id, 'completed', currentRevision),
 
-    reorderStops: async (routeId: string, orderedDeliveryIds: string[]): Promise<Route> => {
-        const current = await deliveryService.getRoute(routeId);
+    reorderStops: async (routeId: string, orderedDeliveryIds: string[], currentRevision: number): Promise<Route> => {
         return (await call<Route>(`/api/v1/delivery/routes/${routeId}/reorder`,
             jsonInit('POST', { ordered_delivery_ids: orderedDeliveryIds },
-                { 'If-Match': `"${current.revision}"` }))).body;
+                { 'If-Match': `"${currentRevision}"` }))).body;
     },
 
-    optimizeRoute: async (routeId: string): Promise<Route> => {
-        const current = await deliveryService.getRoute(routeId);
+    optimizeRoute: async (routeId: string, currentRevision: number): Promise<Route> => {
         return (await call<Route>(`/api/v1/delivery/routes/${routeId}/optimize`,
-            { method: 'POST', headers: { 'If-Match': `"${current.revision}"` } })).body;
+            { method: 'POST', headers: { 'If-Match': `"${currentRevision}"` } })).body;
     },
 
     // Stops
@@ -168,11 +164,10 @@ export const deliveryService = {
     assignOrder: async (req: AssignOrderRequest): Promise<AssignOrderResult> =>
         (await call<AssignOrderResult>('/api/v1/delivery/deliveries', jsonInit('POST', req))).body,
 
-    /** Completes a stop on its current revision; a stale one throws and the caller reloads. */
-    updateStatus: async (id: string, req: TransitionDeliveryRequest): Promise<Delivery> => {
-        const current = await deliveryService.getDelivery(id);
+    /** Completes a stop on the revision the caller loaded; a stale one throws and the caller reloads. */
+    updateStatus: async (id: string, req: TransitionDeliveryRequest, currentRevision: number): Promise<Delivery> => {
         return (await call<Delivery>(`/api/v1/delivery/deliveries/${id}/transitions`,
-            jsonInit('POST', { ...req, revision: current.revision }))).body;
+            jsonInit('POST', { ...req, revision: currentRevision }))).body;
     },
 
     uploadPODPhoto: async (deliveryId: string, file: File, photoType: string = 'site'): Promise<{ id: string; photo_url: string }> => {

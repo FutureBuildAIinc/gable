@@ -171,7 +171,7 @@ export class DeliveryDetail extends LitElement {
                 to: this.status,
                 pod_proof_url: proofUrl,
                 pod_signed_by: this.signedBy || 'Unknown',
-            });
+            }, this.delivery.revision);
 
             this.showPODModal = false;
             this.podPhotos.forEach(p => URL.revokeObjectURL(p.preview));

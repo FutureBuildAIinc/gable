@@ -150,7 +150,11 @@ export class FleetManagement extends LitElement {
     this._vSaving = true;
     try {
       if (this._vehicleModalVehicle) {
-        await deliveryService.updateVehicle(this._vehicleModalVehicle.id, this._vForm as UpdateVehicleRequest);
+        // The edit form loaded the vehicle once and carries its revision.
+        // A fresh re-read here would defeat the revision the user was
+        // editing on (PR 70 review round 1 P3-1: a stale form silently
+        // overwrites a newer change).
+        await deliveryService.updateVehicle(this._vehicleModalVehicle.id, this._vForm as UpdateVehicleRequest, this._vehicleModalVehicle.revision);
       } else {
         await deliveryService.createVehicle(this._vForm);
       }
@@ -163,7 +167,7 @@ export class FleetManagement extends LitElement {
     if (!this._vehicleModalVehicle || !confirm('Delete this vehicle? This action cannot be undone.')) return;
     this._vDeleting = true;
     try {
-      await deliveryService.deleteVehicle(this._vehicleModalVehicle.id);
+      await deliveryService.deleteVehicle(this._vehicleModalVehicle.id, this._vehicleModalVehicle.revision);
       this._onSaved();
       this._closeVehicleModal();
     } catch { ToastService.error('Failed to delete vehicle'); } finally { this._vDeleting = false; }
@@ -220,7 +224,7 @@ export class FleetManagement extends LitElement {
     this._dSaving = true;
     try {
       if (this._driverModalDriver) {
-        await deliveryService.updateDriver(this._driverModalDriver.id, this._dForm as UpdateDriverRequest);
+        await deliveryService.updateDriver(this._driverModalDriver.id, this._dForm as UpdateDriverRequest, this._driverModalDriver.revision);
       } else {
         await deliveryService.createDriver(this._dForm as CreateDriverRequest);
       }
@@ -233,7 +237,7 @@ export class FleetManagement extends LitElement {
     if (!this._driverModalDriver || !confirm('Remove this driver? This action cannot be undone.')) return;
     this._dDeleting = true;
     try {
-      await deliveryService.deleteDriver(this._driverModalDriver.id);
+      await deliveryService.deleteDriver(this._driverModalDriver.id, this._driverModalDriver.revision);
       this._onSaved();
       this._closeDriverModal();
     } catch { ToastService.error('Failed to delete driver'); } finally { this._dDeleting = false; }

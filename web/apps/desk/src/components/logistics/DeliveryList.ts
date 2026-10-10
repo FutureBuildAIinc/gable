@@ -20,6 +20,7 @@ export class GableDeliveryList extends LitElement {
   @property({ type: String, attribute: 'route-id' }) routeId: string | null = null;
   @property({ type: String, attribute: 'vehicle-id' }) vehicleId = '';
   @property({ type: String, attribute: 'route-status' }) routeStatus?: RouteStatus;
+  @property({ type: Number, attribute: 'route-revision' }) routeRevision = 0;
 
   @state() private _deliveries: Delivery[] = [];
   @state() private _loading = false;
@@ -67,7 +68,8 @@ export class GableDeliveryList extends LitElement {
 
     this._reordering = true;
     try {
-      await deliveryService.reorderStops(this.routeId, reordered.map(d => d.id));
+      const result = await deliveryService.reorderStops(this.routeId, reordered.map(d => d.id), this.routeRevision);
+      this.routeRevision = result.revision;
       this._deliveries = reordered;
       this._fireDeliveriesChange(reordered);
     } catch {
@@ -82,7 +84,8 @@ export class GableDeliveryList extends LitElement {
     const reversed = [...this._deliveries].reverse();
     this._reordering = true;
     try {
-      await deliveryService.reorderStops(this.routeId, reversed.map(d => d.id));
+      const result = await deliveryService.reorderStops(this.routeId, reversed.map(d => d.id), this.routeRevision);
+      this.routeRevision = result.revision;
       this._deliveries = reversed;
       this._fireDeliveriesChange(reversed);
       ToastService.show('Route order reversed', 'success');
@@ -97,7 +100,8 @@ export class GableDeliveryList extends LitElement {
     if (!this.routeId || this._deliveries.length < 2) return;
     this._optimizing = true;
     try {
-      const result = await deliveryService.optimizeRoute(this.routeId);
+      const result = await deliveryService.optimizeRoute(this.routeId, this.routeRevision);
+      this.routeRevision = result.revision;
       // The backend persists the new stop order + ETAs; reload to reflect it.
       await this._loadDeliveries(this.routeId);
       const miles = result.total_distance_miles?.toFixed(1) ?? '0.0';
@@ -113,7 +117,8 @@ export class GableDeliveryList extends LitElement {
   private async _dispatchRoute() {
     if (!this.routeId) return;
     try {
-      await deliveryService.dispatchRoute(this.routeId);
+      const result = await deliveryService.dispatchRoute(this.routeId, this.routeRevision);
+      this.routeRevision = result.revision;
       ToastService.show('Route dispatched -- driver notified', 'success');
     } catch {
       ToastService.show('Failed to dispatch route', 'error');
@@ -124,7 +129,8 @@ export class GableDeliveryList extends LitElement {
     if (!this.routeId) return;
     this._completing = true;
     try {
-      await deliveryService.completeRoute(this.routeId);
+      const result = await deliveryService.completeRoute(this.routeId, this.routeRevision);
+      this.routeRevision = result.revision;
       ToastService.show('Route marked as completed', 'success');
     } catch {
       ToastService.show('Failed to complete route -- ensure all deliveries have a terminal status', 'error');
