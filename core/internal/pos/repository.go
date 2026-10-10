@@ -58,6 +58,9 @@ type Repository interface {
 	InvoiceLineCosts(ctx context.Context, invoiceID uuid.UUID) ([]InvoiceLineCost, error)
 
 	// Till sessions
+	// LockTillSession locks a session row (FOR SHARE for the acts that live
+	// in it, FOR UPDATE for the close), inside the caller's transaction.
+	LockTillSession(ctx context.Context, id uuid.UUID, forUpdate bool) error
 	CreateTillSession(ctx context.Context, s *TillSession) error
 	GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error)
 	GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error)

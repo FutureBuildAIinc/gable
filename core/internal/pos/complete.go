@@ -306,6 +306,22 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		if sale.Status != StatusOpen && sale.Status != StatusHeld {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot complete a %s sale", sale.Status.Status()))
 		}
+		// The session the sale lives in, FOR SHARE against the close's FOR
+		// UPDATE: a sale never completes into a drawer being counted; after
+		// the close the money has been counted and the way back is a return.
+		if sale.TillSessionID != nil {
+			if err := s.repo.LockTillSession(ctx, *sale.TillSessionID, false); err != nil {
+				return err
+			}
+			session, err := s.repo.GetTillSession(ctx, *sale.TillSessionID)
+			if err != nil {
+				return err
+			}
+			if session.Status != TillOpen {
+				return conflict("session_closed",
+					"the till session this sale was made in is closed: the money has been counted and the sale cannot complete into it")
+			}
+		}
 		lines, err := s.repo.GetLines(ctx, saleID)
 		if err != nil {
 			return err

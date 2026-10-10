@@ -116,6 +116,12 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByMethod map[string]int64, notes, actor string) (*TillReport, error) {
 	var out *TillReport
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		// The session row first, FOR UPDATE: a completion or a void holding
+		// it FOR SHARE waits here, so the aggregate below counts every sale
+		// that landed and no sale lands while the drawer is being counted.
+		if err := s.repo.LockTillSession(ctx, sessionID, true); err != nil {
+			return err
+		}
 		report, err := s.TillReport(ctx, sessionID)
 		if err != nil {
 			return err

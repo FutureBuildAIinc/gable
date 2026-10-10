@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -57,6 +58,24 @@ func (r *PostgresRepository) scanTillSession(row pgx.Row) (*TillSession, error) 
 
 const tillCols = `id, register_id, branch_id, cashier_id, status, ROUND(opening_float * 100)::bigint, opened_at, closed_at,
 	expected_by_method, counted_by_method, over_short_cents, gl_entry_id, notes`
+
+// LockTillSession locks a session row inside the caller's transaction: the
+// completion and the void take it FOR SHARE (the close's FOR UPDATE then
+// waits for them, so a sale never lands in a drawer being counted), the
+// close takes it FOR UPDATE before it aggregates. The branch wall applies.
+func (r *PostgresRepository) LockTillSession(ctx context.Context, id uuid.UUID, forUpdate bool) error {
+	mode := "FOR SHARE"
+	if forUpdate {
+		mode = "FOR UPDATE"
+	}
+	var one int
+	err := r.ex(ctx).QueryRow(ctx, `SELECT 1 FROM till_sessions WHERE id = $1
+		AND ($2::uuid IS NULL OR branch_id = $2) `+mode, id, branchctx.IDForQuery(ctx)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("till session not found")
+	}
+	return err
+}
 
 func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error) {
 	s, err := r.scanTillSession(r.ex(ctx).QueryRow(ctx, `SELECT `+tillCols+` FROM (

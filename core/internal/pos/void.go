@@ -117,6 +117,22 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			return conflict("has_returns",
 				"this sale has been returned against: return the rest through POST /pos/returns instead of voiding it")
 		}
+		// The session, rechecked under its FOR SHARE lock against the
+		// close's FOR UPDATE: once the drawer is counted the way back is a
+		// return, never a void into a closed session.
+		if sale.TillSessionID != nil {
+			if err := s.repo.LockTillSession(ctx, *sale.TillSessionID, false); err != nil {
+				return err
+			}
+			session, err := s.repo.GetTillSession(ctx, *sale.TillSessionID)
+			if err != nil {
+				return err
+			}
+			if session.Status != TillOpen {
+				return conflict("session_closed",
+					"the till session this sale was made in is closed: return the goods through POST /pos/returns instead")
+			}
+		}
 		if sale.InvoiceID == nil {
 			return conflict("no_invoice", "the sale carries no invoice to void")
 		}
