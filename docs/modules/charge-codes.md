@@ -10,7 +10,7 @@ name on a charge line: freight, fuel surcharge, restocking fee, any
 other named fee. A charge code names the revenue general ledger
 account its money posts to (a freight fee posts to freight revenue,
 a restocking fee to fees and charges revenue, and so on); a charge
-line on a quote, order or invoice snapshots that account on its own
+line on an order, invoice or credit memo snapshots that account on its own
 row at create time, so a later edit of the code never moves posted
 revenue ([ADR 0005](../adr/0005-sales-and-money-core.md) section 2.5).
 
@@ -41,9 +41,9 @@ in state delivery, will call, environmentally adjusted pricing, or
 any other fee, and to set `taxable` per jurisdiction.
 
 The dealer's owner or office manager adds a code through
-`POST /charge-codes`; the finance team edits the name and the default
-price without touching the `code` itself or the revenue account it
-points at; an in use code is never deleted, it is flipped inactive
+`POST /charge-codes`; the finance team edits the name, the default
+price and, when needed, the revenue account (a PUT must send
+`revenue_account_code`; only `code` can never change); an in use code is never deleted, it is flipped inactive
 through `is_active`. A charge line takes the code's revenue account
 into its own column at create; a later edit of the code's account or
 name does not change the line.
@@ -56,12 +56,15 @@ handler is `core/internal/chargecode/handler.go`; the route census
 
 | Method | Path | One line |
 |---|---|---|
-| GET | `/api/v1/charge-codes` | The whole master, ordered by code, active rows only unless `include_inactive=true`. |
+| GET | `/api/v1/charge-codes` | The whole master as a bare JSON array (no list envelope, no cursor), ordered by code, active rows only unless `include_inactive=true`. |
 | POST | `/api/v1/charge-codes` | Create a charge code (`code` and `name` and `revenue_account_code` required); `Idempotency-Key` rides the standard header. |
 | GET | `/api/v1/charge-codes/{id}` | One charge code with its revision. |
 | PUT | `/api/v1/charge-codes/{id}` | Replace the name, revenue account, taxable flag, default price and `is_active`; `code` is never accepted (a 400); the revision precondition applies (`If-Match` and `revision`); `Idempotency-Key` rides the standard header. |
 
-The list endpoint is dealer wide (no branch wall). The
+The rows are dealer wide: `charge_codes` carries no `branch_id` and
+no row is filtered by branch. The routes still run behind the branch
+middleware, so with branches switched on a non admin caller names a
+branch the user holds in `X-Branch-Id`, as on other scoped routes. The
 `include_inactive` flag is the only filter; nothing else narrows the
 list because the table is small and the dealer typically carries a
 handful of charge codes.
@@ -92,7 +95,15 @@ body of POST and PUT. On create `code`, `name`, and
 is optional; `code` is checked once with the same pattern as on the
 response. On update `code` is never accepted (a 400 naming `code`);
 `revision` is the body form of the `If-Match` precondition; the
-header form `If-Match: "<revision>"` rides alongside.
+header form `If-Match: "<revision>"` rides alongside, and a PUT with
+neither is a 428. `revision` on a create is a 400.
+
+A PUT replaces every mutable field: send all of them, or `is_active`
+returns to true, `taxable` to false and the default price to null
+(`Parse` and `Update` in `core/internal/chargecode/service.go`). A
+price is never negative, and `revenue_account_code` is one to six
+digits naming an account in the chart (`accountPattern`, and the
+foreign key to `gl_accounts(code)`).
 
 The wire carries the price under `default_unit_price_ten_thousandths`
 at scale 4, ADR 0001 section 7a; the Go side stores it as the
@@ -103,8 +114,8 @@ NUMERIC(12,4)`. The reference for the price convention is
 ## Lifecycle and transitions
 
 A charge code has one row state the wire cares about: `is_active`.
-A code is active on create and stays active until an admin or owner
-flips it through `PUT /charge-codes/{id}` with `is_active: false`.
+A code is active on create and stays active until a writer (admin,
+owner or finance) flips it through `PUT /charge-codes/{id}` with `is_active: false`.
 Inactive codes cannot appear on a new charge line; lines written
 before the flip keep the code on their row and post to the revenue
 account the line snapshotted.
@@ -121,16 +132,16 @@ to a charge code is today read by polling `GET /charge-codes/{id}`
 and diffing the revision. The events vocabulary table is in
 [`docs/modules/events.md`](events.md).
 
-## How a charge code reaches a quote, order or invoice line
+## How a charge code reaches an order, invoice or credit memo line
 
-A quote, order or invoice line that names a charge code names it
+An order, invoice or credit memo line that names a charge code names it
 with the text `code` (the lookup), and the line takes three fields
 from the master at create:
 
 1. `charge_code_id` (UUID) and `charge_code` (text, the lookup code)
    on the line, written from the master row
-   (`core/internal/order/service.go` `applyChargeCode` block at lines
-   269 to 315, the `LineCharge` arm of the line type switch).
+   (`core/internal/order/service.go` `buildLines`, the `LineCharge`
+   case of the line type switch, lines 269 to 315).
 2. `revenue_account_code` on the line, snapshotted from
    `code.RevenueAccountCode` at create (the snapshot:
    `core/internal/order/service.go:285-286`); a later edit of the
@@ -149,7 +160,7 @@ The same fields land on an invoice line through the order
 fulfilment. `order/fulfil.go` builds the invoice lines from the
 order lines and copies every charge field by column, including the
 `ChargeCodeID` it pulls from the order line and the
-`RevenueAccountCode` the line snapshotted (`fulfil.go:551-555`); the
+`RevenueAccountCode` the line snapshotted (`fulfil.go:552-554`, the `FulfilmentLine` literal); the
 invoice repository inserts the line and its foreign key
 (`invoice/repository.go:574` the `INSERT INTO invoice_lines`
 statement and the column list). Migration 092 wires the foreign key
@@ -158,18 +169,20 @@ charge_code_id UUID REFERENCES charge_codes(id)` at
 `092_orders_wire_contract.sql:286`); the invoice side inherits the
 line through the fulfilment's snapshot.
 
-A quote converted into an order moves the line through the same
-machinery (`quote/convert.go` and the order's `applyChargeCode`
-block): the line's `charge_code` text is the lookup key into the
-master, the snapshot happens at the order create, and the
-fulfilment's invoice line reads back the order line.
+A quote has no charge lines. Its header freight becomes one `FREIGHT`
+charge line on the order at conversion (`core/internal/order/service.go`
+`buildFromQuote`, the `FreightCents` block; ADR 0005 section 5.8),
+priced from the freight, so conversion needs the `FREIGHT` code to
+exist.
 
-A credit memo writes a charge line the same way: the credit memos
-table accepts a `charge_code_id` on its lines
-(`invoice/repository.go` the credit memo line insert path), and
-the seeded code `ADJUST` (revenue account `4010`) is the default
-charge line on a credit memo that the migration backfills
-([ADR 0005](../adr/0005-sales-and-money-core.md) section 2.5).
+A credit memo writes a charge line the same way: a free line on a
+credit memo names its own `charge_code` (`core/internal/invoice/input.go`,
+`CreditLineRequest`), and the credit memo lines carry a
+`charge_code_id`. The seeded code `ADJUST` (revenue account `4010`) is
+the code the migration backfilled onto each migrated credit memo, one
+charge line per memo ([ADR 0005](../adr/0005-sales-and-money-core.md)
+section 2.5 and the migration's step 5); it is not a default for new
+credit memos.
 
 ## Scopes, roles and keys
 
@@ -179,13 +192,17 @@ other method (ADR 0002; the scope segment is the first path segment
 under `/api/v1/`; `pkg/middleware/machinekey.go` the scope table at
 the `"charge-codes"` entry).
 
-The user guard at the serve layer is composed of two `scoped(...)`
-calls per handler (`core/internal/app/serve/serve.go` lines
-473 to 475): the read guard is `admin`, `owner`, `sales`,
-`finance`; the write guard is `admin`, `owner`, `finance`. The
-charge code master is dealer wide and so has no branch wall. A key
-without the scope is `403 forbidden`; the audit row carries the
-refused scope.
+The user guards are two `scoped(...)` calls, a role guard composed
+with the branch middleware (`branchWall.chargeCodes` in
+`core/internal/app/serve/wire_branch_wall.go`): the reads take
+`admin`, `owner`, `sales`, `finance`; the writes (`POST` and `PUT`)
+take `admin`, `owner`, `finance`, so a sales user reads the master and
+cannot change it (`chargecode.RegisterRoutes` applies the second guard
+to the writes; `TestBranchWall_ChargeCodeWritesTakeTheFinanceGuard`
+drives serve's wiring). A machine key is not subject to the role
+guard; its scope is the gate (ADR 0002 section 4). A key without the
+scope is `403 forbidden`; the audit row carries the refused scope
+(ADR 0002 section 5).
 
 The order, quote, invoice and credit memo modules that read or
 reference a charge code do so through their own module guards; the
@@ -193,9 +210,9 @@ charge code permission is the additional segment check.
 
 ## ADRs that govern this module
 
-- [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 5, 7, 7a, 9, 11, 12: the list envelope, the strict query parameters, money (integer cents), unit prices (scale 4), idempotency keys, the revision precondition (`If-Match`, the in place rule), and the field names and timestamps.
+- [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 5, 7, 7a, 9, 11, 12: section 1 (this list is the one deliberate bare array, no envelope), the strict query parameters, money (integer cents), unit prices (scale 4), idempotency keys, the revision precondition (`If-Match`, the in place rule), and the field names and timestamps.
 - [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2: the segment scope rule (`charge-codes:read`, `charge-codes:write`).
-- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 2.5 (`Charge codes`): the schema, the seed, the snapshot rule, the account `4030 Fees and Charges Revenue`. The line snapshot on a quote, order or invoice line is the section 2.1 line type `charge` and section 2.5's `charge_code` reference.
+- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 2.5 (`Charge codes`): the schema, the seed, the snapshot rule, the account `4030 Fees and Charges Revenue`. The line snapshot on an order, invoice or credit memo line is the section 2.1 line type `charge` and section 2.5's `charge_code` reference.
 
 ## How to try it locally
 
@@ -212,8 +229,10 @@ the `make db` data is never truncated or removed by `make up` or
 examples below show the production header shape).
 
 Migration 092 seeds the four codes (`FREIGHT`, `FUEL`, `RESTOCK`,
-`ADJUST`) when the migrate runs, and the demo seed creates one
-order that uses `FREIGHT`. Then, with a finance role bearer and the
+`ADJUST`) when the migrate runs. The demo seed adds credit memo lines
+on `ADJUST` and no order with a charge line. The seed TRUNCATEs the
+orders, invoices, quotes, payments and ledger tables, so run it only
+against a throwaway database. Then, with a finance role bearer and the
 seeded branch:
 
 ```
@@ -239,8 +258,11 @@ with body `{"code": "DELIVERY", "name": "Delivery fee",
 `Location: /api/v1/charge-codes/{id}` and the ETag header return
 the freshly created row.
 
-The transaction proof in `core/internal/chargecode/repository_test.go`
-pins the seed and the write; the golden for the order line in
-`core/internal/characterization/testdata/goldens/order.json` pins
-the line snapshot (the `charge_code_id`, the `charge_code` text and
-the `revenue_account_code` on a `FREIGHT` line).
+The route guards are tested in `core/internal/chargecode/handler_test.go`
+and `core/internal/app/serve/wire_branch_wall_test.go`. The charge
+line snapshot is tested in `core/internal/order/wire_test.go`
+(`TestOrderCreateChargeAndTextLines`) and
+`core/internal/order/fulfil_test.go` (`TestEachLineTypeOnAFulfilment`),
+and the quote freight conversion in
+`core/internal/quote/convert_branch_test.go`
+(`TestConvert_FreightBecomesAFreightLine`).
