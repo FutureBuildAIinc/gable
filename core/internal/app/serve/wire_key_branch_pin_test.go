@@ -23,15 +23,20 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/pricing"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/audit"
@@ -48,20 +53,25 @@ import (
 // routes through branchWall.locations and the exposure routes through
 // registerExposureRoutes, both behind the real machine key core.
 type keyPinFixture struct {
-	t        *testing.T
-	db       *database.DB
-	srv      *httptest.Server
-	branchA  uuid.UUID
-	branchB  uuid.UUID
-	branchC  uuid.UUID
-	branchC2 uuid.UUID
-	yardA    uuid.UUID
-	yardB    uuid.UUID
-	quoteA   uuid.UUID
-	quoteB   uuid.UUID
-	custID   uuid.UUID
-	bound    string // the key pinned to branch A
-	unbound  string // the same scopes, no pin
+	t         *testing.T
+	db        *database.DB
+	srv       *httptest.Server
+	branchA   uuid.UUID
+	branchB   uuid.UUID
+	branchC   uuid.UUID
+	branchC2  uuid.UUID
+	yardA     uuid.UUID
+	yardB     uuid.UUID
+	quoteA    uuid.UUID
+	quoteB    uuid.UUID
+	custID    uuid.UUID
+	custB     uuid.UUID // a customer whose branches hold branch B only
+	category  uuid.UUID // one product category the priced rules hang on
+	catRuleA  uuid.UUID // a category rule scoped to the pin's customer
+	catRuleB  uuid.UUID // a category rule scoped to the foreign customer
+	taxExempt uuid.UUID // a tax exemption row of the foreign customer
+	bound     string    // the key pinned to branch A
+	unbound   string    // the same scopes, no pin
 }
 
 // pinKeyScopes opens every route under test: the location writes, the branch
@@ -71,7 +81,7 @@ var pinKeyScopes = []string{
 	"users:read", "users:grants", "quotes:read", "quotes:write", "admin:write",
 	"reports:read", "reporting:read", "reporting:write", "events:read",
 	"gl:read", "gl:write", "ap:read", "bankrecon:read", "sales-team:read",
-	"market-indices:write",
+	"market-indices:write", "tax:write", "pricing:read", "pricing:write",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -83,6 +93,7 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 	f := &keyPinFixture{t: t, db: db,
 		branchA: uuid.New(), branchB: uuid.New(), branchC: uuid.New(), branchC2: uuid.New(),
 		yardA: uuid.New(), yardB: uuid.New(), quoteA: uuid.New(), quoteB: uuid.New(), custID: uuid.New(),
+		custB: uuid.New(), category: uuid.New(), catRuleA: uuid.New(), catRuleB: uuid.New(), taxExempt: uuid.New(),
 	}
 	for _, r := range []struct {
 		id     uuid.UUID
@@ -111,13 +122,50 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 		VALUES ('pin-both', $1, TRUE, 'test'), ('pin-both', $2, FALSE, 'test')`, f.branchA, f.branchB); err != nil {
 		t.Fatalf("seed grants: %v", err)
 	}
+	// The customer confinement rows: a customer per branch with its
+	// customer_branches row, a product category, one priced category rule per
+	// customer, and a tax exemption of the foreign customer.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ($1, 'pin cust B', $2, $3)`, f.custB, "PINB-"+f.custB.String()[:8], f.branchB); err != nil {
+		t.Fatalf("seed customer B: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2), ($3, $4)`,
+		f.custID, f.branchA, f.custB, f.branchB); err != nil {
+		t.Fatalf("seed customer branches: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO product_categories (id, name, slug, path)
+		VALUES ($1, 'pin cat', $2, $3)`, f.category, "pin-cat-"+f.category.String()[:8], "pin."+f.category.String()[:8]); err != nil {
+		t.Fatalf("seed category: %v", err)
+	}
+	for _, r := range []struct{ id, customer uuid.UUID }{{f.catRuleA, f.custID}, {f.catRuleB, f.custB}} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO category_pricing_rules (id, target_type, customer_id, category_id, rule_type, rule_value, created_by)
+			VALUES ($1, 'ACCOUNT', $2, $3, 'MARKUP', 10, 'test')`, r.id, r.customer, f.category); err != nil {
+			t.Fatalf("seed category rule: %v", err)
+		}
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason) VALUES ($1, $2, 'pin')`, f.taxExempt, f.custB); err != nil {
+		t.Fatalf("seed tax exemption: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote_exposure_event'
 			AND entity_id IN (SELECT id::text FROM quote_exposure_events WHERE quote_id IN ($1, $2))`, f.quoteA, f.quoteB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN ($1, $2)`, f.quoteA, f.quoteB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quote_exposure_events WHERE quote_id IN ($1, $2)`, f.quoteA, f.quoteB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id IN ($1, $2)`, f.quoteA, f.quoteB)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, f.custID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM tax_exemptions WHERE customer_id IN ($1, $2) OR id = $3`, f.custID, f.custB, f.taxExempt)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'category_rule'
+			AND entity_id IN (SELECT id::text FROM category_pricing_rules WHERE customer_id IN ($1, $2))`, f.custID, f.custB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'pricing_rule'
+			AND entity_id IN (SELECT id::text FROM pricing_rules WHERE customer_id IN ($1, $2))`, f.custID, f.custB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_audit WHERE rule_id IN (SELECT id FROM category_pricing_rules WHERE customer_id IN ($1, $2))`, f.custID, f.custB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_rules WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pricing_rules WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_categories WHERE id = $1`, f.category)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2)`, f.custID, f.custB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub LIKE 'pin-%' OR user_sub = 'pin-both'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE code LIKE 'pin-new-%'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE parent_id IN ($1, $2, $3, $4)`, f.branchA, f.branchB, f.branchC, f.branchC2)
@@ -167,6 +215,20 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 		RegisterRoutes(mux, wall.dealerWideReads("bank reconciliation spans every branch", "admin", "owner", "finance"))
 	salesteam.NewHandler(salesteam.NewRepository(db)).
 		RegisterRoutes(mux, wall.dealerWideReads("the sales team roster spans every branch", "admin", "owner", "sales"))
+
+	// The customer confined modules exactly as serve registers them: the tax
+	// exemption writes and the customer priced rules.
+	customerSvc := customer.NewService(customer.NewRepository(db))
+	productSvc := product.NewService(product.NewRepository(db))
+	tax.NewHandler(orderwire.NewTaxService(db, &config.Config{}, slog.Default())).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithTxRunner(db), customerSvc, productSvc).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	pricing.NewCategoryHandler(
+		pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db).
+			WithOutbox(outbox.NewWriter(db, "")).
+			WithAudit(pricingAuditAdapter{l: audit.NewLogger(db)}),
+		customerSvc).RegisterCategoryRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	mint := func(name string, branch *uuid.UUID) string {
@@ -706,5 +768,197 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 	}
 	if sb == http.StatusForbidden && strings.Contains(string(bb), "branch bound key") {
 		t.Errorf("POST /api/v1/gl/accounts: the GL writes are outside the ruling and must not hit the wall: %s", bb)
+	}
+}
+
+// pricingRuleBody builds a plain pricing rule create body for a customer.
+// label tells the principals' rules apart: a rule's name and scope is unique.
+func pricingRuleBody(label string, customer uuid.UUID) string {
+	return fmt.Sprintf(`{"name":"pin rule %s","rule_type":"job_override","customer_id":%q,"discount_pct":"5"}`,
+		label, customer.String())
+}
+
+// categoryRuleBody builds a category rule create body for a customer on a
+// fresh category.
+func categoryRuleBody(customer, category uuid.UUID) string {
+	return fmt.Sprintf(`{"target_type":"account","customer_id":%q,"category_id":%q,"rule_type":"markup","value_pct":"5"}`,
+		customer.String(), category.String())
+}
+
+// freshCategory inserts a product category no rule hangs on yet, so a create
+// or a bulk element never meets the duplicate the seeded rules hold.
+func (f *keyPinFixture) freshCategory(t *testing.T) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO product_categories (id, name, slug, path) VALUES ($1, 'pin cat', $2, $3)`,
+		id, "pin-cat-"+id.String()[:8], "pin."+id.String()[:8]); err != nil {
+		t.Fatalf("seed category: %v", err)
+	}
+	return id
+}
+
+// seedCatRule inserts a category rule row for a customer on a category.
+func (f *keyPinFixture) seedCatRule(t *testing.T, id, customer, category uuid.UUID) {
+	t.Helper()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO category_pricing_rules (id, target_type, customer_id, category_id, rule_type, rule_value, created_by)
+		VALUES ($1, 'ACCOUNT', $2, $3, 'MARKUP', 10, 'test')`, id, customer, category); err != nil {
+		t.Fatalf("seed category rule: %v", err)
+	}
+}
+
+// seedTaxExempt inserts a tax exemption row for a customer.
+func (f *keyPinFixture) seedTaxExempt(t *testing.T, id, customer uuid.UUID) {
+	t.Helper()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason) VALUES ($1, $2, 'pin')`, id, customer); err != nil {
+		t.Fatalf("seed tax exemption: %v", err)
+	}
+}
+
+// exemptionsOf counts a customer's tax exemption rows.
+func (f *keyPinFixture) exemptionsOf(t *testing.T, customer uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tax_exemptions WHERE customer_id = $1`, customer).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// rulesOf counts a customer's priced rules, plain and category.
+func (f *keyPinFixture) rulesOf(t *testing.T, customer uuid.UUID) (plain, category int) {
+	t.Helper()
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT (SELECT COUNT(*) FROM pricing_rules WHERE customer_id = $1),
+		(SELECT COUNT(*) FROM category_pricing_rules WHERE customer_id = $1)`, customer).Scan(&plain, &category); err != nil {
+		t.Fatal(err)
+	}
+	return plain, category
+}
+
+// catRuleRev reads a category rule row's revision for an If-Match.
+func (f *keyPinFixture) catRuleRev(t *testing.T, id uuid.UUID) string {
+	t.Helper()
+	var rev int64
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT revision FROM category_pricing_rules WHERE id = $1`, id).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf(`"%d"`, rev)
+}
+
+// TestKeyBranchPin_CustomerConfinedWrites holds the pin on the customer
+// confined writes (the lead's ruling): the tax exemption writes and the
+// customer priced rules (plain and category, single and bulk) reach a branch
+// bound key only while its pin is among the customer's branches
+// (customer_branches); a customer outside the pin is refused with the audit
+// row and no write, the pin's own customer passes, and the unbound key and
+// the user keep the same answer as each other on every route, each against
+// its own fresh target where the write would otherwise consume it.
+func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
+	f := newKeyPinFixture(t)
+	A, B := f.custID.String(), f.custB.String()
+
+	// Tax exemptions: the create's body names the customer, the delete's row
+	// belongs to one.
+	f.refuseForeign(t, "POST", "/api/v1/tax/exemptions",
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, B), nil)
+	if n := f.exemptionsOf(t, f.custB); n != 1 {
+		t.Errorf("refused exemption create wrote the foreign customer's rows: %d", n)
+	}
+	exemptA := uuid.New()
+	f.seedTaxExempt(t, exemptA, f.custID)
+	f.allow(t, "bound", "DELETE", "/api/v1/tax/exemptions/"+exemptA.String(), "", nil, http.StatusNoContent)
+	f.refuseForeign(t, "DELETE", "/api/v1/tax/exemptions/"+f.taxExempt.String(), "", nil)
+	if n := f.exemptionsOf(t, f.custB); n != 1 {
+		t.Errorf("refused exemption delete changed the foreign customer's rows: %d", n)
+	}
+	f.allow(t, "bound", "POST", "/api/v1/tax/exemptions",
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, A), nil, http.StatusCreated)
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/tax/exemptions",
+			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, B), nil, http.StatusCreated)
+	}
+	for _, who := range []string{"unbound", "user"} {
+		id := uuid.New()
+		f.seedTaxExempt(t, id, f.custB)
+		f.allow(t, who, "DELETE", "/api/v1/tax/exemptions/"+id.String(), "", nil, http.StatusNoContent)
+	}
+
+	// Plain pricing rules: the create's body names the customer.
+	f.refuseForeign(t, "POST", "/api/v1/pricing/rules", pricingRuleBody("refused", f.custB), nil)
+	if _, n := f.rulesOf(t, f.custB); n != 1 {
+		t.Errorf("refused pricing rule create wrote the foreign customer's rows: %d", n)
+	}
+	f.allow(t, "bound", "POST", "/api/v1/pricing/rules", pricingRuleBody("own", f.custID), nil, http.StatusCreated)
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/pricing/rules", pricingRuleBody(who, f.custB), nil, http.StatusCreated)
+	}
+
+	// Category rules: the create's body names the customer, the update and
+	// the delete act on a row that belongs to one.
+	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", categoryRuleBody(f.custB, f.freshCategory(t)), nil)
+	if _, n := f.rulesOf(t, f.custB); n != 1 {
+		t.Errorf("refused category rule create wrote the foreign customer's rows: %d", n)
+	}
+	f.allow(t, "bound", "POST", "/api/v1/pricing/category-rules",
+		categoryRuleBody(f.custID, f.freshCategory(t)), nil, http.StatusCreated)
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/pricing/category-rules",
+			categoryRuleBody(f.custB, f.freshCategory(t)), nil, http.StatusCreated)
+	}
+
+	putBody := `{"rule_type":"markdown","value_pct":"2"}`
+	putHdr := func(id uuid.UUID) map[string]string {
+		return map[string]string{"If-Match": f.catRuleRev(t, id)}
+	}
+	f.refuseForeign(t, "PUT", "/api/v1/pricing/category-rules/"+f.catRuleB.String(), putBody, putHdr(f.catRuleB))
+	f.allow(t, "bound", "PUT", "/api/v1/pricing/category-rules/"+f.catRuleA.String(), putBody, putHdr(f.catRuleA), http.StatusOK)
+	ruleFor := func(customer uuid.UUID) uuid.UUID {
+		id := uuid.New()
+		f.seedCatRule(t, id, customer, f.freshCategory(t))
+		return id
+	}
+	for _, who := range []string{"unbound", "user"} {
+		id := ruleFor(f.custB)
+		f.allow(t, who, "PUT", "/api/v1/pricing/category-rules/"+id.String(), putBody, putHdr(id), http.StatusOK)
+	}
+
+	f.refuseForeign(t, "DELETE", "/api/v1/pricing/category-rules/"+f.catRuleB.String(), "", putHdr(f.catRuleB))
+	if _, n := f.rulesOf(t, f.custB); n != 1 {
+		t.Errorf("refused category rule delete changed the foreign customer's rows: %d", n)
+	}
+	deadA := ruleFor(f.custID)
+	f.allow(t, "bound", "DELETE", "/api/v1/pricing/category-rules/"+deadA.String(), "", putHdr(deadA), http.StatusNoContent)
+	for _, who := range []string{"unbound", "user"} {
+		id := ruleFor(f.custB)
+		f.allow(t, who, "DELETE", "/api/v1/pricing/category-rules/"+id.String(), "", putHdr(id), http.StatusNoContent)
+	}
+
+	// Bulk: every element's customer must hold the pin, and a bulk delete's
+	// rows belong to their customers.
+	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules/bulk",
+		"["+categoryRuleBody(f.custID, f.freshCategory(t))+","+categoryRuleBody(f.custB, f.freshCategory(t))+"]", nil)
+	if _, n := f.rulesOf(t, f.custB); n != 1 {
+		t.Errorf("refused bulk upsert wrote the foreign customer's rows: %d", n)
+	}
+	f.allow(t, "bound", "POST", "/api/v1/pricing/category-rules/bulk",
+		"["+categoryRuleBody(f.custID, f.freshCategory(t))+"]", nil, http.StatusOK)
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/pricing/category-rules/bulk",
+			"["+categoryRuleBody(f.custB, f.freshCategory(t))+"]", nil, http.StatusOK)
+	}
+	f.refuseForeign(t, "DELETE", "/api/v1/pricing/category-rules/bulk",
+		fmt.Sprintf(`{"ids":[%q]}`, f.catRuleB.String()), nil)
+	if _, n := f.rulesOf(t, f.custB); n != 1 {
+		t.Errorf("refused bulk delete changed the foreign customer's rows: %d", n)
+	}
+	for _, who := range []string{"unbound", "user"} {
+		id := ruleFor(f.custB)
+		f.allow(t, who, "DELETE", "/api/v1/pricing/category-rules/bulk",
+			fmt.Sprintf(`{"ids":[%q]}`, id.String()), nil, http.StatusNoContent)
 	}
 }
