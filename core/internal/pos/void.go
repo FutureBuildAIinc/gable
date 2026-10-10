@@ -93,7 +93,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		if t.Method != TenderCard || t.PaymentID == nil || t.GatewayTxID == nil || *t.GatewayTxID == "" {
 			continue
 		}
-		intents = append(intents, RefundIntent{SaleID: saleID, TenderID: t.ID, GatewayTxID: *t.GatewayTxID,
+		intents = append(intents, RefundIntent{ID: uuid.New(), SaleID: saleID, TenderID: t.ID, GatewayTxID: *t.GatewayTxID,
 			AmountCents: int64(t.AmountCents), Act: "void"})
 	}
 	if len(intents) > 0 && s.gateway == nil {
@@ -166,11 +166,18 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			refundErr = conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
 		if refundErr != nil {
-			// this tender's refund failed: its claim is released (no money
-			// moved for it), and the refunds already taken are recorded in
+			// this tender's refund did not go through: an error carries no
+			// verdict (the terminal may have moved the money: the claim
+			// stands and the unknown outcome is recorded, seventh review
+			// P2-2), a definite refusal status proves nothing moved (the
+			// claim is released). The refunds already taken are recorded in
 			// committed rows with their claims left standing, because the
-			// money transaction never opens now
-			s.failRefundIntent(ctx, intents[i])
+			// money transaction never opens now.
+			if err != nil {
+				s.unknownRefundOutcome(ctx, intents[i], err)
+			} else {
+				s.failRefundIntent(ctx, intents[i])
+			}
 			for _, r := range refunds {
 				s.recordOrphanRefund(ctx, r, refundErr)
 			}

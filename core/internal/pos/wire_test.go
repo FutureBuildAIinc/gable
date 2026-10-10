@@ -823,9 +823,12 @@ type fakeGateway struct {
 	currency    []string
 	// refundErrs scripts one error per refund call (nil answers success);
 	// voidErrs the same for voids (a reversal that can neither void nor
-	// refund answers 502).
-	refundErrs []error
-	voidErrs   []error
+	// refund answers 502). refundStatuses scripts one definite refusal
+	// status per refund call, the terminal's own no (a decline), which no
+	// error carries.
+	refundErrs   []error
+	voidErrs     []error
+	refundStatuses []payment.GatewayStatus
 	// onRefund runs at the start of every Refund call, outside the fake's
 	// mutex: the tests park a refund in flight or probe the database while
 	// the terminal is on the wire.
@@ -890,7 +893,11 @@ func (g *fakeGateway) Refund(ctx context.Context, id string, cents int64) (*paym
 	if err != nil {
 		return nil, err
 	}
-	return &payment.GatewayResult{Status: payment.GatewayStatusRefunded, TransactionID: fmt.Sprintf("ref-%d", len(g.refunds))}, nil
+	status := payment.GatewayStatusRefunded
+	if len(g.refundStatuses) > 0 {
+		status, g.refundStatuses = g.refundStatuses[0], g.refundStatuses[1:]
+	}
+	return &payment.GatewayResult{Status: status, TransactionID: fmt.Sprintf("ref-%d", len(g.refunds))}, nil
 }
 
 func withToken(t map[string]any) map[string]any {

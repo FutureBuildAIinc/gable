@@ -476,7 +476,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// refuses a concurrent card return of the same tender, or a void of
 		// the sale, with 409 before it reaches the terminal. No lock of the
 		// money transaction is held across the network call.
-		cardIntent = &RefundIntent{SaleID: *in.OriginalSaleID, TenderID: target.ID, GatewayTxID: *target.GatewayTxID,
+		cardIntent = &RefundIntent{ID: uuid.New(), SaleID: *in.OriginalSaleID, TenderID: target.ID, GatewayTxID: *target.GatewayTxID,
 			AmountCents: -total, Act: "return"}
 		cardTenderCap = int64(target.AmountCents)
 		if err := s.inTx(ctx, func(ctx context.Context) error {
@@ -517,10 +517,14 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, cardIntent.AmountCents)
 		if err != nil {
-			s.failRefundIntent(ctx, *cardIntent)
+			// no verdict came back (a timeout, a cancel): the terminal may
+			// have moved the money, so the claim stands and the unknown
+			// outcome is recorded for reconciliation (seventh review P2-2)
+			s.unknownRefundOutcome(ctx, *cardIntent, err)
 			return nil, fmt.Errorf("card refund failed: %w", err)
 		}
 		if res.Status != "REFUNDED" && res.Status != "APPROVED" {
+			// a definite refusal: the terminal's own no proves nothing moved
 			s.failRefundIntent(ctx, *cardIntent)
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}

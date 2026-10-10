@@ -89,6 +89,33 @@ func (s *Service) checkCardClaim(ctx context.Context, saleID, tenderID uuid.UUID
 	return nil
 }
 
+// unknownRefundOutcome records a refund whose terminal call answered no
+// verdict (a transport or context error: a timeout, a dropped connection, a
+// cancel after the terminal acted): the intent stays PENDING, because the
+// terminal may have moved the money and releasing the claim would let the
+// next refund pay the tender twice, and one committed audit row carries the
+// intent's own id and the unknown outcome for reconciliation.
+func (s *Service) unknownRefundOutcome(ctx context.Context, intent RefundIntent, err error) {
+	s.logger.Error("CRITICAL: the card refund answered no verdict; the claim stands until it is reconciled",
+		"intent_id", intent.ID, "act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID,
+		"gateway_tx_id", intent.GatewayTxID, "amount_cents", intent.AmountCents, "error", err)
+	if s.auditLog == nil {
+		return
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reversalTimeout)
+	defer cancel()
+	if aerr := s.auditLog.Log(rctx, audit.Entry{
+		Action: "pos.refund_outcome_unknown", EntityType: "pos_transaction", EntityID: intent.SaleID,
+		Changes: map[string]any{
+			"intent_id": intent.ID, "act": intent.Act, "tender_id": intent.TenderID,
+			"gateway_tx_id": intent.GatewayTxID, "amount_cents": intent.AmountCents,
+			"outcome": "unknown", "error": fmt.Sprintf("%v", err),
+		}}); aerr != nil {
+		s.logger.Error("CRITICAL: the unknown refund outcome audit row was not written",
+			"intent_id", intent.ID, "sale_id", intent.SaleID, "error", aerr)
+	}
+}
+
 // recordOrphanRefund writes, in its own committed write after the refused
 // transaction rolled back, one audit row per refund the transaction left
 // standing, carrying the gateway ids; the CRITICAL log line carries the same

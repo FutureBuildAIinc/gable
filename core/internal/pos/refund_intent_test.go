@@ -17,7 +17,6 @@ package pos_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -207,27 +206,29 @@ func TestTheGatewayCallRunsOutsideEveryTransaction(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
-// RULE (the lead's decision): a gateway failure releases the intent having
-// moved no money: the tender may be refunded again, and the retry's own
-// intent is the one that completes.
-func TestAFailedCardRefundReleasesTheIntentAndMovesNoMoney(t *testing.T) {
+// RULE (the lead's decision, fix round 4): only a definite refusal from the
+// terminal (a refusal status, the terminal's own no) releases the intent
+// having moved no money: the tender may be refunded again, and the retry's
+// own intent is the one that completes. A call that answers no verdict keeps
+// the claim standing (the timed out and declined legs of the verdict tests).
+func TestADefinitelyRefusedCardRefundReleasesTheIntentAndMovesNoMoney(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()},
-		refundErrs: []error{fmt.Errorf("terminal offline")}}
+		refundStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
 	})
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
 	r := f.cardReturnOn(t, saleID, lineID, "1")
-	if r.status != http.StatusInternalServerError {
-		t.Fatalf("the card return under a failed refund = %d, want 500: %s", r.status, r.raw)
+	if r.status != http.StatusConflict {
+		t.Fatalf("the card return under a refused refund = %d, want 409: %s", r.status, r.raw)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'FAILED'`, saleID); got != 1 {
-		t.Errorf("%d FAILED refund intents, want 1 (the failed call released its claim)", got)
+		t.Errorf("%d FAILED refund intents, want 1 (the refused call released its claim)", got)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING'`, saleID); got != 0 {
-		t.Errorf("%d PENDING refund intents after the failure, want 0", got)
+		t.Errorf("%d PENDING refund intents after the refusal, want 0", got)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID); got != 0 {
 		t.Errorf("%d orphaned refund rows, want 0 (no money moved)", got)
