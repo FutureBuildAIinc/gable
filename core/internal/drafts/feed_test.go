@@ -21,7 +21,6 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -247,63 +246,87 @@ func (f *fixture) doRawGet(path string, headers ...string) resp {
 }
 
 // TestFeedCommitOrderServesBoth pins the ADR 0003 case on this feed's own
-// lock: two transactions whose positions commit out of order (the lower
-// commits last) are both served to a reader that pages by position.
+// lock: the trigger's pg_advisory_xact_lock serialises position draws
+// across concurrent transactions. Without the lock the lower position's
+// holder can commit AFTER the higher's, inverting the reader's order.
+// Review pr66-r1 P2-1.2: the prior test (which read after both writers
+// had committed) passed with the trigger removed. This test proves the
+// lock itself: writer B's INSERT blocks until writer A's transaction
+// commits, even though both transactions are open.
 func TestFeedCommitOrderServesBoth(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
+	ctx := context.Background()
 
-	// Two writers whose commits invert their positions: writer A draws its
-	// event position first, then writer B commits before A does.
-	var wg sync.WaitGroup
-	gate := make(chan struct{})
-	wg.Add(2)
-	go func() { // writer A: inserts the draft event, then waits
-		defer wg.Done()
-		ctx := context.Background()
-		err := f.db.RunInTx(ctx, func(ctx context.Context) error {
-			draftID := uuid.New()
-			_ = draftID
-			if _, err := f.db.GetExecutor(ctx).Exec(ctx,
-				`INSERT INTO draft_events (draft_id, module, branch_id, op, revision, status, actor_kind)
-				 VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')`,
-				draftID); err != nil {
-				return err
-			}
-			<-gate
-			return nil
-		})
-		if err != nil {
-			t.Errorf("writer A: %v", err)
-		}
-	}()
-	time.Sleep(100 * time.Millisecond) // A's insert (and position) is drawn
-	go func() {                        // writer B: commits a higher position while A waits
-		defer wg.Done()
-		err := f.db.RunInTx(context.Background(), func(ctx context.Context) error {
-			draftID := uuid.New()
-			_ = draftID
-			_, err := f.db.GetExecutor(ctx).Exec(ctx,
-				`INSERT INTO draft_events (draft_id, module, branch_id, op, revision, status, actor_kind)
-				 VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')`,
-				draftID)
-			return err
-		})
-		if err != nil {
-			t.Errorf("writer B: %v", err)
-		}
-	}()
-	// Give B time to commit, then release A: A's LOWER position commits LAST.
-	time.Sleep(200 * time.Millisecond)
-	close(gate)
-	wg.Wait()
+	// Writer A: open a transaction, insert a row (the trigger draws
+	// position under the advisory lock), then hold the transaction
+	// open for a moment so writer B can observe the lock blocking.
+	txA, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin A: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = txA.Exec(context.Background(), "ROLLBACK")
+		_, _ = txA.Exec(context.Background(), "ROLLBACK")
+	})
+	if _, err := txA.Exec(ctx,
+		"INSERT INTO draft_events (draft_id, module, branch_id, op, revision, status, actor_kind) "+
+		"VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')",
+		uuid.New()); err != nil {
+		t.Fatalf("A insert: %v", err)
+	}
 
-	// A reader from position 0 serves both rows.
+	// Writer B: open a transaction, attempt its insert. With the
+	// trigger's advisory lock in place, this MUST block because A
+	// holds the lock. A bounded probe proves the block.
+	txB, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin B: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = txB.Exec(context.Background(), "ROLLBACK")
+		_, _ = txB.Exec(context.Background(), "ROLLBACK")
+	})
+
+	insertBErr := make(chan error, 1)
+	go func() {
+		_, err := txB.Exec(ctx,
+			"INSERT INTO draft_events (draft_id, module, branch_id, op, revision, status, actor_kind) "+
+			"VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')",
+			uuid.New())
+		insertBErr <- err
+	}()
+
+	select {
+	case err := <-insertBErr:
+		t.Fatalf("writer B's insert completed without blocking (lock removed?) err=%v", err)
+	case <-time.After(600 * time.Millisecond):
+		// B is still blocked: the lock is held.
+	}
+
+	// Commit A; the lock releases; B's insert now completes.
+	if err := txA.Commit(ctx); err != nil {
+		t.Fatalf("commit A: %v", err)
+	}
+	select {
+	case err := <-insertBErr:
+		if err != nil {
+			t.Fatalf("writer B's insert errored after A commit: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer B's insert did not unblock within 2s after A committed")
+	}
+	if err := txB.Commit(ctx); err != nil {
+		t.Fatalf("commit B: %v", err)
+	}
+
+	// The reader sees both rows; the lower position is A's, the higher
+	// B's (the lock guarantees this when both writers raced).
 	rows, err := f.draftsRepo.ReadEvents(context.Background(), drafts.EventFilter{Module: "quotes"}, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows.Rows) < 2 {
-		t.Fatalf("the reader saw %d rows, want both commits (the lower position committed last)", len(rows.Rows))
+		t.Fatalf("the reader saw %d rows, want both commits", len(rows.Rows))
 	}
 }
 
@@ -380,8 +403,13 @@ func mintTestCursor(t *testing.T, pos int64) string {
 // TestFeedRevokedKeyClosesAtNextHeartbeat pins section 3.3: a keyed stream
 // rechecks its key at every heartbeat by id; a revoked key's stream gets
 // event: reauth and closes, so it reads for at most one heartbeat after
-// the revocation.
+// the revocation. Review pr66-r1 P2-1.1 (the original test passed with
+// keyCheck == nil because the lifetime close was the only reauth). This
+// test rebuilds the FeedHandler around a real keyCheck and waits for the
+// reauth event inside one heartbeat, so a refactor that drops the
+// heartbeat recheck fails it.
 func TestFeedRevokedKeyClosesAtNextHeartbeat(t *testing.T) {
+	_ = fastFeedSettings
 	f := newFixture(t, testutil.RequireDB(t))
 
 	// Mint a propose key and mount the machine-key auth core in front of

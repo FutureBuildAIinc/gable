@@ -564,7 +564,22 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 			// at most one heartbeat after revocation.
 			if keyID != uuid.Nil && h.keyCheck != nil {
 				valid, err := h.keyCheck(ctx, keyID)
-				if err == nil && !valid {
+				if err != nil {
+					// The recheck errored (the DB is gone, the row vanished
+					// under a partition move, etc). We fail closed for this
+					// heartbeat: a forced reauth prevents a revoked key from
+					// reading on for the lifetime close. The error is logged
+					// so an operator can spot it in the feed's own log
+					// stream. (Review pr66-r2 P3-2: the prior code ignored
+					// the error and failed open.)
+					slog.Warn("drafts feed: keyCheck returned an error; failing closed for this heartbeat",
+						"key_id", keyID.String(), "error", err.Error(),
+						"request_id", middleware.GetRequestID(ctx))
+					_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
+					flusher()
+					return
+				}
+				if !valid {
 					_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
 					flusher()
 					return

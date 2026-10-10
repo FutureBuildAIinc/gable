@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -243,6 +244,27 @@ func (h *Handler) resolve(e Entity) http.HandlerFunc {
 	}
 }
 
+// numberRegexps carries the entity's number pattern through a
+// process-scoped cache, so the regexp is compiled once per Row, not per
+// request (review pr66-r2 P3-4). The cache is keyed by the compiled
+// pattern string; a Row with no pattern returns nil and the call falls
+// through to the UUID path.
+var numberRegexps sync.Map // map[string]*regexp.Regexp
+
+// compileNumber returns the compiled regexp for the pattern, caching
+// it for later requests.
+func compileNumber(pattern string) *regexp.Regexp {
+	if pattern == "" {
+		return nil
+	}
+	if v, ok := numberRegexps.Load(pattern); ok {
+		return v.(*regexp.Regexp)
+	}
+	re := regexp.MustCompile(pattern)
+	numberRegexps.Store(pattern, re)
+	return re
+}
+
 // parseSlot parses the {id} slot the way the entity's own reads do (ADR
 // 0007 section 7): a UUID first, then the entity's number pattern when it
 // has one. A well formed number of another entity, or anything else, is a
@@ -251,8 +273,8 @@ func parseSlot(e Row, raw string) (uuid.UUID, string, error) {
 	if id, err := uuid.Parse(raw); err == nil {
 		return id, "", nil
 	}
-	if e.Number != "" {
-		if regexp.MustCompile(e.Number).MatchString(raw) {
+	if re := compileNumber(e.Number); re != nil {
+		if re.MatchString(raw) {
 			return uuid.Nil, raw, nil
 		}
 	}
