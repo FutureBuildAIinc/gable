@@ -104,6 +104,9 @@ func (s *Service) UpdateContact(ctx context.Context, id uuid.UUID, d *ContactDra
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if err := s.checkSharedChild(ctx, cur.CustomerID, "contact"); err != nil {
+			return err
+		}
 		next := contactFrom(d, id, cur.CustomerID, httpx.TimestampOf(s.now().UTC()))
 		if err := s.repo.UpdateContact(ctx, next); err != nil {
 			return err
@@ -121,7 +124,7 @@ func (s *Service) UpdateContact(ctx context.Context, id uuid.UUID, d *ContactDra
 		return s.record(ctx, cust, EventUpdated, PartContact, map[string]any{"contact_id": id, "action": "updated"})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -130,7 +133,7 @@ func (s *Service) DeleteContact(ctx context.Context, id uuid.UUID, pre Precondit
 	if err := needRevision(pre); err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(ctx context.Context) error {
+	return s.sharedOutcome(ctx, s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockContact(ctx, id); err != nil {
 			return notFound(err)
 		}
@@ -141,6 +144,9 @@ func (s *Service) DeleteContact(ctx context.Context, id uuid.UUID, pre Precondit
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if err := s.checkSharedChild(ctx, cur.CustomerID, "contact"); err != nil {
+			return err
+		}
 		if err := s.repo.DeleteContact(ctx, id); err != nil {
 			return err
 		}
@@ -149,7 +155,7 @@ func (s *Service) DeleteContact(ctx context.Context, id uuid.UUID, pre Precondit
 			return notFound(err)
 		}
 		return s.record(ctx, cust, EventUpdated, PartContact, map[string]any{"contact_id": id, "action": "deleted"})
-	})
+	}))
 }
 
 // ---- ship-tos ----
@@ -254,6 +260,9 @@ func (s *Service) UpdateShipTo(ctx context.Context, id uuid.UUID, d *ShipToDraft
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if err := s.checkSharedChild(ctx, cur.CustomerID, "ship_to"); err != nil {
+			return err
+		}
 		next := shipToFrom(d, id, cur.CustomerID, httpx.TimestampOf(s.now().UTC()))
 		if next.IsDefault {
 			if err := s.repo.ClearDefaultShipTo(ctx, cur.CustomerID, id); err != nil {
@@ -273,7 +282,7 @@ func (s *Service) UpdateShipTo(ctx context.Context, id uuid.UUID, d *ShipToDraft
 		return s.record(ctx, cust, EventUpdated, PartShipTo, map[string]any{"ship_to_id": id, "action": "updated"})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }

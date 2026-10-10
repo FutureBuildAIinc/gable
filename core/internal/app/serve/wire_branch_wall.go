@@ -114,8 +114,10 @@ func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {
 // its body, so it is held to the caller's branch context; payment terms writes
 // take the narrower finance guard.
 func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
-	customer.NewHandler(svc.WithBranchGuard(customerguard.New(w.guard))).
-		RegisterRoutes(mux, w.scoped("admin", "owner", "sales"), w.scoped("admin", "owner", "finance"))
+	svc.WithBranchGuard(customerguard.New(w.guard)).WithSharedGuard(customerguard.NewShared(w.keyWall))
+	customer.NewHandler(svc).RegisterRoutes(mux,
+		middleware.Compose(w.scoped("admin", "owner", "sales"), w.keyWall.RecordRequest()),
+		w.scoped("admin", "owner", "finance"))
 }
 
 // crm mounts the activity routes behind the branch middleware: every route

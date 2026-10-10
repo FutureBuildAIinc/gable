@@ -430,6 +430,26 @@ func (l *Logger) AuditKeyBranchRefusal(ctx context.Context, keyID string, branch
 	}
 }
 
+// AuditSharedCustomerChange records a dealer wide machine key's change to the
+// restricted fields of a customer held by more than one branch (principal
+// ruling 43): the row's entity is the customer, its changes carry the key as
+// the actor and the before and after value of every field. It implements the
+// middleware package's SharedAuditor seam and joins the caller's transaction,
+// so a failed row fails the change.
+func (l *Logger) AuditSharedCustomerChange(ctx context.Context, keyID string, customer uuid.UUID, changes map[string]any) error {
+	out := make(map[string]any, len(changes)+1)
+	for k, v := range changes {
+		out[k] = v
+	}
+	out["actor_key_id"] = keyID
+	return l.Log(ctx, Entry{
+		Action:     "customer.shared_restricted_changed",
+		EntityType: "customer",
+		EntityID:   customer,
+		Changes:    out,
+	})
+}
+
 // Drain is retained for graceful-shutdown callers: writes are synchronous
 // now, so there is never anything in flight to wait for.
 func (l *Logger) Drain() {}

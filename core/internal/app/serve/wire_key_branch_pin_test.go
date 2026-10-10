@@ -31,6 +31,7 @@ import (
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
@@ -394,7 +395,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 
 	// The customer confined modules exactly as serve registers them: the tax
 	// exemption writes and the customer priced rules.
-	customerSvc := customer.NewService(customer.NewRepository(db))
+	customerSvc := customer.NewService(customer.NewRepository(db)).WithAudit(customeraudit.New(audit.NewLogger(db)))
 	productSvc := product.NewService(product.NewRepository(db))
 	tax.NewHandler(orderwire.NewTaxService(db, &config.Config{}, slog.Default())).
 		RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))

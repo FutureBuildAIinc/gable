@@ -29,3 +29,27 @@ func (a *Guard) CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error 
 	}
 	return err
 }
+
+// Shared adapts the key branch wall to the customer service's SharedGuard:
+// the shared customer rule of principal rulings 43, 44 and 45.
+type Shared struct{ w *middleware.KeyBranchWall }
+
+// NewShared wraps the key branch wall.
+func NewShared(w *middleware.KeyBranchWall) *Shared { return &Shared{w: w} }
+
+// Shared answers how the caller stands to the customer.
+func (a *Shared) Shared(ctx context.Context, customerID uuid.UUID) (customer.SharedVerdict, error) {
+	v, err := a.w.SharedCustomer(ctx, customerID)
+	if err != nil {
+		return customer.SharedVerdict{}, err
+	}
+	return customer.SharedVerdict{Refuse: v.Refuse, Branch: v.Branch, Audit: v.Audit}, nil
+}
+
+// RecordRefusal writes the refusal's key.branch_refused row.
+func (a *Shared) RecordRefusal(ctx context.Context) { a.w.RecordSharedRefusal(ctx) }
+
+// RecordChange writes the dealer wide key's audit row.
+func (a *Shared) RecordChange(ctx context.Context, customerID uuid.UUID, changes map[string]any) error {
+	return a.w.RecordSharedChange(ctx, customerID, changes)
+}
