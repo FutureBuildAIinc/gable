@@ -452,7 +452,7 @@
             "driver_name": "R1C Driver Renamed",
             "id": "<id-2>",
             "notes": "r1b c main route",
-            "revision": 1,
+            "revision": 3,
             "scheduled_date": "<day+2>",
             "status": "draft",
             "stop_count": 2,

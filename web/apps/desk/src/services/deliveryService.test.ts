@@ -8,9 +8,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // defeat the revision the user was editing on. The test asserts the service
 // sends the caller's revision, never one it fetched itself.
 
-interface UpdateVehiclePayload { name: string; vehicle_type: string; license_plate: string }
-interface UpdateDriverPayload { name: string; status: string }
-interface TransitionPayload { to: string }
+import type {
+  CreateVehicleRequest,
+  CreateDriverRequest,
+  TransitionDeliveryRequest,
+} from '../../types/delivery'
 
 const fetchMock = vi.fn()
 vi.mock('./fetchClient', () => ({
@@ -34,7 +36,7 @@ beforeEach(() => {
 
 describe('deliveryService carries the loaded revision', () => {
   it('updateVehicle sends the caller revision, not a fresh read', async () => {
-    const body: UpdateVehiclePayload = { name: 'x', vehicle_type: 'van', license_plate: 'p' }
+    const body: CreateVehicleRequest = { name: 'x', vehicle_type: 'van', license_plate: 'p' }
     await deliveryService.updateVehicle('v1', body, 4)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [, init] = fetchMock.mock.calls[0]
@@ -49,7 +51,7 @@ describe('deliveryService carries the loaded revision', () => {
   })
 
   it('updateDriver sends the caller revision', async () => {
-    const body: UpdateDriverPayload = { name: 'y', status: 'active' }
+    const body: CreateDriverRequest = { name: 'y', status: 'active' }
     await deliveryService.updateDriver('d1', body, 5)
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(String(init.body)).revision).toBe(5)
@@ -80,16 +82,16 @@ describe('deliveryService carries the loaded revision', () => {
   })
 
   it('updateStatus sends the caller revision in the body', async () => {
-    const body: TransitionPayload = { to: 'delivered' }
+    const body: TransitionDeliveryRequest = { to: 'delivered' }
     await deliveryService.updateStatus('s1', body, 6)
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(String(init.body)).revision).toBe(6)
   })
 
   it('does not issue a fresh read before any of these writes', async () => {
-    const vBody: UpdateVehiclePayload = { name: '', vehicle_type: '', license_plate: '' }
-    const dBody: UpdateDriverPayload = { name: '', status: '' }
-    const sBody: TransitionPayload = { to: '' }
+    const vBody: CreateVehicleRequest = { name: '', vehicle_type: 'van', license_plate: '' }
+    const dBody: CreateDriverRequest = { name: '', status: 'active' }
+    const sBody: TransitionDeliveryRequest = { to: 'delivered' }
     await deliveryService.updateVehicle('v1', vBody, 1)
     await deliveryService.deleteVehicle('v1', 1)
     await deliveryService.updateDriver('d1', dBody, 1)

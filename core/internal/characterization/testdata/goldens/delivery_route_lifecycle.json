@@ -26,7 +26,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/optimize",
       "headers": {
-        "If-Match": "\"1\""
+        "If-Match": "\"3\""
       }
     },
     "response": {
@@ -38,7 +38,7 @@
         "driver_name": "R1C Driver Renamed",
         "id": "<id-1>",
         "notes": "r1b c main route",
-        "revision": 2,
+        "revision": 4,
         "scheduled_date": "<day+2>",
         "status": "draft",
         "stop_count": 2,
@@ -226,7 +226,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/reorder",
       "headers": {
-        "If-Match": "\"2\""
+        "If-Match": "\"4\""
       },
       "body": {
         "ordered_delivery_ids": [
@@ -261,7 +261,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/reorder",
       "headers": {
-        "If-Match": "\"2\""
+        "If-Match": "\"4\""
       },
       "body": {
         "ordered_delivery_ids": [
@@ -279,7 +279,7 @@
         "driver_name": "R1C Driver Renamed",
         "id": "<id-1>",
         "notes": "r1b c main route",
-        "revision": 3,
+        "revision": 5,
         "scheduled_date": "<day+2>",
         "status": "draft",
         "stop_count": 2,
@@ -398,7 +398,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/reorder",
       "headers": {
-        "If-Match": "\"3\""
+        "If-Match": "\"5\""
       },
       "body": {
         "ordered_delivery_ids": [
@@ -519,7 +519,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"3\""
+        "If-Match": "\"5\""
       },
       "body": {
         "to": "completed"
@@ -612,7 +612,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"3\""
+        "If-Match": "\"5\""
       },
       "body": {
         "to": "scheduled"
@@ -645,7 +645,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"3\""
+        "If-Match": "\"5\""
       },
       "body": {
         "to": "in_transit"
@@ -660,7 +660,7 @@
         "driver_name": "R1C Driver Renamed",
         "id": "<id-1>",
         "notes": "r1b c main route",
-        "revision": 4,
+        "revision": 6,
         "scheduled_date": "<day+2>",
         "status": "in_transit",
         "stop_count": 2,
@@ -727,7 +727,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"4\""
+        "If-Match": "\"6\""
       },
       "body": {
         "to": "in_transit"
@@ -1000,14 +1000,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "invalid_state_transition",
-          "details": [
-            {
-              "code": "stop_not_terminal",
-              "message": "every stop must be delivered, failed or partial before the route completes"
-            }
-          ],
-          "message": "cannot complete a route with a stop still PENDING"
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
           "request_id": "<id-31>"
@@ -1082,7 +1076,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"4\""
+        "If-Match": "\"5\""
       },
       "body": {
         "to": "completed"
@@ -1093,14 +1087,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "invalid_state_transition",
-          "details": [
-            {
-              "code": "stop_not_terminal",
-              "message": "every stop must be delivered, failed or partial before the route completes"
-            }
-          ],
-          "message": "cannot complete a route with a stop still PENDING"
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
           "request_id": "<id-33>"
@@ -1125,7 +1113,7 @@
             "driver_name": "R1C Driver Renamed",
             "id": "<id-1>",
             "notes": "r1b c main route",
-            "revision": 4,
+            "revision": 6,
             "scheduled_date": "<day+2>",
             "status": "in_transit",
             "stop_count": 2,
@@ -1148,7 +1136,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"5\""
+        "If-Match": "\"6\""
       },
       "body": {
         "to": "in_transit"
@@ -1159,8 +1147,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "stale_revision",
-          "message": "the document was changed after this revision was read; reload and retry"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invalid_state",
+              "message": "only a draft or scheduled route can be dispatched"
+            }
+          ],
+          "message": "cannot dispatch a route in status IN_TRANSIT"
         },
         "meta": {
           "request_id": "<id-34>"
