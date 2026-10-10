@@ -114,6 +114,11 @@ var draftRouteClassExpectations = map[string]middleware.ScopeClass{
 	"POST /api/v1/drafts/orders/{id}/promote":     middleware.ScopePromotion,
 	"GET /api/v1/links/quotes/{id}":               middleware.ScopeLink,
 	"GET /api/v1/links/drafts/quotes/{id}":        middleware.ScopeDraftLink,
+	"GET /api/v1/links/orders/{id}":               middleware.ScopeLink,
+	"GET /api/v1/links/drafts/orders/{id}":        middleware.ScopeDraftLink,
+	"GET /api/v1/links/invoices/{id}":             middleware.ScopeLink,
+	"GET /api/v1/links/customers/{id}":            middleware.ScopeLink,
+	"GET /api/v1/links/products/{id}":             middleware.ScopeLink,
 }
 
 // TestDraftRoutesResolveThroughScopeTarget is the census extension ADR 0007
@@ -149,7 +154,12 @@ func TestDraftRoutesResolveThroughScopeTarget(t *testing.T) {
 		if middleware.ModuleScopePolicyFor(module) != middleware.ModuleScopeAllowed {
 			t.Errorf("%s resolves to module %q, which the vocabulary does not allow", key, module)
 		}
-		if !middleware.IsConfirmGated(module) {
+		// The confirm gated rule binds draft routes: the shapes under
+		// /api/v1/drafts/ and the draft links. An entity link
+		// (/api/v1/links/<module>/{id}) names its own entity, which needs
+		// no draft kind.
+		isDraftRoute := underDrafts || strings.HasPrefix(pattern, "/api/v1/links/drafts/")
+		if isDraftRoute && !middleware.IsConfirmGated(module) {
 			t.Errorf("%s resolves to module %q, which has no registered draft kind; a draft route may only exist for a confirm gated module", key, module)
 		}
 		want, listed := draftRouteClassExpectations[key]
