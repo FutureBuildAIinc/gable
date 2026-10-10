@@ -6,34 +6,54 @@ package pos
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Repository handles POS data persistence.
+// Repository is the store half of the counter. Every statement goes through
+// GetExecutor (the caller's transaction when one is open), money is written
+// as `$n::numeric / 100` and read as `ROUND(col * 100)::bigint`, never
+// through float64, and every read and lock carries the branch wall.
 type Repository interface {
-	CreateTransaction(ctx context.Context, tx *POSTransaction) error
-	GetTransaction(ctx context.Context, id uuid.UUID) (*POSTransaction, error)
-	UpdateTransaction(ctx context.Context, tx *POSTransaction) error
-	ListTransactions(ctx context.Context, registerID string, date time.Time) ([]TransactionSummary, error)
+	// Sales
+	CreateSale(ctx context.Context, s *Sale) error
+	LockSale(ctx context.Context, id uuid.UUID) error
+	GetSale(ctx context.Context, id uuid.UUID) (*Sale, error)
+	UpdateSaleTotals(ctx context.Context, id uuid.UUID, subtotal, tax, total int64) error
+	CompleteSale(ctx context.Context, id, invoiceID uuid.UUID, subtotal, tax, total, change int64) error
+	VoidSale(ctx context.Context, id uuid.UUID) error
+	NextSaleNumber(ctx context.Context) (string, error)
+	NextReturnNumber(ctx context.Context) (string, error)
+	ListSales(ctx context.Context, f SaleFilter, limit int) ([]SaleSummary, error)
 
-	AddLineItem(ctx context.Context, item *POSLineItem) error
-	RemoveLineItem(ctx context.Context, itemID uuid.UUID) error
-	GetLineItems(ctx context.Context, txID uuid.UUID) ([]POSLineItem, error)
+	// Lines
+	AddLines(ctx context.Context, saleID uuid.UUID, lines []salesdoc.Line) error
+	RemoveLine(ctx context.Context, saleID, lineID uuid.UUID) error
+	GetLines(ctx context.Context, saleID uuid.UUID) ([]salesdoc.Line, error)
 
-	AddTender(ctx context.Context, tender *POSTender) error
-	GetTenders(ctx context.Context, txID uuid.UUID) ([]POSTender, error)
+	// Tenders
+	AddTender(ctx context.Context, t *Tender) error
+	GetTenders(ctx context.Context, saleID uuid.UUID) ([]Tender, error)
+
+	// Returns
+	CreateReturn(ctx context.Context, ret *Return, lines []ReturnLine) error
+	GetReturn(ctx context.Context, id uuid.UUID) (*Return, error)
+	ListReturns(ctx context.Context, f ReturnFilter, limit int) ([]Return, error)
 
 	// Till sessions
 	CreateTillSession(ctx context.Context, s *TillSession) error
 	GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error)
 	GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error)
 	CloseTillSession(ctx context.Context, s *TillSession) error
-	SetTillSessionGLEntry(ctx context.Context, sessionID, glEntryID uuid.UUID) error
 	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
 
 	// Z-reports
@@ -41,350 +61,681 @@ type Repository interface {
 	GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error)
 	ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error)
 
-	// Returns
+	// Lookups
 	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
-	CreateReturn(ctx context.Context, ret *POSReturn) error
-	SetReturnGLEntry(ctx context.Context, returnID, glEntryID uuid.UUID) error
-	GetReturn(ctx context.Context, id uuid.UUID) (*POSReturn, error)
-	ListReturns(ctx context.Context, registerID string, date time.Time) ([]POSReturn, error)
-
+	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
+	LookupKitComponents(ctx context.Context, kitIDs []uuid.UUID) (map[string][]salesdoc.KitComponent, error)
+	LookupChargeCodes(ctx context.Context, codes []string) (map[string]salesdoc.ChargeCode, error)
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
+	GetProductCatalog(ctx context.Context) ([]CatalogProduct, error)
+	WalkInCustomer(ctx context.Context) (uuid.UUID, string, error)
+	CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error)
+	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
+	OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error)
+	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
+	BranchTaxRate(ctx context.Context, branchID *uuid.UUID) (string, bool, error)
 
 	// Offline sync
-	TransactionExists(ctx context.Context, id uuid.UUID) (bool, error)
-	GetProductCatalog(ctx context.Context) ([]CatalogProduct, error)
-	LogSyncBatch(ctx context.Context, batchID, registerID string, synced, duplicates, errors int, errorDetails []SyncError) error
+	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
+	LogSyncBatch(ctx context.Context, batch LogBatch) error
 }
 
-// PostgresRepository implements Repository for PostgreSQL.
-type PostgresRepository struct {
-	db *database.DB
+// CustomerFacts is what the counter reads about the sale's customer: the
+// effective currency and the credit limit the ACCOUNT tender checks.
+type CustomerFacts struct {
+	CreditLimitCents *int64
+	Name             string
+	Currency         string
 }
 
-// NewRepository creates a new POS repository.
-func NewRepository(db *database.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+// TillAggregate is a session's raw sums, taken from the payments its sales
+// became: change never subtracts a second time because a cash payment is
+// already the money kept (ADR 0005 section 14.2 C2-5).
+type TillAggregate struct {
+	SaleCount         int
+	SalesTotalCents   int64
+	TaxTotalCents     int64
+	ChangeCents       int64
+	TenderedByMethod  map[string]int64
+	CashRefundsCents  int64
 }
 
-func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTransaction) error {
-	if tx.ID == uuid.Nil {
-		tx.ID = uuid.New()
-	}
-	tx.CreatedAt = time.Now()
-
-	// Derive the register's branch_id (via its assigned location).
-	var registerBranch *uuid.UUID
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT l.branch_id
-		 FROM pos_registers r
-		 LEFT JOIN locations l ON l.id = r.location_id
-		 WHERE r.id = $1`, tx.RegisterID).Scan(&registerBranch)
-	if err != nil {
-		return fmt.Errorf("failed to resolve register branch: %w", err)
-	}
-
-	// Reject if the caller's branch context disagrees with the register's branch.
-	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
-		return fmt.Errorf("register %s belongs to a different branch than the request", tx.RegisterID)
-	}
-
-	query := `
-		INSERT INTO pos_transactions (id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, created_at, synced_from, client_created_at, branch_id, till_session_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')), $13)
-		RETURNING branch_id
-	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		tx.ID, tx.RegisterID, tx.CashierID, tx.CustomerID,
-		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt, registerBranch, tx.TillSessionID,
-	).Scan(&tx.BranchID)
-	if err != nil {
-		return fmt.Errorf("failed to create POS transaction: %w", err)
-	}
-	return nil
+// SaleFilter is the sale list's filters.
+type SaleFilter struct {
+	RegisterID string
+	Date       *time.Time
+	Status     string
 }
 
-// TransactionExists checks if a transaction with the given ID already exists (for idempotent sync).
-func (r *PostgresRepository) TransactionExists(ctx context.Context, id uuid.UUID) (bool, error) {
-	var exists bool
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM pos_transactions WHERE id = $1)`, id,
-	).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("failed to check transaction existence: %w", err)
-	}
-	return exists, nil
+// ReturnFilter is the return list's filters.
+type ReturnFilter struct {
+	RegisterID string
+	Date       *time.Time
 }
 
-// GetProductCatalog returns all active products for offline caching.
-func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogProduct, error) {
-	query := `
-		SELECT p.id, p.sku, p.description, COALESCE(p.base_price, 0) as price,
-			COALESCE(p.uom_primary::text, 'EA') as uom,
-			COALESCE(i.quantity, 0) as in_stock
-		FROM products p
-		LEFT JOIN inventory i ON i.product_id = p.id
-		WHERE p.is_active = true OR p.is_active IS NULL
-		ORDER BY p.sku ASC
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get product catalog: %w", err)
-	}
-	defer rows.Close()
-
-	var products []CatalogProduct
-	for rows.Next() {
-		var p CatalogProduct
-		if err := rows.Scan(&p.ProductID, &p.SKU, &p.Description, &p.Price, &p.UOM, &p.InStock); err != nil {
-			return nil, fmt.Errorf("failed to scan catalog product: %w", err)
-		}
-		products = append(products, p)
-	}
-	return products, nil
+// LogBatch is one offline sync's outcome record: Errors lists the failed
+// items, Details the pending ones beside them.
+type LogBatch struct {
+	BatchID, RegisterID                     string
+	Synced, Duplicates, ErrorCount, Pending int
+	Errors                                  []SyncItemResult
+	Details                                 []SyncItemResult
 }
 
-// syncErrorJSON is used for safe JSON marshalling of sync error details.
-type syncErrorJSON struct {
+// SyncItemResult is one offline sale's outcome in the sync log.
+type SyncItemResult struct {
 	ClientID string `json:"client_id"`
 	Reason   string `json:"reason"`
 }
 
-// LogSyncBatch records a sync batch result for auditing.
-func (r *PostgresRepository) LogSyncBatch(ctx context.Context, batchID, registerID string, synced, duplicates, errors int, errorDetails []SyncError) error {
-	errJSON := "[]"
-	if len(errorDetails) > 0 {
-		items := make([]syncErrorJSON, len(errorDetails))
-		for i, e := range errorDetails {
-			items[i] = syncErrorJSON{ClientID: e.ClientID, Reason: e.Reason}
+// PostgresRepository implements Repository.
+type PostgresRepository struct {
+	db *database.DB
+}
+
+// NewRepository creates the counter's repository.
+func NewRepository(db *database.DB) *PostgresRepository { return &PostgresRepository{db: db} }
+
+func (r *PostgresRepository) ex(ctx context.Context) database.Executor { return r.db.GetExecutor(ctx) }
+
+// posLineCols is the shared line projection over pos_line_items.
+var posLineCols = salesdoc.LineColumns(`false, NULL::uuid, NULL::bigint`)
+
+func mapWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if pgErr.Code == "23503" {
+			return fmt.Errorf("a referenced record does not exist: %s", pgErr.ConstraintName)
 		}
-		data, err := json.Marshal(items)
-		if err != nil {
-			return fmt.Errorf("failed to marshal sync errors: %w", err)
-		}
-		errJSON = string(data)
 	}
-	_, err := r.db.GetExecutor(ctx).Exec(ctx,
-		`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, errors) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-		batchID, registerID, synced, duplicates, errors, errJSON,
-	)
 	return err
 }
 
-func (r *PostgresRepository) GetTransaction(ctx context.Context, id uuid.UUID) (*POSTransaction, error) {
-	query := `
-		SELECT id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, change_due, till_session_id, status, completed_at, created_at, branch_id
-		FROM pos_transactions
-		WHERE id = $1
-		  AND ($2::uuid IS NULL OR branch_id = $2)
-	`
-	var tx POSTransaction
-	var subtotal, taxAmount, total, changeDue float64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchctx.IDForQuery(ctx)).Scan(
-		&tx.ID, &tx.RegisterID, &tx.CashierID, &tx.CustomerID,
-		&subtotal, &taxAmount, &total, &changeDue, &tx.TillSessionID,
-		&tx.Status, &tx.CompletedAt, &tx.CreatedAt, &tx.BranchID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get POS transaction: %w", err)
+func (r *PostgresRepository) CreateSale(ctx context.Context, s *Sale) error {
+	if s.ID == uuid.Nil {
+		s.ID = uuid.New()
 	}
-	tx.Subtotal = int64(subtotal*100.0 + 0.5)
-	tx.TaxAmount = int64(taxAmount*100.0 + 0.5)
-	tx.Total = int64(total*100.0 + 0.5)
-	tx.ChangeDue = int64(changeDue*100.0 + 0.5)
-	return &tx, nil
-}
-
-func (r *PostgresRepository) UpdateTransaction(ctx context.Context, tx *POSTransaction) error {
-	query := `
-		UPDATE pos_transactions
-		SET subtotal = $2, tax_amount = $3, total = $4, status = $5, completed_at = $6, customer_id = $7, change_due = $9
-		WHERE id = $1
-		  AND ($8::uuid IS NULL OR branch_id = $8)
-	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		tx.ID,
-		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CompletedAt, tx.CustomerID, branchctx.IDForQuery(ctx),
-		float64(tx.ChangeDue)/100.0,
-	)
+	number, err := httpx.NextDocumentNumber(ctx, r.ex(ctx), "pos_transaction_number_seq", "POS", httpx.DefaultDocNumberWidth)
 	if err != nil {
-		return fmt.Errorf("failed to update POS transaction: %w", err)
+		return err
+	}
+	s.Number = number
+	err = r.ex(ctx).QueryRow(ctx, `
+		INSERT INTO pos_transactions (id, number, register_id, cashier_id, customer_id, currency, subtotal, tax_amount,
+			total, change_due, status, till_session_id, branch_id, created_at, updated_at, revision)
+		VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0, $7, $8,
+			COALESCE((SELECT l.branch_id FROM pos_registers pr LEFT JOIN locations l ON l.id = pr.location_id WHERE pr.id = $3),
+			         (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')),
+			NOW(), NOW(), 1)
+		RETURNING branch_id, created_at, revision`,
+		s.ID, s.Number, s.RegisterID, s.CashierID, s.CustomerID, s.Currency, StatusOpen, s.TillSessionID,
+	).Scan(&s.BranchID, &s.CreatedAt, &s.Revision)
+	if err != nil {
+		return fmt.Errorf("failed to create the sale: %w", mapWriteError(err))
 	}
 	return nil
 }
 
-func (r *PostgresRepository) ListTransactions(ctx context.Context, registerID string, date time.Time) ([]TransactionSummary, error) {
-	query := `
-		SELECT t.id, t.register_id, t.total, t.status, t.completed_at, t.created_at,
-			(SELECT COUNT(*) FROM pos_line_items li WHERE li.transaction_id = t.id) as item_count
-		FROM pos_transactions t
-		WHERE ($1 = '' OR t.register_id = $1)
-		  AND t.created_at >= $2 AND t.created_at < $3
-		  AND ($4::uuid IS NULL OR t.branch_id = $4)
-		ORDER BY t.created_at DESC
-	`
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	endOfDay := startOfDay.Add(24 * time.Hour)
+func (r *PostgresRepository) LockSale(ctx context.Context, id uuid.UUID) error {
+	var one int
+	err := r.ex(ctx).QueryRow(ctx, `SELECT 1 FROM pos_transactions WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)
+		FOR NO KEY UPDATE`, id, branchctx.IDForQuery(ctx)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("sale not found")
+	}
+	return err
+}
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, registerID, startOfDay, endOfDay, branchctx.IDForQuery(ctx))
+const saleCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.cashier_id, t.customer_id, t.currency,
+	ROUND(t.subtotal * 100)::bigint, ROUND(t.tax_amount * 100)::bigint, ROUND(t.total * 100)::bigint,
+	ROUND(t.change_due * 100)::bigint, t.till_session_id, t.status, t.invoice_id, t.completed_at, t.created_at`
+
+func scanSale(row pgx.Row, s *Sale) error {
+	return row.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
+		&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
+		&s.CompletedAt, &s.CreatedAt)
+}
+
+func (r *PostgresRepository) GetSale(ctx context.Context, id uuid.UUID) (*Sale, error) {
+	s := &Sale{}
+	err := scanSale(r.ex(ctx).QueryRow(ctx, `SELECT `+saleCols+` FROM pos_transactions t
+		WHERE t.id = $1 AND ($2::uuid IS NULL OR t.branch_id = $2)`, id, branchctx.IDForQuery(ctx)), s)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("sale not found")
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to list POS transactions: %w", err)
+		return nil, fmt.Errorf("failed to read the sale: %w", err)
+	}
+	return s, nil
+}
+
+func (r *PostgresRepository) UpdateSaleTotals(ctx context.Context, id uuid.UUID, subtotal, tax, total int64) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_transactions SET subtotal = $2::numeric / 100, tax_amount = $3::numeric / 100, total = $4::numeric / 100,
+			updated_at = NOW(), revision = revision + 1 WHERE id = $1`, id, subtotal, tax, total)
+	if err != nil {
+		return fmt.Errorf("failed to update the sale's totals: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) CompleteSale(ctx context.Context, id, invoiceID uuid.UUID, subtotal, tax, total, change int64) error {
+	tag, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_transactions SET invoice_id = $2, subtotal = $3::numeric / 100, tax_amount = $4::numeric / 100,
+			total = $5::numeric / 100, change_due = $6::numeric / 100, status = 'COMPLETED', completed_at = NOW(),
+			updated_at = NOW(), revision = revision + 1 WHERE id = $1 AND status IN ('OPEN', 'HELD')`, id, invoiceID, subtotal, tax, total, change)
+	if err != nil {
+		return fmt.Errorf("failed to complete the sale: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return httpx.InvalidStateTransition("only an open or held sale can be completed")
+	}
+	return nil
+}
+
+func (r *PostgresRepository) VoidSale(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_transactions SET status = 'VOIDED', updated_at = NOW(), revision = revision + 1
+		WHERE id = $1 AND status = 'COMPLETED'`, id)
+	if err != nil {
+		return fmt.Errorf("failed to void the sale: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return httpx.InvalidStateTransition("only a completed sale can be voided")
+	}
+	return nil
+}
+
+func (r *PostgresRepository) NextSaleNumber(ctx context.Context) (string, error) {
+	return httpx.NextDocumentNumber(ctx, r.ex(ctx), "pos_transaction_number_seq", "POS", httpx.DefaultDocNumberWidth)
+}
+
+func (r *PostgresRepository) NextReturnNumber(ctx context.Context) (string, error) {
+	return httpx.NextDocumentNumber(ctx, r.ex(ctx), "pos_return_number_seq", "RTN", httpx.DefaultDocNumberWidth)
+}
+
+func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit int) ([]SaleSummary, error) {
+	predicate := `WHERE ($1 = '' OR t.register_id = $1)
+		AND ($2::text IS NULL OR t.status = $2)
+		AND (t.created_at >= $3::date AND t.created_at < ($3::date + 1))
+		AND ($4::uuid IS NULL OR t.branch_id = $4)`
+	args := []any{f.RegisterID, nil, time.Now(), branchctx.IDForQuery(ctx)}
+	if f.Status != "" {
+		args[1] = f.Status
+	}
+	if f.Date != nil {
+		args[2] = *f.Date
+	}
+	rows, err := r.ex(ctx).Query(ctx, `SELECT `+saleCols+`,
+		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT')
+		FROM pos_transactions t `+predicate+` ORDER BY t.created_at DESC, t.id DESC LIMIT $5`, append(args, limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sales: %w", err)
 	}
 	defer rows.Close()
-
-	var summaries []TransactionSummary
+	var out []SaleSummary
 	for rows.Next() {
-		var s TransactionSummary
-		var total float64
-		if err := rows.Scan(&s.ID, &s.RegisterID, &total, &s.Status, &s.CompletedAt, &s.CreatedAt, &s.ItemCount); err != nil {
-			return nil, fmt.Errorf("failed to scan transaction summary: %w", err)
+		s := &Sale{}
+		var count int
+		if err := rows.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID,
+			&s.Currency, &s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status,
+			&s.InvoiceID, &s.CompletedAt, &s.CreatedAt, &count); err != nil {
+			return nil, err
 		}
-		s.Total = int64(total*100.0 + 0.5)
-		summaries = append(summaries, s)
+		out = append(out, SaleSummary{ID: s.ID, Number: s.Number, Revision: s.Revision, BranchID: s.BranchID,
+			RegisterID: s.RegisterID, CashierID: s.CashierID, CustomerID: s.CustomerID, Currency: s.Currency,
+			TotalCents: s.TotalCents, Status: s.Status, InvoiceID: s.InvoiceID, CompletedAt: s.CompletedAt,
+			CreatedAt: s.CreatedAt, ItemCount: count})
 	}
-	return summaries, nil
+	return out, rows.Err()
 }
 
-func (r *PostgresRepository) AddLineItem(ctx context.Context, item *POSLineItem) error {
-	if item.ID == uuid.Nil {
-		item.ID = uuid.New()
-	}
-	item.CreatedAt = time.Now()
-
-	query := `
-		INSERT INTO pos_line_items (id, transaction_id, product_id, description, quantity, uom, unit_price, line_total, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		item.ID, item.TransactionID, item.ProductID, item.Description,
-		item.Quantity, item.UOM,
-		float64(item.UnitPrice)/100.0, float64(item.LineTotal)/100.0,
-		item.CreatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to add POS line item: %w", err)
+func (r *PostgresRepository) AddLines(ctx context.Context, saleID uuid.UUID, lines []salesdoc.Line) error {
+	for i := range lines {
+		l := &lines[i]
+		if l.ID == uuid.Nil {
+			l.ID = uuid.New()
+		}
+		_, err := r.ex(ctx).Exec(ctx, `
+			INSERT INTO pos_line_items (id, transaction_id, position, line_type, parent_line_id, product_id, charge_code_id,
+				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, priced_unit_price,
+				price_source, override_reason, discount_percent, discount_amount, discount_reason, price_adjusted_by,
+				line_total, taxable, revenue_account_code, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000,
+				$14::numeric / 10000, $15::numeric / 10000, $16::numeric / 10000, $17, $18, $19::numeric / 10000,
+				$20::numeric / 100, $21, $22, $23::numeric / 100, $24, $25, NOW())`,
+			l.ID, saleID, l.Position, string(l.LineType), l.ParentLineID, l.ProductID, l.ChargeCodeID,
+			l.SKU, l.Description, qtyArg(l.Quantity), l.UOM, l.PriceUOM, qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty),
+			priceArg(l.UnitPrice), priceArg(l.PricedUnitPrice), string(l.PriceSource), l.OverrideReason,
+			qtyArg(l.DiscountPercent), centsArg(l.DiscountAmount), l.DiscountReason, l.PriceAdjustedBy,
+			centsArg(l.LineTotal), l.Taxable, l.RevenueAccountCode)
+		if err != nil {
+			return fmt.Errorf("failed to add the sale line: %w", mapWriteError(err))
+		}
 	}
 	return nil
 }
 
-func (r *PostgresRepository) RemoveLineItem(ctx context.Context, itemID uuid.UUID) error {
-	query := `DELETE FROM pos_line_items WHERE id = $1`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, itemID)
+func qtyArg(q *httpx.Quantity) any {
+	if q == nil {
+		return nil
+	}
+	return int64(*q)
+}
+
+func priceArg(p *httpx.Price) any {
+	if p == nil {
+		return nil
+	}
+	return int64(*p)
+}
+
+func centsArg(c *httpx.Cents) any {
+	if c == nil {
+		return nil
+	}
+	return int64(*c)
+}
+
+func (r *PostgresRepository) RemoveLine(ctx context.Context, saleID, lineID uuid.UUID) error {
+	tag, err := r.ex(ctx).Exec(ctx, `DELETE FROM pos_line_items WHERE id = $1 AND transaction_id = $2`, lineID, saleID)
 	if err != nil {
-		return fmt.Errorf("failed to remove POS line item: %w", err)
+		return fmt.Errorf("failed to remove the line: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return httpx.NotFound("line not found on this sale")
 	}
 	return nil
 }
 
-func (r *PostgresRepository) GetLineItems(ctx context.Context, txID uuid.UUID) ([]POSLineItem, error) {
-	query := `
-		SELECT id, transaction_id, product_id, description, quantity, uom, unit_price, line_total, created_at
-		FROM pos_line_items
-		WHERE transaction_id = $1
-		ORDER BY created_at ASC
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, txID)
+func (r *PostgresRepository) GetLines(ctx context.Context, saleID uuid.UUID) ([]salesdoc.Line, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT `+posLineCols+` FROM pos_line_items l
+		LEFT JOIN charge_codes cc ON cc.id = l.charge_code_id
+		WHERE l.transaction_id = $1 ORDER BY l.position, l.created_at, l.id`, saleID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get POS line items: %w", err)
+		return nil, fmt.Errorf("failed to read the sale's lines: %w", err)
 	}
 	defer rows.Close()
-
-	var items []POSLineItem
+	var out []salesdoc.Line
 	for rows.Next() {
-		var item POSLineItem
-		var unitPrice, lineTotal float64
-		if err := rows.Scan(
-			&item.ID, &item.TransactionID, &item.ProductID, &item.Description,
-			&item.Quantity, &item.UOM, &unitPrice, &lineTotal, &item.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan POS line item: %w", err)
+		var l salesdoc.Line
+		var sc salesdoc.LineScan
+		if err := rows.Scan(sc.Dests(&l)...); err != nil {
+			return nil, err
 		}
-		item.UnitPrice = int64(unitPrice*100.0 + 0.5)
-		item.LineTotal = int64(lineTotal*100.0 + 0.5)
-		items = append(items, item)
+		sc.Finish(&l)
+		out = append(out, l)
 	}
-	return items, nil
+	return out, rows.Err()
 }
 
-func (r *PostgresRepository) AddTender(ctx context.Context, tender *POSTender) error {
-	if tender.ID == uuid.Nil {
-		tender.ID = uuid.New()
+func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
 	}
-	tender.CreatedAt = time.Now()
-
-	query := `
-		INSERT INTO pos_tenders (id, transaction_id, method, amount, reference, card_last4, card_brand, gateway_tx_id, auth_code, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		tender.ID, tender.TransactionID, tender.Method,
-		float64(tender.Amount)/100.0, tender.Reference,
-		tender.CardLast4, tender.CardBrand,
-		tender.GatewayTxID, tender.AuthCode, tender.CreatedAt,
-	)
+	err := r.ex(ctx).QueryRow(ctx, `
+		INSERT INTO pos_tenders (id, transaction_id, method, amount, payment_id, reference, card_last4, card_brand,
+			gateway_tx_id, auth_code, created_at)
+		VALUES ($1, $2, $3, $4::numeric / 100, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NOW())
+		RETURNING created_at`,
+		t.ID, t.SaleID, string(t.Method), int64(t.AmountCents), t.PaymentID, t.Reference, t.CardLast4, t.CardBrand,
+		t.GatewayTxID, t.AuthCode).Scan(&t.CreatedAt)
 	if err != nil {
-		return fmt.Errorf("failed to add POS tender: %w", err)
+		return fmt.Errorf("failed to record the tender: %w", mapWriteError(err))
 	}
 	return nil
 }
 
-func (r *PostgresRepository) GetTenders(ctx context.Context, txID uuid.UUID) ([]POSTender, error) {
-	query := `
-		SELECT id, transaction_id, method, amount, COALESCE(reference, '') as reference,
-			COALESCE(card_last4, '') as card_last4, COALESCE(card_brand, '') as card_brand,
-			COALESCE(gateway_tx_id, '') as gateway_tx_id, COALESCE(auth_code, '') as auth_code, created_at
-		FROM pos_tenders
-		WHERE transaction_id = $1
-		ORDER BY created_at ASC
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, txID)
+func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) ([]Tender, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, method, ROUND(amount * 100)::bigint, payment_id, reference, card_last4, card_brand, gateway_tx_id,
+			auth_code, created_at
+		FROM pos_tenders WHERE transaction_id = $1 ORDER BY created_at, id`, saleID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get POS tenders: %w", err)
+		return nil, fmt.Errorf("failed to read the tenders: %w", err)
 	}
 	defer rows.Close()
-
-	var tenders []POSTender
+	var out []Tender
 	for rows.Next() {
-		var t POSTender
-		var amount float64
-		if err := rows.Scan(
-			&t.ID, &t.TransactionID, &t.Method, &amount, &t.Reference,
-			&t.CardLast4, &t.CardBrand, &t.GatewayTxID, &t.AuthCode, &t.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan POS tender: %w", err)
+		var t Tender
+		var method string
+		if err := rows.Scan(&t.ID, &method, &t.AmountCents, &t.PaymentID, &t.Reference, &t.CardLast4, &t.CardBrand,
+			&t.GatewayTxID, &t.AuthCode, &t.CreatedAt); err != nil {
+			return nil, err
 		}
-		t.Amount = int64(amount*100.0 + 0.5)
-		tenders = append(tenders, t)
+		t.Method = TenderMethod(method)
+		t.SaleID = saleID
+		out = append(out, t)
 	}
-	return tenders, nil
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, lines []ReturnLine) error {
+	if ret.ID == uuid.Nil {
+		ret.ID = uuid.New()
+	}
+	number, err := httpx.NextDocumentNumber(ctx, r.ex(ctx), "pos_return_number_seq", "RTN", httpx.DefaultDocNumberWidth)
+	if err != nil {
+		return err
+	}
+	ret.Number = number
+	err = r.ex(ctx).QueryRow(ctx, `
+		INSERT INTO pos_returns (id, number, register_id, till_session_id, original_transaction_id, customer_id, branch_id,
+			cashier_id, currency, subtotal, tax_amount, total, refund_method, reason, status, credit_memo_id, created_at, updated_at, revision)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric / 100, $11::numeric / 100, $12::numeric / 100, $13, $14,
+			'COMPLETED', $15, NOW(), NOW(), 1)
+		RETURNING created_at`,
+		ret.ID, ret.Number, ret.RegisterID, ret.TillSessionID, ret.OriginalSaleID, ret.CustomerID, ret.BranchID,
+		ret.CashierID, ret.Currency, int64(ret.SubtotalCents), int64(ret.TaxCents), int64(ret.TotalCents),
+		string(ret.RefundMethod), ret.Reason, ret.CreditMemoID).Scan(&ret.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to record the return: %w", mapWriteError(err))
+	}
+	for i := range lines {
+		l := &lines[i]
+		if l.ID == uuid.Nil {
+			l.ID = uuid.New()
+		}
+		_, err := r.ex(ctx).Exec(ctx, `
+			INSERT INTO pos_return_lines (id, return_id, position, product_id, description, quantity, uom, unit_price,
+				line_total, restock, created_at)
+			VALUES ($1, $2, $3, $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, -($9::numeric / 100), $10, NOW())`,
+			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
+			centsArg(l.LineTotal), l.Restock)
+		if err != nil {
+			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
+		}
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Return, error) {
+	ret := &Return{}
+	var method string
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT id, number, revision, branch_id, register_id, till_session_id, original_transaction_id, customer_id,
+			cashier_id, currency, ROUND(subtotal * 100)::bigint, ROUND(tax_amount * 100)::bigint, ROUND(total * 100)::bigint,
+			refund_method, reason, credit_memo_id, created_at
+		FROM pos_returns WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`, id, branchctx.IDForQuery(ctx)).
+		Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID, &ret.OriginalSaleID,
+			&ret.CustomerID, &ret.CashierID, &ret.Currency, &ret.SubtotalCents, &ret.TaxCents, &ret.TotalCents,
+			&method, &ret.Reason, &ret.CreditMemoID, &ret.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("return not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the return: %w", err)
+	}
+	ret.RefundMethod = RefundMethod(method)
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, position, product_id, description, ROUND(-quantity * 10000)::bigint, uom,
+			ROUND(unit_price * 10000)::bigint, ROUND(-line_total * 100)::bigint, restock
+		FROM pos_return_lines WHERE return_id = $1 ORDER BY position, id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var l ReturnLine
+		if err := rows.Scan(&l.ID, &l.Position, &l.ProductID, &l.Description, &l.Quantity, &l.UOM, &l.UnitPrice,
+			&l.LineTotal, &l.Restock); err != nil {
+			return nil, err
+		}
+		ret.Lines = append(ret.Lines, l)
+	}
+	return ret, rows.Err()
+}
+
+func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, limit int) ([]Return, error) {
+	args := []any{f.RegisterID, time.Now(), branchctx.IDForQuery(ctx), limit}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, number, revision, branch_id, register_id, till_session_id, original_transaction_id, customer_id,
+			cashier_id, currency, ROUND(subtotal * 100)::bigint, ROUND(tax_amount * 100)::bigint, ROUND(total * 100)::bigint,
+			refund_method, reason, credit_memo_id, created_at
+		FROM pos_returns
+		WHERE ($1 = '' OR register_id = $1)
+			AND (created_at >= $2::date AND created_at < ($2::date + 1))
+			AND ($3::uuid IS NULL OR branch_id = $3)
+		ORDER BY created_at DESC, id DESC LIMIT $4`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list returns: %w", err)
+	}
+	defer rows.Close()
+	var out []Return
+	for rows.Next() {
+		ret := &Return{}
+		var method string
+		if err := rows.Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID,
+			&ret.OriginalSaleID, &ret.CustomerID, &ret.CashierID, &ret.Currency, &ret.SubtotalCents, &ret.TaxCents,
+			&ret.TotalCents, &method, &ret.Reason, &ret.CreditMemoID, &ret.CreatedAt); err != nil {
+			return nil, err
+		}
+		ret.RefundMethod = RefundMethod(method)
+		out = append(out, *ret)
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error) {
+	var branch *uuid.UUID
+	err := r.ex(ctx).QueryRow(ctx, `SELECT l.branch_id FROM pos_registers pr
+		LEFT JOIN locations l ON l.id = pr.location_id WHERE pr.id = $1`, registerID).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("no such register")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the register's branch: %w", err)
+	}
+	return branch, nil
+}
+
+func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error) {
+	out := map[string]salesdoc.ProductRef{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, COALESCE(sku, ''), COALESCE(description, ''), COALESCE(uom_primary::text, 'EA'),
+			COALESCE(ROUND(base_price * 10000)::bigint, 0), COALESCE(ROUND(average_unit_cost * 10000)::bigint, 0),
+			COALESCE(is_kit, FALSE), COALESCE(taxable, TRUE)
+		FROM products WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ref salesdoc.ProductRef
+		if err := rows.Scan(&ref.ID, &ref.SKU, &ref.Description, &ref.UOMPrimary, &ref.BasePrice, &ref.AverageCost,
+			&ref.IsKit, &ref.Taxable); err != nil {
+			return nil, err
+		}
+		out[ref.ID.String()] = ref
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) LookupKitComponents(ctx context.Context, kitIDs []uuid.UUID) (map[string][]salesdoc.KitComponent, error) {
+	out := map[string][]salesdoc.KitComponent{}
+	if len(kitIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT kit_product_id, component_product_id, ROUND(quantity * 10000)::bigint, position
+		FROM product_kit_components WHERE kit_product_id = ANY($1) ORDER BY position`, kitIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c salesdoc.KitComponent
+		if err := rows.Scan(&c.KitProductID, &c.ComponentProductID, &c.Quantity, &c.Position); err != nil {
+			return nil, err
+		}
+		out[c.KitProductID.String()] = append(out[c.KitProductID.String()], c)
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) LookupChargeCodes(ctx context.Context, codes []string) (map[string]salesdoc.ChargeCode, error) {
+	out := map[string]salesdoc.ChargeCode{}
+	if len(codes) == 0 {
+		return out, nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, code, name, revenue_account_code, taxable, ROUND(default_unit_price * 10000)::bigint, is_active, revision
+		FROM charge_codes WHERE code = ANY($1)`, codes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c salesdoc.ChargeCode
+		if err := rows.Scan(&c.ID, &c.Code, &c.Name, &c.RevenueAccountCode, &c.Taxable, &c.DefaultUnitPrice,
+			&c.IsActive, &c.Revision); err != nil {
+			return nil, err
+		}
+		out[c.Code] = c
+	}
+	return out, rows.Err()
 }
 
 func (r *PostgresRepository) SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error) {
-	sql := `
-		SELECT p.id, p.sku, p.description, COALESCE(p.base_price, 0) as price, COALESCE(p.uom_primary::text, 'EA') as uom,
-			COALESCE(SUM(i.quantity), 0) as in_stock
-		FROM products p
-		LEFT JOIN inventory i ON i.product_id = p.id
-		WHERE p.sku ILIKE $1 OR p.description ILIKE $1
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
+			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
+		FROM products p LEFT JOIN inventory i ON i.product_id = p.id
+		WHERE (p.sku ILIKE $1 OR p.description ILIKE $1) AND COALESCE(p.is_active, TRUE)
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
-		ORDER BY p.sku ASC
-		LIMIT $2
-	`
-	searchTerm := "%" + query + "%"
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, sql, searchTerm, limit)
+		ORDER BY p.sku LIMIT $2`, "%"+query+"%", limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search products: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
-
-	var results []QuickSearchResult
+	var out []QuickSearchResult
 	for rows.Next() {
-		var r QuickSearchResult
-		if err := rows.Scan(&r.ProductID, &r.SKU, &r.Description, &r.UnitPrice, &r.UOM, &r.InStock); err != nil {
-			return nil, fmt.Errorf("failed to scan product: %w", err)
+		var q QuickSearchResult
+		if err := rows.Scan(&q.ProductID, &q.SKU, &q.Description, &q.UnitPriceCents, &q.UOM, &q.InStock); err != nil {
+			return nil, err
 		}
-		results = append(results, r)
+		out = append(out, q)
 	}
-	return results, nil
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogProduct, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
+			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
+		FROM products p LEFT JOIN inventory i ON i.product_id = p.id
+		WHERE COALESCE(p.is_active, TRUE)
+		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
+		ORDER BY p.sku`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CatalogProduct
+	for rows.Next() {
+		var c CatalogProduct
+		if err := rows.Scan(&c.ProductID, &c.SKU, &c.Description, &c.UnitPriceCents, &c.UOM, &c.InStock); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// WalkInCustomer answers the walk-in customer's id and the dealer's default
+// currency (ADR 0005 section 13 C2-5 step 4).
+func (r *PostgresRepository) WalkInCustomer(ctx context.Context) (uuid.UUID, string, error) {
+	var id uuid.UUID
+	var currency string
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT c.id, COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
+		FROM customers c WHERE c.account_number = 'WALK-IN'`).Scan(&id, &currency)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("the walk-in customer is not configured: %w", err)
+	}
+	return id, currency, nil
+}
+
+func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error) {
+	var f CustomerFacts
+	var limit *int64
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT name, ROUND(credit_limit * 100)::bigint,
+			COALESCE(currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
+		FROM customers WHERE id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return f, httpx.NotFound("no such customer")
+	}
+	if err != nil {
+		return f, err
+	}
+	f.CreditLimitCents = limit
+	return f, nil
+}
+
+func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {
+	var exempt bool
+	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tax_exemptions WHERE customer_id = $1 AND active)`, customerID).Scan(&exempt)
+	return exempt, err
+}
+
+func (r *PostgresRepository) OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
+	var open int64
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE((SELECT SUM(ROUND(i.amount_open * 100)::bigint) FROM invoices i
+			WHERE i.customer_id = $1 AND i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE')), 0)
+			- COALESCE((SELECT SUM(ROUND(m.amount_open * 100)::bigint) FROM credit_memos m
+			WHERE m.customer_id = $1 AND m.status IN ('OPEN', 'PARTIAL')), 0)
+			- COALESCE((SELECT SUM(ROUND(p.amount_unapplied * 100)::bigint) FROM payments p
+			WHERE p.customer_id = $1 AND p.status = 'POSTED'), 0)`, customerID).Scan(&open)
+	return open, err
+}
+
+func (r *PostgresRepository) BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error) {
+	var date time.Time
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT (timezone(COALESCE((SELECT l.timezone FROM locations l WHERE l.id = $1), 'UTC'), $2))::date`, branchID, at).Scan(&date)
+	if err != nil {
+		return at.UTC(), nil
+	}
+	return date, nil
+}
+
+// BranchTaxRate reads the branch's configured rate as the decimal string the
+// resolver takes.
+func (r *PostgresRepository) BranchTaxRate(ctx context.Context, branchID *uuid.UUID) (string, bool, error) {
+	var rate *string
+	err := r.ex(ctx).QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = $1`, branchID).Scan(&rate)
+	if errors.Is(err, pgx.ErrNoRows) || rate == nil {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return *rate, true, nil
+}
+
+func (r *PostgresRepository) SaleExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pos_transactions WHERE id = $1)`, id).Scan(&exists)
+	return exists, err
+}
+
+func (r *PostgresRepository) LogSyncBatch(ctx context.Context, b LogBatch) error {
+	// The jsonb carries both the failures and the pending items (a pending
+	// offline sale stays visible in the log until a retry completes it).
+	details := make([]SyncItemResult, 0, len(b.Details)+len(b.Errors))
+	details = append(details, b.Errors...)
+	details = append(details, b.Details...)
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return err
+	}
+	_, err = r.ex(ctx).Exec(ctx, `
+		INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, errors)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb)`, b.BatchID, b.RegisterID, b.Synced, b.Duplicates, b.ErrorCount, string(raw))
+	return err
 }

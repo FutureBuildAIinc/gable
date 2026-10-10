@@ -6,276 +6,341 @@ package pos
 import (
 	"context"
 	"fmt"
-	"math"
-	"strings"
-	"time"
 
-	"github.com/gablelbm/gable/internal/inventory"
-	"github.com/gablelbm/gable/internal/payment"
-	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
-// ReturnRefundMethod is how a return is refunded to the customer.
-type ReturnRefundMethod string
-
-const (
-	RefundCash    ReturnRefundMethod = "CASH"    // out of the drawer
-	RefundCard    ReturnRefundMethod = "CARD"    // reversed on the card (gateway)
-	RefundAccount ReturnRefundMethod = "ACCOUNT" // store credit against AR
-)
-
-// POSReturn is a completed merchandise return at the till. Its lines restock
-// sellable inventory; its total books a GL reversal of the original sale
-// (DR Sales Revenue / CR Cash for a drawer refund, DR Revenue / CR AR for
-// store credit).
-type POSReturn struct {
-	ID                    uuid.UUID  `json:"id" db:"id"`
-	RegisterID            string     `json:"register_id" db:"register_id"`
-	TillSessionID         *uuid.UUID `json:"till_session_id,omitempty" db:"till_session_id"`
-	OriginalTransactionID *uuid.UUID `json:"original_transaction_id,omitempty" db:"original_transaction_id"`
-	CustomerID            *uuid.UUID `json:"customer_id,omitempty" db:"customer_id"`
-	BranchID              *uuid.UUID `json:"branch_id,omitempty" db:"branch_id"`
-	CashierID             uuid.UUID  `json:"cashier_id" db:"cashier_id"`
-	Subtotal              int64      `json:"subtotal" db:"subtotal"`     // Cents
-	TaxAmount             int64      `json:"tax_amount" db:"tax_amount"` // Cents
-	Total                 int64      `json:"total" db:"total"`           // Cents
-	RefundMethod          string     `json:"refund_method" db:"refund_method"`
-	Reason                string     `json:"reason" db:"reason"`
-	Status                string     `json:"status" db:"status"`
-	GLEntryID             *uuid.UUID `json:"gl_entry_id,omitempty" db:"gl_entry_id"`
-	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
-
-	Lines []POSReturnLine `json:"lines,omitempty"`
+// ReturnIn is a parsed counter return request.
+type ReturnIn struct {
+	RegisterID     string
+	OriginalSaleID *uuid.UUID
+	CustomerID     *uuid.UUID
+	RefundMethod   RefundMethod
+	Reason         string
+	GatewayTxID    string
+	Lines          []ReturnLineIn
 }
 
-// POSReturnLine is one returned product line.
-type POSReturnLine struct {
-	ID          uuid.UUID `json:"id" db:"id"`
-	ReturnID    uuid.UUID `json:"return_id" db:"return_id"`
-	ProductID   uuid.UUID `json:"product_id" db:"product_id"`
-	Description string    `json:"description" db:"description"`
-	Quantity    float64   `json:"quantity" db:"quantity"`
-	UOM         string    `json:"uom" db:"uom"`
-	UnitPrice   int64     `json:"unit_price" db:"unit_price"` // Cents
-	LineTotal   int64     `json:"line_total" db:"line_total"` // Cents
-	Restock     bool      `json:"restock" db:"restock"`
+// ReturnLineIn is one parsed returned line.
+type ReturnLineIn struct {
+	ProductID   *uuid.UUID
+	SaleLineID  *uuid.UUID
+	Description string
+	Quantity    httpx.Quantity
+	UnitPrice   *httpx.Price
+	Restock     bool
 }
 
-// ReturnLineRequest is one line of a return request (money in dollars, matching
-// the POS wire convention).
-type ReturnLineRequest struct {
-	ProductID   uuid.UUID `json:"product_id"`
-	Description string    `json:"description,omitempty"`
-	Quantity    float64   `json:"quantity"` // positive units returned
-	UOM         string    `json:"uom,omitempty"`
-	UnitPrice   float64   `json:"unit_price"`        // Dollars
-	Restock     *bool     `json:"restock,omitempty"` // default true; false for damaged goods
+// returnLinePriced is a returned line with its money resolved.
+type returnLinePriced struct {
+	in        ReturnLineIn
+	lineTotal int64 // positive; the memo line stores it negative
+	taxable   bool
 }
 
-// ReturnRequest initiates a merchandise return.
-type ReturnRequest struct {
-	RegisterID            string              `json:"register_id"`
-	OriginalTransactionID *uuid.UUID          `json:"original_transaction_id,omitempty"`
-	CustomerID            *uuid.UUID          `json:"customer_id,omitempty"`
-	RefundMethod          string              `json:"refund_method"` // CASH | CARD | ACCOUNT
-	Reason                string              `json:"reason,omitempty"`
-	GatewayTxID           string              `json:"gateway_tx_id,omitempty"` // original card tx to reverse
-	Lines                 []ReturnLineRequest `json:"lines"`
-}
-
-// ReturnSale records a merchandise return: it restocks the sellable lines,
-// refunds via the chosen method, and books the GL reversal of the sale. Cash
-// and card refunds unwind against Cash (DR Revenue / CR Cash); account refunds
-// issue store credit (DR Revenue / CR AR) and lower the customer's balance.
-//
-// Ordering mirrors CompleteTransaction: the card reversal (slow, external, not
-// transactional) happens BEFORE the DB transaction; restock + persistence
-// commit together; GL posting is best-effort AFTER commit so a ledger hiccup
-// never unwinds a refund the customer already received.
-func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, req ReturnRequest) (*POSReturn, error) {
-	if req.RegisterID == "" {
-		return nil, fmt.Errorf("register_id is required")
+// ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
+// credit memo created and posted in ONE act with its restock lines,
+// refunded in cash or card or left as account credit. The card refund goes
+// through the gateway before the transaction; the memo's entry, subledger
+// row, the stock return and the refund commit together.
+func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *ReturnIn, actor string) (*Return, error) {
+	if s.ar == nil || s.inventory == nil {
+		return nil, errNotConfigured
 	}
-	if len(req.Lines) == 0 {
-		return nil, fmt.Errorf("a return needs at least one line")
+	branchID, err := s.repo.GetRegisterBranch(ctx, in.RegisterID)
+	if err != nil {
+		return nil, err
 	}
-	method := ReturnRefundMethod(strings.ToUpper(strings.TrimSpace(req.RefundMethod)))
-	if method == "" {
-		method = RefundCash
-	}
-	switch method {
-	case RefundCash, RefundCard, RefundAccount:
-	default:
-		return nil, fmt.Errorf("invalid refund_method %q (want CASH, CARD, or ACCOUNT)", req.RefundMethod)
-	}
-	if method == RefundAccount && req.CustomerID == nil {
-		return nil, fmt.Errorf("ACCOUNT refund requires a customer on the return")
-	}
-
-	// Build lines + subtotal.
-	lines := make([]POSReturnLine, 0, len(req.Lines))
-	taxItems := make([]POSLineItem, 0, len(req.Lines))
-	var subtotal int64
-	for _, l := range req.Lines {
-		if l.Quantity <= 0 {
-			return nil, fmt.Errorf("return quantity must be positive (product %s)", l.ProductID)
+	// The customer: named, the original sale's, or the walk-in.
+	customerID := in.CustomerID
+	if customerID == nil && in.OriginalSaleID != nil {
+		if original, err := s.repo.GetSale(ctx, *in.OriginalSaleID); err == nil && original.CustomerID != nil {
+			customerID = original.CustomerID
 		}
-		unit := int64(l.UnitPrice*100.0 + 0.5)
-		lineTotal := int64(math.Round(float64(unit) * l.Quantity))
-		restock := true
-		if l.Restock != nil {
-			restock = *l.Restock
+	}
+	if customerID == nil {
+		walkInID, _, err := s.repo.WalkInCustomer(ctx)
+		if err != nil {
+			return nil, err
 		}
-		uom := l.UOM
-		if uom == "" {
-			uom = "EA"
+		customerID = &walkInID
+	}
+	facts, err := s.repo.CustomerFacts(ctx, *customerID)
+	if err != nil {
+		return nil, err
+	}
+	// Price the lines: from the original sale's lines when named, else the
+	// request's own price (which is then required).
+	var saleLines []salesdoc.Line
+	if in.OriginalSaleID != nil {
+		if saleLines, err = s.repo.GetLines(ctx, *in.OriginalSaleID); err != nil {
+			return nil, err
 		}
-		lines = append(lines, POSReturnLine{
-			ProductID: l.ProductID, Description: l.Description, Quantity: l.Quantity,
-			UOM: uom, UnitPrice: unit, LineTotal: lineTotal, Restock: restock,
-		})
-		taxItems = append(taxItems, POSLineItem{
-			ProductID: l.ProductID, Description: l.Description, Quantity: l.Quantity, LineTotal: lineTotal,
-		})
-		subtotal += lineTotal
 	}
-	if subtotal <= 0 {
-		return nil, fmt.Errorf("return total must be positive")
+	byID := map[uuid.UUID]salesdoc.Line{}
+	for i := range saleLines {
+		byID[saleLines[i].ID] = saleLines[i]
 	}
-
-	// Resolve the register's branch (for tax and stamping); best-effort.
-	branchID, _ := s.repo.GetRegisterBranch(ctx, req.RegisterID)
-
-	// Tax mirrors the sale path so a full return refunds the tax the sale
-	// charged (same exemption-aware, branch-rate calculation).
-	taxTmp := &POSTransaction{CustomerID: req.CustomerID, Subtotal: subtotal}
-	if branchID != nil {
-		taxTmp.BranchID = *branchID
+	productIDs := make([]uuid.UUID, 0, len(in.Lines))
+	for i := range in.Lines {
+		if in.Lines[i].ProductID != nil {
+			productIDs = append(productIDs, *in.Lines[i].ProductID)
+		}
 	}
-	taxAmount := s.calculateTax(ctx, taxTmp, taxItems)
-	total := subtotal + taxAmount
-
-	// Attach the register's open drawer so cash refunds reconcile against it.
-	var tillSessionID *uuid.UUID
-	if sess, err := s.repo.GetOpenTillSession(ctx, req.RegisterID); err == nil && sess != nil {
-		tillSessionID = &sess.ID
+	refs, err := s.repo.LookupProducts(ctx, productIDs)
+	if err != nil {
+		return nil, err
 	}
-
-	ret := &POSReturn{
-		RegisterID:            req.RegisterID,
-		TillSessionID:         tillSessionID,
-		OriginalTransactionID: req.OriginalTransactionID,
-		CustomerID:            req.CustomerID,
-		BranchID:              branchID,
-		CashierID:             cashierID,
-		Subtotal:              subtotal,
-		TaxAmount:             taxAmount,
-		Total:                 total,
-		RefundMethod:          string(method),
-		Reason:                req.Reason,
-		Status:                "COMPLETED",
-		Lines:                 lines,
+	priced := make([]returnLinePriced, 0, len(in.Lines))
+	for i := range in.Lines {
+		rl := in.Lines[i]
+		if src, ok := byID[*rl.SaleLineID]; ok && rl.SaleLineID != nil {
+			if rl.UnitPrice == nil && src.UnitPrice != nil {
+				p := *src.UnitPrice
+				rl.UnitPrice = &p
+			}
+			if rl.Description == "" {
+				rl.Description = src.Description
+			}
+			if rl.ProductID == nil && src.ProductID != nil {
+				p := *src.ProductID
+				rl.ProductID = &p
+			}
+		}
+		if rl.UnitPrice == nil {
+			return nil, invalid("lines.unit_price_ten_thousandths",
+				"is required when the line names no line of the original sale")
+		}
+		taxable := true
+		if ref, ok := refs[rl.ProductID.String()]; ok {
+			taxable = ref.Taxable
+		}
+		priced = append(priced, returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, *rl.UnitPrice)), taxable: taxable})
 	}
-
-	// Card reversal is external and non-transactional — do it before the DB
-	// transaction so a decline aborts cleanly with nothing persisted.
-	if method == RefundCard && req.GatewayTxID != "" {
+	// Tax: the sale path's resolver, the branch rate (a return at the
+	// counter is a pickup, 5.5), exemptions first.
+	exempt, err := s.repo.CustomerExempt(ctx, *customerID)
+	if err != nil {
+		return nil, err
+	}
+	var taxableSum int64
+	for i := range priced {
+		if priced[i].taxable {
+			taxableSum += priced[i].lineTotal
+		}
+	}
+	subtotal := taxableSum
+	for i := range priced {
+		if !priced[i].taxable {
+			subtotal += priced[i].lineTotal
+		}
+	}
+	var taxCents int64
+	var taxRate *string
+	if exempt {
+		zero := "0"
+		taxRate = &zero
+	} else {
+		rate, ok, err := s.repo.BranchTaxRate(ctx, branchID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, conflict("tax_rate_not_configured", "set the branch's default tax rate before returning goods")
+		}
+		scaled, _, err := salesdoc.ParseTaxRate(rate)
+		if err != nil {
+			return nil, err
+		}
+		taxCents = int64(salesdoc.TaxAt(httpx.Cents(taxableSum), scaled))
+		taxRate = &rate
+	}
+	total := -(subtotal + taxCents)
+	// A card refund goes through the gateway before the transaction, so a
+	// decline aborts with nothing persisted.
+	if in.RefundMethod == RefundCard && in.GatewayTxID != "" {
 		if s.gateway == nil {
-			return nil, fmt.Errorf("card refund requested but no terminal gateway is configured on this register")
+			return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card")
 		}
-		res, err := s.gateway.Refund(ctx, req.GatewayTxID, total)
+		res, err := s.gateway.Refund(ctx, in.GatewayTxID, -total)
 		if err != nil {
 			return nil, fmt.Errorf("card refund failed: %w", err)
 		}
-		if res.Status != payment.GatewayStatusRefunded && res.Status != payment.GatewayStatusApproved {
-			return nil, fmt.Errorf("card refund not accepted (%s)", res.Status)
+		if res.Status != "REFUNDED" && res.Status != "APPROVED" {
+			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
 	}
-
-	// Persist the return + restock sellable lines in one transaction.
-	if err := s.db.RunInTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.CreateReturn(ctx, ret); err != nil {
+	var tillSessionID *uuid.UUID
+	if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
+		tillSessionID = &session.ID
+	}
+	var out *Return
+	err = s.inTx(ctx, func(ctx context.Context) error {
+		date, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
+		if err != nil {
 			return err
 		}
-		for _, l := range ret.Lines {
-			if !l.Restock {
+		// The credit memo: a DRAFT row with its negative lines, then the AR
+		// core's PostCreditMemo mints the gapless number, posts the entry
+		// (DR each revenue account its group's line totals, DR the tax, DR
+		// 1030 / CR 5010 the restocked cost; CR 1020 the core adds) and the
+		// subledger row, all in this transaction.
+		memoID := uuid.New()
+		var lines []ReturnLine
+		var restockCost int64
+		for i := range priced {
+			p := &priced[i]
+			qty := p.in.Quantity
+			uom := "EA"
+			lines = append(lines, ReturnLine{
+				ID: uuid.New(), Position: i, ProductID: p.in.ProductID, Description: p.in.Description,
+				Quantity: &qty, UOM: &uom, UnitPrice: p.in.UnitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
+			})
+			if p.in.Restock && p.in.ProductID != nil {
+				if ref, ok := refs[p.in.ProductID.String()]; ok && ref.AverageCost > 0 {
+					restockCost += int64(salesdoc.CostOf(p.in.Quantity, ref.AverageCost))
+				}
+			}
+		}
+		if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
+			INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, status, created_at, updated_at, revision)
+			VALUES ($1, $2, $3, $4, 'RETURN', $5, 'DRAFT', NOW(), NOW(), 1)`,
+			memoID, customerID, branchID, facts.Currency, in.Reason); err != nil {
+			return fmt.Errorf("failed to create the credit memo: %w", mapWriteError(err))
+		}
+		for i := range lines {
+			l := &lines[i]
+			if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
+				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, product_id, description, quantity,
+					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, restock, created_at)
+				VALUES ($1, $2, 'PRODUCT', $3, $4, -($5::numeric / 10000), $6, $6, 1, 1, $7::numeric / 10000, 'MANUAL',
+					-($8::numeric / 100), $9, $10, NOW())`,
+				memoID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
+				centsArg(l.LineTotal), priced[i].taxable, l.Restock); err != nil {
+				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
+			}
+		}
+		legs := []gl.Leg{{AccountCode: gl.AccountCodeRevenue, Description: "Sales Revenue", Debit: subtotal}}
+		if taxCents > 0 {
+			legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Debit: taxCents})
+		}
+		if restockCost > 0 {
+			legs = append(legs,
+				gl.Leg{AccountCode: gl.AccountCodeInventory, Description: "Inventory", Debit: restockCost},
+				gl.Leg{AccountCode: gl.AccountCodeCOGS, Description: "Cost of Goods Sold", Credit: restockCost})
+		}
+		fxPost, err := s.ar.PostCreditMemo(ctx, account.PostCreditMemoIn{
+			MemoID: memoID, CustomerID: *customerID, Currency: facts.Currency, MemoDate: date,
+			SubtotalCents: -subtotal, TaxCents: -taxCents, TotalCents: total, TaxRate: taxRate, Actor: actor, Legs: legs})
+		if err != nil {
+			return err
+		}
+		var fxAll *account.Effects
+		mergeEffects(&fxAll, fxPost)
+		// The stock returns: restock lines back on hand.
+		for i := range lines {
+			l := &lines[i]
+			if !l.Restock || l.ProductID == nil {
 				continue
 			}
-			if err := s.inventorySvc.AdjustStock(ctx, inventory.StockAdjustmentRequest{
-				ProductID:  l.ProductID,
-				LocationID: nil,
-				Quantity:   l.Quantity, // positive delta — goods come back
-				IsDelta:    true,
-				Reason:     "POS return " + ret.ID.String(),
-			}); err != nil {
-				return fmt.Errorf("restock failed for product %s: %w", l.ProductID, err)
+			if err := s.inventory.RestockQty(ctx, *l.ProductID, *branchID, *l.Quantity); err != nil {
+				return err
 			}
 		}
-		// Audit log: inside the transaction, so it shares the return's fate
-		// — a rolled back return leaves no audit row.
-		if s.auditLog != nil {
-			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action:     "pos.return.completed",
-				EntityType: "pos_return",
-				EntityID:   ret.ID,
-				Changes: map[string]interface{}{
-					"register_id":   ret.RegisterID,
-					"refund_method": ret.RefundMethod,
-					"total_cents":   ret.Total,
-					"customer_id":   ret.CustomerID,
-					"line_count":    len(ret.Lines),
-				},
-			}); err != nil {
-				return fmt.Errorf("failed to write audit log: %w", err)
+		// The refund: cash or card pays the credit out (DR 1020 / CR 1010),
+		// account leaves the credit open.
+		if in.RefundMethod == RefundCash || in.RefundMethod == RefundCard {
+			_, rfx, err := s.ar.RefundCreditMemo(ctx, account.RefundCreditMemoIn{
+				MemoID: memoID, AmountCents: -total, Reason: in.Reason, Method: string(in.RefundMethod),
+				GatewayRefundID: in.GatewayTxID, Actor: actor, On: date})
+			if err != nil {
+				return err
+			}
+			mergeEffects(&fxAll, rfx)
+		}
+		// The return row, linked to its memo.
+		ret := &Return{
+			RegisterID: in.RegisterID, TillSessionID: tillSessionID, OriginalSaleID: in.OriginalSaleID,
+			CustomerID: customerID, BranchID: branchID, CashierID: cashierID, Currency: facts.Currency,
+			SubtotalCents: httpx.Cents(-subtotal), TaxCents: httpx.Cents(-taxCents), TotalCents: httpx.Cents(total),
+			RefundMethod: in.RefundMethod, Reason: in.Reason, CreditMemoID: &memoID, Lines: lines,
+		}
+		if err := s.repo.CreateReturn(ctx, ret, lines); err != nil {
+			return err
+		}
+		// The events, last: the memo's lifecycle, the AR core's, the
+		// return's own.
+		branch := *branchID
+		number := fxMemoNumber(ctx, s, memoID)
+		if err := s.recordEvent(ctx, outbox.Event{Type: "credit_memo.created", EntityType: "credit_memo", EntityID: memoID,
+			BranchID: &branch, Data: eventJSON(map[string]any{
+				"number": nil, "customer_id": customerID, "status": "draft", "currency": facts.Currency,
+				"pos_return_id": ret.ID,
+			})}); err != nil {
+			return err
+		}
+		if err := s.recordEvent(ctx, outbox.Event{Type: "credit_memo.posted", EntityType: "credit_memo", EntityID: memoID,
+			BranchID: &branch, Data: eventJSON(map[string]any{
+				"number": number, "customer_id": customerID, "status": "open", "from_status": "draft",
+				"currency": facts.Currency, "total_cents": total,
+			})}); err != nil {
+			return err
+		}
+		if in.RefundMethod == RefundCash || in.RefundMethod == RefundCard {
+			if err := s.recordEvent(ctx, outbox.Event{Type: "credit_memo.refunded", EntityType: "credit_memo", EntityID: memoID,
+				BranchID: &branch, Data: eventJSON(map[string]any{
+					"customer_id": customerID, "status": "applied", "currency": facts.Currency,
+					"amount_cents": -total, "method": in.RefundMethod.Status(),
+				})}); err != nil {
+				return err
 			}
 		}
+		if fxAll != nil {
+			for _, ev := range fxAll.Events() {
+				if err := s.recordEvent(ctx, ev); err != nil {
+					return err
+				}
+			}
+		}
+		if err := s.recordEvent(ctx, outbox.Event{Type: EventReturnCompleted, EntityType: "pos_return", EntityID: ret.ID,
+			BranchID: &branch, Data: eventJSON(map[string]any{
+				"number": ret.Number, "customer_id": customerID, "status": "completed", "currency": facts.Currency,
+				"total_cents": total, "refund_method": in.RefundMethod.Status(), "credit_memo_id": memoID,
+			})}); err != nil {
+			return err
+		}
+		out = ret
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	// Post-commit GL (best-effort — a refunded customer must not be blocked by
-	// a ledger hiccup; a failure is logged for manual reconciliation).
-	if s.invoiceSvc != nil && total > 0 {
-		if method == RefundAccount {
-			if glID, err := s.invoiceSvc.PostAccountReturnToLedger(ctx, *ret.CustomerID, ret.ID, total); err != nil {
-				s.logger.Error("CRITICAL: POS account return booked no ledger — reconcile manually",
-					"return", ret.ID, "customer", *ret.CustomerID, "amount_cents", total, "error", err)
-			} else {
-				s.linkReturnGL(ctx, ret, glID)
-			}
-		} else { // CASH, CARD — both settle against the cash bucket in v1
-			if glID, err := s.invoiceSvc.PostCashReturnToGL(ctx, ret.ID.String(), total); err != nil {
-				s.logger.Error("failed to post POS cash return to GL", "return", ret.ID, "amount_cents", total, "error", err)
-			} else {
-				s.linkReturnGL(ctx, ret, glID)
-			}
-		}
-	}
-
-	s.logger.Info("POS return completed", "id", ret.ID, "register", ret.RegisterID, "method", ret.RefundMethod, "total_cents", ret.Total)
-	return ret, nil
+	return out, nil
 }
 
-// linkReturnGL records the return's reversal entry back onto the return row.
-func (s *Service) linkReturnGL(ctx context.Context, ret *POSReturn, glID uuid.UUID) {
-	if glID == uuid.Nil {
-		return
-	}
-	if err := s.repo.SetReturnGLEntry(ctx, ret.ID, glID); err != nil {
-		s.logger.Error("return posted to GL but link update failed", "return", ret.ID, "gl_entry_id", glID, "error", err)
-		return
-	}
-	ret.GLEntryID = &glID
+func ptrC(v int64) *httpx.Cents {
+	c := httpx.Cents(v)
+	return &c
 }
 
-// GetReturn returns a full return with its lines.
-func (s *Service) GetReturn(ctx context.Context, id uuid.UUID) (*POSReturn, error) {
-	return s.repo.GetReturn(ctx, id)
+// fxMemoNumber reads the memo's minted number for its event.
+func fxMemoNumber(ctx context.Context, s *Service, memoID uuid.UUID) string {
+	var number string
+	if err := s.db.GetExecutor(ctx).QueryRow(ctx, `SELECT number FROM credit_memos WHERE id = $1`, memoID).Scan(&number); err != nil {
+		return ""
+	}
+	return number
 }
 
-// ListReturns lists returns for a register on a date (both optional).
-func (s *Service) ListReturns(ctx context.Context, registerID string, date time.Time) ([]POSReturn, error) {
-	return s.repo.ListReturns(ctx, registerID, date)
+// GetReturn reads a return with its lines.
+func (s *Service) GetReturn(ctx context.Context, id uuid.UUID) (*Return, error) { return s.repo.GetReturn(ctx, id) }
+
+// ListReturns lists returns for a register on a date.
+func (s *Service) ListReturns(ctx context.Context, f ReturnFilter) ([]Return, error) {
+	return s.repo.ListReturns(ctx, f, 200)
 }

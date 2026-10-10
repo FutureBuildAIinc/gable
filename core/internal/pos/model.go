@@ -4,168 +4,262 @@
 package pos
 
 import (
+	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/google/uuid"
 )
 
-// TransactionStatus tracks the lifecycle of a POS transaction.
-type TransactionStatus string
+// SaleStatus is a counter sale's lifecycle state. Storage keeps the
+// uppercase vocabulary; the wire is lowercase (ADR 0001 section 6).
+type SaleStatus string
 
 const (
-	TransactionStatusOpen      TransactionStatus = "OPEN"
-	TransactionStatusCompleted TransactionStatus = "COMPLETED"
-	TransactionStatusVoided    TransactionStatus = "VOIDED"
-	TransactionStatusReturned  TransactionStatus = "RETURNED"
-	TransactionStatusHeld      TransactionStatus = "HELD"
+	StatusOpen      SaleStatus = "OPEN"
+	StatusHeld      SaleStatus = "HELD"
+	StatusCompleted SaleStatus = "COMPLETED"
+	StatusVoided    SaleStatus = "VOIDED"
 )
 
-// POSTransaction represents a retail point-of-sale transaction.
-type POSTransaction struct {
-	ID            uuid.UUID         `json:"id" db:"id"`
-	BranchID      uuid.UUID         `json:"branch_id" db:"branch_id"`
-	RegisterID    string            `json:"register_id" db:"register_id"`
-	CashierID     uuid.UUID         `json:"cashier_id" db:"cashier_id"`
-	CustomerID    *uuid.UUID        `json:"customer_id,omitempty" db:"customer_id"`
-	Subtotal      int64             `json:"subtotal" db:"subtotal"`     // Cents
-	TaxAmount     int64             `json:"tax_amount" db:"tax_amount"` // Cents
-	Total         int64             `json:"total" db:"total"`           // Cents
-	ChangeDue     int64             `json:"change_due" db:"change_due"` // Cents, set at completion
-	TillSessionID *uuid.UUID        `json:"till_session_id,omitempty" db:"till_session_id"`
-	Status        TransactionStatus `json:"status" db:"status"`
-	CompletedAt   *time.Time        `json:"completed_at,omitempty" db:"completed_at"`
-	CreatedAt     time.Time         `json:"created_at" db:"created_at"`
+// Status returns the wire spelling.
+func (s SaleStatus) Status() string { return strings.ToLower(string(s)) }
 
-	// Offline sync fields
-	SyncedFrom      *string    `json:"synced_from,omitempty" db:"synced_from"`             // nil = live, "offline-v1" = synced
-	ClientCreatedAt *time.Time `json:"client_created_at,omitempty" db:"client_created_at"` // original offline timestamp
+// MarshalText writes the lowercase wire name.
+func (s SaleStatus) MarshalText() ([]byte, error) { return []byte(s.Status()), nil }
 
-	// Populated on read
-	LineItems []POSLineItem `json:"line_items,omitempty"`
-	Tenders   []POSTender   `json:"tenders,omitempty"`
+// TenderMethod is how a sale was paid. Storage keeps the uppercase
+// vocabulary; the wire is lowercase.
+type TenderMethod string
+
+const (
+	TenderCash    TenderMethod = "CASH"
+	TenderCheck   TenderMethod = "CHECK"
+	TenderCard    TenderMethod = "CARD"
+	TenderAccount TenderMethod = "ACCOUNT"
+)
+
+// Status returns the wire spelling.
+func (m TenderMethod) Status() string { return strings.ToLower(string(m)) }
+
+// MarshalText writes the lowercase wire name.
+func (m TenderMethod) MarshalText() ([]byte, error) { return []byte(m.Status()), nil }
+
+// ParseTenderMethod maps a lowercase wire name to its method.
+func ParseTenderMethod(name string) (TenderMethod, bool) {
+	switch name {
+	case "cash":
+		return TenderCash, true
+	case "check":
+		return TenderCheck, true
+	case "card":
+		return TenderCard, true
+	case "account":
+		return TenderAccount, true
+	}
+	return "", false
 }
 
-// POSLineItem represents a product line within a POS transaction.
-type POSLineItem struct {
-	ID            uuid.UUID `json:"id" db:"id"`
-	TransactionID uuid.UUID `json:"transaction_id" db:"transaction_id"`
-	ProductID     uuid.UUID `json:"product_id" db:"product_id"`
-	Description   string    `json:"description" db:"description"`
-	Quantity      float64   `json:"quantity" db:"quantity"`
-	UOM           string    `json:"uom" db:"uom"`
-	UnitPrice     int64     `json:"unit_price" db:"unit_price"` // Cents
-	LineTotal     int64     `json:"line_total" db:"line_total"` // Cents
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+// RefundMethod is how a return is refunded: out of the drawer, back on the
+// card, or left as account credit.
+type RefundMethod string
+
+const (
+	RefundCash    RefundMethod = "CASH"
+	RefundCard    RefundMethod = "CARD"
+	RefundAccount RefundMethod = "ACCOUNT"
+)
+
+// Status returns the wire spelling.
+func (m RefundMethod) Status() string { return strings.ToLower(string(m)) }
+
+// MarshalText writes the lowercase wire name.
+func (m RefundMethod) MarshalText() ([]byte, error) { return []byte(m.Status()), nil }
+
+// Sale is one counter sale on the wire (ADR 0005 section 14.2 C2-5): the
+// cart the register builds, then the completed money moment, all money in
+// cents and prices at scale 4, the lines in the shared shape of section 2.2.
+type Sale struct {
+	ID            uuid.UUID     `json:"id"`
+	Number        string        `json:"number"`
+	Revision      int64         `json:"revision"`
+	BranchID      uuid.UUID     `json:"branch_id"`
+	RegisterID    string        `json:"register_id"`
+	CashierID     uuid.UUID     `json:"cashier_id"`
+	CustomerID    *uuid.UUID    `json:"customer_id"`
+	Currency      string        `json:"currency"`
+	SubtotalCents httpx.Cents   `json:"subtotal_cents"`
+	TaxCents      httpx.Cents   `json:"tax_cents"`
+	TotalCents    httpx.Cents   `json:"total_cents"`
+	ChangeCents   httpx.Cents   `json:"change_cents"`
+	TillSessionID *uuid.UUID    `json:"till_session_id"`
+	Status        SaleStatus    `json:"status"`
+	InvoiceID     *uuid.UUID    `json:"invoice_id"`
+	CompletedAt   *httpx.Timestamp `json:"completed_at"`
+	CreatedAt     httpx.Timestamp  `json:"created_at"`
+
+	Lines   []salesdoc.Line `json:"lines"`
+	Tenders []Tender        `json:"tenders"`
+
+	// WalkInID is the walk-in customer the invoice falls back to when the
+	// sale names no customer; never on the wire.
+	WalkInID uuid.UUID `json:"-"`
 }
 
-// POSTender represents a payment method applied to a POS transaction.
-type POSTender struct {
-	ID            uuid.UUID `json:"id" db:"id"`
-	TransactionID uuid.UUID `json:"transaction_id" db:"transaction_id"`
-	Method        string    `json:"method" db:"method"` // CASH, CARD, CHECK, ACCOUNT
-	Amount        int64     `json:"amount" db:"amount"` // Cents
-	Reference     string    `json:"reference,omitempty" db:"reference"`
-	CardLast4     string    `json:"card_last4,omitempty" db:"card_last4"`
-	CardBrand     string    `json:"card_brand,omitempty" db:"card_brand"`
-	GatewayTxID   string    `json:"gateway_tx_id,omitempty" db:"gateway_tx_id"`
-	AuthCode      string    `json:"auth_code,omitempty" db:"auth_code"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+// SaleSummary is the list item; the full document embeds it, so the two
+// cannot drift (the recipe's rule).
+type SaleSummary struct {
+	ID            uuid.UUID    `json:"id"`
+	Number        string       `json:"number"`
+	Revision      int64        `json:"revision"`
+	BranchID      uuid.UUID    `json:"branch_id"`
+	RegisterID    string       `json:"register_id"`
+	CashierID     uuid.UUID    `json:"cashier_id"`
+	CustomerID    *uuid.UUID   `json:"customer_id"`
+	Currency      string       `json:"currency"`
+	TotalCents    httpx.Cents  `json:"total_cents"`
+	Status        SaleStatus   `json:"status"`
+	InvoiceID     *uuid.UUID   `json:"invoice_id"`
+	CompletedAt   *httpx.Timestamp `json:"completed_at"`
+	CreatedAt     httpx.Timestamp  `json:"created_at"`
+	ItemCount     int          `json:"item_count"`
 }
 
-// POSRegister represents a physical or virtual POS register.
-type POSRegister struct {
-	ID         string     `json:"id" db:"id"`
-	LocationID *uuid.UUID `json:"location_id,omitempty" db:"location_id"`
-	BranchID   *uuid.UUID `json:"branch_id,omitempty" db:"branch_id"` // Derived from locations.branch_id
-	Name       string     `json:"name" db:"name"`
-	IsActive   bool       `json:"is_active" db:"is_active"`
-	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
+// Tender is one payment taken at the counter, stored net: the tendered
+// amount less any change given from it, so the payment it became is the
+// money kept (ADR 0005 section 14.2 C2-5).
+type Tender struct {
+	ID            uuid.UUID     `json:"id"`
+	SaleID        uuid.UUID     `json:"sale_id"`
+	Method        TenderMethod  `json:"method"`
+	AmountCents   httpx.Cents   `json:"amount_cents"`
+	PaymentID     *uuid.UUID    `json:"payment_id"`
+	Reference     *string       `json:"reference"`
+	CardLast4     *string       `json:"card_last4"`
+	CardBrand     *string       `json:"card_brand"`
+	GatewayTxID   *string       `json:"gateway_tx_id"`
+	AuthCode      *string       `json:"auth_code"`
+	CreatedAt     httpx.Timestamp `json:"created_at"`
 }
 
-// --- Request/Response Types ---
+// Return is one counter return: a credit memo created and posted in one act
+// (ADR 0005 section 14.2 C2-5), refunded in cash or card or left as account
+// credit.
+type Return struct {
+	ID              uuid.UUID       `json:"id"`
+	Number          string          `json:"number"`
+	Revision        int64           `json:"revision"`
+	BranchID        *uuid.UUID      `json:"branch_id"`
+	RegisterID      string          `json:"register_id"`
+	TillSessionID   *uuid.UUID      `json:"till_session_id"`
+	OriginalSaleID  *uuid.UUID      `json:"original_sale_id"`
+	CustomerID      *uuid.UUID      `json:"customer_id"`
+	CashierID       uuid.UUID       `json:"cashier_id"`
+	Currency        string          `json:"currency"`
+	SubtotalCents   httpx.Cents     `json:"subtotal_cents"`
+	TaxCents        httpx.Cents     `json:"tax_cents"`
+	TotalCents      httpx.Cents     `json:"total_cents"`
+	RefundMethod    RefundMethod    `json:"refund_method"`
+	Reason          string          `json:"reason"`
+	CreditMemoID    *uuid.UUID      `json:"credit_memo_id"`
+	CreatedAt       httpx.Timestamp `json:"created_at"`
 
-// AddLineItemRequest is sent when scanning/adding a product to the cart.
-type AddLineItemRequest struct {
-	ProductID uuid.UUID `json:"product_id"`
-	Quantity  float64   `json:"quantity"`
-	UOM       string    `json:"uom"`
+	Lines []ReturnLine `json:"lines"`
 }
 
-// AddTenderRequest is sent when applying a payment method.
-type AddTenderRequest struct {
-	Method    string  `json:"method"`
-	Amount    float64 `json:"amount"` // Dollars
-	Reference string  `json:"reference,omitempty"`
-	TokenID   string  `json:"token_id,omitempty"` // For card payments via Run Payments
+// ReturnLine is one returned line, negative quantities and extensions (the
+// credit memo line shape).
+type ReturnLine struct {
+	ID          uuid.UUID     `json:"id"`
+	Position    int           `json:"position"`
+	ProductID   *uuid.UUID    `json:"product_id"`
+	Description string        `json:"description"`
+	Quantity    *httpx.Quantity `json:"quantity"`
+	UOM         *string       `json:"uom"`
+	UnitPrice   *httpx.Price  `json:"unit_price_ten_thousandths"`
+	LineTotal   *httpx.Cents  `json:"line_total_cents"`
+	Restock     bool          `json:"restock"`
 }
 
-// QuickSearchRequest is the typeahead product search.
-type QuickSearchRequest struct {
-	Query string `json:"query"` // SKU, description, or barcode
+// TillSessionStatus is the drawer lifecycle.
+type TillSessionStatus string
+
+const (
+	TillOpen   TillSessionStatus = "OPEN"
+	TillClosed TillSessionStatus = "CLOSED"
+)
+
+// Status returns the wire spelling.
+func (s TillSessionStatus) Status() string { return strings.ToLower(string(s)) }
+
+// MarshalText writes the lowercase wire name.
+func (s TillSessionStatus) MarshalText() ([]byte, error) { return []byte(s.Status()), nil }
+
+// TillSession is one drawer shift on a register. The expected cash is the
+// sum of the session's cash payments (already net of change) plus the opening
+// float less cash refunds (ADR 0005 section 14.2 C2-5).
+type TillSession struct {
+	ID           uuid.UUID         `json:"id"`
+	RegisterID   string            `json:"register_id"`
+	BranchID     *uuid.UUID        `json:"branch_id"`
+	CashierID    uuid.UUID         `json:"cashier_id"`
+	Status       TillSessionStatus `json:"status"`
+	OpeningFloat httpx.Cents       `json:"opening_float_cents"`
+	OpenedAt     httpx.Timestamp   `json:"opened_at"`
+	ClosedAt     *httpx.Timestamp  `json:"closed_at"`
+
+	ExpectedByMethod map[string]int64   `json:"expected_by_method"`
+	CountedByMethod  map[string]int64   `json:"counted_by_method"`
+	OverShort        *httpx.Cents       `json:"over_short_cents"`
+	GLEntryID        *uuid.UUID         `json:"gl_entry_id"`
+	Notes            string             `json:"notes"`
 }
 
-// QuickSearchResult is a lightweight product result for POS.
+// TillReport is the live (X) or closing (Z) summary for a session.
+type TillReport struct {
+	Session          TillSession      `json:"session"`
+	SaleCount        int              `json:"sale_count"`
+	SalesTotalCents  httpx.Cents      `json:"sales_total_cents"`
+	TaxTotalCents    httpx.Cents      `json:"tax_total_cents"`
+	ChangeCents      httpx.Cents      `json:"change_cents"`
+	TenderedByMethod map[string]int64 `json:"tendered_by_method"`
+	ExpectedByMethod map[string]int64 `json:"expected_by_method"`
+}
+
+// ZReport is the immutable end-of-day snapshot generated once when a till
+// session closes. Payload is the frozen closing TillReport.
+type ZReport struct {
+	ID            uuid.UUID       `json:"id"`
+	TillSessionID uuid.UUID       `json:"till_session_id"`
+	RegisterID    string          `json:"register_id"`
+	BranchID      *uuid.UUID      `json:"branch_id"`
+	OverShort     httpx.Cents     `json:"over_short_cents"`
+	Payload       []byte          `json:"payload"`
+	GeneratedAt   httpx.Timestamp `json:"generated_at"`
+}
+
+// QuickSearchResult is a lightweight product result for the counter's
+// typeahead (the product module's data; a bare array, like the partner
+// surface the recipe exempts).
 type QuickSearchResult struct {
-	ProductID   uuid.UUID `json:"product_id"`
-	SKU         string    `json:"sku"`
-	Description string    `json:"description"`
-	UnitPrice   float64   `json:"unit_price"` // Dollars
-	UOM         string    `json:"uom"`
-	InStock     float64   `json:"in_stock"`
-}
-
-// TransactionSummary is a lightweight view for transaction history.
-type TransactionSummary struct {
-	ID          uuid.UUID         `json:"id"`
-	RegisterID  string            `json:"register_id"`
-	Total       int64             `json:"total"`
-	Status      TransactionStatus `json:"status"`
-	ItemCount   int               `json:"item_count"`
-	CompletedAt *time.Time        `json:"completed_at,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-}
-
-// --- Offline Sync DTOs ---
-
-// OfflineSyncRequest is a batch of completed transactions from an offline POS.
-type OfflineSyncRequest struct {
-	BatchID    string               `json:"batch_id"`
-	RegisterID string               `json:"register_id"`
-	Items      []OfflineTransaction `json:"items"`
-}
-
-// OfflineTransaction is a single completed POS transaction captured offline.
-type OfflineTransaction struct {
-	ClientID        uuid.UUID            `json:"client_id"` // client-generated UUID
-	RegisterID      string               `json:"register_id"`
-	CashierID       uuid.UUID            `json:"cashier_id"`
-	CustomerID      *uuid.UUID           `json:"customer_id,omitempty"`
-	Items           []AddLineItemRequest `json:"items"`
-	Tenders         []AddTenderRequest   `json:"tenders"`
-	ClientCreatedAt time.Time            `json:"client_created_at"`
-}
-
-// OfflineSyncResponse reports results of a batch sync.
-type OfflineSyncResponse struct {
-	BatchID        string      `json:"batch_id"`
-	SyncedCount    int         `json:"synced_count"`
-	DuplicateCount int         `json:"duplicate_count"`
-	ErrorCount     int         `json:"error_count"`
-	Errors         []SyncError `json:"errors,omitempty"`
-}
-
-// SyncError describes a single transaction that failed during sync.
-type SyncError struct {
-	ClientID string `json:"client_id"`
-	Reason   string `json:"reason"`
+	ProductID       uuid.UUID     `json:"product_id"`
+	SKU             string        `json:"sku"`
+	Description     string        `json:"description"`
+	UnitPriceCents  httpx.Cents   `json:"unit_price_cents"`
+	UOM             string        `json:"uom"`
+	InStock         httpx.Quantity `json:"in_stock"`
 }
 
 // CatalogProduct is a lightweight product for the offline catalog cache.
 type CatalogProduct struct {
-	ProductID   uuid.UUID `json:"product_id"`
-	SKU         string    `json:"sku"`
-	Description string    `json:"description"`
-	Price       float64   `json:"price"` // dollars
-	UOM         string    `json:"uom"`
-	InStock     float64   `json:"in_stock"`
+	ProductID      uuid.UUID      `json:"product_id"`
+	SKU            string         `json:"sku"`
+	Description    string         `json:"description"`
+	UnitPriceCents httpx.Cents    `json:"unit_price_cents"`
+	UOM            string         `json:"uom"`
+	InStock        httpx.Quantity `json:"in_stock"`
 }
+
+// now is the service's clock, replaceable in tests.
+var saleNow = time.Now
