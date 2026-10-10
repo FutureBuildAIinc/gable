@@ -278,7 +278,7 @@ func Run() {
 
 	// AI Parsing Module (Material List Intake)
 	parsingSvc := parsing.NewService(productRepo, aiClient)
-	parsingHandler := parsing.NewHandler(parsingSvc)
+	parsingHandler := parsing.NewHandler(parsingSvc).WithAuditLog(auditLog)
 	parsingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// PIM Module (AI-Powered Product Information Management) — text generation and
@@ -299,7 +299,7 @@ func Run() {
 		locationSvc,
 		locationUserRepo,
 		middleware.RequireRole("admin", "owner"),
-	)
+	).WithAuditLog(auditLog)
 	// Location routes run behind the branch middleware through
 	// branchWall.locations: POST /locations writes into a branch's tree, the
 	// by-id reads and the list are held to the caller's branches (the branch
@@ -807,7 +807,7 @@ func Run() {
 
 	// AI Vision Module (Sprint 19: Blueprint Verification Prototype)
 	visionSvc := vision.NewService()
-	visionHandler := vision.NewHandler(visionSvc)
+	visionHandler := vision.NewHandler(visionSvc).WithAuditLog(auditLog)
 	visionHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Governance App (converted — reference conversion #2)

@@ -344,14 +344,56 @@ func categoryRuleBodyCustomers(ctx context.Context, r *http.Request) ([]uuid.UUI
 	return element(one)
 }
 
+// exemptionBodyCustomers resolves the customer the exemption create's body
+// names (the exclusive write resolver; the read wall shares it through its
+// own body arm).
+func exemptionBodyCustomers() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		var body struct {
+			CustomerID string `json:"customer_id"`
+		}
+		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
+			return nil, err
+		}
+		if id, err := uuid.Parse(body.CustomerID); err == nil {
+			return []uuid.UUID{id}, nil
+		}
+		return nil, nil
+	}
+}
+
+// exemptionRowCustomers resolves the customer the exemption delete's row
+// belongs to (the exclusive write resolver).
+func exemptionRowCustomers(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	customerOf := exemptionCustomerOf(db)
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		raw := r.PathValue("id")
+		if raw == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		customer, err := customerOf(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if customer == nil {
+			return nil, nil
+		}
+		return []uuid.UUID{*customer}, nil
+	}
+}
+
 // taxCustomerWall composes the tax role guard with the customer branch wall:
 // the exemption create's body names the customer, the delete's row belongs
 // to one, the read's path names one, and the preview's body names one when
 // it names any.
 func taxCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
-	create := middleware.Compose(role, keyWall.CustomerBodyBranch())
-	remove := middleware.Compose(role, keyWall.CustomerRowBranch(exemptionCustomerOf(db)))
+	create := middleware.Compose(role, keyWall.CustomerBranchExclusive(exemptionBodyCustomers()))
+	remove := middleware.Compose(role, keyWall.CustomerBranchExclusive(exemptionRowCustomers(db)))
 	read := middleware.Compose(role, keyWall.CustomerBranch(exemptionCustomerPathOf()))
 	preview := middleware.Compose(role, keyWall.CustomerBranch(previewCustomerOf(db)))
 	return func(next http.Handler) http.Handler {
@@ -417,7 +459,7 @@ func calculateCustomersOf(db *database.DB) func(ctx context.Context, r *http.Req
 // allowlist gate and never reaches these arms.
 func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
-	create := middleware.Compose(role, keyWall.CustomerBranch(pricingRuleCustomersOf(db)))
+	create := middleware.Compose(role, keyWall.CustomerBranchExclusive(pricingRuleCustomersOf(db)))
 	calculate := middleware.Compose(role, keyWall.CustomerBranch(calculateCustomersOf(db)))
 	return func(next http.Handler) http.Handler {
 		createHandler, calculateHandler, roleHandler := create(next), calculate(next), role(next)
@@ -444,9 +486,9 @@ func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB
 // route allowlist gate; the categories routes are stated limits.
 func categoryRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
-	body := middleware.Compose(role, keyWall.CustomerBranch(categoryRuleBodyCustomers))
-	byRow := middleware.Compose(role, keyWall.CustomerBranch(categoryRuleRowCustomerOf(db)))
-	byBulkIDs := middleware.Compose(role, keyWall.CustomerBranch(bulkRuleCustomersOf(db)))
+	body := middleware.Compose(role, keyWall.CustomerBranchExclusive(categoryRuleBodyCustomers))
+	byRow := middleware.Compose(role, keyWall.CustomerBranchExclusive(categoryRuleRowCustomerOf(db)))
+	byBulkIDs := middleware.Compose(role, keyWall.CustomerBranchExclusive(bulkRuleCustomersOf(db)))
 	list := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", true)))
 	resolve := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", false)))
 	return func(next http.Handler) http.Handler {

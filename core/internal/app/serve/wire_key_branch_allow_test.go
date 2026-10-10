@@ -13,8 +13,11 @@ package serve
 // everyone else. All through the production chain the fixture builds.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -584,5 +587,186 @@ func TestKeyBranchPin_StatedLimitWritesRefused(t *testing.T) {
 		if sb != sk {
 			t.Errorf("GET %s: bound %d, unbound %d, want the same answer", path, sb, sk)
 		}
+	}
+}
+
+// TestKeyBranchPin_SharedCustomerWrites holds the stricter line of the
+// principal's PD-4 ruling: a branch bound key may READ a customer shared
+// with another branch, but may not add or change a customer scoped pricing
+// rule or tax exemption for it, because the write prices the other branch's
+// sales to that customer too. The refusal names the other branch; a customer
+// the pin holds alone passes; the unbound key and the user keep both.
+func TestKeyBranchPin_SharedCustomerWrites(t *testing.T) {
+	f := newKeyPinFixture(t)
+	// A customer the pin shares with branch B, and the pin's own alone.
+	shared := uuid.New()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'pin shared', $2, $3)`,
+		shared, "PINSH-"+shared.String()[:8], f.branchA); err != nil {
+		t.Fatalf("seed shared customer: %v", err)
+	}
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2), ($1, $3)`,
+		shared, f.branchA, f.branchB); err != nil {
+		t.Fatalf("seed shared branches: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customer_branches WHERE customer_id = $1`, shared)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customers WHERE id = $1`, shared)
+	})
+	sh := shared.String()
+
+	// The read passes: the exemption read of the shared customer answers.
+	f.allow(t, "bound", "GET", "/api/v1/tax/exemptions/"+sh, "", nil, http.StatusOK)
+
+	// Every customer scoped write on the shared customer is refused with its
+	// audit row, the message naming branch B, and nothing written.
+	before := struct{ rules, catRules, exemptions int }{}
+	counts := func() (int, int, int) {
+		var r, c, e int
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT (SELECT COUNT(*) FROM pricing_rules WHERE customer_id = $1),
+			(SELECT COUNT(*) FROM category_pricing_rules WHERE customer_id = $1),
+			(SELECT COUNT(*) FROM tax_exemptions WHERE customer_id = $1)`, shared).Scan(&r, &c, &e); err != nil {
+			t.Fatal(err)
+		}
+		return r, c, e
+	}
+	refusedNaming := func(method, path, body string) {
+		t.Helper()
+		b := f.auditRows(t)
+		status, buf := f.key(t, f.bound, method, path, body, nil)
+		if status != http.StatusForbidden {
+			t.Errorf("bound key %s %s: %d %s, want 403", method, path, status, buf)
+			return
+		}
+		if !strings.Contains(string(buf), "the customer is also held by branch "+f.branchB.String()) {
+			t.Errorf("bound key %s %s: the refusal does not name the other branch: %s", method, path, buf)
+		}
+		if after := f.auditRows(t); after != b+1 {
+			t.Errorf("bound key %s %s: key.branch_refused rows %d then %d, want one new row", method, path, b, after)
+		}
+	}
+	refusedNaming("POST", "/api/v1/pricing/rules", pricingRuleBody("shared", shared))
+	refusedNaming("POST", "/api/v1/pricing/category-rules", categoryRuleBody(shared, f.freshCategory(t)))
+	refusedNaming("POST", "/api/v1/tax/exemptions",
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, sh))
+	exemptShared := uuid.New()
+	f.seedTaxExempt(t, exemptShared, shared)
+	refusedNaming("DELETE", "/api/v1/tax/exemptions/"+exemptShared.String(), "")
+	catShared := uuid.New()
+	f.seedCatRule(t, catShared, shared, f.freshCategory(t))
+	before.rules, before.catRules, before.exemptions = counts()
+	refusedNaming("PUT", "/api/v1/pricing/category-rules/"+catShared.String(),
+		`{"rule_type":"markdown","value_pct":"2"}`)
+	refusedNaming("DELETE", "/api/v1/pricing/category-rules/"+catShared.String(), "")
+	r, c, e := counts()
+	if r != before.rules || c != before.catRules || e != before.exemptions {
+		t.Errorf("refused shared customer writes changed rows: rules %d->%d, category %d->%d, exemptions %d->%d",
+			before.rules, r, before.catRules, c, before.exemptions, e)
+	}
+
+	// A customer the pin holds alone passes every one of the same writes.
+	f.allow(t, "bound", "POST", "/api/v1/pricing/rules", pricingRuleBody("own", f.custID), nil, http.StatusCreated)
+	f.allow(t, "bound", "POST", "/api/v1/pricing/category-rules",
+		categoryRuleBody(f.custID, f.freshCategory(t)), nil, http.StatusCreated)
+	f.allow(t, "bound", "POST", "/api/v1/tax/exemptions",
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, f.custID.String()), nil, http.StatusCreated)
+
+	// The unbound key and the user keep the shared customer's writes (each on
+	// its own fresh target).
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/pricing/rules", pricingRuleBody(who, shared), nil, http.StatusCreated)
+		f.allow(t, who, "POST", "/api/v1/tax/exemptions",
+			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, sh), nil, http.StatusCreated)
+	}
+}
+
+// TestKeyBranchPin_GrantWritesAreAudited holds the PD-5 ruling's leg: a
+// shared user's grant, revoke and home branch for the pin branch is accepted
+// as confined and audited, the audit row naming the machine key that acted.
+func TestKeyBranchPin_GrantWritesAreAudited(t *testing.T) {
+	f := newKeyPinFixture(t)
+	A := f.branchA.String()
+	grantRows := func(action string) (n int) {
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM audit_log WHERE action = $1 AND actor_kind = 'key'`, action).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := grantRows("user.branch.granted")
+	f.allow(t, "bound", "POST", "/api/v1/users/pin-audit-grant/branches", fmt.Sprintf(`{"branch_id":%q}`, A), nil, http.StatusNoContent)
+	if after := grantRows("user.branch.granted"); after != before+1 {
+		t.Errorf("grant audit rows: %d then %d, want one new row naming the key", before, after)
+	}
+	before = grantRows("user.home_branch.set")
+	f.allow(t, "bound", "PUT", "/api/v1/users/pin-audit-grant/home-branch", fmt.Sprintf(`{"branch_id":%q}`, A), nil, http.StatusNoContent)
+	if after := grantRows("user.home_branch.set"); after != before+1 {
+		t.Errorf("home branch audit rows: %d then %d, want one new row naming the key", before, after)
+	}
+	before = grantRows("user.branch.revoked")
+	f.allow(t, "bound", "DELETE", "/api/v1/users/pin-audit-grant/branches/"+A, "", nil, http.StatusNoContent)
+	if after := grantRows("user.branch.revoked"); after != before+1 {
+		t.Errorf("revoke audit rows: %d then %d, want one new row naming the key", before, after)
+	}
+}
+
+// TestKeyBranchPin_AISpendsWithItsKey holds the PD-6 ruling: the parsing
+// upload and the vision scan stay stated limits, and each call is audited
+// with the key that spent the dealer's AI credit.
+func TestKeyBranchPin_AISpendsWithItsKey(t *testing.T) {
+	f := newKeyPinFixture(t)
+	spendRows := func() (n int) {
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM audit_log WHERE action IN ('ai.parsing.upload', 'ai.vision.scan') AND actor_kind = 'key'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// The upload: a small multipart body; the AI client is unconfigured, so
+	// the answer is the module's own (synthetic), never the gate's refusal.
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "pin-material.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("sku,qty\nPIN-1,2\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest("POST", f.srv.URL+"/api/v1/parsing/upload", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+f.bound)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadBody, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode == http.StatusForbidden {
+		t.Errorf("bound key parsing upload refused: %s", uploadBody)
+	}
+	if n := spendRows(); n < 1 {
+		t.Errorf("parsing upload audit rows naming the key: %d, want at least one", n)
+	}
+
+	before := spendRows()
+	status, buf := f.key(t, f.bound, "POST", "/api/v1/vision/scan", `{"blueprint_text":"pin wall probe"}`, nil)
+	if status == http.StatusForbidden {
+		t.Errorf("bound key vision scan refused: %s", buf)
+	}
+	if after := spendRows(); after != before+1 {
+		t.Errorf("vision scan audit rows naming the key: %d then %d, want one new row", before, after)
 	}
 }

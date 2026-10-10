@@ -48,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/pos"
@@ -62,6 +63,7 @@ import (
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
+	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -150,6 +152,7 @@ var pinKeyScopes = []string{
 	"millwork:read", "millwork:write", "governance:read", "governance:write",
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"apps:read", "apps:write", "admin:settings", "admin:modules",
+	"parsing:write", "vision:write",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -343,7 +346,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	wall := newBranchWall(db)
 	mux := http.NewServeMux()
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)),
-		location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
+		location.NewUserRepository(db), middleware.RequireRole("admin", "owner")).
+		WithAuditLog(audit.NewLogger(db)))
 
 	// The exposure surface exactly as wireExposure registers it (the index
 	// admin surface with the market index refresh comes with it).
@@ -417,6 +421,13 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		inventory.NewService(inventory.NewRepository(db)), invoiceSvc, paymentSvc, slog.Default()).
 		WithAuditLog(audit.NewLogger(db))
 	pos.NewHandler(posSvc).RegisterRoutes(mux, wall.scoped("admin", "owner", "cashier"))
+
+	// The AI spending routes exactly as serve registers them, each call
+	// audited with whoever spent the credit (the PD-6 ruling).
+	parsing.NewHandler(parsing.NewService(product.NewRepository(db), nil)).
+		WithAuditLog(audit.NewLogger(db)).RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	vision.NewHandler(vision.NewService()).WithAuditLog(audit.NewLogger(db)).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// The dealer wide catalogue and configuration modules exactly as serve
 	// registers them: products, PIM, the unit catalogue, the payment terms on

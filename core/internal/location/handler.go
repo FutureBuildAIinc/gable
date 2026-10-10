@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -25,6 +27,33 @@ type Handler struct {
 	guard       LocationGuard                     // optional; see WithBranchWall
 	branchMw    func(http.Handler) http.Handler   // optional; see WithBranchWall
 	keyWall     *middleware.KeyBranchWall         // optional; see WithKeyBranchWall
+	auditLog    *audit.Logger                     // optional; see WithAuditLog
+}
+
+// WithAuditLog sets the audit logger the grant, revoke and home branch
+// writes record their row through (ADR 0007 section 5.5, the PD-5 ruling: a
+// shared user's grant, revoke and home branch for the pin branch is accepted
+// as confined and audited, the audit row naming whoever acted, a user or the
+// machine key).
+func (h *Handler) WithAuditLog(l *audit.Logger) *Handler {
+	h.auditLog = l
+	return h
+}
+
+// recordGrant audits one grant surface write; a missing logger or a failed
+// row never blocks the write (the mutation is already committed).
+func (h *Handler) recordGrant(ctx context.Context, action string, branch uuid.UUID, changes map[string]interface{}) {
+	if h.auditLog == nil {
+		return
+	}
+	if err := h.auditLog.Log(ctx, audit.Entry{
+		Action:     action,
+		EntityType: "user_branch",
+		EntityID:   branch,
+		Changes:    changes,
+	}); err != nil {
+		slog.Error("failed to audit the grant write", "action", action, "error", err)
+	}
 }
 
 // NewHandler constructs the location handler. userRepo and adminGuards may be
@@ -839,6 +868,7 @@ func (h *Handler) GrantUserBranch(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to grant", http.StatusInternalServerError, err)
 		return
 	}
+	h.recordGrant(r.Context(), "user.branch.granted", req.BranchID, map[string]interface{}{"sub": sub})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -857,6 +887,7 @@ func (h *Handler) RevokeUserBranch(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to revoke", http.StatusInternalServerError, err)
 		return
 	}
+	h.recordGrant(r.Context(), "user.branch.revoked", branchID, map[string]interface{}{"sub": sub})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -883,6 +914,7 @@ func (h *Handler) SetHomeBranch(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to set home", http.StatusInternalServerError, err)
 		return
 	}
+	h.recordGrant(r.Context(), "user.home_branch.set", req.BranchID, map[string]interface{}{"sub": sub})
 	w.WriteHeader(http.StatusNoContent)
 }
 

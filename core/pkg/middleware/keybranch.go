@@ -265,6 +265,106 @@ func (w *KeyBranchWall) CustomerRowBranch(customerOf func(ctx context.Context, i
 	})
 }
 
+// CustomerBranchExclusive wraps a handler whose request adds or changes a
+// customer scoped pricing or tax definition (the stricter line of the
+// principal's PD-4 ruling): unlike CustomerBranch, the read rule, the write
+// is held to the customers the pin holds ALONE, because a rule or exemption
+// written on a customer shared with another branch prices that branch's
+// sales to the customer too. A customer held by any branch outside the pin
+// is refused with a message naming that branch; a customer with no
+// customer_branches row holds no branch at all and is refused the same way
+// as by the read wall. A resolver failure answers 500 rather than failing
+// open, and a resolver may hand back ErrBodyRefused.
+func (w *KeyBranchWall) CustomerBranchExclusive(customersOf func(ctx context.Context, r *http.Request) ([]uuid.UUID, error)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			pin, ok := KeyBranchPin(r.Context())
+			if !ok {
+				next.ServeHTTP(rw, r)
+				return
+			}
+			customers, err := customersOf(r.Context(), r)
+			if err != nil {
+				if errors.Is(err, errRefused) {
+					w.refuse(r.Context(), rw, r, pin, "customer_id", "")
+					return
+				}
+				slog.Error("key branch wall: customer branch lookup failed", "error", err, "method", r.Method, "path", r.URL.Path)
+				respondAuthError(rw, r, http.StatusInternalServerError, "internal_error", "branch lookup failed")
+				return
+			}
+			if len(customers) > 0 {
+				other, held, err := w.customerHeldOutsidePin(r.Context(), customers, pin)
+				if err != nil {
+					slog.Error("key branch wall: customer branch lookup failed", "error", err, "method", r.Method, "path", r.URL.Path)
+					respondAuthError(rw, r, http.StatusInternalServerError, "internal_error", "branch lookup failed")
+					return
+				}
+				if !held || other != uuid.Nil {
+					if keyID, ok := KeyIDFromContext(r.Context()); ok && w.auditor != nil {
+						w.auditor.AuditKeyBranchRefusal(r.Context(), keyID, pin, r.Method, r.URL.Path)
+					}
+					message := "a branch bound key may act only on its own branch"
+					if other != uuid.Nil {
+						message = message + ": the customer is also held by branch " + other.String()
+					}
+					writeAuthError(rw, r, http.StatusForbidden, "forbidden", message, []string{"customer_id"})
+					return
+				}
+			}
+			next.ServeHTTP(rw, r)
+		})
+	}
+}
+
+// customerHeldOutsidePin answers one branch that holds any of the customers
+// besides the pin, and whether the pin holds every one of them at all. A
+// customer the pin does not hold (no row, or only other branches) sets held
+// false; the message names the other branch only when one exists.
+func (w *KeyBranchWall) customerHeldOutsidePin(ctx context.Context, customers []uuid.UUID, pin uuid.UUID) (uuid.UUID, bool, error) {
+	if w.db == nil {
+		return uuid.Nil, false, errors.New("key branch wall: no database for the customer branch lookup")
+	}
+	distinct := make(map[uuid.UUID]struct{}, len(customers))
+	for _, c := range customers {
+		distinct[c] = struct{}{}
+	}
+	ids := make([]uuid.UUID, 0, len(distinct))
+	for c := range distinct {
+		ids = append(ids, c)
+	}
+	var holdingPin int
+	if err := w.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COUNT(DISTINCT customer_id) FROM customer_branches WHERE branch_id = $1 AND customer_id = ANY($2)`,
+		pin, ids).Scan(&holdingPin); err != nil {
+		return uuid.Nil, false, fmt.Errorf("key branch wall: customer branch lookup: %w", err)
+	}
+	if holdingPin != len(ids) {
+		// Some named customer is not held by the pin at all; name another of
+		// its branches when one exists.
+		var other *uuid.UUID
+		err := w.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT branch_id FROM customer_branches WHERE customer_id = ANY($1) LIMIT 1`, ids).Scan(&other)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, false, fmt.Errorf("key branch wall: customer branch lookup: %w", err)
+		}
+		if other != nil {
+			return *other, false, nil
+		}
+		return uuid.Nil, false, nil
+	}
+	var outside *uuid.UUID
+	err := w.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT branch_id FROM customer_branches WHERE customer_id = ANY($1) AND branch_id <> $2 LIMIT 1`, ids, pin).Scan(&outside)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, fmt.Errorf("key branch wall: customer branch lookup: %w", err)
+	}
+	if outside != nil {
+		return *outside, true, nil
+	}
+	return uuid.Nil, true, nil
+}
+
 // bodyCustomers reads the customer_ids a body names, one object or an array
 // of them. An id that does not parse names nothing the wall can hold, and
 // the handler's own validation answers it. When required is set, an object
