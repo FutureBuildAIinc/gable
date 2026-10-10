@@ -1500,9 +1500,13 @@ components:
         include=stops (the board read). vehicle_id and driver_id are
         nullable: a legacy row with no vehicle or no driver carries null,
         never the all-zero UUID, so a client cannot reach for the zero
-        identifier.
+        identifier. Both stay in `required` (every response carries the key,
+        written as null when the column is NULL) and their type carries the
+        null leg the model needs to write that null.
       required:
         - id
+        - vehicle_id
+        - driver_id
         - scheduled_date
         - status
         - notes

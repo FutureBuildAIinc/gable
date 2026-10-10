@@ -16637,7 +16637,7 @@ components:
     DeliveryRoute:
       type: object
       description: >-
-        A run for one date. The joined vehicle and driver names are always present; stops is null unless the list was asked for with include=stops (the board read).
+        A run for one date. The joined vehicle and driver names are always present; stops is null unless the list was asked for with include=stops (the board read). vehicle_id and driver_id are nullable: a legacy row with no vehicle or no driver carries null, never the all-zero UUID, so a client cannot reach for the zero identifier. Both stay in `required` (every response carries the key, written as null when the column is NULL) and their type carries the null leg the model needs to write that null.
       required:
         - id
         - vehicle_id
@@ -16659,10 +16659,14 @@ components:
           type: string
           format: uuid
         vehicle_id:
-          type: string
+          type:
+            - string
+            - "null"
           format: uuid
         driver_id:
-          type: string
+          type:
+            - string
+            - "null"
           format: uuid
         scheduled_date:
           type: string

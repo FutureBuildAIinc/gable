@@ -7808,14 +7808,14 @@ export interface components {
         };
         /** @enum {string} */
         DeliveryRouteStatus: "draft" | "scheduled" | "in_transit" | "completed" | "cancelled";
-        /** @description A run for one date. The joined vehicle and driver names are always present; stops is null unless the list was asked for with include=stops (the board read). */
+        /** @description A run for one date. The joined vehicle and driver names are always present; stops is null unless the list was asked for with include=stops (the board read). vehicle_id and driver_id are nullable: a legacy row with no vehicle or no driver carries null, never the all-zero UUID, so a client cannot reach for the zero identifier. Both stay in `required` (every response carries the key, written as null when the column is NULL) and their type carries the null leg the model needs to write that null. */
         DeliveryRoute: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            vehicle_id: string;
+            vehicle_id: string | null;
             /** Format: uuid */
-            driver_id: string;
+            driver_id: string | null;
             /** Format: date */
             scheduled_date: string;
             status: components["schemas"]["DeliveryRouteStatus"];

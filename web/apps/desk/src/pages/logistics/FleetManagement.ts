@@ -307,7 +307,7 @@ export class FleetManagement extends LitElement {
           <div class="space-y-3">
             ${[1,2,3].map(() => html`<div class="h-16 bg-white/5 rounded-xl animate-pulse"></div>`)}
           </div>
-        ` : this._tab === 'vehicles' ? this._renderVehiclesTab() : this._renderDriversTab(statusColors, activeClass)}
+        ` : this._tab === 'vehicles' ? this._renderVehiclesTab() : this._renderDriversTab()}
       </div>
 
       ${this._vehicleModalOpen ? this._renderVehicleModal() : nothing}
@@ -387,7 +387,7 @@ export class FleetManagement extends LitElement {
   }
 
   /* ---- Drivers Tab ---- */
-  private _renderDriversTab(statusColors: Record<string, string>, activeClass: string) {
+  private _renderDriversTab() {
     return html`
       <div class="rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-md">
         <div class="p-0">
