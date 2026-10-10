@@ -146,11 +146,13 @@ test.describe('Delivery on the converted contract', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'delivery-board.png') });
 
     // Dispatch is the transitions route carrying the loaded revision.
+    // The assign moved the route's revision (PR 70 review round 2 P2-1):
+    // the dispatch carries revision 2, the value the desk read at select.
     const dispatch = page.waitForResponse((r) => r.url().endsWith(`/api/v1/delivery/routes/${route.id}/transitions`));
     await page.getByRole('button', { name: 'Dispatch' }).click();
     const dispatchRes = await dispatch;
     expect(dispatchRes.status(), await dispatchRes.text()).toBe(200);
-    expect(dispatchRes.request().postDataJSON()).toEqual({ to: 'in_transit', revision: 1 });
+    expect(dispatchRes.request().postDataJSON()).toEqual({ to: 'in_transit', revision: 2 });
     expect((await dispatchRes.json()).status).toBe('in_transit');
 
     // The driver app: pick the driver, open the route, complete the stop with
@@ -196,7 +198,7 @@ test.describe('Delivery on the converted contract', () => {
     await page.getByRole('button', { name: 'Complete Route' }).click();
     const finishRes = await finish;
     expect(finishRes.status(), await finishRes.text()).toBe(200);
-    expect(finishRes.request().postDataJSON()).toEqual({ to: 'completed', revision: 2 });
+    expect(finishRes.request().postDataJSON()).toEqual({ to: 'completed', revision: 3 });
     expect((await finishRes.json()).status).toBe('completed');
     await page.screenshot({ path: path.join(SHOTS_DIR, 'delivery-route-completed.png') });
 
