@@ -967,7 +967,11 @@ func (s *Service) GetDelivery(ctx context.Context, id uuid.UUID) (*Stop, error) 
 // AssignOrderToRoute adds an order as a stop on a route. A pickup
 // (will-call) order is never routed (ADR 0005 5.5), an order with unresolved
 // lumber-index exposure is refused, and a route the caller cannot see behind
-// the branch wall is the same 404 as reading it.
+// the branch wall is the same 404 as reading it. Inside the transaction the
+// route row is locked FOR UPDATE so the read of its status and the read of
+// the next stop sequence race no other writer; a route already completed or
+// cancelled is refused with 409 invalid_state_transition, and the route's
+// revision moves on a successful assign.
 func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, actor string) (*Stop, *CapacityWarning, error) {
 	if s.orders != nil {
 		dt, err := s.orders.OrderDeliveryType(ctx, d.OrderID)
@@ -1007,40 +1011,58 @@ func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, ac
 		}
 	}
 
-	stop := &Stop{
-		RouteID: &d.RouteID,
-		OrderID: d.OrderID,
-		// The default position starts at 1, the least the input parse
-		// accepts from a client, so an empty route's first stop is 1 and
-		// not the column's legacy 0.
-		StopSequence:         1,
-		Status:               StopStatusPending,
-		DeliveryInstructions: d.DeliveryInstructions,
-	}
-	if d.StopSequence != nil {
-		stop.StopSequence = *d.StopSequence
-	} else {
-		stops, _, err := s.repo.ListDeliveriesByRoute(ctx, d.RouteID, StopListFilter{Limit: 200})
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, existing := range stops {
-			if existing.StopSequence >= stop.StopSequence {
-				stop.StopSequence = existing.StopSequence + 1
-			}
-		}
-	}
-
 	// The geocode is an HTTP call on the keyed path, so it runs before the
 	// transaction opens (the same rule as the tax provider, ADR 0005
 	// section 3).
 	if coord := s.geocodeOrderStop(ctx, d.OrderID); coord != nil {
-		stop.Latitude, stop.Longitude = &coord.Lat, &coord.Lng
+		d.Geocoded = coord
 	}
 
 	var out *Stop
 	txErr := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockRoute(ctx, d.RouteID); err != nil {
+			return notFound(err)
+		}
+		cur, err := s.repo.GetRoute(ctx, d.RouteID)
+		if err != nil {
+			return notFound(err)
+		}
+		if cur.Status == RouteStatusCompleted || cur.Status == RouteStatusCancelled {
+			return httpx.InvalidStateTransition("cannot assign to a route already "+string(cur.Status),
+				httpx.Blocker("invalid_state", "a route in a terminal status takes no more stops"))
+		}
+		stop := &Stop{
+			RouteID: &d.RouteID,
+			OrderID: d.OrderID,
+			// The default position starts at 1, the least the input parse
+			// accepts from a client, so an empty route's first stop is 1 and
+			// not the column's legacy 0.
+			StopSequence:         1,
+			Status:               StopStatusPending,
+			DeliveryInstructions: d.DeliveryInstructions,
+		}
+		if d.Geocoded != nil {
+			stop.Latitude, stop.Longitude = &d.Geocoded.Lat, &d.Geocoded.Lng
+		}
+		if d.StopSequence != nil {
+			stop.StopSequence = *d.StopSequence
+		} else {
+			stops, _, err := s.repo.ListDeliveriesByRoute(ctx, d.RouteID, StopListFilter{Limit: 200})
+			if err != nil {
+				return err
+			}
+			for _, existing := range stops {
+				if existing.StopSequence >= stop.StopSequence {
+					stop.StopSequence = existing.StopSequence + 1
+				}
+			}
+		}
 		if err := s.repo.CreateDelivery(ctx, stop); err != nil {
+			return err
+		}
+		// An assign changes the route document (its stops), so its
+		// revision moves and a client holding a stale one sees 409.
+		if err := s.repo.TouchRoute(ctx, d.RouteID); err != nil {
 			return err
 		}
 		got, err := s.repo.GetDelivery(ctx, stop.ID)

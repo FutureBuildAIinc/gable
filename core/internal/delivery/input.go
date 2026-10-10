@@ -292,6 +292,9 @@ type AssignStopDraft struct {
 	OrderID              uuid.UUID
 	StopSequence         *int
 	DeliveryInstructions *string
+	// Geocoded is filled by the service before the transaction opens, so the
+	// assign reads no HTTP path while the route is locked.
+	Geocoded *LatLng
 }
 
 func (req *AssignStopRequest) Parse() (*AssignStopDraft, error) {
