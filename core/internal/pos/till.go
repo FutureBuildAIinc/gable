@@ -129,6 +129,18 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		if report.Session.Status != TillOpen {
 			return httpx.InvalidStateTransition("the till session is not open")
 		}
+		// A card refund claim of one of the session's sales still standing
+		// refuses the close (eighth review P2-2): its terminal call may still
+		// move money after the drawer was counted, and the void or return
+		// behind it would then be refused session_closed with the card
+		// already refunded. Under the session lock, before anything is
+		// counted.
+		if pending, err := s.repo.SessionHasPendingRefundIntent(ctx, sessionID); err != nil {
+			return err
+		} else if pending {
+			return conflict("refund_in_flight",
+				"a card refund of one of this session's sales is still in flight: settle it before closing the drawer")
+		}
 		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
 		now := time.Now()
 		session := report.Session
