@@ -8,7 +8,7 @@ import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { ArrowLeft, MapPin, FileText, CheckCircle, XCircle, AlertTriangle, PenTool, Navigation, Camera, Image, Trash2 } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
-import type { Delivery, DeliveryStatus } from '../../types/delivery';
+import type { Delivery, TransitionDeliveryRequest } from '../../types/delivery';
 
 interface PODPhotoPreview {
     file: File;
@@ -25,7 +25,8 @@ export class DeliveryDetail extends LitElement {
     @state() private delivery: Delivery | null = null;
     @state() private isSubmitting = false;
     @state() private showPODModal = false;
-    @state() private status: DeliveryStatus = 'delivered';
+    /** The transition target the modal offers; only the terminal states. */
+    @state() private status: TransitionDeliveryRequest['to'] = 'delivered';
     @state() private signedBy = '';
     @state() private podPhotos: PODPhotoPreview[] = [];
     @state() private isDrawing = false;
@@ -147,19 +148,29 @@ export class DeliveryDetail extends LitElement {
                 await deliveryService.uploadPODPhoto(this.delivery.id, photo.file, photo.type);
             }
 
-            let signatureDataUrl: string | undefined;
+            // The signature is evidence appended to the stop, like the site
+            // photos: it uploads through the pod-photo route (type signature)
+            // and the transition carries the uploaded photo's URL as its
+            // proof. The wire caps proof URLs at 2048 characters, so a raw
+            // canvas data URL can never be the proof.
             let proofUrl: string | undefined;
             const canvas = this._getCanvas();
             if (this.status === 'delivered' && canvas) {
-                signatureDataUrl = canvas.toDataURL('image/png');
-                proofUrl = signatureDataUrl;
+                const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+                if (blob) {
+                    const uploaded = await deliveryService.uploadPODPhoto(
+                        this.delivery.id,
+                        new File([blob], 'signature.png', { type: 'image/png' }),
+                        'signature',
+                    );
+                    proofUrl = uploaded.photo_url;
+                }
             }
 
             await deliveryService.updateStatus(this.delivery.id, {
                 to: this.status,
                 pod_proof_url: proofUrl,
                 pod_signed_by: this.signedBy || 'Unknown',
-                signature_data_url: signatureDataUrl,
             });
 
             this.showPODModal = false;
