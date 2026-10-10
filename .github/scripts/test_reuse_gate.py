@@ -33,6 +33,7 @@ which is not an importable package, and reports `NO TESTS RAN`.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -121,14 +122,12 @@ class InlineHeaderCheck(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp(prefix="reuse-gate-test-")
+        # Register the cleanup before `_init_repo` runs: if git is missing
+        # or the init call raises for any other reason, `tearDown` would
+        # not execute and the directory would leak. `addCleanup` runs even
+        # when `setUp` itself fails partway through.
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         _init_repo(self.tmp)
-
-    def tearDown(self) -> None:
-        # `mkdtemp` returns a private directory; recursive remove is fine here
-        # because we created it ourselves in `setUp`.
-        import shutil
-
-        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_file_with_both_lines_passes(self) -> None:
         _write(
@@ -196,13 +195,13 @@ class MainSubprocessCheck(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp(prefix="reuse-gate-subproc-")
+        # Register the cleanup before `_init_repo` runs: if git is missing
+        # or the init call raises for any other reason, `tearDown` would
+        # not execute and the directory would leak. `addCleanup` runs even
+        # when `setUp` itself fails partway through.
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         _init_repo(self.tmp)
         self.stub_path = _make_stub_reuse(self.tmp)
-
-    def tearDown(self) -> None:
-        import shutil
-
-        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _run_gate(self, cwd: str) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
@@ -252,6 +251,24 @@ class MainSubprocessCheck(unittest.TestCase):
             msg=f"stdout=\n{proc.stdout}\nstderr=\n{proc.stderr}",
         )
         self.assertIn("REUSE gate **passed**", proc.stdout)
+
+    def test_main_from_subdirectory_still_finds_root_headerless_file(self) -> None:
+        # When invoked from a subdirectory of the repo, the gate must still
+        # look at the git root and catch a headerless file there. A plain
+        # `os.getcwd()` style scan would only see the empty subdirectory and
+        # silently pass; this case proves `main()` resolves the toplevel.
+        _write(self.tmp, "ok.go", "// " + _LIC + "\n// " + _CR + "\npackage x\n")
+        _write(self.tmp, "headerless.go", "package x\n")
+        subdir = os.path.join(self.tmp, "deep", "nested")
+        os.makedirs(subdir, exist_ok=True)
+        _commit(self.tmp)
+        proc = self._run_gate(subdir)
+        self.assertEqual(
+            proc.returncode,
+            1,
+            msg=f"stdout=\n{proc.stdout}\nstderr=\n{proc.stderr}",
+        )
+        self.assertIn("headerless.go", proc.stdout)
 
 
 if __name__ == "__main__":
