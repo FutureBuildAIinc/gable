@@ -235,6 +235,13 @@ GET	/api/v1/invoices/{id}	internal/invoice	h.HandleGet
 POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
 GET	/api/v1/invoices/{id}/payments	internal/payment	h.GetPaymentHistory
 POST	/api/v1/invoices/{id}/transitions	internal/invoice	h.HandleTransition
+GET	/api/v1/links/customers/{id}	internal/links	Guarded(g.Customers, h.resolveFor("customers", false))
+GET	/api/v1/links/drafts/orders/{id}	internal/links	Guarded(g.DraftOrders, h.resolveFor("orders", true))
+GET	/api/v1/links/drafts/quotes/{id}	internal/links	Guarded(g.DraftQuotes, h.resolveFor("quotes", true))
+GET	/api/v1/links/invoices/{id}	internal/links	Guarded(g.Invoices, h.resolveFor("invoices", false))
+GET	/api/v1/links/orders/{id}	internal/links	Guarded(g.Orders, h.resolveFor("orders", false))
+GET	/api/v1/links/products/{id}	internal/links	Guarded(g.Products, h.resolveFor("products", false))
+GET	/api/v1/links/quotes/{id}	internal/links	Guarded(g.Quotes, h.resolveFor("quotes", false))
 GET	/api/v1/locations	internal/location	list
 POST	/api/v1/locations	internal/location	create
 DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation

@@ -45,6 +45,7 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
@@ -507,6 +508,75 @@ func Run() {
 			}))
 	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, scoped(quoteKind.Roles()...))
 	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, scoped(orderKind.Roles()...))
+
+	// The link resolver (ADR 0007 section 8): one literal route per entity
+	// and per draft kind, each behind the module's own read roles composed
+	// with the branch middleware, resolving through the module's own read
+	// so a record the caller cannot see is a 404. The declarative table is
+	// links.Table, the only copy; cmd/links writes api/links.json from it.
+	linksHandler := links.NewHandler(links.Settings{
+		PublicURL:        cfg.PublicURL,
+		AgentURLTemplate: cfg.AgentURLTemplate,
+	},
+		links.Entity{Row: rowOrNone(links.RowFor("quotes", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			q, err := quoteSvc.GetQuoteByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return q.ID, q.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("orders", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			o, err := orderSvc.GetOrderByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return o.ID, o.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("invoices", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			inv, err := invoiceSvc.GetInvoiceByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return inv.ID, inv.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("customers", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			c, err := customerSvc.Get(ctx, uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return c.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("products", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			p, err := productSvc.GetProduct(ctx, uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return p.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("quotes", true)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			d, err := draftsSvc.Get(ctx, "quotes", uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return d.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("orders", true)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			d, err := draftsSvc.Get(ctx, "orders", uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return d.ID, "", nil
+		}},
+	)
+	links.RegisterAll(mux, linksHandler, links.Guards{
+		Quotes:      scoped("admin", "owner", "sales"),
+		Orders:      scoped("admin", "owner", "sales", "finance"),
+		Invoices:    scoped("admin", "owner", "sales", "finance"),
+		Customers:   scoped("admin", "owner", "sales"),
+		Products:    scoped("admin", "owner", "sales", "warehouse"),
+		DraftQuotes: scoped(quoteKind.Roles()...),
+		DraftOrders: scoped(orderKind.Roles()...),
+	})
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
@@ -1281,4 +1351,13 @@ func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid
 		return basePrice, nil
 	}
 	return float64(pricing.CentsOf(sp.Price)) / 100, nil
+}
+
+// rowOrNone unwraps RowFor's lookup; the table and the registrations sit
+// in the same change, so a miss is a wiring bug that fails loudly at boot.
+func rowOrNone(r links.Row, ok bool) links.Row {
+	if !ok {
+		panic("links: the declarative table names no such row")
+	}
+	return r
 }

@@ -48,9 +48,15 @@ func TestScopeTargetClassTable(t *testing.T) {
 		{"PUT", "/api/v1/drafts/orders/{id}", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
 		{"POST", "/api/v1/drafts/orders/{id}/transitions", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
 		{"POST", "/api/v1/drafts/orders/{id}/promote", "orders", middleware.ScopePromotion, []string{"orders:commit"}},
-		// the two link shapes
+		// the link shapes: an entity link needs the module read scope, a
+		// draft link the confirm verbs
 		{"GET", "/api/v1/links/quotes/{id}", "quotes", middleware.ScopeLink, []string{"quotes:read"}},
 		{"GET", "/api/v1/links/drafts/quotes/{id}", "quotes", middleware.ScopeDraftLink, []string{"quotes:propose", "quotes:commit"}},
+		{"GET", "/api/v1/links/orders/{id}", "orders", middleware.ScopeLink, []string{"orders:read"}},
+		{"GET", "/api/v1/links/drafts/orders/{id}", "orders", middleware.ScopeDraftLink, []string{"orders:propose", "orders:commit"}},
+		{"GET", "/api/v1/links/invoices/{id}", "invoices", middleware.ScopeLink, []string{"invoices:read"}},
+		{"GET", "/api/v1/links/customers/{id}", "customers", middleware.ScopeLink, []string{"customers:read"}},
+		{"GET", "/api/v1/links/products/{id}", "products", middleware.ScopeLink, []string{"products:read"}},
 	}
 	for _, tc := range cases {
 		module, class, ok := middleware.ScopeTarget(tc.method, tc.path)

@@ -112,6 +112,15 @@ type Config struct {
 	DraftFeedMaxStreamsPerPrincipal int           // DRAFT_FEED_MAX_STREAMS_PER_PRINCIPAL, default 8
 	DraftFeedMaxStreams             int           // DRAFT_FEED_MAX_STREAMS, default 500
 
+	// The link resolver's URL settings (ADR 0007 section 8). PublicURL, set
+	// through GABLE_PUBLIC_URL, makes the resolver's links absolute; unset,
+	// they are paths relative to the deployment's origin (the desk, the
+	// door and the API share one). AgentURLTemplate, set through
+	// GABLE_AGENT_URL_TEMPLATE, fills the agent slot for a deployment that
+	// runs an agent UI; unset (every deployment today) the slot is null.
+	PublicURL        string // GABLE_PUBLIC_URL
+	AgentURLTemplate string // GABLE_AGENT_URL_TEMPLATE
+
 	// EDI
 	//
 	// EDIOutputDir is where generated X12 documents are written. It defaults to
@@ -245,6 +254,8 @@ func Load() (*Config, error) {
 		FBBrainIntegrationKey: getEnv("FB_BRAIN_INTEGRATION_KEY", ""),
 		FBBrainPublicKeyPath:  getEnv("FB_BRAIN_PUBLIC_KEY_PATH", ""),
 		FBBrainOrgID:          getEnv("FB_BRAIN_ORG_ID", ""),
+		PublicURL:             strings.TrimRight(getEnv("GABLE_PUBLIC_URL", ""), "/"),
+		AgentURLTemplate:      getEnv("GABLE_AGENT_URL_TEMPLATE", ""),
 	}
 
 	// F-05: Startup validation — fail fast if Brain is enabled but missing required config
