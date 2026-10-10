@@ -16,7 +16,7 @@ notifications ([ADR 0003](../adr/0003-events-outbox.md) section 4), so
 the outside consumer sees exactly what the inside subscribers see.
 
 This module is the work of R1-12 (event feed) and R1-12b
-(lifecycle). The Go code is in `core/internal/events/`, the table and
+(retention). The Go code is in `core/internal/events/`, the table and
 drain are in `core/pkg/outbox/` (the writer) and migration 089
 (`core/migrations/089_events_outbox.sql`). The shared wire contract is
 in `core/api/fragments/events.yaml`. Every other module writes here
@@ -25,9 +25,8 @@ through the same `outbox.Write` seam inside its transaction.
 ## What it does in a yard
 
 A yard operator wants to know every change that mattered since a
-moment in time: a customer was put on hold, a quote was sent, an
-order was confirmed, an invoice was paid, a refund cleared,
-a milestone on a customer went over the credit limit. The feed carries
+moment in time: a customer was updated, a quote was sent, an order
+was confirmed, an invoice was paid, a refund was recorded. The feed carries
 all of them in one paged stream the operator or an integration can
 consume at its own pace.
 
@@ -89,18 +88,32 @@ empty), so a poller can adopt the tail cursor and resume without
 re-reading. The `limit` of the envelope is the requested page size,
 not the number of items returned.
 
+## Retention
+
+The outbox is a replay window, not a ledger. The worker role purges
+rows whose `at` is older than `OUTBOX_RETENTION_DAYS` (default 14;
+zero or negative turns the purge off), on an hourly ticker, and never
+a row a registered subscriber has not yet reached or a parked row
+([ADR 0003](../adr/0003-events-outbox.md) section 6). A feed consumer
+that falls further behind than the retention age finds the oldest
+events gone and resumes from the oldest retained one. Rebuild a report
+from the module tables, not from the feed alone.
+
 ## Filters and envelope
 
 The query parameters are exactly `cursor`, `limit`, `types` and
 `include`. Any other name is a 400 `unsupported_query_parameter`; a
 repeated `include` is a 400 (`internal/events/handler.go`, the
-`include` parsing at the `q["include"]` branch).
+`include` parsing at the `q["include"]` branch), and so is an
+`include` name other than `total`, or a repeated `limit` or `cursor`
+(`httpx.ParseListQuery`). `limit` is plain digits: no sign, space or
+leading zero.
 
 | Parameter | Wire form | Default | Note |
 |---|---|---|---|
 | `cursor` | opaque string | absent means first page | Minted by `httpx.MintCursor` with the cursor scope `events.position`; a malformed cursor is a 400 naming `cursor`. |
 | `limit` | integer 1 to 200 | 50 | Malformed or out of range is a 400 naming `limit`. |
-| `types` | repeatable, comma separated, exact matches only | absent reads every type | Names must be dot-delimited lowercase (the same rule as `outbox.ValidType`); a name outside the shape or a repetition is a 400 naming `types`; a filter matching nothing is an empty page. The read API takes no wildcard syntax. |
+| `types` | repeatable, comma separated, exact matches only | absent reads every type | `types` may repeat as a parameter and carry commas; the same event name more than once, an empty value, or a name outside the dot delimited lowercase shape (the same rule as `outbox.ValidType`) is a 400 naming `types`; a filter matching nothing is an empty page. The read API takes no wildcard syntax. |
 | `include` | string | absent | Only `total` is known; `total` adds the count of matching events to the envelope. |
 
 The list envelope is the ADR 0001 shape (`core/api/fragments/events.yaml`
@@ -142,7 +155,7 @@ the events of one branch filters on `branch_id` in the returned items
 in its own store: the events were recorded against the writer's
 branch, and the `branch_id` field is the truthful one. The role guard
 is the admin reads' narrowest gate ([ADR 0003](../adr/0003-events-outbox.md)
-section 3): `admin` and `owner`. See
+section 5): `admin` and `owner`. See
 `core/internal/app/serve/serve.go` (`eventsHandler.RegisterRoutes`),
 the only place the events route is wired.
 
@@ -152,16 +165,16 @@ A machine key reaching `GET /api/v1/events` needs the segment scope
 `events:read` (the first path segment under `/api/v1/` is the scope
 segment; `pkg/middleware/machinekey.go`, the scope table at the
 `"events"` entry, paired with the read/write split the serve layer
-applies: `events:read` for `GET`, `events:write` is reserved for
-future write scopes). A key without the scope is `403 forbidden`;
-the audit row carries the refused scope ([ADR 0002](../adr/0002-machine-keys.md)
-section 2).
+applies: `events:read` for `GET`; no route under `events` is a
+write, so `events:write` gates nothing today). A key without the
+scope is `403 forbidden`; the audit row carries the refused scope
+([ADR 0002](../adr/0002-machine-keys.md) section 5).
 
 The user guard at the serve layer is `admin` and `owner`
 (`core/internal/app/serve/serve.go` `eventsHandler.RegisterRoutes`,
-`middleware.RequireRole("admin", "owner")`). A machine key holding the
-`events:read` scope passes the same role gate that the `admin` and
-`owner` roles pass.
+`middleware.RequireRole("admin", "owner")`). A machine key is not
+subject to the role gate; its `events:read` scope is the gate
+([ADR 0002](../adr/0002-machine-keys.md) section 4).
 
 ## Event vocabulary on the wire today
 
@@ -256,14 +269,17 @@ landed yet and their writers are not in the tree.
 | `rfc.approved` | governance | `EventApproved` (`core/internal/governance/service.go:51`) | `core/internal/governance/service.go` `record` |
 | `rfc.rejected` | governance | `EventRejected` (`core/internal/governance/service.go:52`) | `core/internal/governance/service.go` `record` |
 | `rfc.reopened` | governance | `EventReopened` (`core/internal/governance/service.go:53`) | `core/internal/governance/service.go` `record` |
+| `millwork_option.created` | millwork | `EventCreated` (`core/internal/millwork/service.go:38`) | `core/internal/millwork/service.go:121` (`record` of `Service`) |
+| `unit.created` | unit | `EventUnitCreated` (`core/internal/unit/service.go:33`) | `core/internal/unit/service.go:73` (`record`, called at `106`) |
+| `unit.updated` | unit | `EventUnitUpdated` (`core/internal/unit/service.go:34`) | `core/internal/unit/service.go:73` (`record`, called at `193`) |
 
 The empty rows of CONTRACT-CHANGES that the tree does not yet ship: no
 `charge_code.created` or `charge_code.updated` event is written by the
 charge code module (`chargecode/service.go`), so an audit of changes to a
 code is today read by polling `GET /charge-codes/{id}` and diffing the
-revision; the events feed is not the place to find one. An inventory or
-unit module event the refactor later writes will be added to this table
-when its writer lands.
+revision; the events feed is not the place to find one. An inventory
+event the refactor later writes will be added to this table when its
+writer lands.
 
 ## ADRs that govern this module
 
@@ -283,12 +299,14 @@ the web front door) on http://127.0.0.1:8080 with `AUTH_MODE=dev`;
 `make db` workflows use different compose projects and volumes, so
 the `make db` data is never truncated or removed by `make up` or
 `make down` (`AUTH_MODE=dev` needs no `Authorization` header; the
-examples below show the production header shape).
+examples below show the production header shape). The seed TRUNCATEs
+the orders, invoices, quotes, payments and ledger tables, so run it
+only against a throwaway database.
 
-The seed posts a quote, accepts it, fulfils the order, creates an
-invoice, records a partial payment and applies it; the resulting
-events are the first page of the feed in the demo state. Then, with
-an admin role bearer:
+The demo seed writes its rows directly and records no events, so a
+fresh stack starts with an empty feed (`items` empty, `next_cursor`
+present). Make a change through the API (create a customer, confirm an
+order) and the matching events appear. Then, with an admin role bearer:
 
 ```
 curl -X GET 'http://127.0.0.1:8080/api/v1/events?limit=20' \
@@ -319,7 +337,9 @@ curl -X GET 'http://127.0.0.1:8080/api/v1/events?include=total' \
 
 The handler proof in `core/internal/events/handler_test.go` pins the
 happy path and the strict query errors (malformed cursor, unknown
-parameter, bad limit, repeated `include`, malformed `types`); the
+parameter, bad limit, an unknown `include` name, the `types` filter
+and its shape refusal); the
 golden group `events` in
 `core/internal/characterization/testdata/goldens/events.json` pins the
-page shape and the always present `next_cursor` for the demo state.
+page shape and the always present `next_cursor` for the
+characterization fixture state.
