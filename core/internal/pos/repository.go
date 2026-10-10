@@ -101,9 +101,16 @@ type Repository interface {
 	// refund_in_flight before any gateway call); CompleteRefundIntent marks
 	// the claim done inside the money transaction that posts the refund;
 	// FailRefundIntent releases the claim of a gateway call that failed.
+	// RefundIntentFacts reads the table's authority for one tender (what its
+	// live claims hold and whether a void already refunded it whole);
+	// SaleHasPendingRefundIntent and SessionHasPendingRefundIntent answer
+	// whether any claim of a sale, or of a session's sales, still stands.
 	InsertRefundIntent(ctx context.Context, intent RefundIntent) error
 	CompleteRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error
 	FailRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID) error
+	RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error)
+	SaleHasPendingRefundIntent(ctx context.Context, saleID uuid.UUID) (bool, error)
+	SessionHasPendingRefundIntent(ctx context.Context, sessionID uuid.UUID) (bool, error)
 	// Lookups
 	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
@@ -767,6 +774,63 @@ func (r *PostgresRepository) FailRefundIntent(ctx context.Context, saleID, tende
 		return fmt.Errorf("failed to release the refund intent: %w", mapWriteError(err))
 	}
 	return nil
+}
+
+// RefundIntentFacts is the intent table's authority on one tender: what its
+// standing claims hold, and whether a void's intent already refunded the
+// tender whole.
+type RefundIntentFacts struct {
+	PendingCents int64
+	DoneVoid     bool
+}
+
+// RefundIntentFacts reads the tender's intents: the cents its PENDING claims
+// hold (claimed at the terminal, not yet booked, so no pos_returns row counts
+// them) and whether any DONE intent of act void refunded the tender whole.
+// The DONE return intents need no field of their own: their booking commits
+// the pos_returns row beside them in one transaction, so CardRefundedCents
+// already counts them.
+func (r *PostgresRepository) RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error) {
+	var facts RefundIntentFacts
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE(ROUND(SUM(CASE WHEN state = 'PENDING' THEN ABS(amount) ELSE 0 END) * 100)::bigint, 0),
+			COALESCE(BOOL_OR(act = 'void' AND state = 'DONE'), FALSE)
+		FROM pos_refund_intents WHERE sale_id = $1 AND tender_id = $2`, saleID, tenderID).
+		Scan(&facts.PendingCents, &facts.DoneVoid)
+	if err != nil {
+		return facts, fmt.Errorf("failed to read the tender's refund intents: %w", err)
+	}
+	return facts, nil
+}
+
+// SaleHasPendingRefundIntent answers whether any card refund claim of the
+// sale still stands: a claim whose terminal call or money transaction has not
+// settled yet.
+func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, saleID uuid.UUID) (bool, error) {
+	var pending bool
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING')`, saleID).
+		Scan(&pending)
+	if err != nil {
+		return false, fmt.Errorf("failed to read the sale's refund intents: %w", err)
+	}
+	return pending, nil
+}
+
+// SessionHasPendingRefundIntent answers whether any card refund claim of the
+// session's sales still stands: the drawer cannot be counted and closed while
+// a terminal refund of one of its sales may still move money.
+func (r *PostgresRepository) SessionHasPendingRefundIntent(ctx context.Context, sessionID uuid.UUID) (bool, error) {
+	var pending bool
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM pos_refund_intents i
+			JOIN pos_transactions t ON t.id = i.sale_id
+			WHERE t.till_session_id = $1 AND i.state = 'PENDING')`, sessionID).
+		Scan(&pending)
+	if err != nil {
+		return false, fmt.Errorf("failed to read the session's refund intents: %w", err)
+	}
+	return pending, nil
 }
 
 // InvoiceLineCost is one invoice line's id and the unit cost the sale

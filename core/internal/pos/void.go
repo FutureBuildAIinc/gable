@@ -141,6 +141,9 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			}
 		}
 		for i := range intents {
+			if err := s.checkCardClaim(ctx, saleID, intents[i].TenderID, intents[i].AmountCents, intents[i].AmountCents); err != nil {
+				return err
+			}
 			if err := s.repo.InsertRefundIntent(ctx, intents[i]); err != nil {
 				return err
 			}

@@ -56,6 +56,39 @@ func (s *Service) failRefundIntent(ctx context.Context, intent RefundIntent) {
 	}
 }
 
+// checkCardClaim refuses a claim the intent table already contradicts
+// (seventh review P1-1, made structural): a tender whose void intent is DONE
+// was refunded whole; a tender another standing claim already holds is
+// refused as in flight (the same refusal its unique index makes at the
+// insert, answered before the insert); and no claim may take the tender past
+// what it kept less every refund already booked (the card returns, whose
+// DONE intents commit beside their rows). Runs under the sale row lock
+// inside the claim's own transaction, before the terminal is reached.
+func (s *Service) checkCardClaim(ctx context.Context, saleID, tenderID uuid.UUID, amountCents, tenderCap int64) error {
+	facts, err := s.repo.RefundIntentFacts(ctx, saleID, tenderID)
+	if err != nil {
+		return err
+	}
+	if facts.DoneVoid {
+		return conflict("tender_refunded",
+			"the card tender was already refunded whole by this sale's void: no second refund of it can be made")
+	}
+	if facts.PendingCents > 0 {
+		return conflict("refund_in_flight",
+			"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
+	}
+	booked, err := s.repo.CardRefundedCents(ctx, saleID)
+	if err != nil {
+		return err
+	}
+	if amountCents > tenderCap-booked {
+		return conflict("exceeds_card_tender",
+			fmt.Sprintf("the card tender kept %d cents less the %d booked card refunds: refund the rest from the drawer",
+				tenderCap, booked))
+	}
+	return nil
+}
+
 // recordOrphanRefund writes, in its own committed write after the refused
 // transaction rolled back, one audit row per refund the transaction left
 // standing, carrying the gateway ids; the CRITICAL log line carries the same

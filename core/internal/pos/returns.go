@@ -468,12 +468,14 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The claim, in one short transaction of its own (ADR 0005 section
 		// 11 and 14.2 C2-5: "The card gateway is called before the
 		// transaction and its result written inside it"): the sale row is
-		// locked, the caps are rechecked under it (a contender whose earlier
-		// check read stale must not refund past what the lock now counts),
-		// and the committed refund intent, unique per sale and tender while
-		// pending, refuses a concurrent card return of the same tender, or a
-		// void of the sale, with 409 before it reaches the terminal. No lock
-		// of the money transaction is held across the network call.
+		// locked, the status and the caps are rechecked under it (a contender
+		// whose earlier check read stale must not refund a sale the lock now
+		// sees voided, or past what it now counts), the intent table's rules
+		// refuse a tender a committed void already refunded whole, and the
+		// committed refund intent, unique per sale and tender while pending,
+		// refuses a concurrent card return of the same tender, or a void of
+		// the sale, with 409 before it reaches the terminal. No lock of the
+		// money transaction is held across the network call.
 		cardIntent = &RefundIntent{SaleID: *in.OriginalSaleID, TenderID: target.ID, GatewayTxID: *target.GatewayTxID,
 			AmountCents: -total, Act: "return"}
 		cardTenderCap = int64(target.AmountCents)
@@ -481,17 +483,22 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if err := s.repo.LockSale(ctx, *in.OriginalSaleID); err != nil {
 				return err
 			}
-			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
-				return err
-			}
-			already, err := s.repo.CardRefundedCents(ctx, *in.OriginalSaleID)
+			held, err := s.repo.GetSale(ctx, *in.OriginalSaleID)
 			if err != nil {
 				return err
 			}
-			if -total > cardTenderCap-already {
-				return conflict("exceeds_card_tender",
-					fmt.Sprintf("the card tender kept %d cents less the %d already refunded to the card: refund the rest from the drawer",
-						cardTenderCap, already))
+			// the status recheck under the lock (seventh review P1-1): a void
+			// that committed while this return priced its lines refunded the
+			// tender already, and the claim must refuse before the terminal
+			if held.Status != StatusCompleted {
+				return httpx.InvalidStateTransition(
+					fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", held.Status.Status()))
+			}
+			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
+				return err
+			}
+			if err := s.checkCardClaim(ctx, held.ID, target.ID, -total, cardTenderCap); err != nil {
+				return err
 			}
 			return s.repo.InsertRefundIntent(ctx, *cardIntent)
 		}); err != nil {
