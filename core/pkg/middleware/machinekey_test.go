@@ -364,6 +364,74 @@ func TestMachineKeyFinerAdminScopes(t *testing.T) {
 	}
 }
 
+// An admin path with a "." or ".." segment, or any path not equal to
+// path.Clean(path), is refused before the scope check, regardless of the
+// key's scope. The reviewer's P3-B: today those paths answer 307 (the
+// router's clean redirect) and the redirected request is authorised on the
+// clean form, so the ADR 0009 guarantee leans on the router. The hardening
+// refuses the dirty path outright, the most restrictive answer for a path
+// the request did not name cleanly. The clean path stays untouched.
+func TestMachineKeyAdminPathsDotSegmentRefused(t *testing.T) {
+	// Dirty paths: a "." or ".." segment, or a path that path.Clean would
+	// rewrite. The audit row the refusal writes carries the verbatim path
+	// so the trail tells the operator what the request actually asked for.
+	for _, tc := range []struct {
+		name, method, path string
+		scopes             []string
+	}{
+		{"admin:read refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:staff"}},
+		{"admin:read refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:staff"}},
+		{"admin:read refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:staff"}},
+		// Even the area scope that the clean path would satisfy is refused
+		// on the dirty form: the request did not name the clean area, so
+		// "the area scope reaches the area" cannot be the answer.
+		{"admin:settings refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:settings"}},
+		{"admin:settings refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:settings"}},
+		{"admin:staff refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:staff"}},
+	} {
+		aud, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+		if len(aud.calls) != 1 || aud.calls[0].action != middleware.AuditActionKeyScopeRefused {
+			t.Errorf("%s: audit calls = %+v, want one key.scope_refused", tc.name, aud.calls)
+		}
+		if rec.Code == http.StatusForbidden {
+			body := decodeError(t, rec)
+			if body.Error.Code != "forbidden" {
+				t.Errorf("%s: code = %q, want forbidden", tc.name, body.Error.Code)
+			}
+		}
+	}
+
+	// The clean path is unchanged: admin:settings still reaches the clean
+	// settings route, and admin:read is still refused on it (the area rule
+	// has not moved).
+	cleanCases := []struct {
+		name   string
+		scopes []string
+		method string
+		path   string
+		want   int
+	}{
+		{"clean settings with admin:settings", []string{"admin:settings"}, "GET", "/api/v1/admin/settings/ai", http.StatusOK},
+		{"clean settings refused for admin:read", []string{"admin:read"}, "GET", "/api/v1/admin/settings/ai", http.StatusForbidden},
+	}
+	for _, tc := range cleanCases {
+		_, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != tc.want {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+}
+
 // The users module's write scope is named for what it grants (ADR 0009):
 // users:grants, not users:write.
 func TestMachineKeyUsersGrantsScope(t *testing.T) {
