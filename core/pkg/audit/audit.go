@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -59,7 +60,7 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	// id being in the context, not on the actor's kind: an agent marker over
 	// a keyed request rewrites the kind to agent while the principal is still
 	// the key, and must not smuggle the key id into user_id either.
-	userID := entry.UserID
+	userID := sanitiseString(entry.UserID)
 	_, viaMachineKey := actor.KeyIDFromContext(ctx)
 	if userID == "" && !viaMachineKey {
 		userID = act.ID
@@ -72,17 +73,20 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	}
 	var actorID any
 	if act.ID != "" {
-		actorID = act.ID
+		actorID = sanitiseString(act.ID)
 	}
 
 	// Extract request ID from context
-	requestID := middleware.GetRequestID(ctx)
+	requestID := sanitiseString(middleware.GetRequestID(ctx))
 
-	// Marshal changes to JSON
+	// Marshal changes to JSON after sanitising every string value: a refused
+	// path can hold a NUL byte or invalid UTF-8 from the URL, and the jsonb
+	// parser rejects a NUL with SQLSTATE 22P05, so the writer is the one
+	// place that prepares the row for Postgres text and jsonb both.
 	var changesJSON []byte
 	if entry.Changes != nil {
 		var err error
-		changesJSON, err = json.Marshal(entry.Changes)
+		changesJSON, err = json.Marshal(sanitiseChanges(entry.Changes))
 		if err != nil {
 			slog.Error("audit: failed to marshal changes", "error", err)
 			changesJSON = nil
@@ -149,6 +153,74 @@ func cutRunes(s string, limit int) (string, bool) {
 		cut--
 	}
 	return s[:cut], true
+}
+
+// sanitiseString makes a string safe for a Postgres text column and for the
+// jsonb marshalling that follows: a NUL byte (U+0000) is replaced with the
+// visible marker `\u0000` (the JSON escape spelled out as literal text, so
+// json.Marshal does not escape it back to `\u0000` and the jsonb parser does
+// not see the escape it rejects) and any invalid UTF-8 sequence is replaced
+// with U+FFFD. A refused path can carry whatever the URL contained, and a
+// NUL or invalid UTF-8 in the path was the failure mode the review flagged:
+// Postgres text rejects a NUL outright, and once json.Marshal had turned the
+// NUL into the JSON escape sequence `\u0000` the jsonb parser rejected it
+// with SQLSTATE 22P05 ("unsupported Unicode escape sequence"), so the audit
+// row of a refused request whose path held a NUL was lost. The fix is one
+// shared place: the audit writer calls sanitiseString on every string it
+// hands to the database, so per-caller code keeps the verbatim value and the
+// row stays whole.
+func sanitiseString(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	if !strings.ContainsRune(s, '\x00') && utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			// Invalid UTF-8: the rune decoder returns RuneError with size 1
+			// for a lone byte that begins no valid sequence. Replace with
+			// U+FFFD and advance one byte so the writer keeps moving
+			// through a run of bad bytes one at a time.
+			b.WriteRune('\uFFFD')
+			i++
+		case r == '\x00':
+			// NUL: append the visible marker so the jsonb parser sees
+			// plain text, never the escape it rejects. The marker is the
+			// JSON escape spelled out; the marshaller will encode the
+			// backslashes once and the stored value reads "\u0000".
+			b.WriteString(`\u0000`)
+			i += size
+		default:
+			b.WriteRune(r)
+			i += size
+		}
+	}
+	return b.String()
+}
+
+// sanitiseChanges walks a changes map and returns a copy with every string
+// value replaced by sanitiseString(string). Booleans and other typed values
+// pass through unchanged. The audit writer calls this on every entry's
+// Changes so callers do not have to know that NULs and invalid UTF-8 are
+// hazards at the database boundary.
+func sanitiseChanges(in map[string]interface{}) map[string]interface{} {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		if s, ok := v.(string); ok {
+			out[k] = sanitiseString(s)
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // AuditKeyRefusal records a refused machine-key request (a valid key refused
